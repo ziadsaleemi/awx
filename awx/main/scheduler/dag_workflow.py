@@ -54,6 +54,8 @@ class WorkflowDAG(SimpleDAG):
         for p in parent_nodes:
             if p.do_not_run is True:
                 continue
+            elif p.bypassed_job_status:
+                continue
             elif p.unified_job_template is None:
                 continue
             # do_not_run is False, node might still run a job and thus blocks children
@@ -82,6 +84,12 @@ class WorkflowDAG(SimpleDAG):
                     node['node_object'] for node in self.get_parents(obj, "always_nodes")
                 ]:
                     return False
+            elif p.bypassed_job_status in ["successful", "failed"]:
+                status = "success_nodes" if p.bypassed_job_status == "successful" else "failure_nodes"
+                if p not in [node['node_object'] for node in self.get_parents(obj, status)] and p not in [
+                    node['node_object'] for node in self.get_parents(obj, "always_nodes")
+                ]:
+                    return False
         return True
 
     def bfs_nodes_to_run(self):
@@ -95,6 +103,11 @@ class WorkflowDAG(SimpleDAG):
             node_ids_visited.add(obj.id)
             if obj.do_not_run is True:
                 continue
+            elif obj.bypassed_job_status:
+                if obj.bypassed_job_status == 'successful':
+                    nodes.extend(self.get_children(obj, 'success_nodes') + self.get_children(obj, 'always_nodes'))
+                else:
+                    nodes.extend(self.get_children(obj, 'failure_nodes') + self.get_children(obj, 'always_nodes'))
             elif obj.job:
                 if obj.job.status in ['failed', 'error', 'canceled']:
                     nodes.extend(self.get_children(obj, 'failure_nodes') + self.get_children(obj, 'always_nodes'))
@@ -132,7 +145,7 @@ class WorkflowDAG(SimpleDAG):
     def is_workflow_done(self):
         for node in self.nodes:
             obj = node['node_object']
-            if obj.do_not_run is False and not obj.job and obj.unified_job_template:
+            if obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and obj.unified_job_template:
                 return False
             elif obj.job and obj.job.status not in ['successful', 'failed', 'canceled', 'error']:
                 return False
@@ -208,6 +221,13 @@ class WorkflowDAG(SimpleDAG):
         for p in parent_nodes:
             if p.do_not_run is True:
                 pass
+            elif p.bypassed_job_status:
+                if p.bypassed_job_status == 'successful':
+                    if node in (self.get_children(p, 'success_nodes') + self.get_children(p, 'always_nodes')):
+                        return False
+                else:
+                    if node in (self.get_children(p, 'failure_nodes') + self.get_children(p, 'always_nodes')):
+                        return False
             elif p.job:
                 if p.job.status == 'successful':
                     if node in (self.get_children(p, 'success_nodes') + self.get_children(p, 'always_nodes')):
@@ -240,7 +260,7 @@ class WorkflowDAG(SimpleDAG):
         for node in self.sort_nodes_topological():
             obj = node['node_object']
             parent_nodes = [p['node_object'] for p in self.get_parents(obj)]
-            if not obj.do_not_run and not obj.job and node not in root_nodes:
+            if not obj.do_not_run and not obj.job and not obj.bypassed_job_status and node not in root_nodes:
                 if obj.all_parents_must_converge:
                     if any(p.do_not_run for p in parent_nodes) or not self._all_parents_met_convergence_criteria(node):
                         obj.do_not_run = True

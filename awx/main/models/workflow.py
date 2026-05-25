@@ -272,6 +272,16 @@ class WorkflowJobNode(WorkflowNodeBase):
             "decidedly not be ran. A value of False means the node may not run."
         ),
     )
+    bypassed_job_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        help_text=_(
+            "If set, this node was carried over from a prior workflow run with this status. "
+            "It will not be re-run but will be treated as having finished with this status "
+            "for graph traversal purposes. Used by the resume-from-failure feature."
+        ),
+    )
     identifier = models.CharField(
         max_length=512,
         blank=True,  # blank denotes pre-migration job nodes
@@ -457,6 +467,51 @@ class WorkflowJobOptions(LaunchTimeConfigBase):
         new_workflow_job = self.copy_unified_job()
         if self.unified_job_template_id is None:
             new_workflow_job.copy_nodes_from_original(original=self)
+        return new_workflow_job
+
+    def _create_workflow_nodes_for_resume(self, old_node_list):
+        """
+        Build a node_links map for a resume run. Nodes whose job already
+        succeeded are recreated with ``bypassed_job_status='successful'`` and
+        their accumulated artifacts pre-populated so downstream nodes that DO
+        re-run still receive the correct artifact chain. Nodes that were
+        previously marked do_not_run (skipped by the scheduler) keep that flag.
+        All other nodes (failed, canceled, error, or never started) are created
+        fresh and will be re-run normally.
+        """
+        node_links = {}
+        for old_node in old_node_list:
+            new_node = old_node.create_workflow_job_node(workflow_job=self)
+            if old_node.job and old_node.job.status == 'successful':
+                # Combine ancestor artifacts with this node's own job artifacts
+                # so that any downstream node that re-runs will see them via
+                # parent_node.ancestor_artifacts in get_job_kwargs().
+                combined_artifacts = dict(old_node.ancestor_artifacts or {})
+                combined_artifacts.update(old_node.job.get_effective_artifacts(parents_set=set([self.pk])))
+                new_node.bypassed_job_status = 'successful'
+                new_node.ancestor_artifacts = combined_artifacts
+                new_node.save(update_fields=['bypassed_job_status', 'ancestor_artifacts'])
+            elif old_node.do_not_run:
+                new_node.do_not_run = True
+                new_node.save(update_fields=['do_not_run'])
+            # else: node failed / was never run → leave fresh for re-execution
+            node_links[old_node.pk] = new_node
+        return node_links
+
+    def copy_nodes_from_original_for_resume(self, original=None):
+        old_node_list = original.workflow_nodes.prefetch_related('always_nodes', 'success_nodes', 'failure_nodes').select_related('job').all()
+        node_links = self._create_workflow_nodes_for_resume(old_node_list)
+        self._inherit_node_relationships(old_node_list, node_links)
+
+    def create_resume_workflow_job(self):
+        """
+        Create a new workflow job that resumes execution from the point of
+        failure. Nodes that already succeeded are bypassed (not re-run);
+        failed, canceled, or error nodes are restarted from scratch.
+        """
+        new_workflow_job = self.copy_unified_job()
+        if self.unified_job_template_id is None:
+            new_workflow_job.copy_nodes_from_original_for_resume(original=self)
         return new_workflow_job
 
 

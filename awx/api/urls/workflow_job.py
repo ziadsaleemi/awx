@@ -10,6 +10,7 @@ from awx.api.views import (
     WorkflowJobLabelList,
     WorkflowJobCancel,
     WorkflowJobRelaunch,
+    WorkflowJobResume,
     WorkflowJobNotificationsList,
     WorkflowJobActivityStreamList,
 )
@@ -21,6 +22,7 @@ urls = [
     re_path(r'^(?P<pk>[0-9]+)/labels/$', WorkflowJobLabelList.as_view(), name='workflow_job_label_list'),
     re_path(r'^(?P<pk>[0-9]+)/cancel/$', WorkflowJobCancel.as_view(), name='workflow_job_cancel'),
     re_path(r'^(?P<pk>[0-9]+)/relaunch/$', WorkflowJobRelaunch.as_view(), name='workflow_job_relaunch'),
+    re_path(r'^(?P<pk>[0-9]+)/resume/$', WorkflowJobResume.as_view(), name='workflow_job_resume'),
     re_path(r'^(?P<pk>[0-9]+)/notifications/$', WorkflowJobNotificationsList.as_view(), name='workflow_job_notifications_list'),
     re_path(r'^(?P<pk>[0-9]+)/activity_stream/$', WorkflowJobActivityStreamList.as_view(), name='workflow_job_activity_stream_list'),
 ]

@@ -3949,6 +3949,7 @@ class WorkflowJobSerializer(LabelsListMixin, UnifiedJobSerializer):
         res['labels'] = self.reverse('api:workflow_job_label_list', kwargs={'pk': obj.pk})
         res['activity_stream'] = self.reverse('api:workflow_job_activity_stream_list', kwargs={'pk': obj.pk})
         res['relaunch'] = self.reverse('api:workflow_job_relaunch', kwargs={'pk': obj.pk})
+        res['resume'] = self.reverse('api:workflow_job_resume', kwargs={'pk': obj.pk})
         if obj.can_cancel or True:
             res['cancel'] = self.reverse('api:workflow_job_cancel', kwargs={'pk': obj.pk})
         return res
@@ -4284,6 +4285,7 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             'always_nodes',
             'all_parents_must_converge',
             'do_not_run',
+            'bypassed_job_status',
             'identifier',
         )
 

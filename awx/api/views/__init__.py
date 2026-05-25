@@ -3605,6 +3605,37 @@ class WorkflowJobRelaunch(GenericAPIView):
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
 
+class WorkflowJobResume(GenericAPIView):
+    model = models.WorkflowJob
+    obj_permission_type = 'start'
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'resume a failed workflow job from the point of failure'
+
+    def check_object_permissions(self, request, obj):
+        if request.method == 'POST' and obj:
+            relaunch_perm, messages = request.user.can_access_with_errors(self.model, 'start', obj)
+            if not relaunch_perm and 'workflow_job_template' in messages:
+                self.permission_denied(request, message=messages['workflow_job_template'])
+        return super(WorkflowJobResume, self).check_object_permissions(request, obj)
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Get workflow job resume information"})
+    def get(self, request, *args, **kwargs):
+        return Response({})
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Resume a failed workflow job from the point of failure"})
+    def post(self, request, *args, **kwargs):
+        obj = self.get_object()
+        if obj.status not in ['failed', 'canceled', 'error']:
+            raise ParseError(_('Cannot resume a workflow job that has not failed or been canceled.'))
+        if obj.is_sliced_job:
+            raise ParseError(_('Cannot resume a sliced workflow job.'))
+        new_workflow_job = obj.create_resume_workflow_job()
+        new_workflow_job.signal_start()
+        data = serializers.WorkflowJobSerializer(new_workflow_job, context=self.get_serializer_context()).data
+        headers = {'Location': new_workflow_job.get_absolute_url(request=request)}
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+
 class WorkflowJobTemplateWorkflowNodesList(SubListCreateAPIView):
     model = models.WorkflowJobTemplateNode
     serializer_class = serializers.WorkflowJobTemplateNodeSerializer
