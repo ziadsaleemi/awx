@@ -76,3 +76,11 @@ django-flags>=5.0.13
 dispatcherd[pg-notify]  # tasking system, previously part of AWX code base
 protobuf>=4.25.8 # CVE-2025-4565
 idna>=3.10 # CVE-2024-3651
+# SSO / Authentication backends
+django-auth-ldap
+django-radius
+python-ldap
+python3-saml  # SAML support for social-auth-core
+social-auth-core[openidconnect]==4.4.2  # see UPGRADE BLOCKERs
+social-auth-app-django==5.4.0  # see UPGRADE BLOCKERs
+tacacs_plus==1.0  # UPGRADE BLOCKER: auth does not work with later versions

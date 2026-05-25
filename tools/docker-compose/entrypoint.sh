@@ -28,5 +28,12 @@ podman system migrate
 
 export SDB_NOTIFY_HOST=$(ip route | head -n1 | awk '{print $3}')
 
+# Symlink the UI build directory so webpack output is served directly by nginx
+# without needing collectstatic after each build.
+if [ -d /awx_devel/awx/ui/build ]; then
+  mkdir -p /var/lib/awx/public/static
+  rm -rf /var/lib/awx/public/static/awx
+  ln -sfn /awx_devel/awx/ui/build/awx /var/lib/awx/public/static/awx
+fi
 
 exec $@

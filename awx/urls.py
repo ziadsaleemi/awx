@@ -34,6 +34,8 @@ def get_urlpatterns(prefix=None):
         re_path(r'^(?:api/)?500.html$', handle_500),
         re_path(r'^csp-violation/', handle_csp_violation),
         re_path(r'^login/', handle_login_redirect),
+        path('sso/', include('social_django.urls', namespace='social')),
+        path('sso/', include('awx.sso.urls')),
     ]
 
     if settings.DYNACONF.is_development_mode:
