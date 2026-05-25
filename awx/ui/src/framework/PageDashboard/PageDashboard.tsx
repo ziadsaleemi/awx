@@ -14,11 +14,13 @@ export function PageDashboard(props: { children?: ReactNode }) {
   const [columns, setColumns] = useState(1);
 
   useLayoutEffect(() => {
-    setColumns(Math.max(1, Math.floor((ref.current?.clientWidth ?? 0) / Divisor)));
+    const raw = Math.max(1, Math.floor((ref.current?.clientWidth ?? 0) / Divisor));
+    setColumns(Math.max(2, Math.floor(raw / 2) * 2));
   }, []);
 
   useResizeObserver(ref, (entry) => {
-    setColumns(Math.max(1, Math.floor((entry.contentRect.width ?? 0) / Divisor)));
+    const raw = Math.max(1, Math.floor((entry.contentRect.width ?? 0) / Divisor));
+    setColumns(Math.max(2, Math.floor(raw / 2) * 2));
   });
 
   return (

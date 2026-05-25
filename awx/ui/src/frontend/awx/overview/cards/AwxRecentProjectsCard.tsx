@@ -36,7 +36,7 @@ export function AwxRecentProjectsCard() {
     <PageDashboardCard
       title={t('Projects')}
       subtitle={t('Recently updated projects')}
-      width="md"
+      width="half"
       height="md"
       linkText={t('View all Projects')}
       to={getPageUrl(AwxRoute.Projects)}

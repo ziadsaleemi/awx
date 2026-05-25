@@ -8,6 +8,7 @@ from awx.api.generics import LoggedLoginView, LoggedLogoutView
 from awx.api.views.root import (
     ApiRootView,
     ApiV2RootView,
+    ApiV2AuthView,
     ApiV2PingView,
     ApiV2ConfigView,
     ApiV2SubscriptionView,
@@ -81,6 +82,7 @@ from .receptor_address import urls as receptor_address_urls
 
 v2_urls = [
     re_path(r'^$', ApiV2RootView.as_view(), name='api_v2_root_view'),
+    re_path(r'^auth/$', ApiV2AuthView.as_view(), name='api_v2_auth_view'),
     re_path(r'^credential_types/', include(credential_type_urls)),
     re_path(r'^credential_input_sources/', include(credential_input_source_urls)),
     re_path(r'^hosts/(?P<pk>[0-9]+)/ansible_facts/$', HostAnsibleFactsDetail.as_view(), name='host_ansible_facts_detail'),

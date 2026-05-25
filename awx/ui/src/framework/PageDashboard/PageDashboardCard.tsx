@@ -15,7 +15,7 @@ import { Help } from '../components/Help';
 import { useID } from '../hooks/useID';
 import { PageDashboardContext } from './PageDashboard';
 
-export type PageDashboardCardWidth = 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
+export type PageDashboardCardWidth = 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl' | 'half' | 'full';
 export type PageDashboardCardHeight = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
 
 const heightUnit = 90;
@@ -68,17 +68,25 @@ export function PageDashboardCard(props: {
 
   const dashboardContext = useContext(PageDashboardContext);
 
-  let colSpan = {
-    xxs: 3,
-    xs: 4,
-    sm: 6,
-    md: 8,
-    lg: 12,
-    xl: 16,
-    xxl: 24,
-  }[props.width || 'md'];
-  if (colSpan > dashboardContext.columns) {
+  let colSpan: number;
+  if (props.width === 'half') {
+    colSpan = Math.floor(dashboardContext.columns / 2);
+  } else if (props.width === 'full') {
     colSpan = dashboardContext.columns;
+  } else {
+    colSpan =
+      {
+        xxs: 3,
+        xs: 4,
+        sm: 6,
+        md: 8,
+        lg: 12,
+        xl: 16,
+        xxl: 24,
+      }[props.width || 'md'] ?? 8;
+    if (colSpan > dashboardContext.columns) {
+      colSpan = dashboardContext.columns;
+    }
   }
 
   const [isCollapsed, setCollapsedState] = useState(

@@ -132,6 +132,28 @@ class ApiV2RootView(ApiVersionRootView):
     resource_purpose = 'api v2 root'
 
 
+class ApiV2AuthView(APIView):
+    """List enabled single-sign-on endpoints."""
+
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
+    name = _('Authentication')
+    swagger_topic = 'Authentication'
+    resource_purpose = 'list enabled SSO endpoints'
+
+    def get(self, request, format=None):
+        data = OrderedDict()
+        for backend in getattr(settings, 'AUTHENTICATION_BACKENDS', []):
+            # Only include social-auth backends
+            if not ('social_core.backends' in backend):
+                continue
+            # Derive backend name from class path (last segment, lowercase)
+            backend_name = backend.rsplit('.', 1)[-1].lower()
+            login_url = '/sso/login/{}/'.format(backend_name)
+            data[backend_name] = {'login_url': login_url}
+        return Response(data)
+
+
 class ApiV2PingView(APIView):
     """A simple view that reports very basic information about this
     instance, which is acceptable to be public information.

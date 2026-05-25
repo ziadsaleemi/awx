@@ -41,7 +41,7 @@ export function AwxRecentJobsCard() {
     <PageDashboardCard
       title={t('Jobs')}
       subtitle={t('Recently finished jobs')}
-      width="md"
+      width="half"
       height="md"
       linkText={t('View all Jobs')}
       to={getPageUrl(AwxRoute.Jobs)}
