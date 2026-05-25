@@ -1,8 +1,15 @@
 import { FormGroup, HelperText, HelperTextItem } from '@patternfly/react-core';
 import { t } from 'i18next';
-import { type ChangeEvent } from 'react';
+import { type ChangeEvent, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import styled from 'styled-components';
+
+const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
+const LOGO_SIZES = [
+  { label: 'S', height: 36 },
+  { label: 'M', height: 48 },
+  { label: 'L', height: 64 },
+] as const;
 
 /**
  * A custom logo upload field for the CUSTOM_LOGO setting.
@@ -35,6 +42,15 @@ export function AwxLogoUpload(props: {
   const currentValue: string = field.value as string;
   const hasImage = currentValue && currentValue.startsWith('data:image/');
 
+  const [logoHeight, setLogoHeight] = useState<number>(() => {
+    const stored = localStorage.getItem(LOGO_SIZE_KEY);
+    return stored ? parseInt(stored, 10) : 48;
+  });
+  const handleLogoSize = (height: number) => {
+    setLogoHeight(height);
+    localStorage.setItem(LOGO_SIZE_KEY, String(height));
+  };
+
   return (
     <FormGroup
       label={props.label}
@@ -66,6 +82,21 @@ export function AwxLogoUpload(props: {
           )}
         </FileInputRow>
       </LogoContainer>
+      <SizeRow>
+        <SizeLabel>{t('Header logo size:')}</SizeLabel>
+        {LOGO_SIZES.map((s) => (
+          <SizeBtn
+            key={s.label}
+            type="button"
+            aria-pressed={logoHeight === s.height}
+            aria-label={`${t('Logo size')}: ${s.label}`}
+            $active={logoHeight === s.height}
+            onClick={() => handleLogoSize(s.height)}
+          >
+            {s.label}
+          </SizeBtn>
+        ))}
+      </SizeRow>
       {props.helpText && (
         <HelperText>
           <HelperTextItem>{props.helpText}</HelperTextItem>
@@ -105,5 +136,38 @@ const ClearButton = styled.button`
   white-space: nowrap;
   &:hover {
     background: var(--pf-v5-global--BackgroundColor--200, #f5f5f5);
+  }
+`;
+
+const SizeRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+`;
+
+const SizeLabel = styled.span`
+  font-size: var(--pf-v5-global--FontSize--sm);
+  color: var(--pf-v5-global--Color--200);
+  margin-right: 2px;
+`;
+
+const SizeBtn = styled.button<{ $active: boolean }>`
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid
+    ${({ $active }) =>
+      $active
+        ? 'var(--pf-v5-global--active-color--100)'
+        : 'var(--pf-v5-global--BorderColor--100)'};
+  background: ${({ $active }) =>
+    $active ? 'var(--pf-v5-global--active-color--100)' : 'transparent'};
+  color: ${({ $active }) => ($active ? '#fff' : 'var(--pf-v5-global--Color--100)')};
+  &:hover {
+    opacity: 0.85;
   }
 `;

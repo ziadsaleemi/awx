@@ -1,6 +1,7 @@
 import { Button, FormGroup } from '@patternfly/react-core';
 import { t } from 'i18next';
 import { useCallback, useMemo } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   PageFormCheckbox,
@@ -15,6 +16,7 @@ import { awxAPI } from '../../common/api/awx-utils';
 import { PageFormFileUpload } from '../../../../framework/PageForm/Inputs/PageFormFileUpload';
 import { useRevertAllSettingsModal } from './useRevertAllSettingsModal';
 import { AwxLogoUpload } from './AwxLogoUpload';
+import { AwxBgImageUpload } from './AwxBgImageUpload';
 
 export interface AwxSettingsOptionsResponse {
   actions: {
@@ -197,9 +199,11 @@ export function AwxSettingsForm(props: {
         </Button>
       }
     >
-      {Object.entries(otherOptions).map(([key, option]) => {
-        return <OptionActionsFormInput key={key} name={key} option={option} />;
-      })}
+      {Object.entries(otherOptions).map(([key, option]) => (
+        <React.Fragment key={key}>
+          <OptionActionsFormInput name={key} option={option} />
+        </React.Fragment>
+      ))}
       {Object.keys(booleanOptions).length > 0 && (
         <FormGroup label={t('Options')} isStack role="group">
           {Object.entries(booleanOptions).map(([key, option]) => {
@@ -266,6 +270,18 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
     return (
       <PageFormSection singleColumn>
         <AwxLogoUpload
+          name={props.name}
+          label={option.label}
+          helpText={option.help_text}
+        />
+      </PageFormSection>
+    );
+  }
+
+  if (props.name === 'CUSTOM_LOGIN_BACKGROUND') {
+    return (
+      <PageFormSection singleColumn>
+        <AwxBgImageUpload
           name={props.name}
           label={option.label}
           helpText={option.help_text}

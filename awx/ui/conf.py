@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy as _
 
 # AWX
 from awx.conf import register, fields
-from awx.ui.fields import PendoTrackingStateField, CustomLogoField  # noqa
+from awx.ui.fields import PendoTrackingStateField, CustomLogoField, CustomLoginBackgroundField  # noqa
 
 register(
     'PENDO_TRACKING_STATE',
@@ -46,6 +46,21 @@ register(
         'transparent background. GIF, PNG and JPEG formats are supported.'
     ),
     placeholder='data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACwAAAAAAQABAAACAkQBADs=',
+    category=_('UI'),
+    category_slug='ui',
+)
+
+register(
+    'CUSTOM_LOGIN_BACKGROUND',
+    field_class=CustomLoginBackgroundField,
+    allow_blank=True,
+    default='',
+    label=_('Custom Login Background'),
+    help_text=_(
+        'Set a background image for the login page. Upload an image file '
+        'or provide an https:// URL. GIF, PNG, JPEG, WebP and SVG formats '
+        'are supported for uploaded files.'
+    ),
     category=_('UI'),
     category_slug='ui',
 )

@@ -663,7 +663,7 @@ function TableHead<T extends object>(props: {
   return (
     <Thead>
       <Tr className="bg-lighten">
-        {expandedRow && <Th style={{ padding: 0 }} className="bg-lighten" screenReaderText="Expand row" />}
+        {expandedRow && <Th style={{ padding: 0, width: 0, minWidth: 0 }} className="bg-lighten" screenReaderText="Expand row" />}
         {(showSelect || onSelect) && (
           <Th
             isStickyColumn
@@ -810,7 +810,7 @@ function TableRow<T extends object>(props: {
                   }
                 : undefined
             }
-            style={{ paddingLeft: expandedRowContent ? 8 : 4 }}
+            style={expandedRowContent ? { paddingLeft: 8 } : { padding: 0, width: 0, minWidth: 0 }}
             data-cy={'expand-column-cell'}
           />
         )}

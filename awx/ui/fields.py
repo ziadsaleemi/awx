@@ -40,3 +40,30 @@ class CustomLogoField(fields.CharField):
         except (TypeError, binascii.Error):
             self.fail('invalid_data')
         return data
+
+
+class CustomLoginBackgroundField(fields.CharField):
+    CUSTOM_LOGIN_BG_RE = re.compile(r'^data:image/(?:png|jpeg|gif|webp|svg\+xml);base64,([A-Za-z0-9+/=]+?)$')
+
+    default_error_messages = {
+        'invalid_format': _(
+            'Invalid format. Must be a base64-encoded image data URL '
+            '(GIF, PNG, JPEG, WebP, SVG) or an https:// URL.'
+        ),
+        'invalid_data': _('Invalid base64-encoded data in data URL.'),
+    }
+
+    def to_internal_value(self, data):
+        data = super().to_internal_value(data)
+        # Allow plain https:// and http:// URLs
+        if data.startswith('https://') or data.startswith('http://'):
+            return data
+        match = self.CUSTOM_LOGIN_BG_RE.match(data)
+        if not match:
+            self.fail('invalid_format')
+        b64data = match.group(1)
+        try:
+            base64.b64decode(b64data)
+        except (TypeError, binascii.Error):
+            self.fail('invalid_data')
+        return data

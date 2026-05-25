@@ -81,6 +81,11 @@ See [API_STANDARDS.md](API_STANDARDS.md) for the full guide. Key rules:
 
 AWX uses `django-ansible-base` for RBAC. Access objects in `awx/main/access.py` define who can read/write/delete each model. Always add a corresponding access class method when adding a new model or action.
 
+## UI development rules
+
+- **Match existing design** — before implementing any new UI element, find the closest existing component in `awx/ui/src/` that already does something similar and copy its visual pattern (markup structure, styled-component names, PatternFly variants). Do not invent new design from scratch.
+- **Update ENHANCEMENTS.md** — every time a UI change is completed (or a new one is planned), update `ENHANCEMENTS.md` accordingly: add the row if missing, and flip the status to ✅ when done.
+
 ## Submitting changes
 
 - All PRs target the `devel` branch

@@ -73,6 +73,10 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 16 | **OpenAPI → TypeScript types** — auto-generate TS interfaces from `make genschema` output to replace manually maintained `awx/ui/src/frontend/awx/interfaces/` files | Low | ✅ |
 | 17 | **Accessibility: table header names** — add `screenReaderText` / `aria-label` to all visually-empty `<Th>` elements (expand-row, select-row, drag-handle columns) to silence the PatternFly "Th: Table headers must have an accessible name" console warning on every table page | Medium | ✅ |
 | 18 | **Login page logo centering** — CSS fix so the AWX logo is properly centered in the right panel of the login page instead of being flush against the form card | Low | ✅ |
+| 19 | **Login page background image** — full-page background image configurable from Settings → User Interface (below logo upload); paste URL or upload file ≤ 2 MB; stored in browser localStorage; login form card left-aligned at desktop; logo displayed inside the login card | Medium | ✅ |
+| 20 | **Navbar logo size control** — S / M / L size-preset buttons in Settings → User Interface (below the logo upload); selected size stored in localStorage and applied to the masthead brand on every page load | Low | ✅ |
+| 21 | **Custom login background image in DB** — upload or paste an https:// URL in Settings → User Interface; stored in `CUSTOM_LOGIN_BACKGROUND` AWX setting (database), served from `/api/` root before auth, no more localStorage | Medium | ✅ |
+| 22 | **Remove first-letter icon placeholders from sidebar** — nav items without an explicit icon now show only their label text in expanded mode; first-letter fallback kept only for collapsed (icon-only) mode | Low | ✅ |
 
 ---
 

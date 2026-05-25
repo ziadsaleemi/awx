@@ -60,6 +60,7 @@ class ApiRootView(APIView):
         data['available_versions'] = dict(v2=v2)
         data['custom_logo'] = settings.CUSTOM_LOGO
         data['custom_login_info'] = settings.CUSTOM_LOGIN_INFO
+        data['custom_login_background'] = settings.CUSTOM_LOGIN_BACKGROUND
         data['login_redirect_override'] = settings.LOGIN_REDIRECT_OVERRIDE
         return Response(data)
 

@@ -1,10 +1,8 @@
 import {
-  BackgroundImage,
   Brand,
   Login,
   LoginFooter,
   LoginForm,
-  LoginHeader,
   LoginMainBody,
   LoginMainFooter,
   LoginMainHeader,
@@ -129,79 +127,88 @@ export function AnsibleLogin(props: {
   // because we need to be able to use a component for the brand image
   // SEE: https://github.com/patternfly/patternfly-react/blob/main/packages/react-core/src/components/LoginPage/LoginPage.tsx
   return (
-    <ErrorBoundary message={translations.errorText}>
-      {props.backgroundImgSrc && <BackgroundImage src={props.backgroundImgSrc} />}
-      <LoginStyled
-        header={
-          <LoginHeader
-            headerBrand={
-              typeof props.brandImg === 'string' ? (
-                <Brand src={props.brandImg} alt={props.brandImgAlt} />
-              ) : (
-                <BrandStyled>{props.brandImg}</BrandStyled>
-              )
+    <LoginPageBackground
+      style={
+        props.backgroundImgSrc
+          ? {
+              backgroundImage: `url(${JSON.stringify(props.backgroundImgSrc)})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundAttachment: 'fixed',
             }
+          : undefined
+      }
+    >
+      {/* background applied via inline style above, no separate img element needed */}
+      <ErrorBoundary message={translations.errorText}>
+        <LoginStyled
+          footer={
+            props.textContent ? (
+              <LoginFooter>
+                <p>{props.textContent}</p>
+              </LoginFooter>
+            ) : undefined
+          }
+        >
+          <BrandInCard>
+            {typeof props.brandImg === 'string' ? (
+              <Brand src={props.brandImg} alt={props.brandImgAlt} />
+            ) : (
+              props.brandImg
+            )}
+          </BrandInCard>
+          <LoginMainHeader
+            title={props.loginTitle ?? t('Log in to your account')}
+            subtitle={props.loginSubtitle}
           />
-        }
-        footer={
-          props.textContent && (
-            <LoginFooter>
-              <p>{props.textContent}</p>
-            </LoginFooter>
-          )
-        }
-      >
-        <LoginMainHeader
-          title={props.loginTitle ?? t('Log in to your account')}
-          subtitle={props.loginSubtitle}
-        />
-        <LoginMainBody>
-          <LoginForm
-            showHelperText={!!helperText}
-            helperText={helperText}
-            helperTextIcon={<ErrorExclamationCircleIconStyled />}
-            usernameLabel={t('Username')}
-            usernameValue={username}
-            onChangeUsername={(_, username) => {
-              setHelperText('');
-              setUsername(username);
-            }}
-            isValidUsername={!helperText || !!username}
-            passwordLabel={t('Password')}
-            passwordValue={password}
-            onChangePassword={(_, password) => {
-              setHelperText('');
-              setPassword(password);
-            }}
-            isValidPassword={!helperText || !!password}
-            isShowPasswordEnabled
-            showPasswordAriaLabel={t('Show password')}
-            hidePasswordAriaLabel={t('Hide password')}
-            loginButtonLabel={t('Log in')}
-            onLoginButtonClick={(event) => {
-              event.preventDefault();
-              if (!username) {
-                setHelperText(t('Username is required'));
-                return;
+          <LoginMainBody>
+            <LoginForm
+              showHelperText={!!helperText}
+              helperText={helperText}
+              helperTextIcon={<ErrorExclamationCircleIconStyled />}
+              usernameLabel={t('Username')}
+              usernameValue={username}
+              onChangeUsername={(_, username) => {
+                setHelperText('');
+                setUsername(username);
+              }}
+              isValidUsername={!helperText || !!username}
+              passwordLabel={t('Password')}
+              passwordValue={password}
+              onChangePassword={(_, password) => {
+                setHelperText('');
+                setPassword(password);
+              }}
+              isValidPassword={!helperText || !!password}
+              isShowPasswordEnabled
+              showPasswordAriaLabel={t('Show password')}
+              hidePasswordAriaLabel={t('Hide password')}
+              loginButtonLabel={t('Log in')}
+              onLoginButtonClick={(event) => {
+                event.preventDefault();
+                if (!username) {
+                  setHelperText(t('Username is required'));
+                  return;
+                }
+                if (!password) {
+                  setHelperText(t('Password is required'));
+                  return;
+                }
+                void onSubmit();
+              }}
+            />
+          </LoginMainBody>
+          {props.authOptions && (
+            <LoginMainFooter
+              socialMediaLoginContent={
+                props.authOptions ? <SocialAuthLogin options={props.authOptions} /> : undefined
               }
-              if (!password) {
-                setHelperText(t('Password is required'));
-                return;
-              }
-              void onSubmit();
-            }}
-          />
-        </LoginMainBody>
-        {props.authOptions && (
-          <LoginMainFooter
-            socialMediaLoginContent={
-              props.authOptions ? <SocialAuthLogin options={props.authOptions} /> : undefined
-            }
-            socialMediaLoginAriaLabel={t('Log in with authentication provider')}
-          />
-        )}
-      </LoginStyled>
-    </ErrorBoundary>
+              socialMediaLoginAriaLabel={t('Log in with authentication provider')}
+            />
+          )}
+        </LoginStyled>
+      </ErrorBoundary>
+    </LoginPageBackground>
   );
 }
 
@@ -213,15 +220,36 @@ const ErrorExclamationCircleIconStyled = styled(ExclamationCircleIcon)`
   color: var(--pf-v5-global--danger-color--100);
 `;
 
-const BrandStyled = styled.div`
-  margin-bottom: 16px;
+/** Fills the viewport; background image is applied via inline style */
+const LoginPageBackground = styled.div`
+  min-height: 100vh;
 `;
 
-/** Center the brand/logo in the right panel of the PF Login two-column layout */
+/** Login card gets a subtle shadow to stand out from any background image.
+ *  Outer container is transparent so the background image shows through.
+ *  On wide screens the card is shifted left so background art is visible. */
 const LoginStyled = styled(Login)`
-  .pf-v5-c-login__header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  background-color: transparent !important;
+  --pf-v5-c-login--BackgroundColor: transparent;
+  .pf-v5-c-login__main {
+    box-shadow: 0 4px 40px rgba(0, 0, 0, 0.3);
+  }
+  @media (min-width: 1200px) {
+    justify-content: flex-start;
+    padding-left: 10%;
+  }
+  @media (min-width: 1920px) {
+    padding-left: 15%;
+  }
+`;
+
+const BrandInCard = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 0 16px;
+  img {
+    height: 52px;
+    max-width: 220px;
   }
 `;

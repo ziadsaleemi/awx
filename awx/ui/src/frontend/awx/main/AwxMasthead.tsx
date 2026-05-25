@@ -2,7 +2,7 @@ import { Brand, Button } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
 import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageMasthead, useGetPageUrl, usePageNavigate } from '../../../framework';
 import { PageMastheadDropdown } from '../../../framework/PageMasthead/PageMastheadDropdown';
@@ -24,6 +24,8 @@ import { AwxRoute } from './AwxRoutes';
 import { AwxGlobalSearch } from './AwxGlobalSearch';
 import { AwxSystemUsageBar } from './AwxSystemUsageBar';
 
+const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
+
 export function AwxMasthead() {
   const { t } = useTranslation();
   const openAnsibleAboutModal = useAnsibleAboutModal();
@@ -31,6 +33,11 @@ export function AwxMasthead() {
   const pageNavigate = usePageNavigate();
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
   useAwxNotifications();
+
+  const [logoHeight] = useState<number>(() => {
+    const stored = localStorage.getItem(LOGO_SIZE_KEY);
+    return stored ? parseInt(stored, 10) : 48;
+  });
   const logout = useCallback(async () => {
     await fetch('/api/logout/');
     refreshActiveAwxUser?.();
@@ -42,9 +49,9 @@ export function AwxMasthead() {
       : undefined;
 
   const brandElement = customLogoSrc ? (
-    <Brand src={customLogoSrc} alt={t('Custom logo')} style={{ height: 60 }} />
+    <Brand src={customLogoSrc} alt={t('Custom logo')} style={{ height: logoHeight }} />
   ) : (
-    <AwxBrand style={{ height: 60 }} />
+    <AwxBrand style={{ height: logoHeight }} />
   );
 
   return (

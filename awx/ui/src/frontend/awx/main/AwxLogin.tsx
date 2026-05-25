@@ -20,10 +20,11 @@ export function AwxLogin(props: { children: React.ReactNode }) {
   const { data: options } = useSWR<AwxAuthOptions>(awxAPI`/auth/`, requestGet);
   // Fetch from the AllowAny root endpoint so custom_logo/custom_login_info are
   // available on the login page before the user authenticates.
-  const { data: rootInfo } = useSWR<{ custom_logo?: string; custom_login_info?: string }>(
-    '/api/',
-    requestGet
-  );
+  const { data: rootInfo } = useSWR<{
+    custom_logo?: string;
+    custom_login_info?: string;
+    custom_login_background?: string;
+  }>('/api/', requestGet);
   const authOptions: AuthOption[] = [];
   if (options && typeof options === 'object') {
     Object.keys(options).forEach((key) => {
@@ -58,6 +59,7 @@ export function AwxLogin(props: { children: React.ReactNode }) {
         brandImg={brandImg}
         brandImgAlt={process.env.PRODUCT}
         textContent={rootInfo?.custom_login_info}
+        backgroundImgSrc={rootInfo?.custom_login_background}
       />
     );
   }
