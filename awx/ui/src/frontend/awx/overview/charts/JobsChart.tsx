@@ -1,5 +1,6 @@
 import { Bullseye, Spinner } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import useSWR from 'swr';
 import { PageDashboardChart } from '../../../../framework/PageDashboard/PageDashboardChart';
 import { usePageChartColors } from '../../../../framework/PageDashboard/usePageChartColors';
@@ -28,6 +29,7 @@ export function JobsChart(props: {
   jobType?: DashboardJobType;
 }) {
   const getPageUrl = useGetPageUrl();
+  const navigate = useNavigate();
 
   const { t } = useTranslation();
   const { period, jobType } = props;
@@ -36,6 +38,9 @@ export function JobsChart(props: {
     awxAPI`/dashboard/graphs/jobs/?job_type=${jobType ?? 'all'}&period=${period ?? 'month'}`,
     (url: string) => fetch(url).then((r) => r.json())
   );
+
+  // Map from chart label (e.g. "5/24") → full ISO date "YYYY-MM-DD"
+  const labelToDate: Record<string, string> = {};
 
   const reducer = (tuple: [number, number]) => {
     const date = new Date(tuple[0] * 1000);
@@ -47,6 +52,7 @@ export function JobsChart(props: {
       default:
         label = `${date.getMonth() + 1}/${date.getDate()}`;
     }
+    labelToDate[label] = date.toISOString().slice(0, 10); // YYYY-MM-DD
     return { label, value: tuple[1] };
   };
 
@@ -68,6 +74,12 @@ export function JobsChart(props: {
     <PageDashboardChart
       yLabel={t('Job count')}
       variant="stackedAreaChart"
+      onPointClick={(label) => {
+        const isoDate = labelToDate[label];
+        if (isoDate) {
+          navigate(getPageUrl(AwxRoute.Jobs) + `?finished__date=${isoDate}`);
+        }
+      }}
       groups={[
         {
           label: t('Success'),

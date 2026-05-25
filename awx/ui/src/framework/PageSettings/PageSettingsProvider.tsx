@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { SWRConfig } from 'swr';
@@ -21,47 +22,76 @@ export interface IPageSettings {
   dataEditorFormat?: 'yaml' | 'json';
 }
 
-export const PageSettingsContext = createContext<
-  [IPageSettings, (settings: IPageSettings) => void]
->([{}, () => null]);
+type PageSettingsContextValue = [
+  IPageSettings,
+  (settings: IPageSettings) => void,
+  (userId: string | null) => void,
+];
+
+export const PageSettingsContext = createContext<PageSettingsContextValue>([
+  {},
+  () => null,
+  () => null,
+]);
 
 export function usePageSettings() {
   const [settings] = useContext(PageSettingsContext);
   return settings;
 }
 
+/** Switch the active user so settings are loaded from / saved to a user-specific key. */
+export function usePageSettingsSwitchUser() {
+  const [, , switchUser] = useContext(PageSettingsContext);
+  return switchUser;
+}
+
+const DEFAULT_STORAGE_KEY = 'user-preferences';
+
+function loadSettings(key: string, defaultRefreshInterval: number): IPageSettings {
+  let stored: IPageSettings = {};
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) stored = JSON.parse(raw) as IPageSettings;
+  } catch {
+    // ignore
+  }
+  return {
+    refreshInterval: defaultRefreshInterval,
+    theme: 'system',
+    tableLayout: 'comfortable',
+    formColumns: 'multiple',
+    formLayout: 'vertical',
+    dateFormat: 'date-time',
+    dataEditorFormat: 'yaml',
+    ...stored,
+  };
+}
+
 export function PageSettingsProvider(props: {
   children?: ReactNode;
   defaultRefreshInterval: number;
 }) {
-  const [settings, setSettingsState] = useState<IPageSettings>(() => {
-    const preferencesStorage = localStorage.getItem('user-preferences');
-    let settings: IPageSettings = {};
-    if (preferencesStorage) {
-      try {
-        settings = JSON.parse(preferencesStorage) as IPageSettings;
-      } catch (e) {
-        // do nothing
-      }
-    }
-    // defaults
-    settings = {
-      refreshInterval: props.defaultRefreshInterval,
-      theme: 'system',
-      tableLayout: 'comfortable',
-      formColumns: 'multiple',
-      formLayout: 'vertical',
-      dateFormat: 'date-time',
-      dataEditorFormat: 'yaml',
-      ...settings,
-    };
-    return settings;
-  });
+  const storageKeyRef = useRef<string>(DEFAULT_STORAGE_KEY);
+  const [settings, setSettingsState] = useState<IPageSettings>(() =>
+    loadSettings(DEFAULT_STORAGE_KEY, props.defaultRefreshInterval)
+  );
 
-  const setSettings = useCallback((settings: IPageSettings) => {
-    localStorage.setItem('user-preferences', JSON.stringify(settings));
-    setSettingsState(settings);
-  }, []);
+  const setSettings = useCallback(
+    (settings: IPageSettings) => {
+      localStorage.setItem(storageKeyRef.current, JSON.stringify(settings));
+      setSettingsState(settings);
+    },
+    []
+  );
+
+  const switchUser = useCallback(
+    (userId: string | null) => {
+      const key = userId ? `user-preferences-${userId}` : DEFAULT_STORAGE_KEY;
+      storageKeyRef.current = key;
+      setSettingsState(loadSettings(key, props.defaultRefreshInterval));
+    },
+    [props.defaultRefreshInterval]
+  );
 
   const activeTheme = useMemo(() => {
     return settings.theme !== 'light' && settings.theme !== 'dark'
@@ -87,7 +117,7 @@ export function PageSettingsProvider(props: {
     <SWRConfig
       value={{ refreshInterval: settings.refreshInterval ? settings.refreshInterval * 1000 : 0 }}
     >
-      <PageSettingsContext.Provider value={[settings, setSettings]}>
+      <PageSettingsContext.Provider value={[settings, setSettings, switchUser]}>
         {props.children}
       </PageSettingsContext.Provider>
     </SWRConfig>

@@ -8,8 +8,9 @@ import {
   NavList,
   PageSidebar,
   PageSidebarBody,
+  Tooltip,
 } from '@patternfly/react-core';
-import { ExternalLinkAltIcon } from '@patternfly/react-icons';
+import { AngleLeftIcon, AngleRightIcon, ExternalLinkAltIcon } from '@patternfly/react-icons';
 import { useState, type CSSProperties } from 'react';
 import { usePageNavBarClick, usePageNavSideBar } from './PageNavSidebar';
 import './PageNavigation.css';
@@ -21,13 +22,36 @@ export function PageNavigation(props: { navigation: PageNavigationItem[]; basena
   const navBar = usePageNavSideBar();
 
   return (
-    <PageSidebar isSidebarOpen={navBar.isOpen} className="bg-lighten">
-      <PageSidebarBody>
-        <Nav data-cy="page-navigation" className="side-nav">
+    <PageSidebar
+      isSidebarOpen={navBar.isOpen}
+      className={`bg-lighten${navBar.isCollapsed ? ' nav-collapsed' : ''}`}
+      style={navBar.isCollapsed ? { width: 56, minWidth: 56 } : undefined}
+    >
+      <PageSidebarBody style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <Nav data-cy="page-navigation" className="side-nav" style={{ flex: 1 }}>
           <NavList>
             <PageNavigationItems baseRoute={props.basename ?? ''} items={navigationItems} />
           </NavList>
         </Nav>
+        {/* Collapse toggle button */}
+        <div
+          onClick={() => navBar.setState({ isCollapsed: !navBar.isCollapsed })}
+          title={navBar.isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: navBar.isCollapsed ? 'center' : 'flex-end',
+            padding: '10px 12px',
+            cursor: 'pointer',
+            borderTop: '1px solid rgba(255,255,255,0.12)',
+            color: 'rgba(255,255,255,0.6)',
+            fontSize: 12,
+            userSelect: 'none',
+            gap: 6,
+          }}
+        >
+          {navBar.isCollapsed ? <AngleRightIcon /> : <><AngleLeftIcon /><span>Collapse</span></>}
+        </div>
       </PageSidebarBody>
     </PageSidebar>
   );
@@ -56,6 +80,8 @@ function PageNavigationItems(props: { items: PageNavigationItem[]; baseRoute: st
 
 function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRoute: string }) {
   const { item } = props;
+  const navBar = usePageNavSideBar();
+  const isCollapsed = navBar.isCollapsed;
   const [isExpanded, setIsExpanded] = useState(
     () =>
       localStorage.getItem('default-nav-expanded') === 'true' ||
@@ -91,6 +117,31 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
     path = path.replace('//', '/');
 
     const isActive = item.href ? false : location.pathname.startsWith(path);
+    const icon = item.icon ?? (
+      <span style={{ fontWeight: 700, fontSize: 14, width: 20, textAlign: 'center', display: 'inline-block' }}>
+        {item.label?.charAt(0)}
+      </span>
+    );
+
+    if (isCollapsed) {
+      return (
+        <Tooltip content={item.label} position="right" key={id}>
+          <NavItem
+            id={id}
+            href={item.href || route}
+            isActive={isActive}
+            className={isActive ? 'bg-lighten' : undefined}
+            onClick={() => (item.href ? window.open(item.href, '_blank') : onClickNavItem(route))}
+            target={item.href ? '_blank' : ''}
+            data-cy={id}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 0' }}
+          >
+            {icon}
+          </NavItem>
+        </Tooltip>
+      );
+    }
+
     return (
       <NavItem
         id={id}
@@ -102,7 +153,8 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
         data-cy={id}
         style={{ display: 'flex', alignItems: 'stretch', flexDirection: 'column' }}
       >
-        <Flex>
+        <Flex alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem style={{ marginRight: 8 }}>{icon}</FlexItem>
           <FlexItem grow={{ default: 'grow' }}>{item.label}</FlexItem>
           {'badge' in item && item.badge && (
             <FlexItem>
@@ -130,6 +182,26 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
 
   if (!item.label) {
     return <PageNavigationItems items={item.children} baseRoute={route} />;
+  }
+
+  const groupIcon = item.icon ?? (
+    <span style={{ fontWeight: 700, fontSize: 14, width: 20, textAlign: 'center', display: 'inline-block' }}>
+      {item.label?.charAt(0)}
+    </span>
+  );
+
+  if (isCollapsed) {
+    return (
+      <Tooltip content={item.label} position="right" key={id}>
+        <NavItem
+          id={id}
+          isActive={false}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 0' }}
+        >
+          {groupIcon}
+        </NavItem>
+      </Tooltip>
+    );
   }
 
   return (

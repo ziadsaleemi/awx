@@ -1,11 +1,19 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useManageItems } from '../../../../framework/components/useManagedItems';
+import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 
 type Resource = { id: string; name: string };
 
 export function useManagedAwxDashboard() {
   const { t } = useTranslation();
+  const { activeAwxUser } = useAwxActiveUser();
+
+  // Use a user-specific key so each user's dashboard card order is stored separately.
+  const storageId = activeAwxUser
+    ? `awx-dashboard-${activeAwxUser.id}`
+    : 'awx-dashboard';
+
   const columns = useMemo(
     () => [
       {
@@ -27,7 +35,7 @@ export function useManagedAwxDashboard() {
   );
   const { openManageItems: openManageDashboard, managedItems: managedResources } =
     useManageItems<Resource>({
-      id: 'awx-dashboard',
+      id: storageId,
       title: t('Manage view'),
       description: t(
         'Hide or show the panels you want to see on the overview page by selecting or unselecting, respectively. The panels are ordered from top to bottom on the list. Use the draggable icon :: to re-order your view.'

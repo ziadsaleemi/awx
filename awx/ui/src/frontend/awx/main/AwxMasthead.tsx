@@ -21,6 +21,7 @@ import { useAwxWebSocketSubscription } from '../common/useAwxWebSocket';
 import { useGetDocsUrl } from '../common/util/useGetDocsUrl';
 import { WorkflowApproval } from '../interfaces/WorkflowApproval';
 import { AwxRoute } from './AwxRoutes';
+import { AwxGlobalSearch } from './AwxGlobalSearch';
 import { AwxSystemUsageBar } from './AwxSystemUsageBar';
 
 export function AwxMasthead() {
@@ -51,6 +52,9 @@ export function AwxMasthead() {
       <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
         <ToolbarItem style={{ marginLeft: 'auto' }}>
           <PageRefreshIcon />
+        </ToolbarItem>
+        <ToolbarItem>
+          <AwxGlobalSearch />
         </ToolbarItem>
         <ToolbarItem>
           <PageThemeSwitcher />

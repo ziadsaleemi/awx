@@ -1,3 +1,5 @@
+import { ReactNode } from 'react';
+
 interface PageNavigationGroup {
   id?: string;
   label?: string;
@@ -6,6 +8,7 @@ interface PageNavigationGroup {
   children: PageNavigationItem[];
   hidden?: boolean;
   href?: string;
+  icon?: ReactNode;
 }
 
 interface PageNavigationComponent {
@@ -18,6 +21,7 @@ interface PageNavigationComponent {
   badge?: string;
   badgeColor?: 'blue' | 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'grey' | 'gold';
   href?: string;
+  icon?: ReactNode;
 }
 
 /**

@@ -1,5 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
+import {
+  ChartBarIcon,
+  CogIcon,
+  HomeIcon,
+  ServerIcon,
+  UsersIcon,
+} from '@patternfly/react-icons';
 import { PageNavigationItem } from '../../../framework/PageNavigation/PageNavigationItem';
 import { PageSettingsDetails } from '../../../framework/PageSettings/PageSettingsDetails';
 import { PageSettingsForm } from '../../../framework/PageSettings/PageSettingsForm';
@@ -67,6 +74,7 @@ export function useAwxNavigation() {
       label: t('Overview'),
       path: 'overview',
       element: <AwxOverview />,
+      icon: <HomeIcon />,
     },
   ];
   const infrastructureItems: PageNavigationItem[] = [
@@ -74,6 +82,7 @@ export function useAwxNavigation() {
       id: AwxRoute.Infrastructure,
       label: t('Infrastructure'),
       path: 'infrastructure',
+      icon: <ServerIcon />,
       children: activeAwxUser?.is_superuser
         ? [
             {
@@ -102,6 +111,7 @@ export function useAwxNavigation() {
       id: AwxRoute.Analytics,
       label: t('Analytics'),
       path: 'analytics',
+      icon: <ChartBarIcon />,
       children: [
         {
           id: AwxRoute.AutomationCalculator,
@@ -129,6 +139,7 @@ export function useAwxNavigation() {
       id: AwxRoute.Administration,
       label: t('Administration'),
       path: 'administration',
+      icon: <CogIcon />,
       children: activeAwxUser?.is_superuser
         ? [
             awxActivityStreamRoutes,
@@ -144,6 +155,7 @@ export function useAwxNavigation() {
       id: AwxRoute.Access,
       label: t('Access Management'),
       path: 'access',
+      icon: <UsersIcon />,
       children: [
         {
           id: AwxRoute.SettingsAuthentication,
@@ -216,6 +228,7 @@ export function useAwxNavigation() {
       id: AwxRoute.Settings,
       label: t('Settings'),
       path: 'settings',
+      icon: <CogIcon />,
       children: [
         {
           id: AwxRoute.SettingsPreferences,

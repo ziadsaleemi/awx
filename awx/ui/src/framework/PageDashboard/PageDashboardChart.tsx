@@ -53,8 +53,11 @@ export function PageDashboardChart(props: {
   showLegendCount?: boolean;
 
   height?: number;
+
+  /** Called when the user clicks a data point; receives the x-axis label (date string). */
+  onPointClick?: (label: string) => void;
 }) {
-  const { allowZero, xLabel, yLabel, minDomain, onlyIntegerTicks } = props;
+  const { allowZero, xLabel, yLabel, minDomain, onlyIntegerTicks, onPointClick } = props;
   let { groups } = props;
   groups = allowZero
     ? groups
@@ -174,7 +177,8 @@ export function PageDashboardChart(props: {
                       name={'scatter-' + index}
                       data={group.values.map((value) => ({ x: value.label, y: value.value }))}
                       size={({ active }) => (active ? 6 : 3)}
-                      style={{ data: { fill: group.color } }}
+                      style={{ data: { fill: group.color, cursor: onPointClick ? 'pointer' : undefined } }}
+                      events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
                     />
                   ))}
                 {(!props.variant || props.variant === 'stackedAreaChart') && (
@@ -201,6 +205,8 @@ export function PageDashboardChart(props: {
                           y: value.value,
                         }))}
                         size={({ active }) => (active ? 6 : 3)}
+                        style={{ data: { cursor: onPointClick ? 'pointer' : undefined } }}
+                        events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
                       />
                     ))}
                   </ChartStack>
