@@ -131,7 +131,7 @@ export function AnsibleLogin(props: {
   return (
     <ErrorBoundary message={translations.errorText}>
       {props.backgroundImgSrc && <BackgroundImage src={props.backgroundImgSrc} />}
-      <Login
+      <LoginStyled
         header={
           <LoginHeader
             headerBrand={
@@ -200,7 +200,7 @@ export function AnsibleLogin(props: {
             socialMediaLoginAriaLabel={t('Log in with authentication provider')}
           />
         )}
-      </Login>
+      </LoginStyled>
     </ErrorBoundary>
   );
 }
@@ -215,4 +215,13 @@ const ErrorExclamationCircleIconStyled = styled(ExclamationCircleIcon)`
 
 const BrandStyled = styled.div`
   margin-bottom: 16px;
+`;
+
+/** Center the brand/logo in the right panel of the PF Login two-column layout */
+const LoginStyled = styled(Login)`
+  .pf-v5-c-login__header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 `;

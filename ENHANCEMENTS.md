@@ -70,7 +70,9 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 
 | # | Enhancement | Priority | Status |
 |---|-------------|----------|--------|
-| 16 | **OpenAPI → TypeScript types** — auto-generate TS interfaces from `make genschema` output to replace manually maintained `awx/ui/src/frontend/awx/interfaces/` files | Low | ⬜ |
+| 16 | **OpenAPI → TypeScript types** — auto-generate TS interfaces from `make genschema` output to replace manually maintained `awx/ui/src/frontend/awx/interfaces/` files | Low | ✅ |
+| 17 | **Accessibility: table header names** — add `screenReaderText` / `aria-label` to all visually-empty `<Th>` elements (expand-row, select-row, drag-handle columns) to silence the PatternFly "Th: Table headers must have an accessible name" console warning on every table page | Medium | ✅ |
+| 18 | **Login page logo centering** — CSS fix so the AWX logo is properly centered in the right panel of the login page instead of being flush against the form card | Low | ✅ |
 
 ---
 

@@ -1,4 +1,4 @@
-import { Brand } from '@patternfly/react-core';
+import { Brand, Button } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
 import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';

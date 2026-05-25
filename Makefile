@@ -369,6 +369,13 @@ genschema-yaml: awx-link reports
 	fi; \
 	$(MANAGEMENT_COMMAND) spectacular --format openapi --file schema.yaml
 
+## Regenerate TypeScript interfaces from the AWX OpenAPI schema.
+## Runs genschema then converts schema.json → awx/ui/src/frontend/awx/interfaces/generated-from-swagger/api.ts
+## Run from inside the dev container (awx-manage must be on PATH) or pass an existing schema.json.
+gen-ui-types: genschema
+	@cd awx/ui/src && npm run generate:types
+	@echo "TypeScript interfaces regenerated: awx/ui/src/frontend/awx/interfaces/generated-from-swagger/api.ts"
+
 check: black
 
 api-lint:

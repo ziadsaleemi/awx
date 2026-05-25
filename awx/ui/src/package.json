@@ -27,6 +27,7 @@
     "prettier": "prettier --check !**/*.scss frontend framework cypress",
     "prettier:fix": "prettier --write frontend framework cypress locales docs README.md",
     "checks": "concurrently --kill-others-on-fail npm:tsc npm:tsc:framework npm:eslint npm:prettier -c auto",
+    "generate:types": "swagger-typescript-api --path ../../../schema.json --output frontend/awx/interfaces/generated-from-swagger --name api.ts --no-client",
     "upgrade": "npx npm-check-updates --upgrade --target minor --doctor -x '/^cypress/' && npm audit fix || true && npm dedup || true ",
     "cypress": "cypress open",
     "e2e:awx": "cypress open --browser chrome --e2e --config-file=cypress.awx.config.ts",
@@ -151,6 +152,7 @@
   },
   "devDependencies": {
     "@4tw/cypress-drag-drop": "2.2.5",
+    "swagger-typescript-api": "^13.0.3",
     "@cypress/code-coverage": "3.12.41",
     "@types/webpack-dev-server": "4.7.1",
     "@typescript-eslint/eslint-plugin": "7.16.0",

@@ -182,9 +182,10 @@ export function ReorderItems<T extends object>(props: ReorderItemsProps<T>) {
       {!hideColumnHeaders && (
         <Thead>
           <Tr>
-            <Th />
+            <Th screenReaderText={t('Drag to reorder')} />
             {isSelectableWithCheckbox && (
               <Th
+                aria-label={t('Select all rows')}
                 select={{
                   onSelect: (_event, isSelected) => {
                     isSelected ? selectAll() : unselectAll();
