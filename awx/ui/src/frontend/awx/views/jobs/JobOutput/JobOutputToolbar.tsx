@@ -1,5 +1,6 @@
 import { Dispatch, SetStateAction } from 'react';
 import { Toolbar, ToolbarContent, Button } from '@patternfly/react-core';
+import { CompressArrowsAltIcon, ExpandArrowsAltIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import {
   IFilterState,
@@ -15,6 +16,8 @@ interface IJobOutputToolbarProps {
   jobStatus?: JobStatus;
   isFollowModeEnabled: boolean;
   setIsFollowModeEnabled: (value: boolean) => void;
+  isFullScreen?: boolean;
+  onToggleFullScreen?: () => void;
 }
 
 export function JobOutputToolbar(props: IJobOutputToolbarProps) {
@@ -25,6 +28,8 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
     jobStatus,
     isFollowModeEnabled,
     setIsFollowModeEnabled,
+    isFullScreen,
+    onToggleFullScreen,
   } = props;
   const { t } = useTranslation();
 
@@ -50,6 +55,17 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
             onClick={handleFollowToggle}
           >
             {isFollowModeEnabled ? t('Unfollow') : t('Follow')}
+          </Button>
+        ) : null}
+        {onToggleFullScreen ? (
+          <Button
+            variant="plain"
+            aria-label={isFullScreen ? t('Exit full screen') : t('Full screen')}
+            title={isFullScreen ? t('Exit full screen') : t('Full screen')}
+            onClick={onToggleFullScreen}
+            style={{ marginLeft: 'auto' }}
+          >
+            {isFullScreen ? <CompressArrowsAltIcon /> : <ExpandArrowsAltIcon />}
           </Button>
         ) : null}
       </ToolbarContent>

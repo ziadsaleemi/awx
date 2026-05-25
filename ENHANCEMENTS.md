@@ -56,15 +56,15 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 
 | # | Enhancement | Priority | Status |
 |---|-------------|----------|--------|
-| 12 | **Bulk job cancel** — "Cancel all running jobs" one-click action on the Jobs list | High | ⬜ |
-| 13 | **Job output full-screen mode** — expanded full-viewport view for the job output console | Medium | ⬜ |
+| 12 | **Bulk job cancel** — "Cancel all running jobs" one-click action on the Jobs list | High | ✅ |
+| 13 | **Job output full-screen mode** — expanded full-viewport view for the job output console | Medium | ✅ |
 
 ### Security & Administration
 
 | # | Enhancement | Priority | Status |
 |---|-------------|----------|--------|
-| 14 | **Session timeout warning** — notify the user 2 min before session expiry with an option to extend | High | ⬜ |
-| 15 | **Audit log viewer** — surface Activity Stream in a prominent, filterable UI rather than buried under Administration | Medium | ⬜ |
+| 14 | **Session timeout warning** — notify the user 2 min before session expiry with an option to extend | High | ✅ |
+| 15 | **Audit log viewer** — surface Activity Stream in a prominent, filterable UI rather than buried under Administration | Medium | ✅ |
 
 ### Developer Experience
 

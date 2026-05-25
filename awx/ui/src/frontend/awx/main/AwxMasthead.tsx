@@ -1,7 +1,7 @@
 import { Brand } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
-import { ExternalLinkAltIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
+import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
 import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageMasthead, useGetPageUrl, usePageNavigate } from '../../../framework';
@@ -61,6 +61,17 @@ export function AwxMasthead() {
         </ToolbarItem>
         <ToolbarItem>
           <PageNotificationsIcon />
+        </ToolbarItem>
+        <ToolbarItem>
+          <Button
+            variant="plain"
+            aria-label={t('Activity Stream')}
+            title={t('Activity Stream')}
+            onClick={() => pageNavigate(AwxRoute.ActivityStream)}
+            data-cy="masthead-activity-stream"
+          >
+            <HistoryIcon />
+          </Button>
         </ToolbarItem>
         <ToolbarItem>
           <AwxSystemUsageBar />

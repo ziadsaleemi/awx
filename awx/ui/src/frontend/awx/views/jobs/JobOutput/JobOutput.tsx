@@ -17,10 +17,17 @@ import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxGetAllPages } from '../../../common/useAwxGetAllPages';
 import { WorkflowNode } from '../../../interfaces/WorkflowNode';
 
-const Section = styled(PageSection)`
+const Section = styled(PageSection)<{ $fullScreen?: boolean }>`
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 204px);
+  height: ${(p) => (p.$fullScreen ? '100vh' : 'calc(100vh - 204px)')};
+  ${(p) =>
+    p.$fullScreen &&
+    `
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+  `}
 `;
 
 export function JobOutput() {
@@ -39,6 +46,7 @@ export function JobOutputInner(props: { job: Job; reloadJob: () => void }) {
   const [filterState, setFilterState] = useState<IFilterState>({});
   const isRunning = isJobRunning(job.status);
   const [isFollowModeEnabled, setIsFollowModeEnabled] = useState(isRunning);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   const { results: workflowNodes, refresh } = useAwxGetAllPages<WorkflowNode>(
     awxAPI`/workflow_jobs/${props.job.id.toString() || ''}/workflow_nodes/`
@@ -48,7 +56,7 @@ export function JobOutputInner(props: { job: Job; reloadJob: () => void }) {
     return <Skeleton />;
   }
   return (
-    <Section variant="light">
+    <Section variant="light" $fullScreen={isFullScreen}>
       <JobStatusBar job={job} />
       {job.type === 'workflow_job' ? (
         <WorkflowNodesStatusBar nodes={workflowNodes || []} />
@@ -62,6 +70,8 @@ export function JobOutputInner(props: { job: Job; reloadJob: () => void }) {
             jobStatus={job.status}
             isFollowModeEnabled={isFollowModeEnabled}
             setIsFollowModeEnabled={setIsFollowModeEnabled}
+            isFullScreen={isFullScreen}
+            onToggleFullScreen={() => setIsFullScreen((prev) => !prev)}
           />
         </>
       )}

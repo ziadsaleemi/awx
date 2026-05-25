@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { PageApp } from '../../../framework/PageNavigation/PageApp';
 import { awxAPI } from '../common/api/awx-utils';
 import { AwxMasthead } from './AwxMasthead';
+import { AwxSessionTimeoutWarning } from './AwxSessionTimeoutWarning';
 import { useAwxNavigation } from './useAwxNavigation';
 
 /**
@@ -29,11 +30,14 @@ export function AwxApp() {
   const navigation = useAwxNavigation();
   useAwxPrefetch();
   return (
-    <PageApp
-      masthead={<AwxMasthead />}
-      navigation={navigation}
-      basename={process.env.ROUTE_PREFIX}
-      defaultRefreshInterval={30}
-    />
+    <>
+      <AwxSessionTimeoutWarning />
+      <PageApp
+        masthead={<AwxMasthead />}
+        navigation={navigation}
+        basename={process.env.ROUTE_PREFIX}
+        defaultRefreshInterval={30}
+      />
+    </>
   );
 }
