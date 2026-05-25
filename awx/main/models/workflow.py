@@ -482,12 +482,17 @@ class WorkflowJobOptions(LaunchTimeConfigBase):
         node_links = {}
         for old_node in old_node_list:
             new_node = old_node.create_workflow_job_node(workflow_job=self)
-            if old_node.job and old_node.job.status == 'successful':
+            if (old_node.job and old_node.job.status == 'successful') or old_node.bypassed_job_status == 'successful':
                 # Combine ancestor artifacts with this node's own job artifacts
                 # so that any downstream node that re-runs will see them via
                 # parent_node.ancestor_artifacts in get_job_kwargs().
-                combined_artifacts = dict(old_node.ancestor_artifacts or {})
-                combined_artifacts.update(old_node.job.get_effective_artifacts(parents_set=set([self.pk])))
+                # If the node was already bypassed (no real job), carry forward
+                # the previously accumulated artifacts unchanged.
+                if old_node.job:
+                    combined_artifacts = dict(old_node.ancestor_artifacts or {})
+                    combined_artifacts.update(old_node.job.get_effective_artifacts(parents_set=set([self.pk])))
+                else:
+                    combined_artifacts = dict(old_node.ancestor_artifacts or {})
                 new_node.bypassed_job_status = 'successful'
                 new_node.ancestor_artifacts = combined_artifacts
                 new_node.save(update_fields=['bypassed_job_status', 'ancestor_artifacts'])
@@ -508,10 +513,18 @@ class WorkflowJobOptions(LaunchTimeConfigBase):
         Create a new workflow job that resumes execution from the point of
         failure. Nodes that already succeeded are bypassed (not re-run);
         failed, canceled, or error nodes are restarted from scratch.
+
+        When the original WFJ was created from a WJT, copy_unified_job() will
+        call create_unified_job() on the WJT which auto-copies fresh nodes from
+        the template.  We must delete those and replace them with resume-aware
+        copies taken from the *previous workflow job* (not the template) so the
+        bypass/artifact logic is applied correctly.
         """
         new_workflow_job = self.copy_unified_job()
-        if self.unified_job_template_id is None:
-            new_workflow_job.copy_nodes_from_original_for_resume(original=self)
+        # Remove any nodes already created (e.g., auto-copied from the WJT).
+        new_workflow_job.workflow_job_nodes.all().delete()
+        # Re-populate nodes using the resume logic (bypass succeeded nodes).
+        new_workflow_job.copy_nodes_from_original_for_resume(original=self)
         return new_workflow_job
 
 

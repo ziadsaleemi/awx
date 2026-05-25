@@ -309,6 +309,11 @@ class BaseTask(object):
         if settings.IS_K8S and instance.instance_group.is_container_group:
             return {}
 
+        # Development-only bypass: set AWX_DISABLE_EE=1 to run ansible directly
+        # without a container (useful on macOS Docker Desktop where nested Podman fails)
+        if os.environ.get('AWX_DISABLE_EE'):
+            return {'process_isolation': False}
+
         image = instance.execution_environment.image
         params = {
             "container_image": image,
