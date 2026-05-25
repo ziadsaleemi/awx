@@ -57,6 +57,12 @@ export interface ViewOptions {
   defaultValues?: Partial<Pick<IView, 'filterState' | 'sort' | 'sortDirection'>> | undefined;
 
   /**
+   * Override the default items-per-page when no URL param or localStorage value is present.
+   * Useful for auto-sizing a table to the current viewport height.
+   */
+  defaultPerPage?: number;
+
+  /**
    * Disable the use of query string parameters when using this view
    * - useful when there are two tables or a table in a modal
    */
@@ -99,7 +105,7 @@ export interface ViewExtendedOptions<T extends object> extends ViewOptions {
 }
 
 export function useView(options: ViewOptions): IView {
-  const { defaultValues, disableQueryString, ignoreQueryStringKeys, filterQueryStringKeys } =
+  const { defaultValues, defaultPerPage, disableQueryString, ignoreQueryStringKeys, filterQueryStringKeys } =
     options;
 
   const mountedRef = useIsMountedRef();
@@ -136,7 +142,7 @@ export function useView(options: ViewOptions): IView {
         return perPage;
       }
     }
-    return 10;
+    return defaultPerPage ?? 10;
   });
 
   const [sort, setSort] = useState(() => {

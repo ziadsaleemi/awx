@@ -1,11 +1,13 @@
 /* eslint-disable i18next/no-literal-string */
 import { Bullseye, Button, PageSection, Spinner } from '@patternfly/react-core';
 import { CogIcon } from '@patternfly/react-icons';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { PageHeader, PageLayout } from '../../../framework';
 import { PageDashboard } from '../../../framework/PageDashboard/PageDashboard';
 import { awxAPI } from '../common/api/awx-utils';
+import { useAwxWebSocketSubscription } from '../common/useAwxWebSocket';
 import { AwxCountsCard } from './cards/AwxCountsCard';
 import { AwxJobActivityCard } from './cards/AwxJobActivityCard';
 import { AwxRecentInventoriesCard } from './cards/AwxRecentInventoriesCard';
@@ -41,9 +43,17 @@ export function AwxOverview() {
 
 function AwxOverviewInternal(props: { managedResources: Resource[] }) {
   const { managedResources } = props;
-  const { data, isLoading } = useSWR<IAwxDashboardData>(awxAPI`/dashboard/`, (url: string) =>
-    fetch(url).then((r) => r.json())
+  const { data, isLoading, mutate: refreshDashboard } = useSWR<IAwxDashboardData>(
+    awxAPI`/dashboard/`,
+    (url: string) => fetch(url).then((r) => r.json())
   );
+
+  // Refresh dashboard data whenever a job changes state (real-time via WebSocket)
+  const handleJobEvent = useCallback(() => {
+    void refreshDashboard();
+  }, [refreshDashboard]);
+  useAwxWebSocketSubscription({ jobs: ['status_changed'] }, handleJobEvent);
+
   if (!data || isLoading) {
     return (
       <PageSection isFilled>

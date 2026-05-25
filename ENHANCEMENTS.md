@@ -48,9 +48,9 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 
 | # | Enhancement | Priority | Status |
 |---|-------------|----------|--------|
-| 9  | **Virtual scrolling for large lists** — use PatternFly `VirtualizedTable` for job/host lists with thousands of rows | High | ⬜ |
-| 10 | **WebSocket-driven dashboard refresh** — replace 30s polling with real-time AWX WebSocket event stream | Medium | ⬜ |
-| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | ⬜ |
+| 9  | **Virtual scrolling for large lists** — use PatternFly `VirtualizedTable` for job/host lists with thousands of rows | High | ✅ |
+| 10 | **WebSocket-driven dashboard refresh** — replace 30s polling with real-time AWX WebSocket event stream | Medium | ✅ |
+| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | ✅ |
 
 ### Operations
 

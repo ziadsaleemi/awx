@@ -65,6 +65,8 @@ export function useAwxView<T extends { id: number }>(options: {
 
   defaultSort?: string | undefined;
   defaultSortDirection?: 'asc' | 'desc' | undefined;
+  /** Override the initial items-per-page when no user preference is stored. */
+  defaultPerPage?: number;
 }): IAwxView<T> {
   let { url } = options;
   const { toolbarFilters, tableColumns, disableQueryString } = options;
@@ -82,6 +84,7 @@ export function useAwxView<T extends { id: number }>(options: {
   const view = useView({
     defaultValues: { sort: defaultSort, sortDirection: defaultSortDirection },
     disableQueryString,
+    defaultPerPage: options.defaultPerPage,
   });
   const itemCountRef = useRef<{ itemCount: number | undefined }>({ itemCount: undefined });
 
