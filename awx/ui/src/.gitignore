@@ -1,0 +1,14 @@
+/.nyc_output
+/build
+/certs
+/coverage
+/dist
+/node_modules
+/framework/publish
+.DS_Store
+/storybook-static
+.vscode
+/cypress/.nyc_output
+/cypress/coverage
+/cypress/downloads
+.eslintcache

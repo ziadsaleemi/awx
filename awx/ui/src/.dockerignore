@@ -1,0 +1,16 @@
+/.dockerignore
+/.git
+/.github
+/.husky
+/.nyc_output
+/.vscode
+/Dockerfile
+/coverage
+/docs
+/locales
+/node_modules
+/playbooks
+/publish
+/rulebooks
+/scripts
+/stories
