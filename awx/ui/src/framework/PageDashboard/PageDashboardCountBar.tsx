@@ -15,7 +15,7 @@ export type PageDashboardCountBarProps = {
 
 export function PageDashboardCountBar(props: PageDashboardCountBarProps) {
   return (
-    <PageDashboardCard width="xxl" isCompact>
+    <PageDashboardCard width="full" isCompact>
       <CardBody>
         <div
           data-cy="resource-count-bar"

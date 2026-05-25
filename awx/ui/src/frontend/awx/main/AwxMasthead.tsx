@@ -21,6 +21,7 @@ import { useAwxWebSocketSubscription } from '../common/useAwxWebSocket';
 import { useGetDocsUrl } from '../common/util/useGetDocsUrl';
 import { WorkflowApproval } from '../interfaces/WorkflowApproval';
 import { AwxRoute } from './AwxRoutes';
+import { AwxSystemUsageBar } from './AwxSystemUsageBar';
 
 export function AwxMasthead() {
   const { t } = useTranslation();
@@ -56,6 +57,9 @@ export function AwxMasthead() {
         </ToolbarItem>
         <ToolbarItem>
           <PageNotificationsIcon />
+        </ToolbarItem>
+        <ToolbarItem>
+          <AwxSystemUsageBar />
         </ToolbarItem>
         <ToolbarItem>
           <PageMastheadDropdown id="help-menu" icon={<QuestionCircleIcon />}>

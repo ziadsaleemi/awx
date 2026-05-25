@@ -26,7 +26,7 @@ export function PageDashboard(props: { children?: ReactNode }) {
   return (
     <PageDashboardContext.Provider value={{ columns }}>
       <Scrollable>
-        <PageSection isWidthLimited>
+        <PageSection style={{ padding: '16px 0' }}>
           <div
             ref={ref}
             style={{ display: 'grid', gap: 16, gridTemplateColumns: `repeat(${columns}, 1fr)` }}

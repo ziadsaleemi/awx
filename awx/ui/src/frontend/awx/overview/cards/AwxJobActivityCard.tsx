@@ -17,7 +17,7 @@ export function AwxJobActivityCard() {
       title={t('Job Activity')}
       linkText={t('View all Jobs')}
       to={getPageUrl(AwxRoute.Jobs)}
-      width="xxl"
+      width="full"
       height="sm"
       headerControls={
         <Flex spaceItems={{ default: 'spaceItemsNone' }} style={{ gap: 8 }}>
