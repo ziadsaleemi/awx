@@ -342,6 +342,8 @@ class ApiV2ConfigView(APIView):
             analytics_status=pendo_state,
             analytics_collectors=all_collectors(),
             become_methods=PRIVILEGE_ESCALATION_METHODS,
+            custom_logo=settings.CUSTOM_LOGO,
+            custom_login_info=settings.CUSTOM_LOGIN_INFO,
         )
 
         # Check superuser/auditor first
