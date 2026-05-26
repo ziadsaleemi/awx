@@ -1,0 +1,124 @@
+---
+# configure_proxmox_vm.yml
+#
+# Configures a freshly provisioned Proxmox VM:
+#   - installs and enables Apache (or Nginx when apache=false is passed)
+#   - sets a custom index page with the VM hostname
+#   - opens the HTTP port in the firewall (ufw on Ubuntu/Debian)
+#
+# Expected to run against the 'proxmox_vms' inventory group which is
+# populated automatically by the upstream Terraform job in the provision
+# workflow.
+#
+# Extra vars supported:
+#   web_server: "apache" (default) or "nginx"
+#   http_port:  80 (default)
+
+- name: Configure web server on Proxmox VM
+  hosts: proxmox_vms
+  become: true
+  gather_facts: true
+
+  vars:
+    web_server: "apache"
+    http_port: 80
+
+  pre_tasks:
+    - name: Wait for connection to become available
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Gather facts after connection
+      ansible.builtin.setup:
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+  tasks:
+    # ---------------------------------------------------------------- #
+    # Apache                                                            #
+    # ---------------------------------------------------------------- #
+    - name: Install Apache
+      ansible.builtin.package:
+        name: apache2
+        state: present
+      when: web_server == "apache"
+
+    - name: Enable and start Apache
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: true
+      when: web_server == "apache"
+
+    - name: Write Apache index page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head><title>{{ inventory_hostname }}</title></head>
+          <body>
+            <h1>Provisioned by AWX Catalog</h1>
+            <p>Host: {{ inventory_hostname }}</p>
+            <p>IP: {{ ansible_default_ipv4.address | default(ansible_host) }}</p>
+          </body>
+          </html>
+        mode: "0644"
+      when: web_server == "apache"
+
+    # ---------------------------------------------------------------- #
+    # Nginx                                                             #
+    # ---------------------------------------------------------------- #
+    - name: Install Nginx
+      ansible.builtin.package:
+        name: nginx
+        state: present
+      when: web_server == "nginx"
+
+    - name: Enable and start Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+      when: web_server == "nginx"
+
+    - name: Write Nginx index page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head><title>{{ inventory_hostname }}</title></head>
+          <body>
+            <h1>Provisioned by AWX Catalog</h1>
+            <p>Host: {{ inventory_hostname }}</p>
+            <p>IP: {{ ansible_default_ipv4.address | default(ansible_host) }}</p>
+          </body>
+          </html>
+        mode: "0644"
+      when: web_server == "nginx"
+
+    # ---------------------------------------------------------------- #
+    # Firewall                                                          #
+    # ---------------------------------------------------------------- #
+    - name: Allow HTTP through ufw
+      community.general.ufw:
+        rule: allow
+        port: "{{ http_port | string }}"
+        proto: tcp
+      when: ansible_os_family == "Debian"
+      ignore_errors: true  # ufw may not be installed in minimal images
+
+  post_tasks:
+    - name: Verify web server is listening
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ http_port }}"
+        timeout: 30
+      delegate_to: localhost
+      become: false

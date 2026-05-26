@@ -174,13 +174,13 @@ Complete working example: Proxmox VM → Ansible configuration → Catalog item.
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| F1 | **Proxmox credential type** — implement B1 as a loaddata fixture (`awx/main/fixtures/credential_type_proxmox.json`) so it ships with the dev environment | High | ⬜ |
-| F2 | **Terraform template project** — sample Git repo (or `awx_devel` sub-path) with: `main.tf` using `telmate/proxmox` provider; variables: `vm_name`, `cores`, `memory`, `disk_gb`, `proxmox_template_name`, `ip_address`, `gateway`; outputs: `host_ip` (maps to AWX inventory population) | High | ⬜ |
-| F3 | **AWX Terraform template** — pre-seeded dev fixture: project pointing at F2 repo, Proxmox credential attached, `target_inventory` set, `target_group = "proxmox_vms"` | High | ⬜ |
-| F4 | **Ansible playbook template** — Job Template using a playbook that: installs Apache / Nginx on the newly added host; limits to `proxmox_vms` group; uses the host IP populated by F3 | High | ⬜ |
-| F5 | **Workflow** — two-node workflow: Node 1 = Terraform template (F3), Node 2 (on success) = Ansible template (F4); demonstrates passing inventory context between nodes | High | ⬜ |
-| F6 | **Catalog item** — `CatalogItem` fixture: "Apache on Proxmox VM"; provision_workflow = F5; deprovision_workflow = separate workflow that runs `terraform destroy` via a TerraformJob with `terraform_operation=destroy` | High | ⬜ |
-| F7 | **Documentation** — `docs/terraform_catalog.md`: architecture overview, credential setup, template configuration, inventory output mapping convention, Proxmox walkthrough | Medium | ⬜ |
+| F1 | **Proxmox credential type** — implement B1 as a loaddata fixture (`awx/main/fixtures/credential_type_proxmox.json`) so it ships with the dev environment | High | ✅ |
+| F2 | **Terraform template project** — sample Git repo (or `awx_devel` sub-path) with: `main.tf` using `telmate/proxmox` provider; variables: `vm_name`, `cores`, `memory`, `disk_gb`, `proxmox_template_name`, `ip_address`, `gateway`; outputs: `host_ip` (maps to AWX inventory population) | High | ✅ |
+| F3 | **AWX Terraform template** — pre-seeded dev fixture: project pointing at F2 repo, Proxmox credential attached, `target_inventory` set, `target_group = "proxmox_vms"` | High | ✅ |
+| F4 | **Ansible playbook template** — Job Template using a playbook that: installs Apache / Nginx on the newly added host; limits to `proxmox_vms` group; uses the host IP populated by F3 | High | ✅ |
+| F5 | **Workflow** — two-node workflow: Node 1 = Terraform template (F3), Node 2 (on success) = Ansible template (F4); demonstrates passing inventory context between nodes | High | ✅ |
+| F6 | **Catalog item** — `CatalogItem` fixture: "Apache on Proxmox VM"; provision_workflow = F5; deprovision_workflow = separate workflow that runs `terraform destroy` via a TerraformJob with `terraform_operation=destroy` | High | ✅ |
+| F7 | **Documentation** — `docs/terraform_catalog.md`: architecture overview, credential setup, template configuration, inventory output mapping convention, Proxmox walkthrough | Medium | ✅ |
 
 ---
 
