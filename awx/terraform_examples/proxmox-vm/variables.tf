@@ -8,13 +8,15 @@ variable "vm_name" {
 }
 
 variable "ip_address" {
-  description = "Static IPv4 address for the VM (without prefix length), e.g. 192.168.1.100"
+  description = "Static IPv4 address for the VM (without prefix length), e.g. 192.168.1.100. Leave empty to use DHCP."
   type        = string
+  default     = ""
 }
 
 variable "gateway" {
-  description = "Default gateway IPv4 address, e.g. 192.168.1.1"
+  description = "Default gateway IPv4 address, e.g. 192.168.1.1. Required only when ip_address is set."
   type        = string
+  default     = ""
 }
 
 variable "proxmox_template_name" {

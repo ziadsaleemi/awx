@@ -1901,6 +1901,11 @@ class CatalogItemAccess(BaseAccess):
     def can_use(self, obj):
         return self.user.is_superuser or self.user in obj.use_role
 
+    def get_user_capabilities(self, obj, **kwargs):
+        user_capabilities = super().get_user_capabilities(obj, **kwargs)
+        user_capabilities['use'] = self.can_use(obj)
+        return user_capabilities
+
 
 class CatalogDeploymentAccess(BaseAccess):
     """

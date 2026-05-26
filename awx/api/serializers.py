@@ -869,7 +869,7 @@ class UnifiedJobSerializer(BaseSerializer):
 
     def get_types(self):
         if type(self) is UnifiedJobSerializer:
-            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job']
+            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job']
         else:
             return super(UnifiedJobSerializer, self).get_types()
 
@@ -936,6 +936,8 @@ class UnifiedJobSerializer(BaseSerializer):
                 serializer_class = WorkflowJobSerializer
             elif isinstance(obj, WorkflowApproval):
                 serializer_class = WorkflowApprovalSerializer
+            elif isinstance(obj, TerraformJob):
+                serializer_class = TerraformJobSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -978,7 +980,7 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
 
     def get_types(self):
         if type(self) is UnifiedJobListSerializer:
-            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job']
+            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job']
         else:
             return super(UnifiedJobListSerializer, self).get_types()
 
@@ -999,6 +1001,8 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
                 serializer_class = WorkflowJobListSerializer
             elif isinstance(obj, WorkflowApproval):
                 serializer_class = WorkflowApprovalListSerializer
+            elif isinstance(obj, TerraformJob):
+                serializer_class = TerraformJobSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -3922,7 +3926,7 @@ class TerraformJobCancelSerializer(TerraformJobSerializer):
 
 
 class CatalogItemSerializer(BaseSerializer):
-    show_capabilities = ['edit', 'delete']
+    show_capabilities = ['edit', 'delete', 'use']
 
     class Meta:
         model = CatalogItem

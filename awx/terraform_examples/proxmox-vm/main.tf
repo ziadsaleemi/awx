@@ -39,24 +39,11 @@ resource "proxmox_vm_qemu" "vm" {
     bridge = var.network_bridge
   }
 
-  ipconfig0 = "ip=${var.ip_address}/24,gw=${var.gateway}"
+  ipconfig0 = var.ip_address != "" ? "ip=${var.ip_address}/24,gw=${var.gateway}" : "ip=dhcp"
 
   ciuser     = var.cloud_init_user
   cipassword = var.cloud_init_password
   sshkeys    = var.ssh_public_key
-
-  # Wait for the VM to become reachable via SSH before reporting success
-  provisioner "remote-exec" {
-    inline = ["true"]
-
-    connection {
-      type        = "ssh"
-      user        = var.cloud_init_user
-      host        = var.ip_address
-      timeout     = "5m"
-      private_key = var.ssh_private_key
-    }
-  }
 
   lifecycle {
     ignore_changes = [

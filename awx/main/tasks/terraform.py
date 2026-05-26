@@ -220,7 +220,7 @@ class RunTerraformJob(SourceControlMixin):
             '--volume', f'{private_data_dir}:/runner:Z',
             '--workdir', container_cwd,
             '--pull', pull,
-            '--env-file', '/runner/env/envvars',
+            '--env-file', os.path.join(private_data_dir, 'env', 'envvars'),
             ee.image,
         ] + list(args)
 

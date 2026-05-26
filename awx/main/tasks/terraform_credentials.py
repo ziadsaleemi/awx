@@ -39,7 +39,7 @@ for each attached credential after the template-based injection pass.
 
 import logging
 
-from awx.main.constants import REPLACE_STR  # noqa: F401 – re-exported for injectors
+from awx.main.redact import REPLACE_STR  # noqa: F401 – re-exported for injectors
 
 logger = logging.getLogger('awx.main.tasks.terraform_credentials')
 

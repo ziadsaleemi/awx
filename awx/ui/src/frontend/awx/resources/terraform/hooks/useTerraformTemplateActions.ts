@@ -46,7 +46,7 @@ export function useTerraformTemplateActions({
       onClick: (template) =>
         pageNavigate(AwxRoute.TerraformTemplateLaunch, { params: { id: template.id } }),
       isDisabled: (template) =>
-        template.summary_fields.user_capabilities.start ? '' : t('No permission'),
+        template.summary_fields.user_capabilities.start ? undefined : t('No permission'),
     },
     {
       type: PageActionType.Button,
@@ -58,7 +58,7 @@ export function useTerraformTemplateActions({
       onClick: (template) =>
         pageNavigate(AwxRoute.EditTerraformTemplate, { params: { id: template.id } }),
       isDisabled: (template) =>
-        template.summary_fields.user_capabilities.edit ? '' : t('No permission'),
+        template.summary_fields.user_capabilities.edit ? undefined : t('No permission'),
     },
     {
       type: PageActionType.Seperator,
@@ -72,7 +72,7 @@ export function useTerraformTemplateActions({
       label: t('Delete template'),
       onClick: handleDelete,
       isDisabled: (template) =>
-        template.summary_fields.user_capabilities.delete ? '' : t('No permission'),
+        template.summary_fields.user_capabilities.delete ? undefined : t('No permission'),
     },
   ];
 }

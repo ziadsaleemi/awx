@@ -11,6 +11,7 @@ from ansible_base.lib.utils.models import prevent_search
 from awx.api.versioning import reverse
 from awx.main.models.base import (
     accepts_json,
+    VarsDictProperty,
     VERBOSITY_CHOICES,
 )
 from awx.main.models.unified_jobs import UnifiedJob, UnifiedJobTemplate
@@ -163,6 +164,8 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
         default=False,
         allows_field='terraform_operation',
     )
+
+    extra_vars_dict = VarsDictProperty('extra_vars', True)
 
     # ------------------------------------------------------------------ #
     # RBAC roles                                                          #
@@ -322,6 +325,17 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         help_text=_('Inventory group to add provisioned hosts to.'),
     )
 
+    allow_simultaneous = models.BooleanField(
+        default=False,
+        help_text=_('Allow simultaneous runs of this job.'),
+    )
+
+    timeout = models.IntegerField(
+        blank=True,
+        default=0,
+        help_text=_('The amount of time (in seconds) to run before the task is canceled.'),
+    )
+
     scm_revision = models.CharField(
         max_length=1024,
         blank=True,
@@ -329,6 +343,8 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         editable=False,
         help_text=_('The SCM revision of the project that was checked out for this job.'),
     )
+
+    extra_vars_dict = VarsDictProperty('extra_vars', True)
 
     # ------------------------------------------------------------------ #
     # UnifiedJob interface                                                 #
@@ -351,9 +367,36 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
     def _global_timeout_setting(self):
         return 'DEFAULT_JOB_TIMEOUT'
 
-    @property
-    def task_impact(self):
+    def resolve_execution_environment(self):
+        """
+        Only use an EE if one is explicitly set on the job or its template.
+        Terraform runs directly on the execution node when no EE is configured.
+        """
+        if self.execution_environment is not None:
+            return self.execution_environment
+        template = getattr(self, 'unified_job_template', None)
+        if template is not None and template.execution_environment is not None:
+            return template.execution_environment
+        return None
+
+    def _get_task_impact(self):
         return 1
+
+    @property
+    def event_parent_key(self):
+        return 'terraform_job_id'
+
+    def get_event_queryset(self):
+        # TerraformJob does not yet have a dedicated event model.
+        from awx.main.models.events import JobEvent
+        return JobEvent.objects.none()
+
+    def result_stdout_raw_handle(self, enforce_max_bytes=False):
+        from io import StringIO
+        legacy = self.result_stdout_text
+        if legacy:
+            return StringIO(legacy)
+        return StringIO('')
 
     def get_jobs_fail_chain(self):
         return []

@@ -1,23 +1,14 @@
+import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import { PageSection } from '@patternfly/react-core';
 import { LoadingPage } from '../../../../framework/components/LoadingPage';
 import { useGetItem } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { TerraformJob } from '../../interfaces/TerraformJob';
-import { JobOutputInner } from '../../views/jobs/JobOutput/JobOutput';
-import { Job } from '../../interfaces/Job';
 
-/**
- * Displays real-time / completed output for a Terraform job.
- *
- * Terraform jobs produce standard AWX job events on the same
- * /api/v2/terraform_jobs/<id>/job_events/ endpoint, so we can
- * reuse the shared <JobOutputInner> component by casting the job to
- * the generic Job union type that JobOutputInner already understands.
- * We fetch the job ourselves (using job_id param) rather than letting
- * JobOutput read params.id / params.job_type.
- */
 export function TerraformJobOutput() {
+  const { t } = useTranslation();
   const params = useParams<{ job_id: string }>();
   const jobId = params.job_id ?? '';
 
@@ -29,7 +20,29 @@ export function TerraformJobOutput() {
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !job) return <LoadingPage />;
 
-  // TerraformJob is structurally compatible with Job for output rendering.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <JobOutputInner job={job as unknown as Job} reloadJob={refresh} />;
+  return (
+    <PageSection
+      variant="light"
+      style={{
+        overflow: 'auto',
+        height: 'calc(100vh - 204px)',
+        backgroundColor: 'var(--pf-v5-global--BackgroundColor--dark-100, #1b1d21)',
+      }}
+    >
+      <pre
+        style={{
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+          fontFamily: 'var(--pf-v5-global--FontFamily--monospace)',
+          fontSize: 'var(--pf-v5-global--FontSize--sm)',
+          color: 'var(--pf-v5-global--Color--light-100, #f0f0f0)',
+          margin: 0,
+          padding: '1rem',
+        }}
+      >
+        {job.result_stdout || t('(No output)')}
+      </pre>
+    </PageSection>
+  );
 }
+
