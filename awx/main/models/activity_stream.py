@@ -63,6 +63,8 @@ class ActivityStream(models.Model):
     execution_environment = models.ManyToManyField("ExecutionEnvironment", blank=True)
     job_template = models.ManyToManyField("JobTemplate", blank=True)
     job = models.ManyToManyField("Job", blank=True)
+    terraform_job_template = models.ManyToManyField("TerraformJobTemplate", blank=True)
+    terraform_job = models.ManyToManyField("TerraformJob", blank=True)
     workflow_job_template_node = models.ManyToManyField("WorkflowJobTemplateNode", blank=True)
     workflow_job_node = models.ManyToManyField("WorkflowJobNode", blank=True)
     workflow_job_template = models.ManyToManyField("WorkflowJobTemplate", blank=True)

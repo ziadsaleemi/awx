@@ -221,6 +221,29 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
     def create_terraform_job(self, **kwargs):
         return self.create_unified_job(**kwargs)
 
+    @classmethod
+    def accessible_pk_qs(cls, accessor, role_field):
+        """Return PKs accessible to accessor via ImplicitRoleField roles.
+
+        TerraformJobTemplate uses the legacy ImplicitRoleField RBAC system and
+        is not registered with DAB RBAC's permission_registry.  Querying via
+        ResourceMixin._accessible_pk_qs would call access_ids_qs which is
+        only available on DAB-RBAC-registered models.  We fall back to the
+        RoleAncestorEntry table directly.
+        """
+        if getattr(accessor, 'is_superuser', False):
+            return cls.objects.values_list('id', flat=True)
+        if getattr(accessor, 'is_system_auditor', False) and role_field in ('read_role',):
+            return cls.objects.values_list('id', flat=True)
+        from django.contrib.contenttypes.models import ContentType
+        from awx.main.models.rbac import RoleAncestorEntry
+        ct = ContentType.objects.get_for_model(cls)
+        return RoleAncestorEntry.objects.filter(
+            ancestor__in=accessor.roles.all(),
+            role_field=role_field,
+            content_type=ct,
+        ).values_list('object_id').distinct()
+
 
 class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManagerUnifiedJobMixin):
     """

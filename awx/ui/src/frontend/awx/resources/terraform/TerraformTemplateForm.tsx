@@ -76,7 +76,7 @@ export function CreateTerraformTemplate() {
       <PageHeader
         title={t('Create Terraform Template')}
         breadcrumbs={[
-          { label: t('Terraform Templates'), to: AwxRoute.TerraformTemplates },
+          { label: t('Terraform Templates') },
           { label: t('Create Terraform Template') },
         ]}
       />
@@ -123,12 +123,8 @@ export function EditTerraformTemplate() {
       <PageHeader
         title={t('Edit Terraform Template')}
         breadcrumbs={[
-          { label: t('Terraform Templates'), to: AwxRoute.TerraformTemplates },
-          {
-            label: template.name,
-            to: AwxRoute.TerraformTemplatePage,
-            id: id,
-          },
+          { label: t('Terraform Templates') },
+          { label: template.name },
           { label: t('Edit') },
         ]}
       />

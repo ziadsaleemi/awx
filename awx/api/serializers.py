@@ -3839,11 +3839,29 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
             'survey_enabled',
         )
 
+    def get_summary_fields(self, obj):
+        summary_fields = super().get_summary_fields(obj)
+        all_creds = []
+        if obj.pk:
+            for cred in obj.credentials.all():
+                all_creds.append(
+                    {
+                        'id': cred.pk,
+                        'name': cred.name,
+                        'description': cred.description,
+                        'kind': cred.kind,
+                        'cloud': cred.credential_type.kind == 'cloud',
+                    }
+                )
+        summary_fields['credentials'] = all_creds
+        return summary_fields
+
     def get_related(self, obj):
         res = super().get_related(obj)
         res.update(
             jobs=self.reverse('api:terraform_job_template_jobs_list', kwargs={'pk': obj.pk}),
             launch=self.reverse('api:terraform_job_template_launch', kwargs={'pk': obj.pk}),
+            credentials=self.reverse('api:terraform_job_template_credentials_list', kwargs={'pk': obj.pk}),
         )
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})

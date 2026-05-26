@@ -5120,6 +5120,23 @@ class TerraformJobTemplateLaunch(GenericAPIView):
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
 
+class TerraformJobTemplateCredentialsList(SubListCreateAttachDetachAPIView):
+    model = models.Credential
+    serializer_class = serializers.CredentialSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'credentials'
+    filter_read_permission = False
+    resource_purpose = 'credentials of a terraform job template'
+
+    def is_valid_relation(self, parent, sub, created=False):
+        if sub.unique_hash() in [cred.unique_hash() for cred in parent.credentials.all()]:
+            return {"error": _("Cannot assign multiple {credential_type} credentials.").format(credential_type=sub.unique_hash(display=True))}
+        kind = sub.credential_type.kind
+        if kind not in ('ssh', 'vault', 'cloud', 'net', 'kubernetes'):
+            return {'error': _('Cannot assign a Credential of kind `{}`.').format(kind)}
+        return super().is_valid_relation(parent, sub, created)
+
+
 class TerraformJobTemplateJobsList(SubListAPIView):
     model = models.TerraformJob
     serializer_class = serializers.TerraformJobSerializer

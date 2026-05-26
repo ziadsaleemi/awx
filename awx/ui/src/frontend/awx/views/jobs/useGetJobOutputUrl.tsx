@@ -26,4 +26,5 @@ const jobPaths: { [key: string]: string } = {
   ad_hoc_command: 'command',
   system_job: 'management',
   workflow_job: 'workflow',
+  terraform_job: 'terraform',
 };

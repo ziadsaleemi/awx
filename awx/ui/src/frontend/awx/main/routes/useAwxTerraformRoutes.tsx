@@ -24,9 +24,11 @@ export function useAwxTerraformRoutes() {
       id: AwxRoute.TerraformTemplates,
       label: t('Terraform Templates'),
       path: 'terraform-templates',
+      hidden: true,
       children: [
         // Individual Terraform job pages (reached via job history links)
         {
+          id: AwxRoute.TerraformJobPage,
           path: 'jobs/:job_id',
           element: <TerraformJobPage />,
           children: [

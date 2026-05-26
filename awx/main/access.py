@@ -1806,6 +1806,13 @@ class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
     )
     prefetch_related = ('credentials__credential_type',)
 
+    def filtered_queryset(self):
+        if self.user.is_superuser or self.user.is_system_auditor:
+            return TerraformJobTemplate.objects.all()
+        return TerraformJobTemplate.objects.filter(
+            pk__in=TerraformJobTemplate.accessible_pk_qs(self.user, 'read_role')
+        )
+
     @check_superuser
     def can_add(self, data):
         if data is None:
