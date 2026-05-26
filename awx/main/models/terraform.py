@@ -22,7 +22,7 @@ from awx.main.models.mixins import (
     SurveyJobTemplateMixin,
     TaskManagerUnifiedJobMixin,
 )
-from awx.main.fields import ImplicitRoleField, AskForField
+from awx.main.fields import ImplicitRoleField, AskForField, JSONBlob
 
 logger = logging.getLogger('awx.main.models.terraform')
 
@@ -344,6 +344,16 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         help_text=_('The SCM revision of the project that was checked out for this job.'),
     )
 
+    artifacts = JSONBlob(
+        default=dict,
+        blank=True,
+        editable=False,
+        help_text=_(
+            'Terraform output values captured after a successful apply. '
+            'Propagated to downstream jobs in a workflow via ancestor_artifacts.'
+        ),
+    )
+
     extra_vars_dict = VarsDictProperty('extra_vars', True)
 
     # ------------------------------------------------------------------ #
@@ -403,3 +413,18 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
 
     def get_jobs_fail_chain(self):
         return []
+
+    def display_artifacts(self):
+        """
+        Hides artifacts if they are marked as no_log type artifacts.
+        """
+        artifacts = self.artifacts
+        if isinstance(artifacts, dict) and artifacts.get('_ansible_no_log', False):
+            return "$hidden due to Ansible no_log flag$"
+        return artifacts
+
+    def get_effective_artifacts(self, **kwargs):
+        """Return Terraform output values to pass downstream in workflows."""
+        if isinstance(self.artifacts, dict):
+            return self.artifacts
+        return {}

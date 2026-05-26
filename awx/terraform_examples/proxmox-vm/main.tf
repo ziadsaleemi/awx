@@ -1,53 +1,87 @@
 terraform {
   required_providers {
     proxmox = {
-      source  = "telmate/proxmox"
-      version = "~> 2.9"
+      source  = "bpg/proxmox"
+      version = "~> 0.69"
     }
   }
   required_version = ">= 1.5"
 }
 
-# Provider credentials are injected via environment variables:
-#   PM_API_URL, PM_API_TOKEN_ID, PM_API_TOKEN_SECRET, PM_NODE, PM_TLS_INSECURE
+# Provider credentials are injected via TF_VAR_pm_* environment variables by AWX.
 provider "proxmox" {
-  pm_api_url          = var.pm_api_url != "" ? var.pm_api_url : null
-  pm_api_token_id     = var.pm_api_token_id != "" ? var.pm_api_token_id : null
-  pm_api_token_secret = var.pm_api_token_secret != "" ? var.pm_api_token_secret : null
-  pm_tls_insecure     = var.pm_tls_insecure
+  endpoint  = var.pm_api_url
+  api_token = "${var.pm_api_token_id}=${var.pm_api_token_secret}"
+  insecure  = var.pm_tls_insecure
 }
 
-resource "proxmox_vm_qemu" "vm" {
-  name        = var.vm_name
-  target_node = var.pm_node != "" ? var.pm_node : "pve"
-  clone       = var.proxmox_template_name
-  full_clone  = true
+locals {
+  node = var.pm_node != "" ? var.pm_node : "pve"
+}
 
-  cores   = var.cores
-  memory  = var.memory
-  sockets = 1
+# Resolve the template VMID by name.
+data "proxmox_virtual_environment_vms" "template" {
+  node_name = local.node
+  filter {
+    name   = "name"
+    values = [var.proxmox_template_name]
+  }
+}
+
+resource "proxmox_virtual_environment_vm" "vm" {
+  name      = var.vm_name
+  node_name = local.node
+
+  clone {
+    vm_id     = data.proxmox_virtual_environment_vms.template.vms[0].vm_id
+    node_name = local.node
+    full      = true
+  }
+
+  # Enable QEMU guest agent so bpg/proxmox can read the VM's assigned IP
+  # after cloud-init completes (used in the host_ip_proxmox_vm output).
+  agent {
+    enabled = true
+    timeout = "10m"
+  }
+
+  cpu {
+    cores = var.cores
+    type  = "host"
+  }
+
+  memory {
+    dedicated = var.memory
+  }
 
   disk {
-    slot    = 0
-    size    = "${var.disk_gb}G"
-    type    = "scsi"
-    storage = var.storage_pool
+    datastore_id = var.storage_pool
+    size         = var.disk_gb
+    interface    = "scsi0"
+    file_format  = "raw"
   }
 
-  network {
-    model  = "virtio"
+  network_device {
     bridge = var.network_bridge
+    model  = "virtio"
   }
 
-  ipconfig0 = var.ip_address != "" ? "ip=${var.ip_address}/24,gw=${var.gateway}" : "ip=dhcp"
+  initialization {
+    ip_config {
+      ipv4 {
+        address = var.ip_address != "" ? "${var.ip_address}/24" : "dhcp"
+        gateway = var.ip_address != "" ? var.gateway : null
+      }
+    }
 
-  ciuser     = var.cloud_init_user
-  cipassword = var.cloud_init_password
-  sshkeys    = var.ssh_public_key
+    user_account {
+      username = var.cloud_init_user
+      password = var.cloud_init_password != "" ? var.cloud_init_password : null
+      keys     = var.ssh_public_key != "" ? [var.ssh_public_key] : []
+    }
+  }
 
   lifecycle {
-    ignore_changes = [
-      network,
-    ]
+    ignore_changes = [initialization]
   }
 }

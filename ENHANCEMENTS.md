@@ -139,6 +139,7 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | C6 | **Workflow editor node type** — add Terraform Template as a selectable node type in the workflow visualiser; distinct icon (Terraform logo or wrench) to distinguish from Ansible job nodes | High | ✅ |
 | C7 | **Sidebar nav entry** — add "Terraform Templates" under the Resources section of the sidebar navigation; use a suitable icon | High | ✅ |
 | C8 | **Terraform templates in global search** — Terraform Job Templates appear in the `AwxGlobalSearch` Cmd+K palette (type `terraform_template`); queries `/terraform_job_templates/?name__icontains=…`; shown with `LayerGroupIcon`; navigates to the template detail page on selection | High | ✅ |
+| C9 | **Terraform details + targeting UX hardening** — Terraform Job details now display `artifacts` alongside Extra Variables; Terraform template form now dynamically loads inventory groups after selecting a target inventory and persists selected group cleanly; workflow handoff can override downstream `limit` from `host_ip*` artifacts via `terraform_override_limit` toggle in workflow/deployment extra vars; survey save normalizes numeric defaults to prevent integer/float default type errors | High | ✅ |
 
 ---
 

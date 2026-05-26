@@ -44,13 +44,24 @@ PROXMOX_VE_INPUTS = {
 
 # Env-var injectors: keys are env var names; values are Jinja2 templates
 # referencing the credential field ids above.
+#
+# Both the telmate/proxmox provider env-var names (PM_*) and the matching
+# Terraform input-variable equivalents (TF_VAR_pm_*) are injected so that
+# HCL files can reference them as ``var.pm_*`` directly.
 PROXMOX_VE_INJECTORS = {
     "env": {
+        # Provider reads these natively via its own env-var support
         "PM_API_URL": "{{ pm_api_url }}",
         "PM_API_TOKEN_ID": "{{ pm_api_token_id }}",
         "PM_API_TOKEN_SECRET": "{{ pm_api_token_secret }}",
         "PM_NODE": "{{ pm_node }}",
         "PM_TLS_INSECURE": "{{ pm_tls_insecure | default('false') | lower }}",
+        # TF_VAR_* equivalents so ``var.pm_*`` in HCL resolves correctly
+        "TF_VAR_pm_api_url": "{{ pm_api_url }}",
+        "TF_VAR_pm_api_token_id": "{{ pm_api_token_id }}",
+        "TF_VAR_pm_api_token_secret": "{{ pm_api_token_secret }}",
+        "TF_VAR_pm_node": "{{ pm_node }}",
+        "TF_VAR_pm_tls_insecure": "{{ pm_tls_insecure | default('false') | lower }}",
     }
 }
 

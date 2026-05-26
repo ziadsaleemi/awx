@@ -1116,8 +1116,12 @@ class RunJob(SourceControlMixin, BaseTask):
         cp_dir = os.path.join(private_data_dir, 'cp')
         if not os.path.exists(cp_dir):
             os.mkdir(cp_dir, 0o700)
-        # FIXME: more elegant way to manage this path in container
-        env['ANSIBLE_SSH_CONTROL_PATH_DIR'] = '/runner/cp'
+        # Prefer the in-container control path when available; otherwise use
+        # the host private-data dir path for non-EE execution contexts.
+        if os.path.isdir('/runner') and os.access('/runner', os.W_OK):
+            env['ANSIBLE_SSH_CONTROL_PATH_DIR'] = '/runner/cp'
+        else:
+            env['ANSIBLE_SSH_CONTROL_PATH_DIR'] = cp_dir
 
         # Set environment variables for cloud credentials.
         cred_files = private_data_files.get('credentials', {})

@@ -2902,6 +2902,17 @@ class JobTemplateSurveySpec(GenericAPIView):
                     ),
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'] != '':
+                if qtype == 'integer':
+                    try:
+                        survey_item['default'] = int(survey_item['default'])
+                    except ValueError:
+                        pass
+                elif qtype == 'float':
+                    try:
+                        survey_item['default'] = float(survey_item['default'])
+                    except ValueError:
+                        pass
             if 'default' in survey_item and survey_item['default'] != '':
                 if not isinstance(survey_item['default'], SURVEY_TYPE_MAPPING[qtype]):
                     type_label = 'string'

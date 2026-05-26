@@ -27,6 +27,10 @@ export function TerraformJobDetails() {
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !job) return <LoadingPage />;
 
+  const artifacts = typeof job.artifacts === 'string'
+    ? job.artifacts
+    : JSON.stringify(job.artifacts ?? {}, null, 2);
+
   const verbosityLabels: Record<number, string> = {
     0: t('0 (Normal)'),
     1: t('1 (Verbose)'),
@@ -81,6 +85,7 @@ export function TerraformJobDetails() {
       {job.extra_vars && (
         <PageDetailCodeEditor label={t('Extra Variables')} value={job.extra_vars} />
       )}
+      <PageDetailCodeEditor label={t('Artifacts')} value={artifacts} />
     </PageDetails>
   );
 }

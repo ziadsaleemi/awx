@@ -24,6 +24,7 @@ export interface TerraformJob {
   failed: boolean;
   result_stdout: string;
   execution_node: string;
+  artifacts?: Record<string, unknown>;
 
   summary_fields: {
     unified_job_template?: { id: number; name: string; description: string; unified_job_type: string };

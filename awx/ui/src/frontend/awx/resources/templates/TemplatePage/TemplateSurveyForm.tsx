@@ -60,6 +60,25 @@ interface FormSpec extends Spec {
   formattedChoices?: ChoiceOption[];
 }
 
+function normalizeNumericDefault(spec: Spec): Spec {
+  if (spec.type !== 'integer' && spec.type !== 'float') {
+    return spec;
+  }
+  if (spec.default === '' || spec.default === null || spec.default === undefined) {
+    return spec;
+  }
+
+  const parsed = Number(spec.default);
+  if (!Number.isFinite(parsed)) {
+    return spec;
+  }
+
+  return {
+    ...spec,
+    default: spec.type === 'integer' ? Math.trunc(parsed) : parsed,
+  };
+}
+
 export function TemplateSurveyForm(props: IProps) {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -226,7 +245,7 @@ export function TemplateSurveyForm(props: IProps) {
 
     const postBody: Survey = {
       ...updatedSurvey,
-      spec: questions,
+      spec: questions.map(normalizeNumericDefault),
     };
 
     try {

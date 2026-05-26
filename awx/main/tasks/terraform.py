@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import traceback
 import uuid as _uuid
 
@@ -60,7 +61,7 @@ class _DefaultTerraformEE:
     the image is pulled on first use, then cached.
     """
 
-    image = 'hashicorp/terraform:latest'
+    image = 'docker.io/hashicorp/terraform:latest'
     pull = 'missing'  # pull only if not already present in local cache
 
 
@@ -362,11 +363,15 @@ class RunTerraformJob(SourceControlMixin):
         timeout = self.get_instance_timeout(instance)
         prefix = instance.log_format
         output_parts = []
-        # Always run Terraform in a container.  Use the explicitly-configured EE
-        # when one is set; otherwise fall back to the official hashicorp/terraform
-        # image so the execution node never needs Terraform installed locally.
+        # Use the explicitly-configured EE when one is set.  When none is
+        # configured, fall back to the containerised hashicorp/terraform image
+        # only if ``terraform`` is not already available on PATH — this avoids
+        # podman-in-Docker issues on environments (e.g. Docker Desktop on
+        # Apple Silicon) where the nested container runtime cannot exec processes.
         if private_data_dir:
-            ee = instance.resolve_execution_environment() or _DefaultTerraformEE()
+            ee = instance.resolve_execution_environment()
+            if ee is None and shutil.which('terraform') is None:
+                ee = _DefaultTerraformEE()
         else:
             ee = None
 
@@ -445,6 +450,104 @@ class RunTerraformJob(SourceControlMixin):
     # Inventory population (A5)
     # ------------------------------------------------------------------
 
+    def _resolve_output_ee(self, instance, private_data_dir=None):
+        if not private_data_dir:
+            return None
+        ee = instance.resolve_execution_environment()
+        if ee is None and shutil.which('terraform') is None:
+            ee = _DefaultTerraformEE()
+        return ee
+
+    def _parse_terraform_output_json(self, text):
+        try:
+            return json.loads(text)
+        except ValueError:
+            # Some execution environments prepend log lines to stdout.
+            # Try to recover by parsing the outermost JSON object.
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end > start:
+                try:
+                    return json.loads(text[start : end + 1])
+                except ValueError:
+                    pass
+        return None
+
+    def _flatten_outputs(self, outputs):
+        flattened = {}
+        if not isinstance(outputs, dict):
+            return flattened
+        for key, val_obj in outputs.items():
+            flattened[key] = val_obj.get('value') if isinstance(val_obj, dict) else val_obj
+        return flattened
+
+    def _has_nonempty_host_ip_output(self, flattened_outputs):
+        for key, raw in flattened_outputs.items():
+            if not _HOST_IP_KEY_RE.search(key):
+                continue
+            if isinstance(raw, list):
+                if any(str(ip).strip() for ip in raw if ip):
+                    return True
+            elif raw and str(raw).strip():
+                return True
+        return False
+
+    def _collect_terraform_outputs(self, instance, working_dir, env, private_data_dir=None, wait_for_host_ip=False):
+        ee = self._resolve_output_ee(instance, private_data_dir=private_data_dir)
+        timeout = self.get_instance_timeout(instance)
+        attempts = 6 if wait_for_host_ip else 1
+        latest_outputs = {}
+
+        for attempt in range(1, attempts + 1):
+            rc, text = self._run_cmd(
+                ['terraform', 'output', '-json', '-no-color'],
+                cwd=working_dir,
+                env=env,
+                timeout=timeout,
+                log_prefix=instance.log_format,
+                private_data_dir=private_data_dir,
+                ee=ee,
+            )
+            if rc != 0:
+                logger.warning(
+                    '%s terraform output failed (rc=%s, attempt=%s/%s)',
+                    instance.log_format,
+                    rc,
+                    attempt,
+                    attempts,
+                )
+                return {}
+
+            parsed = self._parse_terraform_output_json(text)
+            if parsed is None:
+                logger.warning(
+                    '%s could not parse terraform output JSON (attempt=%s/%s)',
+                    instance.log_format,
+                    attempt,
+                    attempts,
+                )
+                return {}
+
+            latest_outputs = self._flatten_outputs(parsed)
+            if not wait_for_host_ip or self._has_nonempty_host_ip_output(latest_outputs):
+                return latest_outputs
+
+            if attempt < attempts:
+                # Refresh and retry to allow guest-agent/DHCP-reported IPs
+                # to appear in output values after initial apply completion.
+                self._run_cmd(
+                    ['terraform', 'apply', '-refresh-only', '-auto-approve', '-no-color'],
+                    cwd=working_dir,
+                    env=env,
+                    timeout=timeout,
+                    log_prefix=instance.log_format,
+                    private_data_dir=private_data_dir,
+                    ee=ee,
+                )
+                time.sleep(10)
+
+        return latest_outputs
+
     def _populate_inventory(self, instance, working_dir, env, private_data_dir=None):
         """
         After a successful ``apply``, parse ``terraform output -json`` and
@@ -461,43 +564,19 @@ class RunTerraformJob(SourceControlMixin):
         if not instance.target_inventory_id:
             return
 
-        if private_data_dir:
-            ee = instance.resolve_execution_environment() or _DefaultTerraformEE()
-        else:
-            ee = None
-        timeout = self.get_instance_timeout(instance)
-        rc, text = self._run_cmd(
-            ['terraform', 'output', '-json', '-no-color'],
-            cwd=working_dir,
-            env=env,
-            timeout=timeout,
-            log_prefix=instance.log_format,
+        outputs = self._collect_terraform_outputs(
+            instance,
+            working_dir,
+            env,
             private_data_dir=private_data_dir,
-            ee=ee,
+            wait_for_host_ip=True,
         )
-        if rc != 0:
-            logger.warning(
-                '%s terraform output failed (rc=%s); skipping inventory population',
-                instance.log_format,
-                rc,
-            )
-            return
-
-        try:
-            outputs = json.loads(text)
-        except ValueError:
-            logger.warning(
-                '%s could not parse terraform output JSON; skipping inventory population',
-                instance.log_format,
-            )
-            return
 
         # Extract raw values from {"key": {"value": ..., "type": ...}} structure
         host_entries = {}
-        for key, val_obj in outputs.items():
+        for key, raw in outputs.items():
             if not _HOST_IP_KEY_RE.search(key):
                 continue
-            raw = val_obj.get('value') if isinstance(val_obj, dict) else val_obj
             if isinstance(raw, list):
                 ips = [str(ip).strip() for ip in raw if ip]
             elif raw:
@@ -575,6 +654,44 @@ class RunTerraformJob(SourceControlMixin):
             instance.log_format,
             host_count,
         )
+
+    # ------------------------------------------------------------------
+    # Artifact capture
+    # ------------------------------------------------------------------
+
+    def _capture_artifacts(self, instance, working_dir, env, private_data_dir=None):
+        """
+        Run ``terraform output -json`` and store every output value in
+        ``instance.artifacts`` so they are available to downstream workflow
+        nodes via ``get_effective_artifacts()``.
+
+        The Terraform output JSON has the shape::
+
+            {"key": {"value": <raw>, "type": "..."}, ...}
+
+        We flatten this to ``{"key": <raw>, ...}`` — the same flat dict that
+        Ansible's ``set_stats`` module produces so the workflow engine treats
+        both identically.
+        """
+        artifacts = self._collect_terraform_outputs(
+            instance,
+            working_dir,
+            env,
+            private_data_dir=private_data_dir,
+            wait_for_host_ip=True,
+        )
+
+        if artifacts:
+            self.update_model(instance.pk, artifacts=artifacts)
+            instance.artifacts = artifacts
+            logger.info(
+                '%s captured %d terraform output(s) as job artifacts: %s',
+                instance.log_format,
+                len(artifacts),
+                list(artifacts.keys()),
+            )
+        else:
+            logger.warning('%s no Terraform outputs captured as artifacts', instance.log_format)
 
     # ------------------------------------------------------------------
     # Main entry point (completely overrides BaseTask.run)
@@ -682,15 +799,15 @@ class RunTerraformJob(SourceControlMixin):
 
             status = 'successful' if rc == 0 else 'failed'
 
-            # 8. Inventory population (apply only)
-            if (
-                status == 'successful'
-                and self.instance.terraform_operation == 'apply'
-                and self.instance.target_inventory_id
-            ):
-                self._populate_inventory(
+            # 8. Capture artifacts + inventory population (apply only)
+            if status == 'successful' and self.instance.terraform_operation == 'apply':
+                self._capture_artifacts(
                     self.instance, working_dir, env, private_data_dir=private_data_dir
                 )
+                if self.instance.target_inventory_id:
+                    self._populate_inventory(
+                        self.instance, working_dir, env, private_data_dir=private_data_dir
+                    )
 
         except Exception:
             tb = traceback.format_exc()

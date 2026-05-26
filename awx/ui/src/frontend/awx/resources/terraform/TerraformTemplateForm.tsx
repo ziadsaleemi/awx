@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import {
@@ -7,6 +9,7 @@ import {
   PageLayout,
   usePageNavigate,
 } from '../../../../framework';
+import { PageFormAsyncSelect } from '../../../../framework/PageForm/Inputs/PageFormAsyncSelect';
 import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFormTextInput';
 import { PageFormTextArea } from '../../../../framework/PageForm/Inputs/PageFormTextArea';
 import { PageFormSelect } from '../../../../framework/PageForm/Inputs/PageFormSelect';
@@ -14,7 +17,7 @@ import { PageFormCheckbox } from '../../../../framework/PageForm/Inputs/PageForm
 import { AwxPageForm } from '../../common/AwxPageForm';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGet } from '../../../common/crud/useGet';
-import { requestPatch, postRequest } from '../../../common/crud/Data';
+import { requestGet, requestPatch, postRequest } from '../../../common/crud/Data';
 import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { TerraformJobTemplate } from '../../interfaces/TerraformJobTemplate';
@@ -25,6 +28,13 @@ import { PageFormInventorySelect } from '../inventories/components/PageFormInven
 import { getAddedAndRemoved } from '../../common/util/getAddedAndRemoved';
 import { Project } from '../../interfaces/Project';
 import { Inventory } from '../../interfaces/Inventory';
+import { AwxItemsResponse } from '../../common/AwxItemsResponse';
+
+interface InventoryGroup {
+  id: number;
+  name: string;
+  description?: string;
+}
 
 interface TerraformTemplateFormValues {
   name: string;
@@ -35,7 +45,7 @@ interface TerraformTemplateFormValues {
   verbosity: 0 | 1 | 2 | 3 | 4;
   terraform_operation: 'apply' | 'plan' | 'destroy';
   target_inventory: Inventory | null;
-  target_group: string;
+  target_group: InventoryGroup | null;
   timeout: number;
   ask_variables_on_launch: boolean;
   ask_inventory_on_launch: boolean;
@@ -53,7 +63,9 @@ function defaultValues(template?: TerraformJobTemplate): TerraformTemplateFormVa
     verbosity: template?.verbosity ?? 0,
     terraform_operation: template?.terraform_operation ?? 'apply',
     target_inventory: (template?.summary_fields?.target_inventory as unknown as Inventory) ?? null,
-    target_group: template?.target_group ?? '',
+    target_group: template?.target_group
+      ? { id: -1, name: template.target_group }
+      : null,
     timeout: template?.timeout ?? 0,
     ask_variables_on_launch: template?.ask_variables_on_launch ?? false,
     ask_inventory_on_launch: template?.ask_inventory_on_launch ?? false,
@@ -95,6 +107,7 @@ export function CreateTerraformTemplate() {
       ...rest,
       project: values.project?.id ?? null,
       target_inventory: values.target_inventory?.id ?? null,
+      target_group: values.target_group?.name ?? '',
     };
     const created = await postRequest<TerraformJobTemplate, typeof payload>(
       awxAPI`/terraform_job_templates/`,
@@ -146,6 +159,7 @@ export function EditTerraformTemplate() {
       ...rest,
       project: values.project?.id ?? null,
       target_inventory: values.target_inventory?.id ?? null,
+      target_group: values.target_group?.name ?? '',
     };
     await requestPatch<typeof payload>(
       awxAPI`/terraform_job_templates/${id}/`,
@@ -185,6 +199,33 @@ export function EditTerraformTemplate() {
 
 function TerraformTemplateFormInputs() {
   const { t } = useTranslation();
+  const { setValue } = useFormContext<TerraformTemplateFormValues>();
+  const targetInventory = useWatch<TerraformTemplateFormValues>({
+    name: 'target_inventory',
+  }) as Inventory | null;
+  const targetInventoryId = targetInventory?.id ?? null;
+  const prevTargetInventoryId = useRef<number | null>(targetInventoryId);
+
+  useEffect(() => {
+    if (prevTargetInventoryId.current === null) {
+      prevTargetInventoryId.current = targetInventoryId;
+      return;
+    }
+    if (prevTargetInventoryId.current !== targetInventoryId) {
+      setValue('target_group', null);
+      prevTargetInventoryId.current = targetInventoryId;
+    }
+  }, [targetInventoryId, setValue]);
+
+  const queryInventoryGroups = useCallback(async () => {
+    if (!targetInventoryId) {
+      return { total: 0, values: [] as InventoryGroup[] };
+    }
+    const response = await requestGet<AwxItemsResponse<InventoryGroup>>(
+      awxAPI`/inventories/${targetInventoryId.toString()}/groups/?page_size=200`
+    );
+    return { total: response.count, values: response.results };
+  }, [targetInventoryId]);
 
   const verbosityOptions = [
     { value: 0, label: t('0 (Normal)') },
@@ -267,14 +308,24 @@ function TerraformTemplateFormInputs() {
           <PageFormCheckbox label={t('Prompt on launch')} name="ask_inventory_on_launch" />
         }
       />
-      <PageFormTextInput<TerraformTemplateFormValues>
+      <PageFormAsyncSelect<TerraformTemplateFormValues, 'target_group', InventoryGroup>
         name="target_group"
         label={t('Target group')}
-        labelHelpTitle={t('Target group')}
         labelHelp={t(
-          'Inventory group to add provisioned hosts to after a successful apply. Created automatically if it does not exist.'
+          'Optional. Select an inventory group from the selected inventory. Provisioned hosts are added to this group after a successful apply.'
         )}
-        placeholder={t('Add an inventory group name')}
+        variant="typeahead"
+        query={queryInventoryGroups}
+        valueToString={(value) => value?.name ?? ''}
+        placeholder={
+          targetInventoryId
+            ? t('Select target group')
+            : t('Select an inventory first')
+        }
+        loadingPlaceholder={t('Loading inventory groups...')}
+        loadingErrorText={t('Error loading inventory groups')}
+        limit={200}
+        isReadOnly={!targetInventoryId}
       />
       <PageFormTextInput<TerraformTemplateFormValues>
         name="timeout"

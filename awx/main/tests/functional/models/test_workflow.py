@@ -15,6 +15,7 @@ from awx.main.models.projects import ProjectUpdate
 from awx.main.models.credential import Credential, CredentialType
 from awx.main.models.label import Label
 from awx.main.models.ha import InstanceGroup
+from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.scheduler.dag_workflow import WorkflowDAG
 from awx.api.versioning import reverse
 from awx.api.views import WorkflowJobTemplateNodeSuccessNodesList
@@ -231,6 +232,55 @@ class TestWorkflowJob:
         mocker.patch.object(queued_node, 'get_parent_nodes', lambda: [project_node])
         assert queued_node.get_job_kwargs()['extra_vars'] == {'a': 42, 'b': 43}
         assert queued_node.ancestor_artifacts == {'a': 42, 'b': 43}
+
+    def test_relaunch_workflow_spawned_job_preserves_artifact_prompts(self, mocker):
+        wfj = WorkflowJob.objects.create(name='test-wf-job', extra_vars={'terraform_override_limit': True, 'wf_input': 'abc'})
+        jt = JobTemplate.objects.create(name='test-jt')
+
+        parent_job = Job.objects.create(name='parent-job', artifacts={'host_ip_proxmox_vm': '192.0.2.25'})
+        parent_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=parent_job, ancestor_artifacts={'from_prev': 42})
+
+        child_job = Job.objects.create(name='child-job', launch_type='workflow', unified_job_template=jt)
+        child_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=child_job, unified_job_template=jt)
+        parent_node.success_nodes.add(child_node)
+
+        super_copy = mocker.patch.object(UnifiedJob, 'copy_unified_job', return_value='ok')
+
+        result = child_job.copy_unified_job()
+        assert result == 'ok'
+
+        call_kwargs = super_copy.call_args.kwargs
+        assert call_kwargs['extra_vars'] == {
+            'from_prev': 42,
+            'host_ip_proxmox_vm': '192.0.2.25',
+            'wf_input': 'abc',
+        }
+        assert call_kwargs['limit'] == '192.0.2.25'
+
+    def test_resume_workflow_keeps_artifacts_for_rerun_nodes(self, job_template, mocker):
+        wfj = WorkflowJob.objects.create(name='resume-source-wf', status='failed')
+
+        parent_job = Job.objects.create(name='parent-job', status='successful', artifacts={'host_ip_proxmox_vm': '192.0.2.44'})
+        parent_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=parent_job, ancestor_artifacts={'seed': 'x'})
+
+        failed_child_job = Job.objects.create(name='failed-child', status='failed')
+        failed_child_node = WorkflowJobNode.objects.create(workflow_job=wfj, job=failed_child_job, unified_job_template=job_template)
+        parent_node.success_nodes.add(failed_child_node)
+
+        resumed = wfj.create_resume_workflow_job()
+        resumed_nodes = list(resumed.workflow_job_nodes.order_by('id'))
+
+        resumed_parent = next(n for n in resumed_nodes if n.bypassed_job_status == 'successful')
+        resumed_child = next(n for n in resumed_nodes if n.bypassed_job_status != 'successful')
+
+        assert resumed_parent.ancestor_artifacts == {'seed': 'x', 'host_ip_proxmox_vm': '192.0.2.44'}
+
+        mocker.patch.object(resumed_child, 'get_parent_nodes', return_value=[resumed_parent])
+        job_kwargs = resumed_child.get_job_kwargs()
+
+        assert job_kwargs['extra_vars']['seed'] == 'x'
+        assert job_kwargs['extra_vars']['host_ip_proxmox_vm'] == '192.0.2.44'
+        assert job_kwargs['limit'] == '192.0.2.44'
 
     def test_combine_prompts_WFJT_to_node(self, project, inventory, organization):
         """

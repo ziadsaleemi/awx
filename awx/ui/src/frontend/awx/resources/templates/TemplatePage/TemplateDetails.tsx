@@ -23,6 +23,7 @@ import { CredentialLabel } from '../../../common/CredentialLabel';
 import { UserDateDetail } from '../../../common/UserDateDetail';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useVerbosityString } from '../../../common/useVerbosityString';
+import { Job } from '../../../interfaces/Job';
 import { InstanceGroup } from '../../../interfaces/InstanceGroup';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
 import { AwxRoute } from '../../../main/AwxRoutes';
@@ -51,6 +52,8 @@ export function TemplateDetails(props: { templateId?: string; disableScroll?: bo
 
   const urlId = props?.templateId ? props.templateId : params.id;
   const { error, data: template, refresh } = useGetItem<JobTemplate>(awxAPI`/job_templates`, urlId);
+  const lastJobId = template?.summary_fields.last_job?.id;
+  const { data: lastJob } = useGetItem<Job>(awxAPI`/jobs`, lastJobId);
   const instanceGroups = useInstanceGroups(urlId || '0');
   const getPageUrl = useGetPageUrl();
   const history = useNavigate();
@@ -73,6 +76,17 @@ export function TemplateDetails(props: { templateId?: string; disableScroll?: bo
     smart: 'smart_inventory',
     constructed: 'constructed_inventory',
   };
+
+  const artifactsValue = (() => {
+    const artifacts = (lastJob as Job & { artifacts?: unknown } | undefined)?.artifacts;
+    if (typeof artifacts === 'string') {
+      return artifacts;
+    }
+    if (artifacts && typeof artifacts === 'object') {
+      return JSON.stringify(artifacts, null, 2);
+    }
+    return '{}';
+  })();
 
   return (
     <PageDetails disableScroll={props.disableScroll}>
@@ -287,6 +301,12 @@ export function TemplateDetails(props: { templateId?: string; disableScroll?: bo
         helpText={t(
           'Pass extra command line variables to the playbook. This is the -e or --extra-vars command line parameter for ansible-playbook. Provide key/value pairs using either YAML or JSON. Refer to the documentation for example syntax.'
         )}
+      />
+      <PageDetailCodeEditor
+        label={t('Artifacts')}
+        helpText={t('Artifacts produced by the most recent job run for this template.')}
+        showCopyToClipboard
+        value={artifactsValue}
       />
       <PageDetail
         label={t('Enabled options')}

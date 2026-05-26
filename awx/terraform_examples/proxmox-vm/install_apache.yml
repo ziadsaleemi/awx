@@ -1,0 +1,77 @@
+---
+# install_apache.yml
+#
+# Installs Apache (httpd / apache2) on a freshly provisioned VM.
+# The target host IP is passed from the upstream Terraform job via
+# the workflow artifact "host_ip_proxmox_vm".
+#
+# AWX wires the artifact into extra_vars automatically, so the playbook
+# can use it directly in the hosts line.
+#
+# Survey / extra_vars used:
+#   host_ip_proxmox_vm  - IP address of the VM (from Terraform artifact)
+#   ansible_user        - SSH user (default: ansible)
+#   ansible_password    - SSH password (default: ansible)
+#   ansible_port        - SSH port (default: 22)
+#
+- name: Provision Apache web server
+  hosts: "{{ host_ip_proxmox_vm }}"
+  gather_facts: true
+  become: true
+  vars:
+    ansible_user: "{{ ansible_user | default('ansible') }}"
+    ansible_password: "{{ ansible_password | default('ansible') }}"
+    ansible_port: "{{ ansible_port | default(22) }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+  tasks:
+    - name: Wait for SSH to become available
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Gather facts after SSH is ready
+      ansible.builtin.setup:
+
+    - name: Install Apache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: apache2
+        state: present
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Install Apache (RedHat/CentOS)
+      ansible.builtin.dnf:
+        name: httpd
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start and enable Apache (Debian)
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Start and enable Apache (RedHat)
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Verify Apache is responding
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(inventory_hostname) }}"
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: apache_check
+      failed_when: false
+
+    - name: Report Apache status
+      ansible.builtin.debug:
+        msg: >
+          Apache installed on {{ inventory_hostname }}.
+          HTTP status: {{ apache_check.status | default('N/A') }}.
+          {{ 'Responding OK!' if apache_check.status | default(0) == 200 else 'Check firewall rules if not responding.' }}
