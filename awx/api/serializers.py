@@ -88,6 +88,8 @@ from awx.main.models import (
     SystemJobEvent,
     SystemJobTemplate,
     Team,
+    TerraformJob,
+    TerraformJobTemplate,
     UnifiedJob,
     UnifiedJobTemplate,
     WorkflowApproval,
@@ -771,7 +773,7 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
 
     def get_types(self):
         if type(self) is UnifiedJobTemplateSerializer:
-            return ['project', 'inventory_source', 'job_template', 'system_job_template', 'workflow_job_template']
+            return ['project', 'inventory_source', 'job_template', 'system_job_template', 'workflow_job_template', 'terraform_job_template']
         else:
             return super(UnifiedJobTemplateSerializer, self).get_types()
 
@@ -790,6 +792,8 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
                 serializer_class = WorkflowJobTemplateSerializer
             elif isinstance(obj, WorkflowApprovalTemplate):
                 serializer_class = WorkflowApprovalTemplateSerializer
+            elif isinstance(obj, TerraformJobTemplate):
+                serializer_class = TerraformJobTemplateSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -801,7 +805,7 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
                 serializer.parent = self.parent
                 serializer.polymorphic_base = self
                 # capabilities prefetch is only valid for these models
-                if isinstance(obj, (JobTemplate, WorkflowJobTemplate)):
+                if isinstance(obj, (JobTemplate, WorkflowJobTemplate, TerraformJobTemplate)):
                     serializer.capabilities_prefetch = serializer_class.capabilities_prefetch
                 else:
                     serializer.capabilities_prefetch = None
@@ -3810,7 +3814,94 @@ class SystemJobCancelSerializer(SystemJobSerializer):
         fields = ('can_cancel',)
 
 
-class WorkflowJobTemplateSerializer(JobTemplateMixin, LabelsListMixin, UnifiedJobTemplateSerializer):
+class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
+    show_capabilities = ['start', 'edit', 'delete']
+    capabilities_prefetch = ['admin', 'execute']
+
+    class Meta:
+        model = TerraformJobTemplate
+        fields = (
+            '*',
+            'project',
+            'terraform_dir',
+            'extra_vars',
+            'verbosity',
+            'terraform_operation',
+            'target_inventory',
+            'target_group',
+            'allow_simultaneous',
+            'timeout',
+            'ask_variables_on_launch',
+            'ask_inventory_on_launch',
+            'ask_terraform_operation_on_launch',
+            'survey_enabled',
+        )
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        res.update(
+            jobs=self.reverse('api:terraform_job_template_jobs_list', kwargs={'pk': obj.pk}),
+            launch=self.reverse('api:terraform_job_template_launch', kwargs={'pk': obj.pk}),
+        )
+        if obj.project_id:
+            res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        if obj.target_inventory_id:
+            res['target_inventory'] = self.reverse('api:inventory_detail', kwargs={'pk': obj.target_inventory_id})
+        if obj.execution_environment_id:
+            res['execution_environment'] = self.reverse(
+                'api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id}
+            )
+        return res
+
+
+class TerraformJobSerializer(UnifiedJobSerializer):
+    result_stdout = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TerraformJob
+        fields = (
+            '*',
+            'terraform_job_template',
+            'project',
+            'terraform_dir',
+            'extra_vars',
+            'verbosity',
+            'terraform_operation',
+            'target_inventory',
+            'target_group',
+            'scm_revision',
+            'result_stdout',
+        )
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        if obj.terraform_job_template_id:
+            res['terraform_job_template'] = self.reverse(
+                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
+            )
+        if obj.project_id:
+            res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        res['cancel'] = self.reverse('api:terraform_job_cancel', kwargs={'pk': obj.pk})
+        return res
+
+    def get_result_stdout(self, obj):
+        try:
+            return obj.result_stdout
+        except StdoutMaxBytesExceeded as e:
+            return _(
+                "Standard Output too large to display ({text_size} bytes), "
+                "only download supported for sizes over {supported_size} bytes."
+            ).format(text_size=e.total, supported_size=e.supported)
+
+
+class TerraformJobCancelSerializer(TerraformJobSerializer):
+    can_cancel = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        fields = ('can_cancel',)
+
+
+class WorkflowJobTemplateSerializer(LabelsListMixin, UnifiedJobTemplateSerializer):
     show_capabilities = ['start', 'schedule', 'edit', 'copy', 'delete']
     capabilities_prefetch = ['admin', 'execute', {'copy': 'organization.workflow_admin'}]
     limit = serializers.CharField(allow_blank=True, allow_null=True, required=False, default=None)

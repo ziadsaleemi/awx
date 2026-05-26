@@ -104,7 +104,7 @@ from awx.main.utils import (
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
 from awx.main.utils.plugins import compute_cloud_inventory_sources
-from awx.main.utils.common import memoize
+from awx.main.utils.common import memoize, parse_yaml_or_json
 from awx.main.redact import UriCleaner
 from awx.api.permissions import (
     JobTemplateCallbackPermission,
@@ -5036,3 +5036,112 @@ class WorkflowApprovalDeny(RetrieveAPIView):
             return Response({"error": _("This workflow step has already been approved or denied.")}, status=status.HTTP_400_BAD_REQUEST)
         obj.deny(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Terraform Job Template + Terraform Job views
+# ---------------------------------------------------------------------------
+
+class TerraformJobTemplateList(ListCreateAPIView):
+    model = models.TerraformJobTemplate
+    serializer_class = serializers.TerraformJobTemplateSerializer
+    resource_purpose = 'terraform job templates'
+
+
+class TerraformJobTemplateDetail(RetrieveUpdateDestroyAPIView):
+    model = models.TerraformJobTemplate
+    serializer_class = serializers.TerraformJobTemplateSerializer
+    resource_purpose = 'terraform job template detail'
+
+
+class TerraformJobTemplateLaunch(GenericAPIView):
+    model = models.TerraformJobTemplate
+    obj_permission_type = 'start'
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'launch a terraform job from a terraform job template'
+
+    def get(self, request, *args, **kwargs):
+        obj = self.get_object()
+        data = {
+            'ask_variables_on_launch': obj.ask_variables_on_launch,
+            'ask_inventory_on_launch': obj.ask_inventory_on_launch,
+            'ask_terraform_operation_on_launch': obj.ask_terraform_operation_on_launch,
+            'variables_needed_to_start': obj.variables_needed_to_start,
+            'defaults': {
+                'terraform_operation': obj.terraform_operation,
+                'extra_vars': obj.extra_vars,
+            },
+        }
+        return Response(data)
+
+    def post(self, request, *args, **kwargs):
+        obj = self.get_object()
+        launch_kwargs = {}
+
+        # Parse and validate extra_vars, including survey answers.
+        # accept_or_ignore_variables validates survey fields and respects
+        # ask_variables_on_launch when deciding what to accept.
+        raw_extra_vars = request.data.get('extra_vars', {})
+        if isinstance(raw_extra_vars, str):
+            try:
+                raw_extra_vars = parse_yaml_or_json(raw_extra_vars, silent_failure=False)
+            except Exception:
+                return Response(
+                    {'extra_vars': ['Invalid JSON/YAML format.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if raw_extra_vars:
+            accepted_vars, _rejected_vars, errors = obj.accept_or_ignore_variables(raw_extra_vars)
+            if errors.get('variables_needed_to_start') or errors.get('extra_vars'):
+                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+            if accepted_vars:
+                launch_kwargs['extra_vars'] = accepted_vars
+        elif obj.survey_enabled:
+            # No launch-time vars provided; still validate that required survey
+            # fields have defaults or were already set on the template.
+            survey_errors = obj.survey_variable_validation({})
+            if survey_errors:
+                return Response(
+                    {'variables_needed_to_start': survey_errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if obj.ask_inventory_on_launch and 'target_inventory' in request.data:
+            launch_kwargs['target_inventory_id'] = request.data['target_inventory']
+        if obj.ask_terraform_operation_on_launch and 'terraform_operation' in request.data:
+            launch_kwargs['terraform_operation'] = request.data['terraform_operation']
+
+        new_job = obj.create_unified_job(**launch_kwargs)
+        new_job.signal_start()
+        data = OrderedDict()
+        data['terraform_job'] = new_job.id
+        data.update(serializers.TerraformJobSerializer(new_job, context=self.get_serializer_context()).to_representation(new_job))
+        headers = {'Location': new_job.get_absolute_url(request)}
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class TerraformJobTemplateJobsList(SubListAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'jobs'
+    parent_key = 'terraform_job_template'
+    resource_purpose = 'terraform jobs of a terraform job template'
+
+
+class TerraformJobList(ListAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    resource_purpose = 'terraform jobs'
+
+
+class TerraformJobDetail(UnifiedJobDeletionMixin, RetrieveDestroyAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    resource_purpose = 'terraform job detail'
+
+
+class TerraformJobCancel(GenericCancelView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobCancelSerializer
+    resource_purpose = 'cancel a terraform job'

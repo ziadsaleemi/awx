@@ -72,6 +72,8 @@ from awx.main.models import (
     WorkflowJobTemplateNode,
     WorkflowApproval,
     WorkflowApprovalTemplate,
+    TerraformJobTemplate,
+    TerraformJob,
 )
 from awx.main.models.mixins import ResourceMixin
 
@@ -1785,6 +1787,80 @@ class SystemJobAccess(BaseAccess):
 
     def can_start(self, obj, validate_license=True):
         return False  # no relaunching of system jobs
+
+
+class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
+    """
+    I can see Terraform Job Templates when I have read role on the template.
+    """
+
+    model = TerraformJobTemplate
+    select_related = (
+        'created_by',
+        'modified_by',
+        'project',
+        'organization',
+        'target_inventory',
+    )
+    prefetch_related = ('credentials__credential_type',)
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'job_template_admin_role').exists()
+        return self.check_related('organization', Organization, data, role_field='job_template_admin_role')
+
+    def can_start(self, obj, validate_license=True):
+        if validate_license:
+            self.check_license()
+        if self.user.is_superuser:
+            return True
+        return self.user in obj.execute_role
+
+    def can_change(self, obj, data):
+        if self.user not in obj.admin_role and not self.user.is_superuser:
+            return False
+        if data is None:
+            return True
+        return self.check_related('project', Project, data, obj=obj, role_field='use_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or self.user in obj.admin_role
+
+
+class TerraformJobAccess(BaseAccess):
+    """
+    I can see a Terraform Job if I can see its parent template.
+    """
+
+    model = TerraformJob
+    select_related = (
+        'created_by',
+        'modified_by',
+        'terraform_job_template',
+        'project',
+        'target_inventory',
+    )
+
+    def filtered_queryset(self):
+        return TerraformJob.objects.filter(
+            terraform_job_template__in=TerraformJobTemplate.accessible_pk_qs(self.user, 'read_role')
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return False
+        return self.check_related('terraform_job_template', TerraformJobTemplate, data, role_field='execute_role')
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_start(self, obj, validate_license=True):
+        return self.can_add({'terraform_job_template': obj.terraform_job_template_id})
+
+    def can_delete(self, obj):
+        return self.user.is_superuser
 
 
 class JobLaunchConfigAccess(UnifiedCredentialsMixin, BaseAccess):

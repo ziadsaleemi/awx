@@ -387,6 +387,17 @@ class WorkflowJobNode(WorkflowNodeBase):
                 extra_vars.update(functional_aa_dict)
         elif ujt_obj and isinstance(ujt_obj, WorkflowJobTemplate):
             pass  # artifacts are applied via seed_root_ancestor_artifacts in the task manager
+        else:
+            # Generic fallback for other UnifiedJobTemplate subclasses that
+            # accept extra_vars (e.g. TerraformJobTemplate).  Propagate
+            # ancestor artifacts as extra_vars the same way JobTemplate does.
+            from awx.main.models.terraform import TerraformJobTemplate  # local import avoids circular dependency
+
+            if ujt_obj and isinstance(ujt_obj, TerraformJobTemplate):
+                if aa_dict:
+                    functional_aa_dict = copy(aa_dict)
+                    functional_aa_dict.pop('_ansible_no_log', None)
+                    extra_vars.update(functional_aa_dict)
 
         # Workflow Job extra_vars higher precedence than ancestor artifacts
         extra_vars.update(wj_special_vars)

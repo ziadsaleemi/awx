@@ -41,6 +41,7 @@ import { useAwxNotificationsRoutes } from './routes/useAwxNotificationsRoutes';
 import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
+import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxTeamsRoutes } from './routes/useAwxTeamsRoutes';
 import { useAwxTemplateRoutes } from './routes/useAwxTemplateRoutes';
 import { useAwxUsersRoutes } from './routes/useAwxUsersRoutes';
@@ -51,6 +52,7 @@ export function useAwxNavigation() {
   const awxInventoryRoutes = useAwxInventoryRoutes();
   const awxHostRoutes = useAwxHostRoutes();
   const awxProjectRoutes = useAwxProjectRoutes();
+  const awxTerraformRoutes = useAwxTerraformRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
   const awxWorkflowApprovalRoutes = useAwxWorkflowApprovalRoutes();
@@ -347,6 +349,7 @@ export function useAwxNavigation() {
     awxTemplateRoutes,
     awxSchedulesRoutes,
     awxProjectRoutes,
+    awxTerraformRoutes,
     ...infrastructureItems,
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? analyticsItems : []),
     ...administrationItems,

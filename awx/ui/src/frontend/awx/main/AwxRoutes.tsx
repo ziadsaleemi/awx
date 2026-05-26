@@ -148,6 +148,18 @@ export enum AwxRoute {
   HostGroups = 'awx-host-groups',
   HostJobs = 'awx-host-jobs',
 
+  // Terraform Templates
+  TerraformTemplates = 'awx-terraform-templates',
+  CreateTerraformTemplate = 'awx-create-terraform-template',
+  EditTerraformTemplate = 'awx-edit-terraform-template',
+  TerraformTemplatePage = 'awx-terraform-template-page',
+  TerraformTemplateDetails = 'awx-terraform-template-details',
+  TerraformTemplateJobs = 'awx-terraform-template-jobs',
+  TerraformTemplateLaunch = 'awx-terraform-template-launch',
+  TerraformJobPage = 'awx-terraform-job-page',
+  TerraformJobOutput = 'awx-terraform-job-output',
+  TerraformJobDetails = 'awx-terraform-job-details',
+
   // Access
   Access = 'awx-access',
 

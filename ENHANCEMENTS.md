@@ -80,6 +80,128 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 
 ---
 
+## Terraform & Catalog Platform
+
+Full Terraform lifecycle support inside AWX — templates, execution, inventory population, credential injection, and a self-service Catalog for end-to-end provisioning/decommissioning.
+
+**Guiding principles:**
+- Terraform templates are first-class citizens alongside Job Templates; they share the same extra-vars system, credentials, RBAC, and workflow node model.
+- Catalog items are thin wrappers around Workflow Job Templates; all provisioning/decommissioning logic lives in workflows so every step is auditable.
+- The first provider target is **Proxmox**; the same credential-type pattern is then repeated for VMware, AWS, Azure, GCP, and OCI.
+
+---
+
+### Phase A — Terraform Template Engine (Backend)
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| A1 | **`TerraformJobTemplate` model** — new `UnifiedJobTemplate` subclass in `awx/main/models/terraform.py`; fields: `scm_project` (FK → Project), `terraform_dir` (path within repo, default `.`), `extra_vars` (JSON/YAML same as JobTemplate), `verbosity` (0–4), `target_inventory` (FK → Inventory, nullable), `target_group` (str, nullable), `destroy_on_delete` (bool) | High | ✅ |
+| A2 | **`TerraformJob` model** — `UnifiedJob` subclass; mirrors `TerraformJobTemplate` fields at launch time; adds `terraform_operation` choice field: `apply` / `destroy` / `plan` | High | ✅ |
+| A3 | **Django migrations** — create initial migration for both new models; `swappable_dependency` on `UnifiedJob`/`UnifiedJobTemplate` already handled by base | High | ✅ |
+| A4 | **Task runner** (`awx/main/tasks/terraform.py`) — `RunTerraformJob` task class; steps: checkout project via Receptor, write `terraform.tfvars.json` from extra_vars, inject credential env vars, run `terraform init`, run `terraform plan -out=plan.tfplan`, run `terraform apply plan.tfplan` (or `terraform destroy`); stream stdout/stderr to job event system | High | ✅ |
+| A5 | **Inventory population from Terraform output** — after successful `apply`, run `terraform output -json`; for each key matching `host_ip_*` or a configurable output key pattern, create/update `Host` records in `target_inventory`; add to `target_group` if set; store `terraform_resource_id` in host variables for later `destroy` | High | ✅ |
+| A6 | **Extra-vars / variable precedence** — reuse AWX's existing `process_extra_vars` pipeline; support survey specs (same `SurveySpec` model); Terraform receives merged vars as `terraform.tfvars.json` | Medium | ✅ |
+| A7 | **Credential injection** — new `CredentialType` injector class `TerraformProviderInjector`; maps credential fields → env vars before `terraform` subprocess; each cloud provider credential type registers its own injector | High | ✅ |
+| A8 | **DRF serializers + views** — `TerraformJobTemplateSerializer`, `TerraformJobSerializer`, `TerraformJobTemplateList/Detail`, `TerraformJobList/Detail`, `TerraformJobTemplateLaunch`, `TerraformJobCancel`; URL: `/api/v2/terraform_job_templates/`, `/api/v2/terraform_jobs/` | High | ✅ |
+| A9 | **RBAC access classes** — `TerraformJobTemplateAccess`, `TerraformJobAccess` in `awx/main/access.py`; mirrors `JobTemplateAccess` permission model (admin/execute/read) | High | ✅ |
+| A10 | **Workflow node type** — extend `WorkflowJobTemplateNode.unified_job_template` polymorphic FK to include `TerraformJobTemplate`; update workflow task manager to launch `TerraformJob` when a node resolves to a terraform template; update workflow visualiser API to return node type info | High | ✅ |
+| A11 | **Execution Environment support for Terraform** — `TerraformJobTemplate` and `TerraformJob` inherit `execution_environment` FK from `UnifiedJobTemplate`/`UnifiedJob` base via `ExecutionEnvironmentMixin`; `RunTerraformJob._run_cmd()` detects a configured EE via `instance.resolve_execution_environment()` and wraps every `terraform` invocation in `podman run --rm -v {private_data_dir}:/runner:Z --workdir {mapped_cwd} --env-file /runner/env/envvars {image} terraform {args}`; credential env vars are written to an env-file so they never appear in process listings; pull policy from `ExecutionEnvironment.pull` is honoured; when no EE is configured the `terraform` binary runs directly on the AWX execution node (requires terraform ≥ 1.5 on the node or in the EE image) | High | ✅ |
+
+---
+
+### Phase B — Cloud Provider Credential Types
+
+Each credential type is a `CredentialType` fixture/data migration with `inputs` schema and `injectors` that map fields to env vars consumed by the relevant Terraform provider.
+
+| # | Provider | Credential Fields | Env Vars Injected | Priority | Status |
+|---|----------|-------------------|-------------------|----------|--------|
+| B1 | **Proxmox VE** | `pm_api_url`, `pm_api_token_id`, `pm_api_token_secret`, `pm_node`, `pm_tls_insecure` (bool) | `PM_API_URL`, `PM_API_TOKEN_ID`, `PM_API_TOKEN_SECRET`, `PM_NODE`, `PM_TLS_INSECURE` | High | ✅ |
+| B2 | **VMware vSphere** | `vsphere_server`, `vsphere_user`, `vsphere_password`, `vsphere_allow_unverified_ssl` (bool) | `VSPHERE_SERVER`, `VSPHERE_USER`, `VSPHERE_PASSWORD`, `VSPHERE_ALLOW_UNVERIFIED_SSL` | Medium | ✅ |
+| B3 | **AWS** | `aws_access_key_id`, `aws_secret_access_key`, `aws_session_token` (optional), `aws_default_region` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION` | Medium | ✅ |
+| B4 | **Azure** | `arm_subscription_id`, `arm_client_id`, `arm_client_secret`, `arm_tenant_id` | `ARM_SUBSCRIPTION_ID`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID` | Medium | ✅ |
+| B5 | **GCP** | `gcp_project`, `google_credentials` (JSON key file content) | `GOOGLE_PROJECT`, `GOOGLE_CREDENTIALS` (written to temp file, path exported) | Low | ✅ |
+| B6 | **Oracle Cloud (OCI)** | `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key` (PEM), `region` | Written to `~/.oci/config` before `terraform init` | Low | ✅ |
+
+---
+
+### Phase C — Terraform Template UI
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| C1 | **Terraform Templates list page** — `awx/ui/src/frontend/awx/resources/terraform/TerraformTemplates.tsx`; table with columns: Name, Project, Directory, Last Run, Actions; same PatternFly table pattern as Job Templates | High | ✅ |
+| C2 | **Terraform Template detail/edit form** — tabs: Details (name, description, project, dir, verbosity), Variables (extra_vars editor, survey), Credentials (cloud provider picker), Inventory Target (inventory + group picker, output key pattern), Notifications, Schedules | High | ✅ |
+| C3 | **Launch dialog** — reuse existing `LaunchPrompt` pattern; shows survey + extra-vars override before launch | High | ✅ |
+| C4 | **Terraform Job output page** — real-time log streaming; ANSI colour support; separate tabs: `plan` output and `apply` output; "Download log" button | High | ✅ |
+| C5 | **Terraform Job history list** — per-template job runs list; columns: status, operation (apply/destroy/plan), started, duration, triggered by | Medium | ✅ |
+| C6 | **Workflow editor node type** — add Terraform Template as a selectable node type in the workflow visualiser; distinct icon (Terraform logo or wrench) to distinguish from Ansible job nodes | High | ⬜ |
+| C7 | **Sidebar nav entry** — add "Terraform Templates" under the Resources section of the sidebar navigation; use a suitable icon | High | ✅ |
+
+---
+
+### Phase D — Catalog System (Backend)
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| D1 | **`CatalogItem` model** (`awx/main/models/catalog.py`) — fields: `name`, `description`, `icon_url`, `provision_workflow` (FK → `WorkflowJobTemplate`, nullable), `deprovision_workflow` (FK → `WorkflowJobTemplate`, nullable), `extra_vars_schema` (JSON Schema for user-visible parameters), `organization` (FK → Organization) | High | ⬜ |
+| D2 | **`CatalogDeployment` model** — fields: `catalog_item` (FK), `name` (user-supplied label), `owner` (FK → User), `status` choices: `pending` / `provisioning` / `active` / `deprovisioning` / `failed` / `destroyed`; `provision_job` (FK → WorkflowJob, nullable), `deprovision_job` (FK → WorkflowJob, nullable), `extra_vars` (JSON, the values the user filled in at deploy time), `created`, `modified`, `deployed_hosts` (M2M → Host) | High | ⬜ |
+| D3 | **`catalog_user` role** — built-in role; auto-assigned to any user account that has zero explicit role assignments at login time (post-login signal); grants: read-only view of CatalogItems they have visibility to, launch provision workflow on visible items, view own CatalogDeployments | High | ⬜ |
+| D4 | **`catalog_admin` role** — built-in role; grants: full CRUD on CatalogItems and all CatalogDeployments within scope; cannot access non-catalog AWX resources | High | ⬜ |
+| D5 | **Default role assignment signal** — `post_save` / login signal on `User`: if `user.role_memberships.count() == 0` assign `catalog_user`; runs every login so newly-promoted users get upgraded automatically | High | ⬜ |
+| D6 | **DRF API** — `/api/v2/catalog_items/`, `/api/v2/catalog_deployments/`; actions: `POST /catalog_items/{id}/deploy/` (creates CatalogDeployment + launches provision workflow), `POST /catalog_deployments/{id}/deprovision/` (launches deprovision workflow + sets status) | High | ⬜ |
+| D7 | **RBAC access classes** — `CatalogItemAccess`, `CatalogDeploymentAccess`; catalog_admin sees all in org; catalog_user sees items they've been given read access to | High | ⬜ |
+| D8 | **Deployment status tracking** — WorkflowJob completion signal updates `CatalogDeployment.status`; populates `deployed_hosts` from the inventory populated by the Terraform job in the workflow | Medium | ⬜ |
+
+---
+
+### Phase E — Catalog UI
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| E1 | **Catalog browse page** (`/catalog`) — card grid of available `CatalogItem`s; each card shows icon, name, description, "Deploy" button; PatternFly `Gallery` layout | High | ⬜ |
+| E2 | **Deploy form dialog** — wizard: Step 1 extra-vars (JSON Schema-driven form), Step 2 deployment name + confirm; launches provision workflow and creates `CatalogDeployment` | High | ⬜ |
+| E3 | **My Deployments page** (`/catalog/deployments`) — table of own deployments; columns: name, catalog item, status, deployed hosts (count), deployed date; row action: "Deprovision" | High | ⬜ |
+| E4 | **Deployment detail page** — shows deployment vars, workflow job link (with status), list of provisioned hosts with IPs, decommission button | Medium | ⬜ |
+| E5 | **Catalog Admin: Item management** (`/catalog/admin/items`) — CRUD table; create/edit item links provision/deprovision workflows; visible only to catalog_admin + superuser | High | ⬜ |
+| E6 | **Catalog Admin: All Deployments** (`/catalog/admin/deployments`) — same as My Deployments but shows all users' deployments across the org; allows force-deprovision | High | ⬜ |
+| E7 | **Sidebar nav** — new top-level "Catalog" section in sidebar with entries: Browse, My Deployments; Admin sub-section (Items, All Deployments) shown only if user has catalog_admin | High | ⬜ |
+| E8 | **Catalog-only login redirect** — if logged-in user has only `catalog_user` role, redirect from AWX root (`/`) to `/catalog` instead of the usual dashboard | Medium | ⬜ |
+
+---
+
+### Phase F — Proxmox End-to-End Reference Implementation
+
+Complete working example: Proxmox VM → Ansible configuration → Catalog item.
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| F1 | **Proxmox credential type** — implement B1 as a loaddata fixture (`awx/main/fixtures/credential_type_proxmox.json`) so it ships with the dev environment | High | ⬜ |
+| F2 | **Terraform template project** — sample Git repo (or `awx_devel` sub-path) with: `main.tf` using `telmate/proxmox` provider; variables: `vm_name`, `cores`, `memory`, `disk_gb`, `proxmox_template_name`, `ip_address`, `gateway`; outputs: `host_ip` (maps to AWX inventory population) | High | ⬜ |
+| F3 | **AWX Terraform template** — pre-seeded dev fixture: project pointing at F2 repo, Proxmox credential attached, `target_inventory` set, `target_group = "proxmox_vms"` | High | ⬜ |
+| F4 | **Ansible playbook template** — Job Template using a playbook that: installs Apache / Nginx on the newly added host; limits to `proxmox_vms` group; uses the host IP populated by F3 | High | ⬜ |
+| F5 | **Workflow** — two-node workflow: Node 1 = Terraform template (F3), Node 2 (on success) = Ansible template (F4); demonstrates passing inventory context between nodes | High | ⬜ |
+| F6 | **Catalog item** — `CatalogItem` fixture: "Apache on Proxmox VM"; provision_workflow = F5; deprovision_workflow = separate workflow that runs `terraform destroy` via a TerraformJob with `terraform_operation=destroy` | High | ⬜ |
+| F7 | **Documentation** — `docs/terraform_catalog.md`: architecture overview, credential setup, template configuration, inventory output mapping convention, Proxmox walkthrough | Medium | ⬜ |
+
+---
+
+### Implementation Order (Suggested Sprint Sequence)
+
+```
+Sprint 1  →  A1–A3 (models + migrations) + B1 (Proxmox credential type)
+Sprint 2  →  A4–A5 (task runner + inventory population)
+Sprint 3  →  A6–A9 (extra-vars, injectors, API, RBAC)
+Sprint 4  →  C1–C4 (Terraform template list, form, launch, job output UI)
+Sprint 5  →  A10 + C6 (workflow node support, visualiser)
+Sprint 6  →  D1–D5 (Catalog models + roles)
+Sprint 7  →  D6–D8 (Catalog API + status tracking)
+Sprint 8  →  E1–E4 (Catalog browse + deploy + deployments UI)
+Sprint 9  →  E5–E8 (Catalog admin UI + role-based redirect)
+Sprint 10 →  F1–F7 (Proxmox end-to-end + docs)
+Sprint 11 →  B2–B6 (remaining cloud provider credential types)
+```
+
+---
+
 ## Notes
 
 - **Build command**: `bash tools/scripts/deploy-ui.sh` from repo root

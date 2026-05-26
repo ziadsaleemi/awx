@@ -158,12 +158,15 @@ export function useAwxView<T extends { id: number }>(options: {
     }
   }
 
-  if (sort && !queryString.includes('order_by')) {
+  // Strip any legacy ":N" direction suffix that may appear in stale browser
+  // URLs (e.g. "name:1" → "name"). AWX API uses order_by=name / order_by=-name.
+  const cleanSort = sort ? sort.replace(/:[-\d]+$/, '') : sort;
+  if (cleanSort && !queryString.includes('order_by')) {
     queryString ? (queryString += '&') : (queryString += '?');
     if (sortDirection === 'desc') {
-      queryString += `order_by=-${sort}`;
+      queryString += `order_by=-${cleanSort}`;
     } else {
-      queryString += `order_by=${sort}`;
+      queryString += `order_by=${cleanSort}`;
     }
   }
 
