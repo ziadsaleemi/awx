@@ -52,6 +52,15 @@ class CatalogItem(CommonModelNameNotUnique):
         on_delete=models.SET_NULL,
         help_text=_('Workflow to run when a user deploys this item.'),
     )
+    terraform_job_template = models.ForeignKey(
+        'TerraformJobTemplate',
+        related_name='catalog_items',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Terraform template to run when a user deploys this item (alternative to provision_workflow).'),
+    )
     deprovision_workflow = models.ForeignKey(
         'WorkflowJobTemplate',
         related_name='catalog_items_as_deprovision',
@@ -131,6 +140,14 @@ class CatalogDeployment(CommonModelNameNotUnique):
     provision_job = models.ForeignKey(
         'WorkflowJob',
         related_name='catalog_deployments_as_provision',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+    )
+    terraform_provision_job = models.ForeignKey(
+        'TerraformJob',
+        related_name='catalog_deployments_as_terraform_provision',
         null=True,
         blank=True,
         default=None,

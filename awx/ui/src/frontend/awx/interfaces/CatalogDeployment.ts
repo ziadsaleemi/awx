@@ -16,6 +16,7 @@ export interface CatalogDeployment {
   catalog_item: number | null;
   owner: number | null;
   provision_job: number | null;
+  terraform_provision_job: number | null;
   deprovision_job: number | null;
   extra_vars: Record<string, unknown> | null;
   created: string;
@@ -30,6 +31,7 @@ export interface CatalogDeployment {
   related: {
     catalog_item?: string;
     provision_job?: string;
+    terraform_provision_job?: string;
     deprovision_job?: string;
     deprovision: string;
   };

@@ -34,6 +34,11 @@ export function CatalogItemDetails() {
       <PageDetail label={t('Provision workflow')}>
         {item.summary_fields?.provision_workflow?.name ?? t('None')}
       </PageDetail>
+      {item.summary_fields?.terraform_job_template && (
+        <PageDetail label={t('Terraform template')}>
+          {item.summary_fields.terraform_job_template.name}
+        </PageDetail>
+      )}
       <PageDetail label={t('Deprovision workflow')}>
         {item.summary_fields?.deprovision_workflow?.name ?? t('None')}
       </PageDetail>

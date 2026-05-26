@@ -49,6 +49,7 @@ export interface TerraformJobTemplate {
       start: boolean;
       copy: boolean;
     };
+    credentials?: { id: number; name: string; description: string; kind: string; cloud: boolean }[];
     created_by?: { id: number; username: string };
     modified_by?: { id: number; username: string };
   };

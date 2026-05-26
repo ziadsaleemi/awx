@@ -155,9 +155,15 @@ function useCatalogItemColumns(): ITableColumn<CatalogItem>[] {
         ),
       },
       {
-        header: t('Provision workflow'),
+        header: t('Provision'),
         cell: (item) => (
-          <TextCell text={item.summary_fields?.provision_workflow?.name ?? '-'} />
+          <TextCell
+            text={
+              item.summary_fields?.terraform_job_template?.name
+                ? `${item.summary_fields.terraform_job_template.name} (Terraform)`
+                : (item.summary_fields?.provision_workflow?.name ?? '-')
+            }
+          />
         ),
       },
     ],

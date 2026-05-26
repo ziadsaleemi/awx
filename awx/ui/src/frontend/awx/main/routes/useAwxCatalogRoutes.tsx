@@ -10,6 +10,7 @@ import { CatalogDeploymentDetails } from '../../resources/catalog/CatalogDeploym
 import { CatalogItems } from '../../resources/catalog/CatalogItems';
 import { CatalogItemPage } from '../../resources/catalog/CatalogItemPage';
 import { CatalogItemDetails } from '../../resources/catalog/CatalogItemDetails';
+import { CreateCatalogItem, EditCatalogItem } from '../../resources/catalog/CatalogItemForm';
 import { CatalogAdminDeployments } from '../../resources/catalog/CatalogAdminDeployments';
 import { AwxRoute } from '../AwxRoutes';
 
@@ -63,6 +64,16 @@ export function useAwxCatalogRoutes() {
           label: t('Items (Admin)'),
           path: 'admin/items',
           children: [
+            {
+              id: AwxRoute.CreateCatalogItem,
+              path: 'create',
+              element: <CreateCatalogItem />,
+            },
+            {
+              id: AwxRoute.EditCatalogItem,
+              path: ':id/edit',
+              element: <EditCatalogItem />,
+            },
             {
               id: AwxRoute.CatalogItemPage,
               path: ':id',

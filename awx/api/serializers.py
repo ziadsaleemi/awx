@@ -3936,6 +3936,7 @@ class CatalogItemSerializer(BaseSerializer):
             'organization',
             'icon_url',
             'provision_workflow',
+            'terraform_job_template',
             'deprovision_workflow',
             'extra_vars_schema',
         )
@@ -3947,6 +3948,10 @@ class CatalogItemSerializer(BaseSerializer):
         if obj.provision_workflow_id:
             res['provision_workflow'] = self.reverse(
                 'api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id}
+            )
+        if obj.terraform_job_template_id:
+            res['terraform_job_template'] = self.reverse(
+                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
             )
         if obj.deprovision_workflow_id:
             res['deprovision_workflow'] = self.reverse(
@@ -3962,6 +3967,11 @@ class CatalogItemSerializer(BaseSerializer):
             d['provision_workflow'] = {
                 'id': obj.provision_workflow_id,
                 'name': obj.provision_workflow.name,
+            }
+        if obj.terraform_job_template_id:
+            d['terraform_job_template'] = {
+                'id': obj.terraform_job_template_id,
+                'name': obj.terraform_job_template.name,
             }
         if obj.deprovision_workflow_id:
             d['deprovision_workflow'] = {
@@ -3982,10 +3992,11 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'owner',
             'status',
             'provision_job',
+            'terraform_provision_job',
             'deprovision_job',
             'extra_vars',
         )
-        read_only_fields = ('status', 'provision_job', 'deprovision_job', 'owner')
+        read_only_fields = ('status', 'provision_job', 'terraform_provision_job', 'deprovision_job', 'owner')
 
     def get_related(self, obj):
         res = super().get_related(obj)
@@ -3993,6 +4004,8 @@ class CatalogDeploymentSerializer(BaseSerializer):
             res['catalog_item'] = self.reverse('api:catalog_item_detail', kwargs={'pk': obj.catalog_item_id})
         if obj.provision_job_id:
             res['provision_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.provision_job_id})
+        if obj.terraform_provision_job_id:
+            res['terraform_provision_job'] = self.reverse('api:terraform_job_detail', kwargs={'pk': obj.terraform_provision_job_id})
         if obj.deprovision_job_id:
             res['deprovision_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.deprovision_job_id})
         res['deprovision'] = self.reverse('api:catalog_deployment_deprovision', kwargs={'pk': obj.pk})

@@ -91,6 +91,23 @@ export function CatalogDeploymentDetails() {
           </a>
         </PageDetail>
       )}
+      {deployment.terraform_provision_job && (
+        <PageDetail label={t('Terraform provision job')}>
+          <a
+            href={getPageUrl(AwxRoute.TerraformJobPage, {
+              params: { job_id: String(deployment.terraform_provision_job) },
+            })}
+            onClick={(e) => {
+              e.preventDefault();
+              pageNavigate(AwxRoute.TerraformJobPage, {
+                params: { job_id: String(deployment.terraform_provision_job) },
+              });
+            }}
+          >
+            {t('Terraform Job #{{id}}', { id: deployment.terraform_provision_job })}
+          </a>
+        </PageDetail>
+      )}
       {deployment.deprovision_job && (
         <PageDetail label={t('Deprovision job')}>
           {t('Job #{{id}}', { id: deployment.deprovision_job })}

@@ -26,7 +26,7 @@ import { AwxRoute } from './AwxRoutes';
 interface SearchResultItem {
   id: number;
   name: string;
-  type: 'job' | 'template' | 'workflow_template' | 'inventory';
+  type: 'job' | 'template' | 'workflow_template' | 'inventory' | 'terraform_template';
   subtitle?: string;
 }
 
@@ -46,6 +46,8 @@ function categoryLabel(type: SearchResultItem['type'], t: (k: string) => string)
       return t('Workflow Templates');
     case 'inventory':
       return t('Inventories');
+    case 'terraform_template':
+      return t('Terraform Templates');
   }
 }
 
@@ -55,6 +57,7 @@ function categoryIcon(type: SearchResultItem['type']): ReactNode {
       return <BriefcaseIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
     case 'template':
     case 'workflow_template':
+    case 'terraform_template':
       return <LayerGroupIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
     case 'inventory':
       return <ArchiveIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
@@ -105,7 +108,7 @@ export function AwxGlobalSearch() {
     const timer = setTimeout(async () => {
       const q = encodeURIComponent(query.trim());
       try {
-        const [jobs, templates, wfTemplates, inventories] = await Promise.all([
+        const [jobs, templates, wfTemplates, inventories, terraformTemplates] = await Promise.all([
           requestGet<AwxItemsResponse<{ id: number; name: string; type: string; status?: string }>>(
             awxAPI`/unified_jobs/?name__icontains=${query.trim()}&not__launch_type=sync&order_by=-finished&page_size=5`
           ).catch(() => ({ results: [] })),
@@ -117,6 +120,9 @@ export function AwxGlobalSearch() {
           ).catch(() => ({ results: [] })),
           requestGet<AwxItemsResponse<{ id: number; name: string }>>(
             awxAPI`/inventories/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+          ).catch(() => ({ results: [] })),
+          requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+            awxAPI`/terraform_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
           ).catch(() => ({ results: [] })),
         ]);
 
@@ -154,6 +160,14 @@ export function AwxGlobalSearch() {
             routeParams: { id: inv.id },
             icon: categoryIcon('inventory'),
           })),
+          ...(terraformTemplates.results ?? []).map((tf) => ({
+            id: tf.id,
+            name: tf.name,
+            type: 'terraform_template' as const,
+            route: AwxRoute.TerraformTemplateDetails,
+            routeParams: { id: tf.id },
+            icon: categoryIcon('terraform_template'),
+          })),
         ];
         setResults(combined);
         setSelectedIndex(0);
@@ -190,7 +204,7 @@ export function AwxGlobalSearch() {
     return acc;
   }, {});
 
-  const typeOrder: SearchResultItem['type'][] = ['job', 'template', 'workflow_template', 'inventory'];
+  const typeOrder: SearchResultItem['type'][] = ['job', 'template', 'workflow_template', 'inventory', 'terraform_template'];
 
   return (
     <>

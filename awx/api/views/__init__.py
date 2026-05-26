@@ -6,6 +6,7 @@ import dateutil
 import functools
 import html
 import itertools
+import json
 import logging
 import re
 import requests
@@ -5234,7 +5235,14 @@ class CatalogItemDeploy(GenericAPIView):
         extra_vars = request.data.get('extra_vars', None)
 
         workflow_job = None
-        if item.provision_workflow:
+        terraform_job = None
+        if item.terraform_job_template:
+            launch_kwargs = {}
+            if extra_vars:
+                launch_kwargs['extra_vars'] = extra_vars if isinstance(extra_vars, str) else json.dumps(extra_vars)
+            terraform_job = item.terraform_job_template.create_unified_job(**launch_kwargs)
+            terraform_job.signal_start()
+        elif item.provision_workflow:
             launch_kwargs = {}
             if extra_vars:
                 launch_kwargs['extra_vars'] = extra_vars
@@ -5245,8 +5253,9 @@ class CatalogItemDeploy(GenericAPIView):
             catalog_item=item,
             name=name,
             owner=request.user,
-            status='provisioning' if workflow_job else 'active',
+            status='provisioning' if (workflow_job or terraform_job) else 'active',
             provision_job=workflow_job,
+            terraform_provision_job=terraform_job,
             extra_vars=extra_vars,
         )
 

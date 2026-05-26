@@ -111,6 +111,11 @@ function CatalogItemCard({
             {t('Org: {{name}}', { name: item.summary_fields.organization.name })}
           </p>
         )}
+        {item.summary_fields?.terraform_job_template && (
+          <p style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: 'var(--pf-global--Color--200)' }}>
+            {t('Terraform: {{name}}', { name: item.summary_fields.terraform_job_template.name })}
+          </p>
+        )}
       </CardBody>
       <CardFooter>
         <Button

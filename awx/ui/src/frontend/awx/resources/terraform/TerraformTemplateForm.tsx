@@ -5,7 +5,6 @@ import {
   PageFormSubmitHandler,
   PageHeader,
   PageLayout,
-  useGetPageUrl,
   usePageNavigate,
 } from '../../../../framework';
 import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFormTextInput';
@@ -19,39 +18,71 @@ import { requestPatch, postRequest } from '../../../common/crud/Data';
 import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { TerraformJobTemplate } from '../../interfaces/TerraformJobTemplate';
+import { Credential } from '../../interfaces/Credential';
+import { PageFormCredentialSelect } from '../../access/credentials/components/PageFormCredentialSelect';
+import { PageFormProjectSelect } from '../projects/components/PageFormProjectSelect';
+import { PageFormInventorySelect } from '../inventories/components/PageFormInventorySelect';
+import { getAddedAndRemoved } from '../../common/util/getAddedAndRemoved';
+import { Project } from '../../interfaces/Project';
+import { Inventory } from '../../interfaces/Inventory';
 
 interface TerraformTemplateFormValues {
   name: string;
   description: string;
-  project: number | '';
+  project: Project | null;
   terraform_dir: string;
   extra_vars: string;
   verbosity: 0 | 1 | 2 | 3 | 4;
   terraform_operation: 'apply' | 'plan' | 'destroy';
-  target_inventory: number | '';
+  target_inventory: Inventory | null;
   target_group: string;
   timeout: number;
   ask_variables_on_launch: boolean;
   ask_inventory_on_launch: boolean;
   ask_terraform_operation_on_launch: boolean;
+  credentials: Pick<Credential, 'id' | 'name' | 'description' | 'kind' | 'cloud'>[];
 }
 
 function defaultValues(template?: TerraformJobTemplate): TerraformTemplateFormValues {
   return {
     name: template?.name ?? '',
     description: template?.description ?? '',
-    project: template?.project ?? '',
+    project: (template?.summary_fields?.project as unknown as Project) ?? null,
     terraform_dir: template?.terraform_dir ?? '.',
     extra_vars: template?.extra_vars ?? '',
     verbosity: template?.verbosity ?? 0,
     terraform_operation: template?.terraform_operation ?? 'apply',
-    target_inventory: template?.target_inventory ?? '',
+    target_inventory: (template?.summary_fields?.target_inventory as unknown as Inventory) ?? null,
     target_group: template?.target_group ?? '',
     timeout: template?.timeout ?? 0,
     ask_variables_on_launch: template?.ask_variables_on_launch ?? false,
     ask_inventory_on_launch: template?.ask_inventory_on_launch ?? false,
     ask_terraform_operation_on_launch: template?.ask_terraform_operation_on_launch ?? false,
+    credentials: template?.summary_fields?.credentials ?? [],
   };
+}
+
+async function submitCredentials(
+  templateId: number,
+  existingCredentials: Pick<Credential, 'id'>[],
+  newCredentials: Pick<Credential, 'id'>[]
+) {
+  const { added, removed } = getAddedAndRemoved(existingCredentials, newCredentials);
+  await Promise.all(
+    removed.map((cred) =>
+      postRequest(awxAPI`/terraform_job_templates/${templateId.toString()}/credentials/`, {
+        id: cred.id,
+        disassociate: true,
+      })
+    )
+  );
+  await Promise.all(
+    added.map((cred) =>
+      postRequest(awxAPI`/terraform_job_templates/${templateId.toString()}/credentials/`, {
+        id: cred.id,
+      })
+    )
+  );
 }
 
 export function CreateTerraformTemplate() {
@@ -59,15 +90,19 @@ export function CreateTerraformTemplate() {
   const pageNavigate = usePageNavigate();
 
   const onSubmit: PageFormSubmitHandler<TerraformTemplateFormValues> = async (values) => {
+    const { credentials, ...rest } = values;
     const payload = {
-      ...values,
-      project: values.project === '' ? null : Number(values.project),
-      target_inventory: values.target_inventory === '' ? null : Number(values.target_inventory),
+      ...rest,
+      project: values.project?.id ?? null,
+      target_inventory: values.target_inventory?.id ?? null,
     };
-    const created = await postRequest<Partial<TerraformTemplateFormValues>, TerraformJobTemplate>(
+    const created = await postRequest<TerraformJobTemplate, typeof payload>(
       awxAPI`/terraform_job_templates/`,
       payload
     );
+    if (credentials?.length > 0) {
+      await submitCredentials(created.id, [], credentials);
+    }
     pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id: created.id } });
   };
 
@@ -106,14 +141,20 @@ export function EditTerraformTemplate() {
   if (!template) return <LoadingPage />;
 
   const onSubmit: PageFormSubmitHandler<TerraformTemplateFormValues> = async (values) => {
+    const { credentials, ...rest } = values;
     const payload = {
-      ...values,
-      project: values.project === '' ? null : Number(values.project),
-      target_inventory: values.target_inventory === '' ? null : Number(values.target_inventory),
+      ...rest,
+      project: values.project?.id ?? null,
+      target_inventory: values.target_inventory?.id ?? null,
     };
-    await requestPatch<Partial<TerraformTemplateFormValues>>(
+    await requestPatch<typeof payload>(
       awxAPI`/terraform_job_templates/${id}/`,
       payload
+    );
+    await submitCredentials(
+      template.id,
+      template.summary_fields?.credentials ?? [],
+      credentials
     );
     pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id } });
   };
@@ -161,73 +202,100 @@ function TerraformTemplateFormInputs() {
 
   return (
     <>
-      <PageFormTextInput
+      <PageFormTextInput<TerraformTemplateFormValues>
         name="name"
         label={t('Name')}
         isRequired
         maxLength={512}
+        placeholder={t('Add a name for this template')}
       />
-      <PageFormTextArea
+      <PageFormTextInput<TerraformTemplateFormValues>
         name="description"
         label={t('Description')}
+        placeholder={t('Add a description for this template')}
       />
-      <PageFormTextInput
+      <PageFormProjectSelect<TerraformTemplateFormValues>
         name="project"
-        label={t('Project')}
-        helperText={t('Enter the numeric ID of the project that contains the Terraform configuration files.')}
-        type="number"
-      />
-      <PageFormTextInput
-        name="terraform_dir"
-        label={t('Terraform Directory')}
-        helperText={t('Path within the project to the directory containing the Terraform root module. Use "." for the repository root.')}
-        placeholder="."
-      />
-      <PageFormSelect
-        name="terraform_operation"
-        label={t('Default Operation')}
-        options={operationOptions}
         isRequired
       />
-      <PageFormSelect
+      <PageFormTextInput<TerraformTemplateFormValues>
+        name="terraform_dir"
+        label={t('Terraform directory')}
+        labelHelpTitle={t('Terraform directory')}
+        labelHelp={t(
+          'Path within the project to the directory containing the Terraform root module. Use "." for the repository root (default).'
+        )}
+        placeholder="."
+      />
+      <PageFormSelect<TerraformTemplateFormValues>
+        name="terraform_operation"
+        label={t('Terraform operation')}
+        labelHelpTitle={t('Terraform operation')}
+        labelHelp={t('Select the Terraform operation to run: apply, plan, or destroy.')}
+        options={operationOptions}
+        isRequired
+        additionalControls={
+          <PageFormCheckbox
+            label={t('Prompt on launch')}
+            name="ask_terraform_operation_on_launch"
+          />
+        }
+      />
+      <PageFormSelect<TerraformTemplateFormValues>
         name="verbosity"
         label={t('Verbosity')}
+        labelHelpTitle={t('Verbosity')}
+        labelHelp={t('Control the level of output Terraform will produce as it executes.')}
         options={verbosityOptions}
       />
-      <PageFormTextArea
-        name="extra_vars"
-        label={t('Extra Variables')}
-        helperText={t('Variables passed to Terraform as a tfvars file. Accepts JSON or YAML key/value pairs.')}
-        style={{ fontFamily: 'monospace' }}
+      <PageFormCredentialSelect<TerraformTemplateFormValues>
+        name="credentials"
+        label={t('Credentials')}
+        placeholder={t('Select credentials')}
+        labelHelp={t(
+          'Select credentials that provide environment variables for the Terraform provider (e.g. Proxmox VE, AWS, Azure). You can attach multiple credentials of different types.'
+        )}
+        isMultiple
+        allowDuplicateCredentialTypes={false}
       />
-      <PageFormTextInput
+      <PageFormInventorySelect<TerraformTemplateFormValues>
         name="target_inventory"
-        label={t('Target Inventory')}
-        helperText={t('Numeric ID of the inventory to populate after a successful apply.')}
-        type="number"
+        labelHelp={t(
+          'Optional. After a successful apply, AWX will read Terraform output variables and register hosts named "host_ip_*" into this inventory.'
+        )}
+        additionalControls={
+          <PageFormCheckbox label={t('Prompt on launch')} name="ask_inventory_on_launch" />
+        }
       />
-      <PageFormTextInput
+      <PageFormTextInput<TerraformTemplateFormValues>
         name="target_group"
-        label={t('Target Group')}
-        helperText={t('Inventory group to add provisioned hosts to. Created automatically if it does not exist.')}
+        label={t('Target group')}
+        labelHelpTitle={t('Target group')}
+        labelHelp={t(
+          'Inventory group to add provisioned hosts to after a successful apply. Created automatically if it does not exist.'
+        )}
+        placeholder={t('Add an inventory group name')}
       />
-      <PageFormTextInput
+      <PageFormTextInput<TerraformTemplateFormValues>
         name="timeout"
         label={t('Timeout')}
+        labelHelpTitle={t('Timeout')}
+        labelHelp={t(
+          'The number of seconds to run before the job is cancelled. Zero (the default) means no timeout.'
+        )}
         type="number"
-        helperText={t('Number of seconds before the job is cancelled. 0 means no timeout.')}
+        placeholder={t('Add a timeout value')}
       />
-      <PageFormCheckbox
-        name="ask_variables_on_launch"
-        label={t('Prompt for variables on launch')}
-      />
-      <PageFormCheckbox
-        name="ask_inventory_on_launch"
-        label={t('Prompt for inventory on launch')}
-      />
-      <PageFormCheckbox
-        name="ask_terraform_operation_on_launch"
-        label={t('Prompt for operation on launch')}
+      <PageFormTextArea<TerraformTemplateFormValues>
+        name="extra_vars"
+        label={t('Extra variables')}
+        labelHelpTitle={t('Extra variables')}
+        labelHelp={t(
+          'Key/value pairs to pass to Terraform as a tfvars file. Accepts JSON or YAML format. Survey variables and launch-time overrides are merged in automatically.'
+        )}
+        additionalControls={
+          <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+        }
       />
     </>
   );
