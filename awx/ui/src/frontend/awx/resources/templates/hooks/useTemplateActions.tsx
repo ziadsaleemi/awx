@@ -15,6 +15,7 @@ import {
   useGetPageUrl,
 } from '../../../../../framework';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import { AwxRoute } from '../../../main/AwxRoutes';
 import { useDeleteTemplates } from '../hooks/useDeleteTemplates';
@@ -22,7 +23,7 @@ import { useLaunchTemplate } from './useLaunchTemplate';
 import { useCopyTemplate } from './useCopyTemplate';
 import { missingResources } from './useTemplateColumns';
 
-type Template = JobTemplate | WorkflowJobTemplate;
+type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate;
 type TemplateActionOptions = {
   onTemplatesDeleted: (templates: Template[]) => void;
   onTemplateCopied?: () => unknown;
@@ -80,7 +81,9 @@ export function useTemplateActions({
           getPageUrl(
             template.type === 'job_template'
               ? AwxRoute.EditJobTemplate
-              : AwxRoute.EditWorkflowJobTemplate,
+              : template.type === 'terraform_job_template'
+                ? AwxRoute.EditTerraformTemplate
+                : AwxRoute.EditWorkflowJobTemplate,
             { params: { id: template?.id.toString() } }
           ),
       },
@@ -89,6 +92,7 @@ export function useTemplateActions({
         selection: PageActionSelection.Single,
         icon: CopyIcon,
         label: t('Copy template'),
+        isHidden: (template) => template?.type === 'terraform_job_template',
         onClick: (template: Template) => copyTemplate(template),
         isDisabled: (template: Template) =>
           !template?.summary_fields.user_capabilities.copy

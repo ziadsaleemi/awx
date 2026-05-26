@@ -21,6 +21,7 @@ import {
   useTypeColumn,
 } from '../../../../common/columns';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import { SummaryFieldRecentJob } from '../../../interfaces/summary-fields/summary-fields';
 import { AwxRoute } from '../../../main/AwxRoutes';
@@ -50,7 +51,7 @@ function useActivityColumn() {
   return column;
 }
 
-export const missingResources = (template: JobTemplate | WorkflowJobTemplate) =>
+export const missingResources = (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate) =>
   template.type === 'job_template' &&
   (!template?.summary_fields.project ||
     (!template?.summary_fields.inventory && !template?.ask_inventory_on_launch));
@@ -58,9 +59,14 @@ export const missingResources = (template: JobTemplate | WorkflowJobTemplate) =>
 export function useTemplateColumns(options?: { disableSort?: boolean; disableLinks?: boolean }) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
-  const makeReadable: (template: JobTemplate | WorkflowJobTemplate) => string = (template) => {
+  const makeReadable: (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate) => string = (
+    template
+  ) => {
     if (template.type === 'workflow_job_template') {
       return t('Workflow job template');
+    }
+    if (template.type === 'terraform_job_template') {
+      return t('Terraform template');
     }
     return t('Job template');
   };
@@ -76,23 +82,25 @@ export function useTemplateColumns(options?: { disableSort?: boolean; disableLin
   const executionEnvColumn = useExecutionEnvColumn(AwxRoute.ExecutionEnvironments, options);
 
   const lastRanColumn = useLastRanColumn(options);
-  const typeOfTemplate = useTypeColumn<JobTemplate | WorkflowJobTemplate>({
+  const typeOfTemplate = useTypeColumn<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>({
     ...options,
     makeReadable,
   });
 
-  const tableColumns = useMemo<ITableColumn<JobTemplate | WorkflowJobTemplate>[]>(
+  const tableColumns = useMemo<ITableColumn<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]>(
     () => [
       {
         header: t('Name'),
-        cell: (template: JobTemplate | WorkflowJobTemplate) => (
+        cell: (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate) => (
           <Split hasGutter>
             <TextCell
               text={template.name}
               to={getPageUrl(
                 template.type === 'job_template'
                   ? AwxRoute.JobTemplateDetails
-                  : AwxRoute.WorkflowJobTemplateDetails,
+                  : template.type === 'terraform_job_template'
+                    ? AwxRoute.TerraformTemplateDetails
+                    : AwxRoute.WorkflowJobTemplateDetails,
                 { params: { id: template.id } }
               )}
             />

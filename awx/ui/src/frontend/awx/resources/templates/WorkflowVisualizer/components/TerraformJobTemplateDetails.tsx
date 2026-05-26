@@ -19,8 +19,10 @@ export function TerraformJobTemplateDetails({
   const getPageUrl = useGetPageUrl();
 
   const { resource: nodeValues } = node;
-  const extraVars =
-    nodeValues?.extra_data ? jsonToYaml(JSON.stringify(nodeValues.extra_data)) : template.extra_vars;
+  const nodeExtraVars = nodeValues?.extra_data
+    ? jsonToYaml(JSON.stringify(nodeValues.extra_data))
+    : '';
+  const templateExtraVars = template.extra_vars || '';
 
   const { data: project } = useGet<{ id: number; name: string }>(
     template.project ? awxAPI`/projects/${template.project.toString()}/` : null
@@ -32,7 +34,7 @@ export function TerraformJobTemplateDetails({
         {project ? (
           <TextCell
             text={project.name}
-            to={getPageUrl(AwxRoute.ProjectPage, { params: { id: project.id } })}
+            to={getPageUrl(AwxRoute.ProjectDetails, { params: { id: project.id } })}
           />
         ) : (
           template.summary_fields?.project?.name ?? ''
@@ -51,7 +53,7 @@ export function TerraformJobTemplateDetails({
         <PageDetail label={t('Target inventory')}>
           <TextCell
             text={template.summary_fields.target_inventory.name}
-            to={getPageUrl(AwxRoute.InventoryPage, {
+            to={getPageUrl(AwxRoute.InventoryDetails, {
               params: { id: template.summary_fields.target_inventory.id },
             })}
           />
@@ -69,7 +71,7 @@ export function TerraformJobTemplateDetails({
         />
       </PageDetail>
 
-      <NodeCodeEditorDetail label={t('Variables')} value={extraVars} />
+      <NodeCodeEditorDetail label={t('Variables')} nodeExtraVars={nodeExtraVars} templateExtraVars={templateExtraVars} />
     </>
   );
 }

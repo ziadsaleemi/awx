@@ -6,22 +6,25 @@ import { getItemKey, requestDelete } from '../../../../common/crud/Data';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxBulkConfirmation } from '../../../common/useAwxBulkConfirmation';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import { useTemplateColumns } from './useTemplateColumns';
 
 export function useDeleteTemplates(
-  onComplete: (templates: (JobTemplate | WorkflowJobTemplate)[]) => void
+  onComplete: (templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]) => void
 ) {
   const { t } = useTranslation();
   const confirmationColumns = useTemplateColumns({ disableLinks: true, disableSort: true });
   const deleteActionNameColumn = useNameColumn({ disableLinks: true, disableSort: true });
   const actionColumns = useMemo(() => [deleteActionNameColumn], [deleteActionNameColumn]);
-  const bulkAction = useAwxBulkConfirmation<JobTemplate | WorkflowJobTemplate>();
+  const bulkAction = useAwxBulkConfirmation<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>();
   const getSingularDeleteTitle = (type: string) =>
     type === 'job_template'
       ? t('Permanently delete job template')
-      : t('Permanently delete workflow job template');
-  const deleteTemplates = (templates: (JobTemplate | WorkflowJobTemplate)[]) => {
+      : type === 'terraform_job_template'
+        ? t('Permanently delete terraform template')
+        : t('Permanently delete workflow job template');
+  const deleteTemplates = (templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]) => {
     bulkAction({
       title:
         templates.length === 1
@@ -39,9 +42,11 @@ export function useDeleteTemplates(
       confirmationColumns,
       actionColumns,
       onComplete,
-      actionFn: (template: JobTemplate | WorkflowJobTemplate, signal) => {
+      actionFn: (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate, signal) => {
         if (template.type === 'job_template') {
           return requestDelete(awxAPI`/job_templates/${template.id.toString()}/`, signal);
+        } else if (template.type === 'terraform_job_template') {
+          return requestDelete(awxAPI`/terraform_job_templates/${template.id.toString()}/`, signal);
         } else {
           return requestDelete(awxAPI`/workflow_job_templates/${template.id.toString()}/`, signal);
         }

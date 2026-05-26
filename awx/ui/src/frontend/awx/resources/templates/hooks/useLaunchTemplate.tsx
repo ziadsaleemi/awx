@@ -5,13 +5,14 @@ import { requestGet } from '../../../../common/crud/Data';
 import { usePostRequest } from '../../../../common/crud/usePostRequest';
 import { awxAPI } from '../../../common/api/awx-utils';
 import type { JobTemplate } from '../../../interfaces/JobTemplate';
+import type { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import type { UnifiedJob } from '../../../interfaces/UnifiedJob';
 import type { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import type { JobLaunch, WorkflowJobLaunch } from '../../../interfaces/generated-from-swagger/api';
 import { AwxRoute } from '../../../main/AwxRoutes';
 import { useGetJobOutputUrl } from '../../../views/jobs/useGetJobOutputUrl';
 
-type Template = JobTemplate | WorkflowJobTemplate;
+type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate;
 type TemplateLaunch = JobLaunch & WorkflowJobLaunch;
 
 export function useLaunchTemplate() {
@@ -39,7 +40,9 @@ export function useLaunchTemplate() {
         const awxRoute =
           template.type === 'workflow_job_template'
             ? AwxRoute.WorkflowJobTemplateLaunchWizard
-            : AwxRoute.TemplateLaunchWizard;
+            : template.type === 'terraform_job_template'
+              ? AwxRoute.TerraformTemplateLaunch
+              : AwxRoute.TemplateLaunchWizard;
 
         pageNavigate(awxRoute, {
           params: { id: template.id },
@@ -86,6 +89,8 @@ export function getLaunchEndpoint(template: Template) {
     return awxAPI`/job_templates/${template.id.toString()}/launch/`;
   } else if (template.type === 'workflow_job_template') {
     return awxAPI`/workflow_job_templates/${template.id.toString()}/launch/`;
+  } else if (template.type === 'terraform_job_template') {
+    return awxAPI`/terraform_job_templates/${template.id.toString()}/launch/`;
   } else {
     return undefined;
   }

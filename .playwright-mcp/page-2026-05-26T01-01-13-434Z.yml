@@ -1,0 +1,115 @@
+- generic [ref=e1]:
+  - generic [ref=e9]:
+    - banner [ref=e10]:
+      - button "Global navigation" [expanded] [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+      - link "Custom logo" [ref=e543] [cursor=pointer]:
+        - /url: /
+        - img "Custom logo" [ref=e544]
+      - generic [ref=e22]:
+        - button [ref=e25] [cursor=pointer]:
+          - img [ref=e26]
+        - button "Search" [ref=e29] [cursor=pointer]:
+          - img [ref=e30]
+        - button [ref=e33] [cursor=pointer]:
+          - img [ref=e34]
+        - button [ref=e37] [cursor=pointer]:
+          - img [ref=e39]
+        - button "Activity Stream" [ref=e42] [cursor=pointer]:
+          - img [ref=e43]
+        - generic [ref=e47] [cursor=pointer]:
+          - generic [ref=e48]: 0 jobs
+          - generic [ref=e51]: 0%
+        - button [ref=e54] [cursor=pointer]:
+          - img [ref=e58]
+        - button "admin" [ref=e62] [cursor=pointer]:
+          - generic [ref=e64]:
+            - img [ref=e68]
+            - generic [ref=e70]: admin
+    - navigation "Global" [ref=e486]:
+      - list [ref=e487]:
+        - listitem [ref=e488]:
+          - link "Overview" [ref=e489] [cursor=pointer]:
+            - /url: /overview
+            - generic [ref=e490]:
+              - img [ref=e72]
+              - generic [ref=e492]: Overview
+        - listitem [ref=e493]:
+          - link "Jobs" [ref=e494] [cursor=pointer]:
+            - /url: /jobs
+            - generic [ref=e496]: Jobs
+        - listitem [ref=e497]:
+          - link "Templates" [ref=e498] [cursor=pointer]:
+            - /url: /templates
+            - generic [ref=e500]: Templates
+        - listitem [ref=e501]:
+          - link "Schedules" [ref=e502] [cursor=pointer]:
+            - /url: /schedules
+            - generic [ref=e504]: Schedules
+        - listitem [ref=e505]:
+          - link "Projects" [ref=e506] [cursor=pointer]:
+            - /url: /projects
+            - generic [ref=e508]: Projects
+        - listitem [ref=e509]:
+          - link "Terraform Templates" [ref=e510] [cursor=pointer]:
+            - /url: /terraform-templates
+            - generic [ref=e512]: Terraform Templates
+        - listitem [ref=e513]:
+          - button "Catalog" [expanded] [ref=e514] [cursor=pointer]:
+            - generic [ref=e82]: Catalog
+            - img [ref=e85]
+          - region "Catalog" [ref=e515]:
+            - list [ref=e516]:
+              - listitem [ref=e517]:
+                - link "Browse" [active] [ref=e518] [cursor=pointer]:
+                  - /url: /catalog/browse
+                  - generic [ref=e520]: Browse
+              - listitem [ref=e521]:
+                - link "My Deployments" [ref=e522] [cursor=pointer]:
+                  - /url: /catalog/deployments
+                  - generic [ref=e524]: My Deployments
+              - listitem [ref=e525]:
+                - link "Items (Admin)" [ref=e526] [cursor=pointer]:
+                  - /url: /catalog/admin/items
+                  - generic [ref=e528]: Items (Admin)
+              - listitem [ref=e529]:
+                - link "All Deployments" [ref=e530] [cursor=pointer]:
+                  - /url: /catalog/admin/deployments
+                  - generic [ref=e532]: All Deployments
+        - listitem [ref=e533]:
+          - button "Infrastructure" [ref=e534] [cursor=pointer]:
+            - generic [ref=e90]: Infrastructure
+            - img [ref=e93]
+        - listitem [ref=e535]:
+          - button "Analytics" [ref=e536] [cursor=pointer]:
+            - generic [ref=e98]: Analytics
+            - img [ref=e101]
+        - listitem [ref=e537]:
+          - button "Administration" [ref=e538] [cursor=pointer]:
+            - generic [ref=e106]: Administration
+            - img [ref=e109]
+        - listitem [ref=e539]:
+          - button "Access Management" [ref=e540] [cursor=pointer]:
+            - generic [ref=e114]: Access Management
+            - img [ref=e117]
+        - listitem [ref=e541]:
+          - button "Settings" [ref=e542] [cursor=pointer]:
+            - generic [ref=e122]: Settings
+            - img [ref=e125]
+    - main [ref=e127]:
+      - generic [ref=e545]:
+        - generic [ref=e549]:
+          - heading "Service Catalog" [level=1] [ref=e550]
+          - generic [ref=e551]: Browse and deploy available catalog items.
+        - generic [ref=e555]:
+          - generic [ref=e558]:
+            - img [ref=e559]
+            - generic [ref=e562]: Apache on Proxmox VM
+          - generic [ref=e563]:
+            - text: Provisions a Proxmox VM via Terraform then installs Apache web server via Ansible. Deprovisioning destroys the VM with terraform destroy.
+            - paragraph [ref=e564]: "Org: Default"
+          - generic [ref=e565]:
+            - button "Deploy" [disabled]
+  - generic:
+    - list
+  - img [ref=e481]

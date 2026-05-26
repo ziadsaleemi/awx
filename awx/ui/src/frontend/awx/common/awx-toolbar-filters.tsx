@@ -244,6 +244,7 @@ export function useTemplateTypeToolbarFilter() {
       options: [
         { label: t('Job template'), value: 'job_template' },
         { label: t('Workflow job template'), value: 'workflow_job_template' },
+        { label: t('Terraform template'), value: 'terraform_job_template' },
       ],
       placeholder: t('Select types'),
     }),

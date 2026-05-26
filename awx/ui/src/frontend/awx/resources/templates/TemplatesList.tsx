@@ -13,6 +13,7 @@ import {
 import { usePersistentFilters } from '../../../common/PersistentFilters';
 import { useAwxView } from '../../common/useAwxView';
 import { JobTemplate } from '../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../interfaces/WorkflowJobTemplate';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { useDeleteTemplates } from './hooks/useDeleteTemplates';
@@ -48,7 +49,7 @@ export function TemplatesList(props: {
     executionEnvironmentId?: string
   ) => {
     const templateQueryParams: { [key: string]: string } = {
-      type: 'job_template,workflow_job_template',
+      type: 'job_template,workflow_job_template,terraform_job_template',
       // order_by: '-last_job_run',
     };
     if (projectId) {
@@ -65,7 +66,7 @@ export function TemplatesList(props: {
     }
     return templateQueryParams;
   };
-  const view = useAwxView<JobTemplate | WorkflowJobTemplate>({
+  const view = useAwxView<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>({
     url: props.url ? props.url : awxAPI`/unified_job_templates/`,
     queryParams: getQueryParams(
       props.projectId,
@@ -85,6 +86,10 @@ export function TemplatesList(props: {
     awxAPI`/workflow_job_templates/`
   );
 
+  const { data: terraformTemplateActions } = useOptions<OptionsResponse<ActionsResponse>>(
+    awxAPI`/terraform_job_templates/`
+  );
+
   const canCreateJobTemplate = Boolean(
     jobTemplateActions && jobTemplateActions.actions && jobTemplateActions.actions['POST']
   );
@@ -93,10 +98,16 @@ export function TemplatesList(props: {
     wfJobTemplateActions && wfJobTemplateActions.actions && wfJobTemplateActions.actions['POST']
   );
 
+  const canCreateTerraformTemplate = Boolean(
+    terraformTemplateActions &&
+      terraformTemplateActions.actions &&
+      terraformTemplateActions.actions['POST']
+  );
+
   usePersistentFilters('templates');
   const deleteTemplates = useDeleteTemplates(view.unselectItemsAndRefresh);
 
-  const toolbarActions = useMemo<IPageAction<JobTemplate | WorkflowJobTemplate>[]>(
+  const toolbarActions = useMemo<IPageAction<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]>(
     () => [
       {
         type: PageActionType.Dropdown,
@@ -104,7 +115,7 @@ export function TemplatesList(props: {
         isPinned: true,
         label: t('Create template'),
         isDisabled:
-          canCreateJobTemplate || canCreateWFJobTemplate
+          canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
             ? undefined
             : t(
                 'You do not have permission to create a template. Please contact your organization administrator if there is an issue with your access.'
@@ -130,6 +141,15 @@ export function TemplatesList(props: {
               : 'You do not have permission to create a workflow job template. Please contact your organization administrator if there is an issue with your access.',
             href: getPageUrl(AwxRoute.CreateWorkflowJobTemplate),
           },
+          {
+            type: PageActionType.Link,
+            selection: PageActionSelection.None,
+            label: t('Create terraform template'),
+            isDisabled: canCreateTerraformTemplate
+              ? undefined
+              : 'You do not have permission to create a terraform template. Please contact your organization administrator if there is an issue with your access.',
+            href: getPageUrl(AwxRoute.CreateTerraformTemplate),
+          },
         ],
       },
       {
@@ -141,7 +161,7 @@ export function TemplatesList(props: {
         isDanger: true,
       },
     ],
-    [canCreateJobTemplate, canCreateWFJobTemplate, deleteTemplates, getPageUrl, t]
+    [canCreateJobTemplate, canCreateWFJobTemplate, canCreateTerraformTemplate, deleteTemplates, getPageUrl, t]
   );
 
   const rowActions = useTemplateActions({
@@ -150,7 +170,7 @@ export function TemplatesList(props: {
   });
 
   return (
-    <PageTable<JobTemplate | WorkflowJobTemplate>
+    <PageTable<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>
       id="awx-job-templates-table"
       toolbarFilters={toolbarFilters}
       toolbarActions={toolbarActions}
@@ -158,12 +178,12 @@ export function TemplatesList(props: {
       rowActions={rowActions}
       errorStateTitle={t('Error loading templates')}
       emptyStateTitle={
-        canCreateJobTemplate || canCreateWFJobTemplate
+        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
           ? t('No templates yet')
           : t('You do not have permission to create a template')
       }
       emptyStateDescription={
-        canCreateJobTemplate || canCreateWFJobTemplate
+        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
           ? t('Please create a template by using the button below.')
           : t(
               'Please contact your organization administrator if there is an issue with your access.'
@@ -171,10 +191,14 @@ export function TemplatesList(props: {
       }
       emptyStateButtonIcon={<PlusCircleIcon />}
       emptyStateButtonText={
-        canCreateJobTemplate || canCreateWFJobTemplate ? t('Create template') : undefined
+        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
+          ? t('Create template')
+          : undefined
       }
       emptyStateButtonClick={
-        canCreateJobTemplate ? () => pageNavigate(AwxRoute.CreateJobTemplate) : undefined
+        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
+          ? () => pageNavigate(AwxRoute.CreateJobTemplate)
+          : undefined
       }
       {...view}
       defaultSubtitle={t('Template')}

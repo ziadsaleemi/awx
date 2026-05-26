@@ -9,14 +9,14 @@ export function NodeCodeEditorDetail({
   templateExtraVars,
 }: {
   label?: string;
-  nodeExtraVars: string;
-  templateExtraVars: string;
+  nodeExtraVars?: string;
+  templateExtraVars?: string;
 }) {
   const { id } = useParams();
   const { t } = useTranslation();
 
-  const value = nodeExtraVars ?? templateExtraVars;
-  const isMatch = value.trim() === templateExtraVars.trim();
+  const value = nodeExtraVars ?? templateExtraVars ?? '';
+  const isMatch = (value?.trim() ?? '') === (templateExtraVars?.trim() ?? '');
 
   return (
     <PromptDetail
