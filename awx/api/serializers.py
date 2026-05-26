@@ -90,6 +90,8 @@ from awx.main.models import (
     Team,
     TerraformJob,
     TerraformJobTemplate,
+    CatalogItem,
+    CatalogDeployment,
     UnifiedJob,
     UnifiedJobTemplate,
     WorkflowApproval,
@@ -3899,6 +3901,87 @@ class TerraformJobCancelSerializer(TerraformJobSerializer):
 
     class Meta:
         fields = ('can_cancel',)
+
+
+class CatalogItemSerializer(BaseSerializer):
+    show_capabilities = ['edit', 'delete']
+
+    class Meta:
+        model = CatalogItem
+        fields = (
+            '*',
+            'organization',
+            'icon_url',
+            'provision_workflow',
+            'deprovision_workflow',
+            'extra_vars_schema',
+        )
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        res['deployments'] = self.reverse('api:catalog_item_deployments_list', kwargs={'pk': obj.pk})
+        res['deploy'] = self.reverse('api:catalog_item_deploy', kwargs={'pk': obj.pk})
+        if obj.provision_workflow_id:
+            res['provision_workflow'] = self.reverse(
+                'api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id}
+            )
+        if obj.deprovision_workflow_id:
+            res['deprovision_workflow'] = self.reverse(
+                'api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id}
+            )
+        return res
+
+    def get_summary_fields(self, obj):
+        d = super().get_summary_fields(obj)
+        if obj.organization_id:
+            d['organization'] = {'id': obj.organization_id, 'name': obj.organization.name}
+        if obj.provision_workflow_id:
+            d['provision_workflow'] = {
+                'id': obj.provision_workflow_id,
+                'name': obj.provision_workflow.name,
+            }
+        if obj.deprovision_workflow_id:
+            d['deprovision_workflow'] = {
+                'id': obj.deprovision_workflow_id,
+                'name': obj.deprovision_workflow.name,
+            }
+        return d
+
+
+class CatalogDeploymentSerializer(BaseSerializer):
+    show_capabilities = ['delete']
+
+    class Meta:
+        model = CatalogDeployment
+        fields = (
+            '*',
+            'catalog_item',
+            'owner',
+            'status',
+            'provision_job',
+            'deprovision_job',
+            'extra_vars',
+        )
+        read_only_fields = ('status', 'provision_job', 'deprovision_job', 'owner')
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        if obj.catalog_item_id:
+            res['catalog_item'] = self.reverse('api:catalog_item_detail', kwargs={'pk': obj.catalog_item_id})
+        if obj.provision_job_id:
+            res['provision_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.provision_job_id})
+        if obj.deprovision_job_id:
+            res['deprovision_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.deprovision_job_id})
+        res['deprovision'] = self.reverse('api:catalog_deployment_deprovision', kwargs={'pk': obj.pk})
+        return res
+
+    def get_summary_fields(self, obj):
+        d = super().get_summary_fields(obj)
+        if obj.catalog_item_id:
+            d['catalog_item'] = {'id': obj.catalog_item_id, 'name': obj.catalog_item.name if obj.catalog_item else ''}
+        if obj.owner_id:
+            d['owner'] = {'id': obj.owner_id, 'username': obj.owner.username if obj.owner else ''}
+        return d
 
 
 class WorkflowJobTemplateSerializer(LabelsListMixin, UnifiedJobTemplateSerializer):

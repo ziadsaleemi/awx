@@ -10,6 +10,7 @@ export function useGetNodeTypeDetail(type?: UnifiedJobType) {
     inventory_update: t('Inventory source'),
     workflow_approval: t('Workflow approval'),
     system_job: t('Management job'),
+    terraform_job: t('Terraform template'),
   };
   if (!type) return null;
   return typeMapping[type];

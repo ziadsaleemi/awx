@@ -74,6 +74,8 @@ from awx.main.models import (
     WorkflowApprovalTemplate,
     TerraformJobTemplate,
     TerraformJob,
+    CatalogItem,
+    CatalogDeployment,
 )
 from awx.main.models.mixins import ResourceMixin
 
@@ -1861,6 +1863,74 @@ class TerraformJobAccess(BaseAccess):
 
     def can_delete(self, obj):
         return self.user.is_superuser
+
+
+class CatalogItemAccess(BaseAccess):
+    """
+    I can see CatalogItems I have read_role on.
+    catalog_admin users (org.admin_role) have full CRUD.
+    catalog_user (org.member_role) can read and deploy items they have use_role on.
+    """
+
+    model = CatalogItem
+    select_related = ('organization', 'provision_workflow', 'deprovision_workflow', 'created_by', 'modified_by')
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'admin_role').exists()
+        return self.check_related('organization', Organization, data, role_field='admin_role')
+
+    def can_change(self, obj, data):
+        if self.user not in obj.admin_role and not self.user.is_superuser:
+            return False
+        if data is None:
+            return True
+        return self.check_related('organization', Organization, data, obj=obj, role_field='admin_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or self.user in obj.admin_role
+
+    def can_use(self, obj):
+        return self.user.is_superuser or self.user in obj.use_role
+
+
+class CatalogDeploymentAccess(BaseAccess):
+    """
+    I can see CatalogDeployments I own, or all deployments if I have catalog admin.
+    """
+
+    model = CatalogDeployment
+    select_related = ('catalog_item', 'owner', 'provision_job', 'deprovision_job')
+
+    def filtered_queryset(self):
+        if self.user.is_superuser:
+            return CatalogDeployment.objects.all()
+        admin_items = CatalogItem.accessible_pk_qs(self.user, 'admin_role')
+        return CatalogDeployment.objects.filter(
+            Q(owner=self.user) | Q(catalog_item__in=admin_items)
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return False
+        item_id = data.get('catalog_item')
+        if not item_id:
+            return False
+        try:
+            item = CatalogItem.objects.get(pk=item_id)
+        except CatalogItem.DoesNotExist:
+            return False
+        return self.user in item.use_role
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or (
+            obj.owner == self.user and obj.status in ('destroyed', 'failed')
+        )
 
 
 class JobLaunchConfigAccess(UnifiedCredentialsMixin, BaseAccess):

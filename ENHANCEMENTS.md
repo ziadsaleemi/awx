@@ -133,7 +133,7 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | C3 | **Launch dialog** — reuse existing `LaunchPrompt` pattern; shows survey + extra-vars override before launch | High | ✅ |
 | C4 | **Terraform Job output page** — real-time log streaming; ANSI colour support; separate tabs: `plan` output and `apply` output; "Download log" button | High | ✅ |
 | C5 | **Terraform Job history list** — per-template job runs list; columns: status, operation (apply/destroy/plan), started, duration, triggered by | Medium | ✅ |
-| C6 | **Workflow editor node type** — add Terraform Template as a selectable node type in the workflow visualiser; distinct icon (Terraform logo or wrench) to distinguish from Ansible job nodes | High | ⬜ |
+| C6 | **Workflow editor node type** — add Terraform Template as a selectable node type in the workflow visualiser; distinct icon (Terraform logo or wrench) to distinguish from Ansible job nodes | High | ✅ |
 | C7 | **Sidebar nav entry** — add "Terraform Templates" under the Resources section of the sidebar navigation; use a suitable icon | High | ✅ |
 
 ---
@@ -142,14 +142,14 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| D1 | **`CatalogItem` model** (`awx/main/models/catalog.py`) — fields: `name`, `description`, `icon_url`, `provision_workflow` (FK → `WorkflowJobTemplate`, nullable), `deprovision_workflow` (FK → `WorkflowJobTemplate`, nullable), `extra_vars_schema` (JSON Schema for user-visible parameters), `organization` (FK → Organization) | High | ⬜ |
-| D2 | **`CatalogDeployment` model** — fields: `catalog_item` (FK), `name` (user-supplied label), `owner` (FK → User), `status` choices: `pending` / `provisioning` / `active` / `deprovisioning` / `failed` / `destroyed`; `provision_job` (FK → WorkflowJob, nullable), `deprovision_job` (FK → WorkflowJob, nullable), `extra_vars` (JSON, the values the user filled in at deploy time), `created`, `modified`, `deployed_hosts` (M2M → Host) | High | ⬜ |
-| D3 | **`catalog_user` role** — built-in role; auto-assigned to any user account that has zero explicit role assignments at login time (post-login signal); grants: read-only view of CatalogItems they have visibility to, launch provision workflow on visible items, view own CatalogDeployments | High | ⬜ |
-| D4 | **`catalog_admin` role** — built-in role; grants: full CRUD on CatalogItems and all CatalogDeployments within scope; cannot access non-catalog AWX resources | High | ⬜ |
-| D5 | **Default role assignment signal** — `post_save` / login signal on `User`: if `user.role_memberships.count() == 0` assign `catalog_user`; runs every login so newly-promoted users get upgraded automatically | High | ⬜ |
-| D6 | **DRF API** — `/api/v2/catalog_items/`, `/api/v2/catalog_deployments/`; actions: `POST /catalog_items/{id}/deploy/` (creates CatalogDeployment + launches provision workflow), `POST /catalog_deployments/{id}/deprovision/` (launches deprovision workflow + sets status) | High | ⬜ |
-| D7 | **RBAC access classes** — `CatalogItemAccess`, `CatalogDeploymentAccess`; catalog_admin sees all in org; catalog_user sees items they've been given read access to | High | ⬜ |
-| D8 | **Deployment status tracking** — WorkflowJob completion signal updates `CatalogDeployment.status`; populates `deployed_hosts` from the inventory populated by the Terraform job in the workflow | Medium | ⬜ |
+| D1 | **`CatalogItem` model** (`awx/main/models/catalog.py`) — fields: `name`, `description`, `icon_url`, `provision_workflow` (FK → `WorkflowJobTemplate`, nullable), `deprovision_workflow` (FK → `WorkflowJobTemplate`, nullable), `extra_vars_schema` (JSON Schema for user-visible parameters), `organization` (FK → Organization) | High | ✅ |
+| D2 | **`CatalogDeployment` model** — fields: `catalog_item` (FK), `name` (user-supplied label), `owner` (FK → User), `status` choices: `pending` / `provisioning` / `active` / `deprovisioning` / `failed` / `destroyed`; `provision_job` (FK → WorkflowJob, nullable), `deprovision_job` (FK → WorkflowJob, nullable), `extra_vars` (JSON, the values the user filled in at deploy time), `created`, `modified`, `deployed_hosts` (M2M → Host) | High | ✅ |
+| D3 | **`catalog_user` role** — built-in role; auto-assigned to any user account that has zero explicit role assignments at login time (post-login signal); grants: read-only view of CatalogItems they have visibility to, launch provision workflow on visible items, view own CatalogDeployments | High | ✅ |
+| D4 | **`catalog_admin` role** — built-in role; grants: full CRUD on CatalogItems and all CatalogDeployments within scope; cannot access non-catalog AWX resources | High | ✅ |
+| D5 | **Default role assignment signal** — `post_save` / login signal on `User`: if `user.role_memberships.count() == 0` assign `catalog_user`; runs every login so newly-promoted users get upgraded automatically | High | ✅ |
+| D6 | **DRF API** — `/api/v2/catalog_items/`, `/api/v2/catalog_deployments/`; actions: `POST /catalog_items/{id}/deploy/` (creates CatalogDeployment + launches provision workflow), `POST /catalog_deployments/{id}/deprovision/` (launches deprovision workflow + sets status) | High | ✅ |
+| D7 | **RBAC access classes** — `CatalogItemAccess`, `CatalogDeploymentAccess`; catalog_admin sees all in org; catalog_user sees items they've been given read access to | High | ✅ |
+| D8 | **Deployment status tracking** — WorkflowJob completion signal updates `CatalogDeployment.status`; populates `deployed_hosts` from the inventory populated by the Terraform job in the workflow | Medium | ✅ |
 
 ---
 
@@ -157,14 +157,14 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| E1 | **Catalog browse page** (`/catalog`) — card grid of available `CatalogItem`s; each card shows icon, name, description, "Deploy" button; PatternFly `Gallery` layout | High | ⬜ |
-| E2 | **Deploy form dialog** — wizard: Step 1 extra-vars (JSON Schema-driven form), Step 2 deployment name + confirm; launches provision workflow and creates `CatalogDeployment` | High | ⬜ |
-| E3 | **My Deployments page** (`/catalog/deployments`) — table of own deployments; columns: name, catalog item, status, deployed hosts (count), deployed date; row action: "Deprovision" | High | ⬜ |
-| E4 | **Deployment detail page** — shows deployment vars, workflow job link (with status), list of provisioned hosts with IPs, decommission button | Medium | ⬜ |
-| E5 | **Catalog Admin: Item management** (`/catalog/admin/items`) — CRUD table; create/edit item links provision/deprovision workflows; visible only to catalog_admin + superuser | High | ⬜ |
-| E6 | **Catalog Admin: All Deployments** (`/catalog/admin/deployments`) — same as My Deployments but shows all users' deployments across the org; allows force-deprovision | High | ⬜ |
-| E7 | **Sidebar nav** — new top-level "Catalog" section in sidebar with entries: Browse, My Deployments; Admin sub-section (Items, All Deployments) shown only if user has catalog_admin | High | ⬜ |
-| E8 | **Catalog-only login redirect** — if logged-in user has only `catalog_user` role, redirect from AWX root (`/`) to `/catalog` instead of the usual dashboard | Medium | ⬜ |
+| E1 | **Catalog browse page** (`/catalog`) — card grid of available `CatalogItem`s; each card shows icon, name, description, "Deploy" button; PatternFly `Gallery` layout | High | ✅ |
+| E2 | **Deploy form dialog** — wizard: Step 1 extra-vars (JSON Schema-driven form), Step 2 deployment name + confirm; launches provision workflow and creates `CatalogDeployment` | High | ✅ |
+| E3 | **My Deployments page** (`/catalog/deployments`) — table of own deployments; columns: name, catalog item, status, deployed hosts (count), deployed date; row action: "Deprovision" | High | ✅ |
+| E4 | **Deployment detail page** — shows deployment vars, workflow job link (with status), list of provisioned hosts with IPs, decommission button | Medium | ✅ |
+| E5 | **Catalog Admin: Item management** (`/catalog/admin/items`) — CRUD table; create/edit item links provision/deprovision workflows; visible only to catalog_admin + superuser | High | ✅ |
+| E6 | **Catalog Admin: All Deployments** (`/catalog/admin/deployments`) — same as My Deployments but shows all users' deployments across the org; allows force-deprovision | High | ✅ |
+| E7 | **Sidebar nav** — new top-level "Catalog" section in sidebar with entries: Browse, My Deployments; Admin sub-section (Items, All Deployments) shown only if user has catalog_admin | High | ✅ |
+| E8 | **Catalog-only login redirect** — if logged-in user has only `catalog_user` role, redirect from AWX root (`/`) to `/catalog` instead of the usual dashboard | Medium | ✅ |
 
 ---
 

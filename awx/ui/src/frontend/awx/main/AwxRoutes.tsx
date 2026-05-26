@@ -160,6 +160,20 @@ export enum AwxRoute {
   TerraformJobOutput = 'awx-terraform-job-output',
   TerraformJobDetails = 'awx-terraform-job-details',
 
+  // Catalog
+  Catalog = 'awx-catalog',
+  CatalogItems = 'awx-catalog-items',
+  CatalogItemPage = 'awx-catalog-item-page',
+  CatalogItemDetails = 'awx-catalog-item-details',
+  CreateCatalogItem = 'awx-create-catalog-item',
+  EditCatalogItem = 'awx-edit-catalog-item',
+  CatalogDeploy = 'awx-catalog-deploy',
+  CatalogDeployments = 'awx-catalog-deployments',
+  CatalogDeploymentPage = 'awx-catalog-deployment-page',
+  CatalogDeploymentDetails = 'awx-catalog-deployment-details',
+  CatalogAdminItems = 'awx-catalog-admin-items',
+  CatalogAdminDeployments = 'awx-catalog-admin-deployments',
+
   // Access
   Access = 'awx-access',
 

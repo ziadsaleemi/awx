@@ -80,6 +80,7 @@ from .workflow_approval import urls as workflow_approval_urls
 from .analytics import urls as analytics_urls
 from .receptor_address import urls as receptor_address_urls
 from .terraform_job_template import terraform_job_template_urls, terraform_job_urls
+from .catalog import catalog_item_urls, catalog_deployment_urls
 
 v2_urls = [
     re_path(r'^$', ApiV2RootView.as_view(), name='api_v2_root_view'),
@@ -148,6 +149,8 @@ v2_urls = [
     re_path(r'^receptor_addresses/', include(receptor_address_urls)),
     re_path(r'^terraform_job_templates/', include(terraform_job_template_urls)),
     re_path(r'^terraform_jobs/', include(terraform_job_urls)),
+    re_path(r'^catalog_items/', include(catalog_item_urls)),
+    re_path(r'^catalog_deployments/', include(catalog_deployment_urls)),
 ]
 
 

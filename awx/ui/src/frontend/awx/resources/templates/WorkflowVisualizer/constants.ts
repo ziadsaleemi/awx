@@ -14,4 +14,5 @@ export const RESOURCE_TYPE: Record<UnifiedJobType, UnifiedJobType> = {
   workflow_approval: 'workflow_approval',
   inventory_update: 'inventory_update',
   system_job: 'system_job',
+  terraform_job: 'terraform_job',
 };

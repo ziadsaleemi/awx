@@ -48,6 +48,7 @@ from awx.main.models import (
     WorkflowJobTemplateNode,
     WorkflowApproval,
     WorkflowApprovalTemplate,
+    WorkflowJob,
     ROLE_SINGLETON_SYSTEM_ADMINISTRATOR,
 )
 from awx.main.utils import model_instance_diff, model_to_dict, camelcase_to_underscore, get_current_apps
@@ -593,3 +594,99 @@ def save_user_session_membership(sender, **kwargs):
             membership.delete()
         if len(expired):
             consumers.emit_channel_notification('control-limit_reached_{}'.format(user_id), dict(group_name='control', reason='limit_reached'))
+
+
+# ---------------------------------------------------------------------------
+# Catalog deployment status tracking (Phase D8)
+# ---------------------------------------------------------------------------
+
+def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_job):
+    """
+    Helper: update any CatalogDeployment linked to this workflow job.
+    Imported lazily to avoid circular imports.
+    """
+    from awx.main.models.catalog import CatalogDeployment
+
+    terminal_status = workflow_job.status  # 'successful', 'failed', 'error', 'canceled'
+
+    # --- provision job completed ---
+    for deployment in CatalogDeployment.objects.filter(provision_job_id=workflow_job_id):
+        if terminal_status == 'successful':
+            new_status = 'active'
+            # Populate deployed_hosts from inventory populated by the workflow.
+            _populate_deployed_hosts(deployment, workflow_job)
+        else:
+            new_status = 'failed'
+        deployment.status = new_status
+        deployment.save(update_fields=['status'])
+
+    # --- deprovision job completed ---
+    for deployment in CatalogDeployment.objects.filter(deprovision_job_id=workflow_job_id):
+        if terminal_status == 'successful':
+            new_status = 'destroyed'
+        else:
+            new_status = 'failed'
+        deployment.status = new_status
+        deployment.save(update_fields=['status'])
+
+
+def _populate_deployed_hosts(deployment, workflow_job):
+    """
+    After a successful provision workflow, collect all hosts that were added
+    to the target inventory by the workflow's Terraform job nodes and link them
+    to the deployment.
+    """
+    try:
+        from awx.main.models import WorkflowJobNode, TerraformJob, Host
+
+        terraform_job_ids = (
+            WorkflowJobNode.objects.filter(
+                workflow_job=workflow_job,
+                unified_job__isnull=False,
+            )
+            .values_list('unified_job_id', flat=True)
+        )
+        for job in TerraformJob.objects.filter(id__in=terraform_job_ids, target_inventory__isnull=False):
+            hosts = Host.objects.filter(inventory_id=job.target_inventory_id)
+            deployment.deployed_hosts.add(*hosts)
+    except Exception:
+        logger.exception('Error populating deployed_hosts for CatalogDeployment %s', deployment.pk)
+
+
+@receiver(post_save, sender=WorkflowJob)
+def update_catalog_deployment_on_workflow_completion(sender, instance, created, **kwargs):
+    """
+    When a WorkflowJob transitions to a terminal state, update any linked
+    CatalogDeployment records.
+    """
+    if created:
+        return
+    if instance.status not in ('successful', 'failed', 'error', 'canceled'):
+        return
+    _update_catalog_deployment_status(instance.pk, 'status', instance)
+
+
+# ---------------------------------------------------------------------------
+# D5: Default catalog_user role assignment on login / user save
+# ---------------------------------------------------------------------------
+
+@receiver(post_save, sender=User)
+def assign_default_catalog_user_role(sender, instance, created, **kwargs):
+    """
+    D5: If a user has no explicit role memberships, assign them to the
+    member_role of every organization.  This ensures new users are treated
+    as catalog_user (can browse catalog items) without requiring manual
+    role assignment.
+
+    This only runs when the user is first created so it doesn't override
+    intentional removals.
+    """
+    if not created:
+        return
+    # Avoid import-time circular dependency
+    try:
+        orgs = Organization.objects.all()
+        for org in orgs:
+            org.member_role.members.add(instance)
+    except Exception:
+        logger.exception('Failed to assign default catalog_user role to user %s', instance.pk)

@@ -5145,3 +5145,123 @@ class TerraformJobCancel(GenericCancelView):
     model = models.TerraformJob
     serializer_class = serializers.TerraformJobCancelSerializer
     resource_purpose = 'cancel a terraform job'
+
+
+# ---------------------------------------------------------------------------
+# Catalog views (Phase D)
+# ---------------------------------------------------------------------------
+
+
+class CatalogItemList(ListCreateAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.CatalogItemSerializer
+    resource_purpose = 'catalog items'
+
+
+class CatalogItemDetail(RetrieveUpdateDestroyAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.CatalogItemSerializer
+    resource_purpose = 'catalog item detail'
+
+
+class CatalogItemDeploymentsList(SubListCreateAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    parent_model = models.CatalogItem
+    relationship = 'deployments'
+    parent_key = 'catalog_item'
+    resource_purpose = 'deployments of a catalog item'
+
+
+class CatalogItemDeploy(GenericAPIView):
+    """
+    POST /api/v2/catalog_items/{id}/deploy/
+
+    Creates a CatalogDeployment and launches the provision workflow.
+    Required body field: ``name`` (label for the deployment).
+    Optional body field: ``extra_vars`` (dict, merged with the template).
+    """
+
+    model = models.CatalogItem
+    obj_permission_type = 'use'
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'deploy a catalog item'
+
+    def post(self, request, *args, **kwargs):
+        item = self.get_object()
+
+        name = request.data.get('name', '')
+        if not name:
+            return Response({'name': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        extra_vars = request.data.get('extra_vars', None)
+
+        workflow_job = None
+        if item.provision_workflow:
+            launch_kwargs = {}
+            if extra_vars:
+                launch_kwargs['extra_vars'] = extra_vars
+            workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
+            workflow_job.signal_start()
+
+        deployment = models.CatalogDeployment.objects.create(
+            catalog_item=item,
+            name=name,
+            owner=request.user,
+            status='provisioning' if workflow_job else 'active',
+            provision_job=workflow_job,
+            extra_vars=extra_vars,
+        )
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        headers = {'Location': deployment.get_absolute_url(request)}
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class CatalogDeploymentList(ListAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    resource_purpose = 'catalog deployments'
+
+
+class CatalogDeploymentDetail(RetrieveDestroyAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    resource_purpose = 'catalog deployment detail'
+
+
+class CatalogDeploymentDeprovision(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/deprovision/
+
+    Launches the deprovision workflow and sets status to 'deprovisioning'.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'deprovision a catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status in ('deprovisioning', 'destroyed'):
+            return Response(
+                {'detail': 'Deployment is already being deprovisioned or has been destroyed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        workflow_job = None
+        if deployment.catalog_item and deployment.catalog_item.deprovision_workflow:
+            workflow_job = deployment.catalog_item.deprovision_workflow.create_unified_job()
+            workflow_job.signal_start()
+
+        deployment.status = 'deprovisioning'
+        deployment.deprovision_job = workflow_job
+        deployment.save(update_fields=['status', 'deprovision_job'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)

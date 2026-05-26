@@ -1,0 +1,58 @@
+import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
+import {
+  LoadingPage,
+  PageDetail,
+  PageDetails,
+  useGetPageUrl,
+} from '../../../../framework';
+import { useGetItem } from '../../../common/crud/useGet';
+import { AwxError } from '../../common/AwxError';
+import { awxAPI } from '../../common/api/awx-utils';
+import { CatalogItem } from '../../interfaces/CatalogItem';
+import { AwxRoute } from '../../main/AwxRoutes';
+
+export function CatalogItemDetails() {
+  const { t } = useTranslation();
+  const params = useParams<{ id: string }>();
+
+  const { data: item, error, isLoading, refresh } = useGetItem<CatalogItem>(
+    awxAPI`/catalog_items`,
+    params.id
+  );
+
+  if (error) return <AwxError error={error} handleRefresh={refresh} />;
+  if (isLoading || !item) return <LoadingPage />;
+
+  return (
+    <PageDetails>
+      <PageDetail label={t('Name')}>{item.name}</PageDetail>
+      <PageDetail label={t('Description')}>{item.description || '-'}</PageDetail>
+      <PageDetail label={t('Organization')}>
+        {item.summary_fields?.organization?.name ?? '-'}
+      </PageDetail>
+      <PageDetail label={t('Provision workflow')}>
+        {item.summary_fields?.provision_workflow?.name ?? t('None')}
+      </PageDetail>
+      <PageDetail label={t('Deprovision workflow')}>
+        {item.summary_fields?.deprovision_workflow?.name ?? t('None')}
+      </PageDetail>
+      {item.icon_url && (
+        <PageDetail label={t('Icon URL')}>{item.icon_url}</PageDetail>
+      )}
+      {item.extra_vars_schema && (
+        <PageDetail label={t('Extra variables schema')}>
+          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+            {JSON.stringify(item.extra_vars_schema, null, 2)}
+          </pre>
+        </PageDetail>
+      )}
+      <PageDetail label={t('Created')}>
+        {new Date(item.created).toLocaleString()}
+      </PageDetail>
+      <PageDetail label={t('Modified')}>
+        {new Date(item.modified).toLocaleString()}
+      </PageDetail>
+    </PageDetails>
+  );
+}

@@ -6,6 +6,7 @@ import {
   ClipboardCheckIcon,
   ClockIcon,
   CogIcon,
+  InfrastructureIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -19,6 +20,7 @@ import { PageDetailCodeEditor } from '../../../../../../framework/PageDetails/Pa
 import { jsonToYaml } from '../../../../../../framework/utils/codeEditorUtils';
 import { Project } from '../../../../interfaces/Project';
 import { JobTemplate } from '../../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../../interfaces/WorkflowJobTemplate';
 import { InventorySource } from '../../../../interfaces/InventorySource';
 import { SystemJobTemplate } from '../../../../interfaces/SystemJobTemplate';
@@ -32,10 +34,12 @@ import { JobTemplateDetails } from './JobTemplateDetails';
 import { NodeNameDetail } from './NodeNameDetail';
 import { ProjectDetails } from './ProjectDetails';
 import { SidebarHeader } from './SidebarHeader';
+import { TerraformJobTemplateDetails } from './TerraformJobTemplateDetails';
 import { WorkflowJobTemplateDetails } from './WorkflowJobTemplateDetails';
 
 type RelatedTemplate =
   | JobTemplate
+  | TerraformJobTemplate
   | WorkflowJobTemplate
   | InventorySource
   | SystemJobTemplate
@@ -57,6 +61,8 @@ function getRelatedResourceUrl(unifiedJobTemplate?: SummaryFieldUnifiedJobTempla
       return awxAPI`/system_job_templates/${unifiedJobTemplate?.id.toString()}/`;
     case 'workflow_approval':
       return awxAPI`/workflow_approval_templates/${unifiedJobTemplate?.id.toString()}/`;
+    case 'terraform_job':
+      return awxAPI`/terraform_job_templates/${unifiedJobTemplate?.id.toString()}/`;
     default:
       return '';
   }
@@ -89,6 +95,9 @@ export function WorkflowNodeDetails({ node }: { node: GraphNode }) {
       break;
     case 'workflow_job_template':
       Details = <WorkflowJobTemplateDetails node={nodeData} template={data} />;
+      break;
+    case 'terraform_job_template':
+      Details = <TerraformJobTemplateDetails node={nodeData} template={data} />;
       break;
     case 'system_job_template':
       Details = (
@@ -142,6 +151,7 @@ function WorkflowNodeDetailsHeader({ node }: { node: GraphNode }) {
     job: ClipboardCheckIcon,
     project_update: SyncAltIcon,
     system_job: CogIcon,
+    terraform_job: InfrastructureIcon,
     workflow_approval: ClockIcon,
     workflow_job: ShareAltIcon,
   };
