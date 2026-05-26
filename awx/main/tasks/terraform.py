@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import traceback
@@ -43,6 +44,39 @@ logger = logging.getLogger('awx.main.tasks.terraform')
 
 # Match any Terraform output key that starts with "host_ip"
 _HOST_IP_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
+
+# ---------------------------------------------------------------------------
+# Container runtime / default execution environment
+# ---------------------------------------------------------------------------
+
+
+class _DefaultTerraformEE:
+    """
+    Minimal stand-in for an ExecutionEnvironment model instance.
+
+    Used when no explicit EE is configured on the TerraformJobTemplate/Job.
+    Runs Terraform inside the official ``hashicorp/terraform`` image so the
+    AWX execution node itself does NOT need Terraform installed locally —
+    the image is pulled on first use, then cached.
+    """
+
+    image = 'hashicorp/terraform:latest'
+    pull = 'missing'  # pull only if not already present in local cache
+
+
+def _container_runtime() -> str:
+    """
+    Return the first available container runtime binary on PATH.
+
+    Prefers ``docker`` (the native runtime for hashicorp/terraform images),
+    and falls back to ``podman`` for environments where Docker is absent.
+    If neither is found the name ``docker`` is returned so the subsequent
+    subprocess call fails with a recognisable "command not found" message.
+    """
+    for runtime in ('docker', 'podman'):
+        if shutil.which(runtime):
+            return runtime
+    return 'docker'
 
 
 @task(queue=get_task_queuename)
@@ -215,9 +249,10 @@ class RunTerraformJob(SourceControlMixin):
 
         self._write_envvars_file(env, private_data_dir)
         pull = getattr(ee, 'pull', 'missing')
+        runtime = _container_runtime()
 
-        podman_cmd = [
-            'podman', 'run', '--rm',
+        container_cmd = [
+            runtime, 'run', '--rm',
             '--volume', f'{private_data_dir}:/runner:Z',
             '--workdir', container_cwd,
             '--pull', pull,
@@ -226,12 +261,13 @@ class RunTerraformJob(SourceControlMixin):
         ] + list(args)
 
         logger.info(
-            '%s using execution environment %s (pull=%s)',
+            '%s using execution environment %s (runtime=%s, pull=%s)',
             self.instance.log_format,
             ee.image,
+            runtime,
             pull,
         )
-        return podman_cmd
+        return container_cmd
 
     # ------------------------------------------------------------------
     # Subprocess helpers
@@ -326,7 +362,13 @@ class RunTerraformJob(SourceControlMixin):
         timeout = self.get_instance_timeout(instance)
         prefix = instance.log_format
         output_parts = []
-        ee = instance.resolve_execution_environment() if private_data_dir else None
+        # Always run Terraform in a container.  Use the explicitly-configured EE
+        # when one is set; otherwise fall back to the official hashicorp/terraform
+        # image so the execution node never needs Terraform installed locally.
+        if private_data_dir:
+            ee = instance.resolve_execution_environment() or _DefaultTerraformEE()
+        else:
+            ee = None
 
         # Plan binary lives in a temp dir on the HOST (or inside the container
         # via the /runner mount when EE is active).
@@ -419,7 +461,10 @@ class RunTerraformJob(SourceControlMixin):
         if not instance.target_inventory_id:
             return
 
-        ee = instance.resolve_execution_environment() if private_data_dir else None
+        if private_data_dir:
+            ee = instance.resolve_execution_environment() or _DefaultTerraformEE()
+        else:
+            ee = None
         timeout = self.get_instance_timeout(instance)
         rc, text = self._run_cmd(
             ['terraform', 'output', '-json', '-no-color'],

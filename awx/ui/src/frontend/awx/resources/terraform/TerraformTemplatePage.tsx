@@ -50,6 +50,7 @@ export function TerraformTemplatePage() {
             actions={itemActions}
             position={DropdownPosition.right}
             additionalActionButtonProps={{ size: 'sm' }}
+            selectedItem={template}
           />
         }
       />

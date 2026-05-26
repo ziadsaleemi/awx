@@ -12,6 +12,7 @@ import {
 import {
   ArchiveIcon,
   BriefcaseIcon,
+  CubesIcon,
   LayerGroupIcon,
   SearchIcon,
 } from '@patternfly/react-icons';
@@ -26,7 +27,7 @@ import { AwxRoute } from './AwxRoutes';
 interface SearchResultItem {
   id: number;
   name: string;
-  type: 'job' | 'template' | 'workflow_template' | 'inventory' | 'terraform_template';
+  type: 'job' | 'template' | 'workflow_template' | 'inventory' | 'terraform_template' | 'catalog_item';
   subtitle?: string;
 }
 
@@ -48,6 +49,8 @@ function categoryLabel(type: SearchResultItem['type'], t: (k: string) => string)
       return t('Inventories');
     case 'terraform_template':
       return t('Terraform Templates');
+    case 'catalog_item':
+      return t('Catalog Items');
   }
 }
 
@@ -61,6 +64,8 @@ function categoryIcon(type: SearchResultItem['type']): ReactNode {
       return <LayerGroupIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
     case 'inventory':
       return <ArchiveIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
+    case 'catalog_item':
+      return <CubesIcon style={{ color: 'var(--pf-v5-global--Color--100)' }} />;
   }
 }
 
@@ -108,7 +113,7 @@ export function AwxGlobalSearch() {
     const timer = setTimeout(async () => {
       const q = encodeURIComponent(query.trim());
       try {
-        const [jobs, templates, wfTemplates, inventories, terraformTemplates] = await Promise.all([
+        const [jobs, templates, wfTemplates, inventories, terraformTemplates, catalogItems] = await Promise.all([
           requestGet<AwxItemsResponse<{ id: number; name: string; type: string; status?: string }>>(
             awxAPI`/unified_jobs/?name__icontains=${query.trim()}&not__launch_type=sync&order_by=-finished&page_size=5`
           ).catch(() => ({ results: [] })),
@@ -123,6 +128,9 @@ export function AwxGlobalSearch() {
           ).catch(() => ({ results: [] })),
           requestGet<AwxItemsResponse<{ id: number; name: string }>>(
             awxAPI`/terraform_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+          ).catch(() => ({ results: [] })),
+          requestGet<AwxItemsResponse<{ id: number; name: string; description?: string }>>(
+            awxAPI`/catalog_items/?name__icontains=${query.trim()}&order_by=name&page_size=5`
           ).catch(() => ({ results: [] })),
         ]);
 
@@ -168,6 +176,15 @@ export function AwxGlobalSearch() {
             routeParams: { id: tf.id },
             icon: categoryIcon('terraform_template'),
           })),
+          ...(catalogItems.results ?? []).map((ci) => ({
+            id: ci.id,
+            name: ci.name,
+            type: 'catalog_item' as const,
+            subtitle: ci.description,
+            route: AwxRoute.CatalogItemDetails,
+            routeParams: { id: ci.id },
+            icon: categoryIcon('catalog_item'),
+          })),
         ];
         setResults(combined);
         setSelectedIndex(0);
@@ -204,7 +221,7 @@ export function AwxGlobalSearch() {
     return acc;
   }, {});
 
-  const typeOrder: SearchResultItem['type'][] = ['job', 'template', 'workflow_template', 'inventory', 'terraform_template'];
+  const typeOrder: SearchResultItem['type'][] = ['job', 'template', 'workflow_template', 'inventory', 'terraform_template', 'catalog_item'];
 
   return (
     <>

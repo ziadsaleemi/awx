@@ -369,8 +369,12 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
 
     def resolve_execution_environment(self):
         """
-        Only use an EE if one is explicitly set on the job or its template.
-        Terraform runs directly on the execution node when no EE is configured.
+        Return the configured ExecutionEnvironment for this job, or ``None``.
+
+        When ``None`` is returned the task runner (``RunTerraformJob``) falls
+        back to running Terraform inside the ``hashicorp/terraform:latest``
+        container via the auto-detected container runtime (docker or podman).
+        The AWX execution node therefore does NOT need Terraform installed.
         """
         if self.execution_environment is not None:
             return self.execution_environment
