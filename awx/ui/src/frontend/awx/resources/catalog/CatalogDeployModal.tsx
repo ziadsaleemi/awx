@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -15,6 +15,7 @@ import {
 } from '@patternfly/react-core';
 import { usePageAlertToaster, usePageNavigate } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
+import { useGet } from '../../../common/crud/useGet';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
@@ -41,29 +42,45 @@ interface CatalogDeployModalProps {
   onClose: () => void;
 }
 
+interface DeploySurveyResponse {
+  schema: JsonSchema;
+}
+
 export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
   const { t } = useTranslation();
   const pageNavigate = usePageNavigate();
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest<Record<string, unknown>, CatalogDeployment>();
 
-  const schema = (item.extra_vars_schema ?? {}) as JsonSchema;
+  const { data: surveyData } = useGet<DeploySurveyResponse>(
+    awxAPI`/catalog_items/${String(item.id)}/deploy_survey/`
+  );
+
+  const schema = useMemo(
+    () => (surveyData?.schema ?? (item.extra_vars_schema ?? {})) as JsonSchema,
+    [item.extra_vars_schema, surveyData?.schema]
+  );
   const properties = schema.properties ?? {};
   const requiredSet = new Set<string>(schema.required ?? []);
 
-  const buildInitialValues = (): Record<string, string> => {
+  const initialFormValues = useMemo((): Record<string, string> => {
     const vals: Record<string, string> = {};
     for (const [key, prop] of Object.entries(properties)) {
       vals[key] = prop.default !== undefined ? String(prop.default) : '';
     }
     return vals;
-  };
+  }, [properties]);
 
   const [name, setName] = useState('');
-  const [formValues, setFormValues] = useState<Record<string, string>>(buildInitialValues);
+  const [formValues, setFormValues] = useState<Record<string, string>>(initialFormValues);
   const [nameError, setNameError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFormValues(initialFormValues);
+    setFieldErrors({});
+  }, [initialFormValues]);
 
   const setValue = useCallback((key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));

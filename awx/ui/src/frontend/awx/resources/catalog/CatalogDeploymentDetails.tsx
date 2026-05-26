@@ -49,6 +49,24 @@ export function CatalogDeploymentDetails() {
     }
   };
 
+  const handleRetry = async () => {
+    try {
+      await postRequest(awxAPI`/catalog_deployments/${id}/retry/`, {});
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('Retry started'),
+        timeout: 4000,
+      });
+      refresh();
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Failed to retry deployment'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !deployment) return <LoadingPage />;
 
@@ -77,6 +95,9 @@ export function CatalogDeploymentDetails() {
       </PageDetail>
       <PageDetail label={t('Owner')}>
         {deployment.summary_fields?.owner?.username ?? '-'}
+      </PageDetail>
+      <PageDetail label={t('Organization')}>
+        {deployment.summary_fields?.organization?.name ?? '-'}
       </PageDetail>
       {deployment.provision_job && (
         <PageDetail label={t('Provision job')}>
@@ -122,14 +143,43 @@ export function CatalogDeploymentDetails() {
           '-'
         )}
       </PageDetail>
+      <PageDetail label={t('Last deprovision variables')}>
+        {deployment.last_deprovision_vars ? (
+          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+            {JSON.stringify(deployment.last_deprovision_vars, null, 2)}
+          </pre>
+        ) : (
+          '-'
+        )}
+      </PageDetail>
+      <PageDetail label={t('Provisioning history')}>
+        {deployment.provisioning_history?.length ? (
+          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+            {JSON.stringify(deployment.provisioning_history, null, 2)}
+          </pre>
+        ) : (
+          '-'
+        )}
+      </PageDetail>
       <PageDetail label={t('Deployed')}>
         {new Date(deployment.created).toLocaleString()}
       </PageDetail>
       <PageDetail label={t('Actions')}>
         <Button
+          variant="secondary"
+          isDisabled={
+            deployment.status !== 'failed' ||
+            !deployment.summary_fields?.user_capabilities?.retry
+          }
+          onClick={() => void handleRetry()}
+        >
+          {t('Retry provision')}
+        </Button>
+        <Button
           variant="danger"
           isDisabled={!canDeprovision}
           onClick={() => void handleDeprovision()}
+          style={{ marginLeft: '0.75rem' }}
         >
           {t('Deprovision')}
         </Button>

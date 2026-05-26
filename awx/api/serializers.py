@@ -3963,9 +3963,11 @@ class CatalogItemSerializer(BaseSerializer):
             '*',
             'organization',
             'icon_url',
+            'icon_data',
             'provision_workflow',
             'terraform_job_template',
             'deprovision_workflow',
+            'override_workflow_limit',
             'extra_vars_schema',
         )
 
@@ -3973,6 +3975,7 @@ class CatalogItemSerializer(BaseSerializer):
         res = super().get_related(obj)
         res['deployments'] = self.reverse('api:catalog_item_deployments_list', kwargs={'pk': obj.pk})
         res['deploy'] = self.reverse('api:catalog_item_deploy', kwargs={'pk': obj.pk})
+        res['deploy_survey'] = self.reverse('api:catalog_item_deploy_survey', kwargs={'pk': obj.pk})
         if obj.provision_workflow_id:
             res['provision_workflow'] = self.reverse(
                 'api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id}
@@ -4010,7 +4013,7 @@ class CatalogItemSerializer(BaseSerializer):
 
 
 class CatalogDeploymentSerializer(BaseSerializer):
-    show_capabilities = ['delete']
+    show_capabilities = ['delete', 'retry']
 
     class Meta:
         model = CatalogDeployment
@@ -4022,9 +4025,21 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'provision_job',
             'terraform_provision_job',
             'deprovision_job',
+            'last_failed_workflow_job',
             'extra_vars',
+            'last_deprovision_vars',
+            'provisioning_history',
         )
-        read_only_fields = ('status', 'provision_job', 'terraform_provision_job', 'deprovision_job', 'owner')
+        read_only_fields = (
+            'status',
+            'provision_job',
+            'terraform_provision_job',
+            'deprovision_job',
+            'last_failed_workflow_job',
+            'owner',
+            'last_deprovision_vars',
+            'provisioning_history',
+        )
 
     def get_related(self, obj):
         res = super().get_related(obj)
@@ -4036,7 +4051,10 @@ class CatalogDeploymentSerializer(BaseSerializer):
             res['terraform_provision_job'] = self.reverse('api:terraform_job_detail', kwargs={'pk': obj.terraform_provision_job_id})
         if obj.deprovision_job_id:
             res['deprovision_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.deprovision_job_id})
+        if obj.last_failed_workflow_job_id:
+            res['last_failed_workflow_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.last_failed_workflow_job_id})
         res['deprovision'] = self.reverse('api:catalog_deployment_deprovision', kwargs={'pk': obj.pk})
+        res['retry'] = self.reverse('api:catalog_deployment_retry', kwargs={'pk': obj.pk})
         return res
 
     def get_summary_fields(self, obj):
@@ -4045,6 +4063,8 @@ class CatalogDeploymentSerializer(BaseSerializer):
             d['catalog_item'] = {'id': obj.catalog_item_id, 'name': obj.catalog_item.name if obj.catalog_item else ''}
         if obj.owner_id:
             d['owner'] = {'id': obj.owner_id, 'username': obj.owner.username if obj.owner else ''}
+        if obj.catalog_item and obj.catalog_item.organization_id:
+            d['organization'] = {'id': obj.catalog_item.organization_id, 'name': obj.catalog_item.organization.name}
         return d
 
 

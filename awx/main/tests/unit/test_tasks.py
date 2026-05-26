@@ -1623,6 +1623,37 @@ def test_fcntl_ioerror():
         fcntl.lockf(99999, fcntl.LOCK_EX)
 
 
+def test_get_sync_needs_treats_non_directory_project_path_as_missing(mocker):
+    task = jobs.RunJob()
+    task.instance = mock.Mock(id=101, scm_revision='abc123')
+
+    project = mock.Mock()
+    project.id = 22
+    project.scm_type = 'git'
+    project.scm_revision = 'abc123'
+    project.scm_branch = 'main'
+    project.get_project_path.return_value = '/tmp/project_path'
+    project.get_cache_path.return_value = '/tmp/project_cache'
+    project.cache_id = 'cache_id'
+
+    mocker.patch('awx.main.tasks.jobs.os.path.isdir', return_value=False)
+    mocker.patch('awx.main.tasks.jobs.os.path.exists', return_value=False)
+
+    sync_needs = task.get_sync_needs(project)
+
+    assert 'update_git' in sync_needs
+
+
+def test_make_local_copy_raises_clear_error_when_project_tree_missing(mocker, private_data_dir):
+    project = mock.Mock()
+    project.get_project_path.return_value = '/tmp/missing_project_path'
+
+    mocker.patch('awx.main.tasks.jobs.os.path.isdir', return_value=False)
+
+    with pytest.raises(RuntimeError, match='Project source path missing or invalid'):
+        jobs.RunProjectUpdate.make_local_copy(project, private_data_dir)
+
+
 @mock.patch('os.open')
 @mock.patch('awx.main.tasks.jobs.logger')
 def test_acquire_lock_open_fail_logged(logger_mock, os_open, mock_me):

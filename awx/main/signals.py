@@ -615,10 +615,13 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
             new_status = 'active'
             # Populate deployed_hosts from inventory populated by the workflow.
             _populate_deployed_hosts(deployment, workflow_job)
+            deployment.last_failed_workflow_job = None
         else:
             new_status = 'failed'
+            deployment.last_failed_workflow_job = workflow_job
         deployment.status = new_status
-        deployment.save(update_fields=['status'])
+        deployment.update_history_for_job(workflow_job_id, terminal_status)
+        deployment.save(update_fields=['status', 'last_failed_workflow_job', 'provisioning_history'])
 
     # --- deprovision job completed ---
     for deployment in CatalogDeployment.objects.filter(deprovision_job_id=workflow_job_id):
@@ -627,7 +630,8 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
         else:
             new_status = 'failed'
         deployment.status = new_status
-        deployment.save(update_fields=['status'])
+        deployment.update_history_for_job(workflow_job_id, terminal_status)
+        deployment.save(update_fields=['status', 'provisioning_history'])
 
 
 def _populate_deployed_hosts(deployment, workflow_job):
@@ -664,6 +668,29 @@ def update_catalog_deployment_on_workflow_completion(sender, instance, created, 
     if instance.status not in ('successful', 'failed', 'error', 'canceled'):
         return
     _update_catalog_deployment_status(instance.pk, 'status', instance)
+
+
+@receiver(post_save, sender=Job)
+def update_catalog_deployment_on_terraform_completion(sender, instance, created, **kwargs):
+    """
+    When a TerraformJob linked to catalog provisioning reaches a terminal state,
+    update the CatalogDeployment status.
+    """
+    if created:
+        return
+    if instance.polymorphic_ctype.model != 'terraformjob':
+        return
+    if instance.status not in ('successful', 'failed', 'error', 'canceled'):
+        return
+
+    from awx.main.models.catalog import CatalogDeployment
+
+    terminal_status = instance.status
+    new_status = 'active' if terminal_status == 'successful' else 'failed'
+    for deployment in CatalogDeployment.objects.filter(terraform_provision_job_id=instance.pk):
+        deployment.status = new_status
+        deployment.update_history_for_job(instance.pk, terminal_status)
+        deployment.save(update_fields=['status', 'provisioning_history'])
 
 
 # ---------------------------------------------------------------------------

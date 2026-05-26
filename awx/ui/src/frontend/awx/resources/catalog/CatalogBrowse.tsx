@@ -83,14 +83,15 @@ function CatalogItemCard({
   onDeploy: () => void;
 }) {
   const { t } = useTranslation();
+  const iconSrc = item.icon_data && item.icon_data.startsWith('data:image/') ? item.icon_data : item.icon_url;
 
   return (
     <Card isRaised style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardHeader>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {item.icon_url ? (
+          {iconSrc ? (
             <img
-              src={item.icon_url}
+              src={iconSrc}
               alt=""
               style={{ width: 40, height: 40, objectFit: 'contain' }}
             />

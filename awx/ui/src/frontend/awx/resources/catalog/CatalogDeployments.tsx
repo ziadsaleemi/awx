@@ -1,8 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageActionSelection,
+  PageActionType,
   PageHeader,
   PageLayout,
   PageTable,
@@ -54,28 +57,59 @@ export function CatalogDeployments() {
     [alertToaster, postRequest, t, view]
   );
 
-  const rowActions = useMemo(
+  const handleRetry = useCallback(
+    async (deployment: CatalogDeployment) => {
+      try {
+        await postRequest(awxAPI`/catalog_deployments/${String(deployment.id)}/retry/`, {});
+        alertToaster.addAlert({
+          variant: 'success',
+          title: t('Retry started for "{{name}}"', { name: deployment.name }),
+          timeout: 4000,
+        });
+        void view.refresh();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to retry deployment'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, postRequest, t, view]
+  );
+
+  const rowActions = useMemo<IPageAction<CatalogDeployment>[]>(
     () => [
       {
-        type: 'button' as const,
-        selection: 'single' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('View details'),
         onClick: (deployment: CatalogDeployment) =>
           pageNavigate(AwxRoute.CatalogDeploymentPage, { params: { id: String(deployment.id) } }),
       },
       {
-        type: 'button' as const,
-        selection: 'single' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        label: t('Retry provision'),
+        isDisabled: (deployment: CatalogDeployment) =>
+          deployment.status !== 'failed' || !deployment.summary_fields?.user_capabilities?.retry
+            ? t('Only failed deployments can be retried.')
+            : undefined,
+        onClick: handleRetry,
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Deprovision'),
         isDanger: true,
         isDisabled: (deployment: CatalogDeployment) =>
           ['deprovisioning', 'destroyed', 'provisioning'].includes(deployment.status)
             ? t('Deployment cannot be deprovisioned in its current state.')
-            : '',
+            : undefined,
         onClick: handleDeprovision,
       },
     ],
-    [handleDeprovision, pageNavigate, t]
+    [handleDeprovision, handleRetry, pageNavigate, t]
   );
 
   return (
@@ -139,6 +173,26 @@ function useCatalogDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
         header: t('Catalog item'),
         cell: (deployment) => (
           <TextCell text={deployment.summary_fields?.catalog_item?.name ?? '-'} />
+        ),
+      },
+      {
+        header: t('Organization'),
+        cell: (deployment) => (
+          <TextCell text={deployment.summary_fields?.organization?.name ?? '-'} />
+        ),
+      },
+      {
+        header: t('Provision details'),
+        cell: (deployment) => (
+          <TextCell
+            text={
+              deployment.terraform_provision_job
+                ? t('Terraform #{{id}}', { id: deployment.terraform_provision_job })
+                : deployment.provision_job
+                ? t('Workflow #{{id}}', { id: deployment.provision_job })
+                : '-'
+            }
+          />
         ),
       },
       {

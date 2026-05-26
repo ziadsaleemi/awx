@@ -42,6 +42,18 @@ export function CatalogItemDetails() {
       <PageDetail label={t('Deprovision workflow')}>
         {item.summary_fields?.deprovision_workflow?.name ?? t('None')}
       </PageDetail>
+      {item.icon_data && item.icon_data.startsWith('data:image/') && (
+        <PageDetail label={t('Uploaded icon')}>
+          <img
+            src={item.icon_data}
+            alt={t('Catalog icon')}
+            style={{ width: 64, height: 64, objectFit: 'contain' }}
+          />
+        </PageDetail>
+      )}
+      <PageDetail label={t('Override downstream workflow limit')}>
+        {item.override_workflow_limit ? t('Enabled') : t('Disabled')}
+      </PageDetail>
       {item.icon_url && (
         <PageDetail label={t('Icon URL')}>{item.icon_url}</PageDetail>
       )}

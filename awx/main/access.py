@@ -1883,6 +1883,15 @@ class CatalogItemAccess(BaseAccess):
     model = CatalogItem
     select_related = ('organization', 'provision_workflow', 'deprovision_workflow', 'created_by', 'modified_by')
 
+    def filtered_queryset(self):
+        if self.user.is_superuser:
+            return CatalogItem.objects.all()
+        return CatalogItem.objects.filter(
+            Q(admin_role__members=self.user)
+            | Q(use_role__members=self.user)
+            | Q(read_role__members=self.user)
+        ).distinct()
+
     @check_superuser
     def can_add(self, data):
         if data is None:
@@ -1914,12 +1923,12 @@ class CatalogDeploymentAccess(BaseAccess):
     """
 
     model = CatalogDeployment
-    select_related = ('catalog_item', 'owner', 'provision_job', 'deprovision_job')
+    select_related = ('catalog_item', 'catalog_item__organization', 'owner', 'provision_job', 'deprovision_job', 'last_failed_workflow_job')
 
     def filtered_queryset(self):
         if self.user.is_superuser:
             return CatalogDeployment.objects.all()
-        admin_items = CatalogItem.accessible_pk_qs(self.user, 'admin_role')
+        admin_items = CatalogItem.objects.filter(admin_role__members=self.user).values_list('pk', flat=True)
         return CatalogDeployment.objects.filter(
             Q(owner=self.user) | Q(catalog_item__in=admin_items)
         ).distinct()
@@ -1944,6 +1953,20 @@ class CatalogDeploymentAccess(BaseAccess):
         return self.user.is_superuser or (
             obj.owner == self.user and obj.status in ('destroyed', 'failed')
         )
+
+    def can_retry(self, obj):
+        if obj.status != 'failed' or obj.catalog_item_id is None:
+            return False
+        if self.user.is_superuser:
+            return True
+        if obj.owner_id == self.user.id:
+            return True
+        return self.user in obj.catalog_item.admin_role
+
+    def get_user_capabilities(self, obj, **kwargs):
+        user_capabilities = super().get_user_capabilities(obj, **kwargs)
+        user_capabilities['retry'] = self.can_retry(obj)
+        return user_capabilities
 
 
 class JobLaunchConfigAccess(UnifiedCredentialsMixin, BaseAccess):

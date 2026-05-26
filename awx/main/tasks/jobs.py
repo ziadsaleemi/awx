@@ -869,7 +869,7 @@ class SourceControlMixin(BaseTask):
             sync_needs.append(source_update_tag)
         elif not project.scm_type:
             pass  # manual projects are not synced, user has responsibility for that
-        elif not os.path.exists(project_path):
+        elif not os.path.isdir(project_path):
             logger.debug(f'Performing fresh clone of {project.id} for unified job {self.instance.id} on this instance.')
             sync_needs.append(source_update_tag)
         elif project.scm_type == 'git' and project.scm_revision and (not branch_override):
@@ -919,7 +919,7 @@ class SourceControlMixin(BaseTask):
         local_project_sync.log_lifecycle("execution_node_chosen")
         return local_project_sync
 
-    def sync_and_copy_without_lock(self, project, private_data_dir, scm_branch=None):
+    def sync_and_copy_without_lock(self, project, private_data_dir, scm_branch=None, retry_missing_project_copy=True):
         sync_needs = self.get_sync_needs(project, scm_branch=scm_branch)
 
         if sync_needs:
@@ -957,6 +957,21 @@ class SourceControlMixin(BaseTask):
             # Case where a local sync is not needed, meaning that local tree is
             # up-to-date with project, job is running project current version
             self.instance = self.update_model(self.instance.pk, scm_revision=project.scm_revision)
+            project_path = project.get_project_path(check_if_exists=False)
+            if not os.path.isdir(project_path):
+                if project.scm_type and retry_missing_project_copy:
+                    logger.warning(
+                        f'Project source tree missing at copy time for unified job {self.instance.id}; forcing one project sync retry.'
+                    )
+                    return self.sync_and_copy_without_lock(
+                        project,
+                        private_data_dir,
+                        scm_branch=scm_branch,
+                        retry_missing_project_copy=False,
+                    )
+                failed_reason = f'Project source path missing or invalid: {project_path}'
+                self.update_model(self.instance.pk, status='failed', job_explanation=failed_reason)
+                raise RuntimeError(failed_reason)
             # Project update does not copy the folder, so copy here
             RunProjectUpdate.make_local_copy(project, private_data_dir)
 
@@ -1604,6 +1619,8 @@ class RunProjectUpdate(BaseTask):
         :param str job_private_data_dir: The root of the target ansible-runner folder
         """
         project_path = project.get_project_path(check_if_exists=False)
+        if not os.path.isdir(project_path):
+            raise RuntimeError(f'Project source path missing or invalid: {project_path}')
         destination_folder = os.path.join(job_private_data_dir, 'project')
         shutil.copytree(project_path, destination_folder, ignore=shutil.ignore_patterns('.git'), symlinks=True)
 

@@ -5273,6 +5273,94 @@ class CatalogItemDeploymentsList(SubListCreateAPIView):
     resource_purpose = 'deployments of a catalog item'
 
 
+def _survey_question_to_schema_property(question):
+    survey_type = question.get('type', 'text')
+    field_type = 'string'
+    if survey_type == 'integer':
+        field_type = 'integer'
+    elif survey_type == 'float':
+        field_type = 'number'
+
+    prop = {
+        'type': field_type,
+        'title': question.get('question_name') or question.get('variable', ''),
+        'description': question.get('question_description', ''),
+    }
+
+    if 'default' in question:
+        prop['default'] = question.get('default')
+
+    if survey_type in ('multiplechoice', 'multiselect'):
+        choices = question.get('choices') or []
+        if isinstance(choices, str):
+            choices = [c for c in choices.split('\n') if c]
+        if choices:
+            prop['enum'] = choices
+
+    if survey_type in ('integer', 'float'):
+        if question.get('min') is not None:
+            prop['minimum'] = question.get('min')
+        if question.get('max') is not None:
+            prop['maximum'] = question.get('max')
+
+    return prop
+
+
+def _build_catalog_item_live_schema(item):
+    schema = {'type': 'object', 'properties': {}, 'required': []}
+    if isinstance(item.extra_vars_schema, dict):
+        schema.update(item.extra_vars_schema)
+        schema.setdefault('type', 'object')
+        schema.setdefault('properties', {})
+        schema.setdefault('required', [])
+
+    required_fields = set(schema.get('required') or [])
+
+    if item.provision_workflow_id and item.provision_workflow and item.provision_workflow.survey_enabled:
+        survey_spec = item.provision_workflow.survey_spec or {}
+        for question in survey_spec.get('spec', []):
+            variable = question.get('variable')
+            if not variable:
+                continue
+            schema['properties'][variable] = _survey_question_to_schema_property(question)
+            if question.get('required'):
+                required_fields.add(variable)
+
+    schema['required'] = sorted(required_fields)
+    return schema
+
+
+def _collect_deployment_saved_vars(deployment):
+    saved_vars = {}
+    if isinstance(deployment.extra_vars, dict):
+        saved_vars.update(deployment.extra_vars)
+
+    if deployment.provision_job_id and deployment.provision_job:
+        try:
+            saved_vars.update(deployment.provision_job.get_real_instance().get_effective_artifacts(parents_set=set()))
+        except Exception:
+            logger.exception('Failed to collect workflow artifacts for CatalogDeployment %s', deployment.pk)
+
+    if deployment.terraform_provision_job_id and deployment.terraform_provision_job:
+        artifacts = deployment.terraform_provision_job.artifacts
+        if isinstance(artifacts, dict):
+            saved_vars.update(artifacts)
+
+    return saved_vars
+
+
+class CatalogItemDeploySurvey(GenericAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'use'
+    resource_purpose = 'catalog item deploy survey schema'
+
+    def get(self, request, *args, **kwargs):
+        item = self.get_object()
+        schema = _build_catalog_item_live_schema(item)
+        return Response({'schema': schema})
+
+
 class CatalogItemDeploy(GenericAPIView):
     """
     POST /api/v2/catalog_items/{id}/deploy/
@@ -5295,19 +5383,27 @@ class CatalogItemDeploy(GenericAPIView):
             return Response({'name': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
 
         extra_vars = request.data.get('extra_vars', None)
+        if extra_vars is None:
+            launch_extra_vars = {}
+        elif isinstance(extra_vars, dict):
+            launch_extra_vars = extra_vars.copy()
+        else:
+            return Response({'extra_vars': ['This field must be a dictionary.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
 
         workflow_job = None
         terraform_job = None
         if item.terraform_job_template:
             launch_kwargs = {}
-            if extra_vars:
-                launch_kwargs['extra_vars'] = extra_vars if isinstance(extra_vars, str) else json.dumps(extra_vars)
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
             terraform_job = item.terraform_job_template.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
         elif item.provision_workflow:
             launch_kwargs = {}
-            if extra_vars:
-                launch_kwargs['extra_vars'] = extra_vars
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = launch_extra_vars
             workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 
@@ -5318,8 +5414,15 @@ class CatalogItemDeploy(GenericAPIView):
             status='provisioning' if (workflow_job or terraform_job) else 'active',
             provision_job=workflow_job,
             terraform_provision_job=terraform_job,
-            extra_vars=extra_vars,
+            extra_vars=launch_extra_vars,
+            last_failed_workflow_job=None,
         )
+        if workflow_job:
+            deployment.append_history_entry('provision', job=workflow_job, status='running')
+            deployment.save(update_fields=['provisioning_history'])
+        elif terraform_job:
+            deployment.append_history_entry('provision', job=terraform_job, status='running')
+            deployment.save(update_fields=['provisioning_history'])
 
         serializer = serializers.CatalogDeploymentSerializer(
             deployment, context=self.get_serializer_context()
@@ -5361,13 +5464,96 @@ class CatalogDeploymentDeprovision(GenericAPIView):
             )
 
         workflow_job = None
+        saved_vars = _collect_deployment_saved_vars(deployment)
         if deployment.catalog_item and deployment.catalog_item.deprovision_workflow:
-            workflow_job = deployment.catalog_item.deprovision_workflow.create_unified_job()
+            launch_kwargs = {}
+            if saved_vars:
+                launch_kwargs['extra_vars'] = saved_vars
+            workflow_job = deployment.catalog_item.deprovision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 
         deployment.status = 'deprovisioning'
         deployment.deprovision_job = workflow_job
-        deployment.save(update_fields=['status', 'deprovision_job'])
+        deployment.last_deprovision_vars = saved_vars
+        if workflow_job:
+            deployment.append_history_entry(
+                'deprovision',
+                job=workflow_job,
+                status='running',
+                details={'saved_var_keys': sorted(saved_vars.keys())},
+            )
+        deployment.save(update_fields=['status', 'deprovision_job', 'last_deprovision_vars', 'provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)
+
+
+class CatalogDeploymentRetry(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/retry/
+
+    Relaunches provisioning for failed deployments with the originally
+    supplied deploy parameters.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'retry'
+    resource_purpose = 'retry a failed catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status != 'failed':
+            return Response(
+                {'detail': _('Only failed deployments can be retried.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item = deployment.catalog_item
+        if item is None:
+            return Response(
+                {'detail': _('Cannot retry deployment because the catalog item is missing.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        launch_extra_vars = deployment.extra_vars if isinstance(deployment.extra_vars, dict) else {}
+        launch_extra_vars = launch_extra_vars.copy()
+        launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
+
+        workflow_job = None
+        terraform_job = None
+        retry_from_workflow = deployment.last_failed_workflow_job or deployment.provision_job
+        if retry_from_workflow and retry_from_workflow.status in ['failed', 'canceled', 'error'] and not retry_from_workflow.is_sliced_job:
+            workflow_job = retry_from_workflow.create_resume_workflow_job()
+            workflow_job.signal_start()
+        elif item.terraform_job_template:
+            terraform_job = item.terraform_job_template.create_unified_job(extra_vars=json.dumps(launch_extra_vars))
+            terraform_job.signal_start()
+        elif item.provision_workflow:
+            workflow_job = item.provision_workflow.create_unified_job(extra_vars=launch_extra_vars)
+            workflow_job.signal_start()
+
+        if workflow_job is None and terraform_job is None:
+            return Response(
+                {'detail': _('Cannot retry deployment because no provision template is configured.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deployment.status = 'provisioning'
+        if workflow_job is not None:
+            deployment.provision_job = workflow_job
+        if terraform_job is not None:
+            deployment.terraform_provision_job = terraform_job
+        deployment.extra_vars = launch_extra_vars
+        deployment.last_failed_workflow_job = None
+        if workflow_job is not None:
+            deployment.append_history_entry('retry', job=workflow_job, status='running', details={'mode': 'resume'})
+        elif terraform_job is not None:
+            deployment.append_history_entry('retry', job=terraform_job, status='running', details={'mode': 'relaunch'})
+        deployment.save(update_fields=['status', 'provision_job', 'terraform_provision_job', 'extra_vars', 'last_failed_workflow_job', 'provisioning_history'])
 
         serializer = serializers.CatalogDeploymentSerializer(
             deployment, context=self.get_serializer_context()

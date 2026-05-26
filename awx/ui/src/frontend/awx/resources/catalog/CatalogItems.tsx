@@ -1,8 +1,11 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageActionSelection,
+  PageActionType,
   PageHeader,
   PageLayout,
   PageTable,
@@ -38,24 +41,24 @@ export function CatalogItems() {
   const { data } = useOptions<OptionsResponse<ActionsResponse>>(awxAPI`/catalog_items/`);
   const canCreate = Boolean(data?.actions?.['POST']);
 
-  const toolbarActions = useMemo(
+  const toolbarActions = useMemo<IPageAction<CatalogItem>[]>(
     () => [
       {
-        type: 'button' as const,
-        selection: 'none' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.None,
         variant: ButtonVariant.primary,
         isPinned: true,
         label: t('Create catalog item'),
-        icon: <PlusCircleIcon />,
+        icon: PlusCircleIcon,
         onClick: () => pageNavigate(AwxRoute.CreateCatalogItem),
         isDisabled: () =>
           canCreate
-            ? ''
+            ? undefined
             : t('You do not have permission to create catalog items.'),
       },
       {
-        type: 'bulk' as const,
-        selection: 'multiple' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
         label: t('Delete selected'),
         onClick: deleteCatalogItems,
         isDanger: true,
@@ -64,25 +67,25 @@ export function CatalogItems() {
     [canCreate, deleteCatalogItems, pageNavigate, t]
   );
 
-  const rowActions = useMemo(
+  const rowActions = useMemo<IPageAction<CatalogItem>[]>(
     () => [
       {
-        type: 'button' as const,
-        selection: 'single' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Edit'),
         onClick: (item: CatalogItem) =>
           pageNavigate(AwxRoute.EditCatalogItem, { params: { id: String(item.id) } }),
         isDisabled: (item: CatalogItem) =>
-          item.summary_fields?.user_capabilities?.edit ? '' : t('No permission'),
+          item.summary_fields?.user_capabilities?.edit ? undefined : t('No permission'),
       },
       {
-        type: 'button' as const,
-        selection: 'single' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Delete'),
         isDanger: true,
         onClick: (item: CatalogItem) => deleteCatalogItems([item]),
         isDisabled: (item: CatalogItem) =>
-          item.summary_fields?.user_capabilities?.delete ? '' : t('No permission'),
+          item.summary_fields?.user_capabilities?.delete ? undefined : t('No permission'),
       },
     ],
     [deleteCatalogItems, pageNavigate, t]

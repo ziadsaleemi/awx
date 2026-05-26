@@ -6,6 +6,7 @@ import logging
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
+from django.utils.timezone import now
 
 from awx.api.versioning import reverse
 from awx.main.fields import ImplicitRoleField
@@ -34,6 +35,11 @@ class CatalogItem(CommonModelNameNotUnique):
         blank=True,
         default='',
         help_text=_('Optional URL for a display icon.'),
+    )
+    icon_data = models.TextField(
+        blank=True,
+        default='',
+        help_text=_('Optional base64-encoded image (data URL) used for catalog item icon upload.'),
     )
     organization = models.ForeignKey(
         'Organization',
@@ -69,6 +75,10 @@ class CatalogItem(CommonModelNameNotUnique):
         default=None,
         on_delete=models.SET_NULL,
         help_text=_('Workflow to run when a user decommissions a deployment.'),
+    )
+    override_workflow_limit = models.BooleanField(
+        default=True,
+        help_text=_('When enabled, deployment launches include terraform_override_limit=true.'),
     )
     extra_vars_schema = models.JSONField(
         blank=True,
@@ -161,17 +171,61 @@ class CatalogDeployment(CommonModelNameNotUnique):
         default=None,
         on_delete=models.SET_NULL,
     )
+    last_failed_workflow_job = models.ForeignKey(
+        'WorkflowJob',
+        related_name='catalog_deployments_as_last_failed',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+    )
     extra_vars = models.JSONField(
         blank=True,
         null=True,
         default=None,
         help_text=_('Variable values supplied by the user at deploy time.'),
     )
+    last_deprovision_vars = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_('Resolved variables passed to the most recent deprovision workflow launch.'),
+    )
+    provisioning_history = models.JSONField(
+        blank=True,
+        default=list,
+        help_text=_('Chronological record of provision/deprovision/retry job attempts for this deployment.'),
+    )
     deployed_hosts = models.ManyToManyField(
         'Host',
         blank=True,
         related_name='catalog_deployments',
     )
+
+    def append_history_entry(self, action, job=None, status='pending', details=None):
+        history = list(self.provisioning_history or [])
+        entry = {
+            'action': action,
+            'status': status,
+            'created': now().isoformat(),
+            'job_id': getattr(job, 'id', None),
+            'job_type': getattr(job, 'polymorphic_ctype', None).model if getattr(job, 'polymorphic_ctype_id', None) else None,
+        }
+        if details:
+            entry['details'] = details
+        history.append(entry)
+        self.provisioning_history = history
+
+    def update_history_for_job(self, job_id, status):
+        if not job_id:
+            return
+        history = list(self.provisioning_history or [])
+        for entry in reversed(history):
+            if entry.get('job_id') == job_id:
+                entry['status'] = status
+                entry['finished'] = now().isoformat()
+                break
+        self.provisioning_history = history
 
     def get_absolute_url(self, request=None):
         return reverse('api:catalog_deployment_detail', kwargs={'pk': self.pk}, request=request)
