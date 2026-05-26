@@ -29,7 +29,7 @@ analytics_logger = logging.getLogger('awx.analytics.job_events')
 
 logger = logging.getLogger('awx.main.models.events')
 
-__all__ = ['JobEvent', 'ProjectUpdateEvent', 'AdHocCommandEvent', 'InventoryUpdateEvent', 'SystemJobEvent']
+__all__ = ['JobEvent', 'ProjectUpdateEvent', 'AdHocCommandEvent', 'InventoryUpdateEvent', 'SystemJobEvent', 'TerraformJobEvent']
 
 
 def sanitize_event_keys(kwargs, valid_keys):
@@ -71,6 +71,7 @@ def emit_event_detail(event):
         ProjectUpdateEvent: 'project_update_id',
         InventoryUpdateEvent: 'inventory_update_id',
         SystemJobEvent: 'system_job_id',
+        TerraformJobEvent: 'terraform_job_id',
     }[cls]
     url = ''
     if isinstance(event, JobEvent):
@@ -961,3 +962,48 @@ class UnpartitionedSystemJobEvent(SystemJobEvent):
 
 
 UnpartitionedSystemJobEvent._meta.db_table = '_unpartitioned_' + SystemJobEvent._meta.db_table  # noqa
+
+
+class TerraformJobEvent(BaseCommandEvent):
+    VALID_KEYS = BaseCommandEvent.VALID_KEYS + ['terraform_job_id', 'job_created']
+    JOB_REFERENCE = 'terraform_job_id'
+
+    objects = DeferJobCreatedManager()
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('-pk',)
+        indexes = [
+            models.Index(fields=['terraform_job', 'job_created', 'uuid']),
+            models.Index(fields=['terraform_job', 'job_created', 'counter']),
+        ]
+
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
+    terraform_job = models.ForeignKey(
+        'TerraformJob',
+        related_name='terraform_job_events',
+        on_delete=models.DO_NOTHING,
+        editable=False,
+        db_index=False,
+    )
+    job_created = models.DateTimeField(null=True, editable=False)
+
+    @property
+    def event(self):
+        return 'verbose'
+
+    @property
+    def failed(self):
+        return False
+
+    @property
+    def changed(self):
+        return False
+
+
+class UnpartitionedTerraformJobEvent(TerraformJobEvent):
+    class Meta:
+        proxy = True
+
+
+UnpartitionedTerraformJobEvent._meta.db_table = '_unpartitioned_' + TerraformJobEvent._meta.db_table  # noqa

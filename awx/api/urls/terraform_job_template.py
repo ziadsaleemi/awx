@@ -12,6 +12,7 @@ from awx.api.views import (
     TerraformJobList,
     TerraformJobDetail,
     TerraformJobCancel,
+    TerraformJobEventsList,
 )
 
 terraform_job_template_urls = [
@@ -26,4 +27,5 @@ terraform_job_urls = [
     re_path(r'^$', TerraformJobList.as_view(), name='terraform_job_list'),
     re_path(r'^(?P<pk>[0-9]+)/$', TerraformJobDetail.as_view(), name='terraform_job_detail'),
     re_path(r'^(?P<pk>[0-9]+)/cancel/$', TerraformJobCancel.as_view(), name='terraform_job_cancel'),
+    re_path(r'^(?P<pk>[0-9]+)/events/$', TerraformJobEventsList.as_view(), name='terraform_job_events_list'),
 ]

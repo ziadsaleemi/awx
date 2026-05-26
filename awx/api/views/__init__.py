@@ -1155,6 +1155,26 @@ class SystemJobEventsList(SubListAPIView):
         return job.get_event_queryset()
 
 
+class TerraformJobEventsList(SubListAPIView):
+    model = models.TerraformJobEvent
+    serializer_class = serializers.TerraformJobEventSerializer
+    parent_model = models.TerraformJob
+    relationship = 'terraform_job_events'
+    name = _('Terraform Job Events List')
+    search_fields = ('stdout',)
+    pagination_class = UnifiedJobEventPagination
+    resource_purpose = 'events of a terraform job'
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
+        return super(TerraformJobEventsList, self).finalize_response(request, response, *args, **kwargs)
+
+    def get_queryset(self):
+        job = self.get_parent_object()
+        self.check_parent_access(job)
+        return job.get_event_queryset()
+
+
 class ProjectUpdateCancel(GenericCancelView):
     model = models.ProjectUpdate
     serializer_class = serializers.ProjectUpdateCancelSerializer

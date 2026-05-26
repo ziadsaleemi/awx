@@ -89,6 +89,7 @@ from awx.main.models import (
     SystemJobTemplate,
     Team,
     TerraformJob,
+    TerraformJobEvent,
     TerraformJobTemplate,
     CatalogItem,
     CatalogDeployment,
@@ -4749,6 +4750,17 @@ class SystemJobEventSerializer(AdHocCommandEventSerializer):
     def get_related(self, obj):
         res = super(AdHocCommandEventSerializer, self).get_related(obj)
         res['system_job'] = self.reverse('api:system_job_detail', kwargs={'pk': obj.system_job_id})
+        return res
+
+
+class TerraformJobEventSerializer(AdHocCommandEventSerializer):
+    class Meta:
+        model = TerraformJobEvent
+        fields = ('*', '-name', '-description', '-ad_hoc_command', '-host', '-host_name', 'terraform_job')
+
+    def get_related(self, obj):
+        res = super(AdHocCommandEventSerializer, self).get_related(obj)
+        res['terraform_job'] = self.reverse('api:terraform_job_detail', kwargs={'pk': obj.terraform_job_id})
         return res
 
 

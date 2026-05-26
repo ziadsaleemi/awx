@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import {
   ClipboardCheckIcon,
   ClockIcon,
+  CodeIcon,
   CogIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
@@ -55,6 +56,7 @@ const NodeIcon: { [key: string]: ElementType<SVGIconProps> } = {
   job: ClipboardCheckIcon,
   project_update: SyncAltIcon,
   system_job: CogIcon,
+  terraform_job: CodeIcon,
   workflow_approval: ClockIcon,
   workflow_job: ShareAltIcon,
   deleted_resource: TrashIcon,
@@ -87,6 +89,11 @@ export const WorkflowOutputNode = observer(({ element, selected }: WorkflowOutpu
 
   function handleSelect() {
     if (!job) return;
+
+    if (job.type === 'terraform_job') {
+      pageNavigate(AwxRoute.TerraformJobOutput, { params: { job_id: job.id } });
+      return;
+    }
 
     const routeParams =
       job.type === 'workflow_approval'

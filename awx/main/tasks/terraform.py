@@ -20,6 +20,7 @@ import re
 import subprocess
 import tempfile
 import traceback
+import uuid as _uuid
 
 # third-party
 import yaml
@@ -236,10 +237,43 @@ class RunTerraformJob(SourceControlMixin):
     # Subprocess helpers
     # ------------------------------------------------------------------
 
+    def _write_event(self, line):
+        """
+        Persist a single output line as a TerraformJobEvent record and push
+        it over WebSocket so the UI can display it in real-time.
+        """
+        from django.utils.timezone import now as tz_now
+        from awx.main.models.events import TerraformJobEvent, emit_event_detail
+
+        self._event_counter += 1
+        line_count = line.count('\n') or 1
+        start = self._event_line_number
+        end = start + line_count
+        ts = tz_now()
+        event = TerraformJobEvent(
+            terraform_job=self.instance,
+            job_created=self.instance.created,
+            counter=self._event_counter,
+            uuid=str(_uuid.uuid4()),
+            stdout=line,
+            start_line=start,
+            end_line=end,
+            created=ts,
+            modified=ts,
+        )
+        event.save()
+        self._event_line_number = end
+        try:
+            emit_event_detail(event)
+        except Exception:
+            logger.warning('%s emit_event_detail failed', self.instance.log_format, exc_info=True)
+
     def _run_cmd(self, args, cwd, env, timeout, log_prefix, private_data_dir=None, ee=None):
         """
         Run a single command; returns ``(returncode, stdout+stderr text)``.
         stderr is merged into stdout so both are captured together.
+        Each output line is also written as a TerraformJobEvent for live UI
+        streaming (when self._event_counter has been initialised).
 
         When *ee* and *private_data_dir* are provided the command is wrapped
         in a ``podman run`` invocation so it executes inside the execution
@@ -258,13 +292,24 @@ class RunTerraformJob(SourceControlMixin):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
+        output_lines = []
         try:
-            out, _ = proc.communicate(timeout=timeout or None)
-        except subprocess.TimeoutExpired:
+            for raw in iter(proc.stdout.readline, b''):
+                line = raw.decode('utf-8', errors='replace')
+                output_lines.append(line)
+                if hasattr(self, '_event_counter'):
+                    self._write_event(line)
+            try:
+                proc.wait(timeout=timeout or None)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                logger.warning('%s timed out after %s s', log_prefix, timeout)
+        except Exception:
             proc.kill()
-            out, _ = proc.communicate()
-            logger.warning('%s timed out after %s s', log_prefix, timeout)
-        return proc.returncode, out.decode('utf-8', errors='replace')
+            proc.wait()
+            raise
+        return proc.returncode, ''.join(output_lines)
 
     def _run_terraform(self, instance, working_dir, env, private_data_dir=None):
         """
@@ -302,6 +347,8 @@ class RunTerraformJob(SourceControlMixin):
                           private_data_dir=private_data_dir, ee=ee)
 
         # 1. terraform init
+        if hasattr(self, '_event_counter'):
+            self._write_event('=== terraform init ===\n')
         rc, text = self._run_cmd(
             ['terraform', 'init', '-no-color', '-input=false'],
             cwd=working_dir, **cmd_kwargs,
@@ -313,6 +360,8 @@ class RunTerraformJob(SourceControlMixin):
         operation = instance.terraform_operation
 
         if operation == 'plan':
+            if hasattr(self, '_event_counter'):
+                self._write_event('=== terraform plan ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'plan', '-no-color', '-input=false'],
                 cwd=working_dir, **cmd_kwargs,
@@ -322,6 +371,8 @@ class RunTerraformJob(SourceControlMixin):
         elif operation == 'apply':
             plan_file = os.path.join(plan_tmpdir_for_cmd, 'tfplan.out')
             # 2a. terraform plan (saves binary plan)
+            if hasattr(self, '_event_counter'):
+                self._write_event('=== terraform plan ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'plan', '-no-color', '-input=false', f'-out={plan_file}'],
                 cwd=working_dir, **cmd_kwargs,
@@ -329,6 +380,8 @@ class RunTerraformJob(SourceControlMixin):
             output_parts.append('=== terraform plan ===\n' + text)
             if rc == 0:
                 # 2b. terraform apply (consumes the binary plan)
+                if hasattr(self, '_event_counter'):
+                    self._write_event('=== terraform apply ===\n')
                 rc, text = self._run_cmd(
                     ['terraform', 'apply', '-auto-approve', '-no-color', '-input=false', plan_file],
                     cwd=working_dir, **cmd_kwargs,
@@ -336,6 +389,8 @@ class RunTerraformJob(SourceControlMixin):
                 output_parts.append('=== terraform apply ===\n' + text)
 
         elif operation == 'destroy':
+            if hasattr(self, '_event_counter'):
+                self._write_event('=== terraform destroy ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'destroy', '-auto-approve', '-no-color', '-input=false'],
                 cwd=working_dir, **cmd_kwargs,
@@ -524,6 +579,10 @@ class RunTerraformJob(SourceControlMixin):
         # 2. Notify "running"
         self.instance.websocket_emit_status('running')
         self.instance.send_notification_templates('running')
+
+        # Initialize live-streaming event counters
+        self._event_counter = 0
+        self._event_line_number = 0
 
         status = 'error'
         private_data_dir = None

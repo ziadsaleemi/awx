@@ -43,7 +43,7 @@ from awx.main.models.mixins import (
 from awx.main.models.jobs import LaunchTimeConfigBase, LaunchTimeConfig, JobTemplate
 from awx.main.models.credential import Credential
 from awx.main.redact import REPLACE_STR
-from awx.main.utils import ScheduleWorkflowManager
+from awx.main.utils import ScheduleWorkflowManager, NullablePromptPseudoField
 
 __all__ = [
     'WorkflowJobTemplate',
@@ -298,6 +298,23 @@ class WorkflowJobNode(WorkflowNodeBase):
             models.Index(fields=['identifier']),
         ]
         ordering = ('pk',)
+
+    # Compatibility descriptors for TerraformJobTemplate-specific prompt fields.
+    # WorkflowJobNode stores inventory in the standard 'inventory' FK from
+    # LaunchTimeConfig; TerraformJobTemplate names the same concept
+    # 'target_inventory', so provide an alias to avoid AttributeError in
+    # prompts_dict(for_cls=TerraformJobTemplate).
+    @property
+    def target_inventory(self):
+        return self.inventory
+
+    @target_inventory.setter
+    def target_inventory(self, value):
+        self.inventory = value
+
+    # terraform_operation is a char_prompts-backed pseudo-field specific to
+    # TerraformJobTemplate; store it transparently so prompts_dict works.
+    terraform_operation = NullablePromptPseudoField('terraform_operation')
 
     @property
     def event_processing_finished(self):
@@ -745,6 +762,17 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
     )
     is_sliced_job = models.BooleanField(default=False)
     is_bulk_job = models.BooleanField(default=False)
+
+    # Compatibility descriptors for TerraformJobTemplate-specific prompt fields.
+    @property
+    def target_inventory(self):
+        return self.inventory
+
+    @target_inventory.setter
+    def target_inventory(self, value):
+        self.inventory = value
+
+    terraform_operation = NullablePromptPseudoField('terraform_operation')
 
     def _set_default_dependencies_processed(self):
         self.dependencies_processed = True

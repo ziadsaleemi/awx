@@ -387,9 +387,8 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         return 'terraform_job_id'
 
     def get_event_queryset(self):
-        # TerraformJob does not yet have a dedicated event model.
-        from awx.main.models.events import JobEvent
-        return JobEvent.objects.none()
+        from awx.main.models.events import TerraformJobEvent
+        return TerraformJobEvent.objects.filter(terraform_job=self)
 
     def result_stdout_raw_handle(self, enforce_max_bytes=False):
         from io import StringIO

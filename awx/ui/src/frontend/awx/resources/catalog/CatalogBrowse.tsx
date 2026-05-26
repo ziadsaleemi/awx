@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -15,11 +16,11 @@ import {
   Title,
 } from '@patternfly/react-core';
 import { CubesIcon } from '@patternfly/react-icons';
-import { PageHeader, PageLayout, usePageNavigate } from '../../../../framework';
+import { PageHeader, PageLayout } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGet } from '../../../common/crud/useGet';
 import { CatalogItem } from '../../interfaces/CatalogItem';
-import { AwxRoute } from '../../main/AwxRoutes';
+import { CatalogDeployModal } from './CatalogDeployModal';
 
 interface CatalogItemListResponse {
   count: number;
@@ -28,7 +29,7 @@ interface CatalogItemListResponse {
 
 export function CatalogBrowse() {
   const { t } = useTranslation();
-  const pageNavigate = usePageNavigate();
+  const [deployItem, setDeployItem] = useState<CatalogItem | null>(null);
 
   const { data, isLoading } = useGet<CatalogItemListResponse>(awxAPI`/catalog_items/`);
   const items = data?.results ?? [];
@@ -60,14 +61,15 @@ export function CatalogBrowse() {
               <GalleryItem key={item.id}>
                 <CatalogItemCard
                   item={item}
-                  onDeploy={() =>
-                    pageNavigate(AwxRoute.CatalogDeploy, { params: { id: String(item.id) } })
-                  }
+                  onDeploy={() => setDeployItem(item)}
                 />
               </GalleryItem>
             ))}
           </Gallery>
         </div>
+      )}
+      {deployItem && (
+        <CatalogDeployModal item={deployItem} onClose={() => setDeployItem(null)} />
       )}
     </PageLayout>
   );
