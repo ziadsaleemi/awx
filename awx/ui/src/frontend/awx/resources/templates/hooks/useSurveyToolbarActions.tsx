@@ -22,7 +22,7 @@ import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 
 export function useSurveyToolbarActions(
   view: ISurveyView,
-  templateType: (JobTemplate | WorkflowJobTemplate)['type']
+  templateType: (JobTemplate | WorkflowJobTemplate)['type'] | 'terraform_job_template'
 ) {
   const { t } = useTranslation();
   const pageNavigate = usePageNavigate();
@@ -30,12 +30,14 @@ export function useSurveyToolbarActions(
   const deleteQuestions = useDeleteSurveyDialog(view.unselectItemsAndRefresh, templateType);
 
   const isJobTemplate = templateType === 'job_template';
+  const isTerraformTemplate = templateType === 'terraform_job_template';
+  const resourcePath = isTerraformTemplate ? 'terraform_job_templates' : isJobTemplate ? 'job_templates' : 'workflow_job_templates';
 
-  const { openManageQuestionOrder } = useManageSurveyQuestions(isJobTemplate);
+  const { openManageQuestionOrder } = useManageSurveyQuestions(isJobTemplate, isTerraformTemplate);
 
   const { data: options } = useOptions<OptionsResponse<ActionsResponse>>(
     id
-      ? awxAPI`/${isJobTemplate ? 'job_templates' : 'workflow_job_templates'}/${id.toString()}/`
+      ? awxAPI`/${resourcePath}/${id.toString()}/`
       : ''
   );
   const canModifySurvey = Boolean(options && options.actions && options.actions['PUT']);
@@ -56,7 +58,11 @@ export function useSurveyToolbarActions(
             ),
         onClick: () => {
           pageNavigate(
-            isJobTemplate ? AwxRoute.AddJobTemplateSurvey : AwxRoute.AddWorkflowJobTemplateSurvey,
+            isTerraformTemplate
+              ? AwxRoute.AddTerraformTemplateSurvey
+              : isJobTemplate
+              ? AwxRoute.AddJobTemplateSurvey
+              : AwxRoute.AddWorkflowJobTemplateSurvey,
             {
               params: { id },
             }
@@ -90,6 +96,6 @@ export function useSurveyToolbarActions(
             ),
       },
     ],
-    [t, openManageQuestionOrder, deleteQuestions, canModifySurvey, id, pageNavigate, isJobTemplate]
+    [t, openManageQuestionOrder, deleteQuestions, canModifySurvey, id, pageNavigate, isJobTemplate, isTerraformTemplate]
   );
 }

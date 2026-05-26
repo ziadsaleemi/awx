@@ -9,7 +9,7 @@ import json
 import sys
 
 # Django
-from django.db import connection
+from django.db import connection, transaction
 from django.conf import settings
 from django.db.models.signals import (
     pre_save,
@@ -686,7 +686,12 @@ def assign_default_catalog_user_role(sender, instance, created, **kwargs):
     # Avoid import-time circular dependency
     try:
         orgs = Organization.objects.all()
-        for org in orgs:
-            org.member_role.members.add(instance)
     except Exception:
-        logger.exception('Failed to assign default catalog_user role to user %s', instance.pk)
+        logger.exception('Failed to query organizations for default catalog_user role for user %s', instance.pk)
+        return
+    for org in orgs:
+        try:
+            with transaction.atomic():
+                org.member_role.members.add(instance)
+        except Exception:
+            logger.exception('Failed to assign default catalog_user role for org %s to user %s', org.pk, instance.pk)

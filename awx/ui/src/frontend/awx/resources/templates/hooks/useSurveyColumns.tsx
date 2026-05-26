@@ -7,7 +7,7 @@ import type { Spec } from '../../../interfaces/Survey';
 import { AwxRoute } from '../../../main/AwxRoutes';
 
 export function useSurveyColumns(_options?: {
-  templateType?: 'job_template' | 'workflow_job_template';
+  templateType?: 'job_template' | 'workflow_job_template' | 'terraform_job_template';
   id?: string;
 }) {
   const { t } = useTranslation();
@@ -36,6 +36,8 @@ export function useSurveyColumns(_options?: {
               to={getPageUrl(
                 templateType === 'job_template'
                   ? AwxRoute.EditJobTemplateSurvey
+                  : templateType === 'terraform_job_template'
+                  ? AwxRoute.EditTerraformTemplateSurvey
                   : AwxRoute.EditWorkflowJobTemplateSurvey,
                 { params: { id }, query: { question_variable: question.variable } }
               )}

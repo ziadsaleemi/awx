@@ -28,7 +28,7 @@ const ConfirmBoxDiv = styled.div`
 
 export function useDeleteSurveyDialog(
   onComplete: (questions: Spec[]) => void,
-  templateType?: (JobTemplate | WorkflowJobTemplate)['type']
+  templateType?: (JobTemplate | WorkflowJobTemplate)['type'] | 'terraform_job_template'
 ) {
   const { t } = useTranslation();
   const [_, setDialog] = usePageDialog();
@@ -70,7 +70,7 @@ function DeleteSurveyDialog(props: {
   onComplete: (questions: Spec[]) => void;
   onError: (err: unknown) => void;
   id?: string;
-  templateType?: (JobTemplate | WorkflowJobTemplate)['type'];
+  templateType?: (JobTemplate | WorkflowJobTemplate)['type'] | 'terraform_job_template';
 }) {
   const { questions, onClose, onComplete, onError, id, templateType } = props;
   const { t } = useTranslation();

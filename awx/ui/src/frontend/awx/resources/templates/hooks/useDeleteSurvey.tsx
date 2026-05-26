@@ -19,7 +19,7 @@ export function useDeleteSurvey(props: {
   const deleteRequest = useDeleteRequest();
 
   const surveySpecEndpoint = id
-    ? awxAPI`/${templateType === 'job_template' ? 'job_templates' : 'workflow_job_templates'}/${id}/survey_spec/`
+    ? awxAPI`/${templateType === 'job_template' ? 'job_templates' : templateType === 'terraform_job_template' ? 'terraform_job_templates' : 'workflow_job_templates'}/${id}/survey_spec/`
     : '';
 
   const { data } = useGet<Survey>(surveySpecEndpoint);

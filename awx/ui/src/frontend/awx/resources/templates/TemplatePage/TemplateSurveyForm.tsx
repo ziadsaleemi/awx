@@ -27,7 +27,7 @@ import { awxAPI } from '../../../common/api/awx-utils';
 import { Spec, Survey } from '../../../interfaces/Survey';
 import { AwxRoute } from '../../../main/AwxRoutes';
 
-type ResourceType = 'job_templates' | 'workflow_job_templates';
+type ResourceType = 'job_templates' | 'workflow_job_templates' | 'terraform_job_templates';
 
 const minDefault = 0;
 const maxDefault = 1024;
@@ -72,6 +72,8 @@ export function TemplateSurveyForm(props: IProps) {
     pageNavigate(
       resourceType === 'job_templates'
         ? AwxRoute.JobTemplateSurvey
+        : resourceType === 'terraform_job_templates'
+        ? AwxRoute.TerraformTemplateSurvey
         : AwxRoute.WorkflowJobTemplateSurvey,
       { params: { id } }
     );

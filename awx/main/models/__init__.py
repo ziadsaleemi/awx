@@ -258,7 +258,7 @@ activity_stream_registrar.connect(WorkflowApproval)
 activity_stream_registrar.connect(WorkflowApprovalTemplate)
 
 # Register models
-permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
+permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, TerraformJobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
 permission_registry.register(InstanceGroup, parent_field_name=None)  # Not part of an organization
 
 # prevent API filtering on certain Django-supplied sensitive fields

@@ -1,23 +1,25 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
+  DateTimeCell,
+  ElapsedTimeCell,
   ITableColumn,
   IToolbarFilter,
   PageTable,
   ToolbarFilterType,
-  usePageNavigate,
+  useGetPageUrl,
 } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxView } from '../../common/useAwxView';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { TerraformJob } from '../../interfaces/TerraformJob';
 import { StatusCell } from '../../../common/Status';
-import { useMemo } from 'react';
 
 export function TerraformTemplateJobs() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
-  const pageNavigate = usePageNavigate();
+  const getPageUrl = useGetPageUrl();
 
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
@@ -38,6 +40,18 @@ export function TerraformTemplateJobs() {
         ],
         placeholder: t('Select status'),
       },
+      {
+        key: 'operation',
+        label: t('Operation'),
+        type: ToolbarFilterType.SingleSelect,
+        query: 'terraform_operation',
+        options: [
+          { value: 'apply', label: t('Apply') },
+          { value: 'plan', label: t('Plan') },
+          { value: 'destroy', label: t('Destroy') },
+        ],
+        placeholder: t('Select operation'),
+      },
     ],
     [t]
   );
@@ -48,9 +62,20 @@ export function TerraformTemplateJobs() {
         header: t('ID'),
         cell: (job) => job.id,
         sort: 'id',
-        value: (job) => job.id.toString(),
-        onClick: (job: TerraformJob) =>
-          pageNavigate(AwxRoute.TerraformJobPage, { params: { job_id: job.id } }),
+        card: 'hidden',
+        list: 'hidden',
+        minWidth: 0,
+      },
+      {
+        header: t('Name'),
+        cell: (job) => (
+          <Link to={getPageUrl(AwxRoute.TerraformJobPage, { params: { job_id: job.id } })}>
+            {job.name}
+          </Link>
+        ),
+        sort: 'name',
+        card: 'name',
+        list: 'name',
       },
       {
         header: t('Status'),
@@ -64,25 +89,46 @@ export function TerraformTemplateJobs() {
       },
       {
         header: t('Started'),
-        cell: (job) =>
-          job.started ? new Date(job.started).toLocaleString() : t('Not started'),
+        cell: (job) => <DateTimeCell value={job.started ?? undefined} />,
         sort: 'started',
-        defaultSort: true,
         defaultSortDirection: 'desc',
       },
       {
         header: t('Finished'),
-        cell: (job) =>
-          job.finished ? new Date(job.finished).toLocaleString() : '-',
+        cell: (job) => <DateTimeCell value={job.finished ?? undefined} />,
         sort: 'finished',
+        defaultSort: true,
+        defaultSortDirection: 'desc',
       },
       {
         header: t('Duration'),
-        cell: (job) => (job.elapsed ? `${job.elapsed.toFixed(1)}s` : '-'),
-        sort: 'elapsed',
+        cell: (job) => <ElapsedTimeCell value={job.elapsed} />,
+      },
+      {
+        header: t('Launched by'),
+        cell: (job) => job.summary_fields.created_by?.username ?? '—',
+        card: 'hidden',
+        list: 'secondary',
+      },
+      {
+        header: t('Project'),
+        cell: (job) =>
+          job.summary_fields.project ? (
+            <Link
+              to={getPageUrl(AwxRoute.ProjectDetails, {
+                params: { id: job.summary_fields.project.id },
+              })}
+            >
+              {job.summary_fields.project.name}
+            </Link>
+          ) : (
+            '—'
+          ),
+        card: 'hidden',
+        list: 'secondary',
       },
     ],
-    [pageNavigate, t]
+    [getPageUrl, t]
   );
 
   const view = useAwxView<TerraformJob>({

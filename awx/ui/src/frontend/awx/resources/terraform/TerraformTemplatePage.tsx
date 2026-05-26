@@ -42,7 +42,7 @@ export function TerraformTemplatePage() {
       <PageHeader
         title={template.name}
         breadcrumbs={[
-          { label: t('Terraform Templates'), to: getPageUrl(AwxRoute.TerraformTemplates) },
+          { label: t('Templates'), to: getPageUrl(AwxRoute.Templates) },
           { label: template.name },
         ]}
         headerActions={
@@ -56,13 +56,18 @@ export function TerraformTemplatePage() {
       />
       <PageRoutedTabs
         backTab={{
-          label: t('Back to Terraform Templates'),
-          page: AwxRoute.TerraformTemplates,
+          label: t('Back to Templates'),
+          page: AwxRoute.Templates,
           persistentFilterKey: 'terraform-templates',
         }}
         tabs={[
           { label: t('Details'), page: AwxRoute.TerraformTemplateDetails },
+          { label: t('Team Access'), page: AwxRoute.TerraformTemplateTeamAccess },
+          { label: t('User Access'), page: AwxRoute.TerraformTemplateUserAccess },
+          { label: t('Notifications'), page: AwxRoute.TerraformTemplateNotifications },
           { label: t('Jobs'), page: AwxRoute.TerraformTemplateJobs },
+          { label: t('Schedules'), page: AwxRoute.TerraformTemplateSchedules },
+          { label: t('Survey'), page: AwxRoute.TerraformTemplateSurvey },
         ]}
         params={{ id: template.id.toString() }}
         componentParams={{ template }}

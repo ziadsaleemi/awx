@@ -5167,6 +5167,57 @@ class TerraformJobTemplateJobsList(SubListAPIView):
     resource_purpose = 'terraform jobs of a terraform job template'
 
 
+class TerraformJobTemplateSchedulesList(SubListCreateAPIView):
+    name = _("Terraform Job Template Schedules")
+    model = models.Schedule
+    serializer_class = serializers.ScheduleSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'schedules'
+    parent_key = 'unified_job_template'
+    resource_purpose = 'schedules of a terraform job template'
+
+
+class TerraformJobTemplateSurveySpec(JobTemplateSurveySpec):
+    model = models.TerraformJobTemplate
+    resource_purpose = 'terraform job template survey specification'
+
+
+class TerraformJobTemplateNotificationTemplatesAnyList(SubListCreateAttachDetachAPIView):
+    model = models.NotificationTemplate
+    serializer_class = serializers.NotificationTemplateSerializer
+    parent_model = models.TerraformJobTemplate
+    resource_purpose = 'base view for notification templates of a terraform job template'
+
+
+class TerraformJobTemplateNotificationTemplatesStartedList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_started'
+    resource_purpose = 'notification templates triggered on terraform job start'
+
+
+class TerraformJobTemplateNotificationTemplatesErrorList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_error'
+    resource_purpose = 'notification templates triggered on terraform job error'
+
+
+class TerraformJobTemplateNotificationTemplatesSuccessList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_success'
+    resource_purpose = 'notification templates triggered on terraform job success'
+
+
+class TerraformJobTemplateObjectRolesList(SubListAPIView):
+    deprecated = True
+    model = models.Role
+    serializer_class = serializers.RoleSerializer
+    parent_model = models.TerraformJobTemplate
+    search_fields = ('role_field', 'content_type__model')
+    resource_purpose = 'roles of a terraform job template'
+
+    def get_queryset(self):
+        po = self.get_parent_object()
+        content_type = ContentType.objects.get_for_model(self.parent_model)
+        return models.Role.objects.filter(content_type=content_type, object_id=po.pk)
+
+
 class TerraformJobList(ListAPIView):
     model = models.TerraformJob
     serializer_class = serializers.TerraformJobSerializer

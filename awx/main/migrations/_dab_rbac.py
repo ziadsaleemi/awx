@@ -132,7 +132,14 @@ def get_permissions_for_role(role_field, children_map, apps):
             for perm_name in role_name_to_perm_mapping[child_field.name]:
                 if perm_name == 'add_' and role_field.model._meta.model_name != 'organization':
                     continue  # only organizations can contain add permissions
-                perm = Permission.objects.filter(content_type=ContentType.objects.get_for_model(child_field.model), codename__startswith=perm_name).first()
+                try:
+                    ct = ContentType.objects.get_for_model(child_field.model)
+                except (RuntimeError, LookupError):
+                    # Model is not registered in DAB RBAC content types (e.g. custom models
+                    # using ImplicitRoleField that haven't been added to DAB RBAC yet).
+                    # Skip gracefully so we don't break permission lookups for the parent role.
+                    continue
+                perm = Permission.objects.filter(content_type=ct, codename__startswith=perm_name).first()
                 if perm is not None and perm not in perm_list:
                     perm_list.append(perm)
 
