@@ -79,6 +79,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 20 | **Navbar logo size control** — S / M / L size-preset buttons in Settings → User Interface (below the logo upload); selected size stored in localStorage and applied to the masthead brand on every page load | Low | ✅ |
 | 21 | **Custom login background image in DB** — upload or paste an https:// URL in Settings → User Interface; stored in `CUSTOM_LOGIN_BACKGROUND` AWX setting (database), served from `/api/` root before auth, no more localStorage | Medium | ✅ |
 | 22 | **Remove first-letter icon placeholders from sidebar** — nav items without an explicit icon now show only their label text in expanded mode; first-letter fallback kept only for collapsed (icon-only) mode | Low | ✅ |
+| 23 | **Catalog deploy dynamic field interpolation** — deploy form now resolves `dynamic_field_templates` placeholders (for example `{mnemonic}{cores}`) using current form values before submitting `extra_vars` | High | ✅ |
 
 ---
 
@@ -172,6 +173,17 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E7 | **Sidebar nav** — new top-level "Catalog" section in sidebar with entries: Browse, My Deployments; Admin sub-section (Items, All Deployments) shown only if user has catalog_admin | High | ✅ |
 | E8 | **Catalog-only login redirect** — if logged-in user has only `catalog_user` role, redirect from AWX root (`/`) to `/catalog` instead of the usual dashboard | Medium | ✅ |
 | E9 | **Catalog ↔ Terraform integration (UI)** — `CatalogItemForm` includes `terraform_job_template` selector alongside workflow selectors; catalog item list "Provision" column shows terraform template name with `(Terraform)` badge or workflow name; catalog item detail page shows terraform template row; deployment detail page links to the `TerraformJobPage` output viewer; `CatalogBrowse` cards show terraform template name indicator | High | ✅ |
+| E10 | **Catalog dynamic field UX hardening** — removed dynamic-field controls from Name template; survey fields are shown automatically in Catalog Item create/edit for centralized per-field control (no manual add/remove); dynamic values are stored independently in `dynamic_field_templates`; admins can set both `deploy_disabled_fields` and `deploy_hidden_fields` per catalog item to control deploy-form behavior; item form now uses Details/Form Fields tabs with consistent two-column layout and icon URL input removed | High | ✅ |
+| E11 | **Catalog sidebar VM size discoverability** — updated Catalog admin nav label to "Catalog Items / VM Sizes" so VM size preset management is visible from the sidebar | Medium | ✅ |
+| E12 | **Dedicated VM Sizes admin home** — new Catalog sidebar item `VM Sizes` with hypervisor/public-cloud tabs, per-item VM size add/edit/remove controls, and provider metadata fields (`cluster`, `node`) for future placement mapping | High | ✅ |
+| E13 | **Public cloud provider strategy tabs** — added provider tabs under VM Sizes planning view; DigitalOcean enabled as first test provider tab while preserving hypervisor-only custom size enforcement | High | ✅ |
+| E14 | **Marketplace template ingestion plan** — design phase for importing cloud marketplace images/templates and provider-native plans into a provider-mapping layer consumable by Catalog deploy flows | High | ⬜ |
+| E15 | **Workflow-driven post-provision configuration mapping** — design phase for chaining template deploy + AWX workflows (configure, validate, lifecycle actions) across hypervisors and public clouds | High | ⬜ |
+| E16 | **Cloud section with connection health** — new top-level `Cloud` sidebar area with provider tabs on `Connections`, credential selection, connect/disconnect actions, and status indicators (green connected, warning/error states for misconfigured/disconnected) | High | ✅ |
+| E17 | **Dynamic cloud provider sub-navigation** — when a provider is connected, a provider-specific child item appears under `Cloud` and opens dedicated configuration controls for template pull policy, allowed templates, and network allow-lists | High | ✅ |
+| E18 | **Cloud RBAC hardening** — Cloud sidebar visibility and cloud management pages now require admin-level access (superuser/system auditor); credential `use` capability is enforced before provider connection attempts | High | ✅ |
+| E19 | **DigitalOcean cloud credential type** — added managed migration for `DigitalOcean (Terraform)` credential type (`digitalocean_terraform`) so users can create and select DigitalOcean credentials in AWX | High | ✅ |
+| E20 | **Automated DigitalOcean image + pricing pull** — Cloud provider settings now call a backend endpoint that uses the selected DigitalOcean credential to pull all available images and droplet pricing, then renders both lists in the UI without manual source URL input | High | ✅ |
 
 ---
 

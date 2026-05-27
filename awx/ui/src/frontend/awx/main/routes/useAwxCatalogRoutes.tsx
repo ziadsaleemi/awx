@@ -12,11 +12,11 @@ import { CatalogItemPage } from '../../resources/catalog/CatalogItemPage';
 import { CatalogItemDetails } from '../../resources/catalog/CatalogItemDetails';
 import { CreateCatalogItem, EditCatalogItem } from '../../resources/catalog/CatalogItemForm';
 import { CatalogAdminDeployments } from '../../resources/catalog/CatalogAdminDeployments';
+import { CatalogVmSizes } from '../../resources/catalog/CatalogVmSizes';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCatalogRoutes() {
   const { t } = useTranslation();
-
   const catalogRoutes = useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.Catalog,
@@ -61,7 +61,7 @@ export function useAwxCatalogRoutes() {
         // Admin — Catalog Items
         {
           id: AwxRoute.CatalogAdminItems,
-          label: t('Items (Admin)'),
+          label: t('Catalog Items'),
           path: 'admin/items',
           children: [
             {
@@ -89,6 +89,12 @@ export function useAwxCatalogRoutes() {
             },
             { path: '', element: <CatalogItems /> },
           ],
+        },
+        {
+          id: AwxRoute.CatalogAdminVmSizes,
+          label: t('VM Sizes'),
+          path: 'admin/vm-sizes',
+          element: <CatalogVmSizes />,
         },
         // Admin — All Deployments
         {

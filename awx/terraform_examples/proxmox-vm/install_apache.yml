@@ -33,6 +33,15 @@
     - name: Gather facts after SSH is ready
       ansible.builtin.setup:
 
+    - name: Wait for dpkg/apt lock to be released (Debian/Ubuntu)
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+      timeout: 300
+
     - name: Install Apache (Debian/Ubuntu)
       ansible.builtin.apt:
         name: apache2

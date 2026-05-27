@@ -41,6 +41,46 @@ class CatalogItem(CommonModelNameNotUnique):
         default='',
         help_text=_('Optional base64-encoded image (data URL) used for catalog item icon upload.'),
     )
+    name_template = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text=_(
+            'Optional deployment name template. Use {user_org_name} for the normalized organization name and append +1 to enable sequential numbering.'
+        ),
+    )
+    dynamic_name_field = models.CharField(
+        max_length=256,
+        blank=True,
+        default='',
+        help_text=_(
+            'Optional deploy variable name to auto-populate as a dynamic field (for example, vmnam).'
+        ),
+    )
+    dynamic_field_templates = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Optional per-field dynamic values keyed by deploy variable name. These values are independent from name_template.'
+        ),
+    )
+    deploy_disabled_fields = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Optional list of deploy field names that should be read-only in the deploy form for this catalog item.'
+        ),
+    )
+    deploy_hidden_fields = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Optional list of deploy field names that should be hidden from the deploy form for this catalog item.'
+        ),
+    )
     organization = models.ForeignKey(
         'Organization',
         related_name='catalog_items',

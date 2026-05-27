@@ -6,6 +6,11 @@ export interface CatalogItem {
   description: string;
   icon_url: string;
   icon_data: string;
+  name_template: string;
+  dynamic_name_field: string;
+  dynamic_field_templates: Record<string, string> | null;
+  deploy_disabled_fields: string[] | null;
+  deploy_hidden_fields: string[] | null;
   organization: number | null;
   provision_workflow: number | null;
   terraform_job_template: number | null;

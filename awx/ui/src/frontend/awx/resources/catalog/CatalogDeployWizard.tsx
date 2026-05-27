@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Button,
   Form,
@@ -27,6 +27,7 @@ import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
+import { generateCatalogName, parseCatalogDynamicFieldNames } from './catalogNaming';
 
 interface SchemaProperty {
   type?: 'string' | 'integer' | 'number' | 'boolean';
@@ -48,9 +49,45 @@ interface DeploySurveyResponse {
   schema: JsonSchema;
 }
 
+interface CatalogDeploymentListResponse {
+  count: number;
+  results: Array<{ name: string; extra_vars?: Record<string, unknown> | null }>;
+}
+
+function renderDynamicTemplate(template: string, context: Record<string, string>) {
+  return template.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_match, key: string) => {
+    const value = context[key];
+    return value !== undefined && value !== null ? String(value) : '';
+  });
+}
+
+function resolveSequenceSuffix(value: string, existingValues: string[]) {
+  const trimmed = value.trim();
+  if (!trimmed.endsWith('+1')) {
+    return value;
+  }
+
+  const base = trimmed.slice(0, -2);
+  const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^${escapedBase}(?<sequence>\\d+)?$`, 'i');
+
+  let highestSequence = 0;
+  let matched = false;
+  for (const existingValue of existingValues) {
+    const match = pattern.exec(existingValue.trim());
+    if (!match) continue;
+    matched = true;
+    const sequence = match.groups?.sequence;
+    highestSequence = Math.max(highestSequence, sequence ? Number(sequence) : 1);
+  }
+
+  return matched ? `${base}${highestSequence + 1}` : `${base}1`;
+}
+
 export function CatalogDeployWizard() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const id = params.id ?? '';
   const pageNavigate = usePageNavigate();
   const alertToaster = usePageAlertToaster();
@@ -62,6 +99,7 @@ export function CatalogDeployWizard() {
   const { data: deploySurvey } = useGet<DeploySurveyResponse>(
     awxAPI`/catalog_items/${id}/deploy_survey/`
   );
+  const { data: deploymentList } = useGet<CatalogDeploymentListResponse>(item?.related.deployments);
 
   const postRequest = usePostRequest<Record<string, unknown>, CatalogDeployment>();
 
@@ -72,24 +110,101 @@ export function CatalogDeployWizard() {
   const properties = schema.properties ?? {};
   const requiredSet = new Set<string>(schema.required ?? []);
 
+  const existingDynamicFieldValues = useMemo(() => {
+    const valuesByField: Record<string, string[]> = {};
+    for (const deployment of deploymentList?.results ?? []) {
+      const extraVars = deployment.extra_vars;
+      if (!extraVars || typeof extraVars !== 'object') continue;
+
+      for (const [key, value] of Object.entries(extraVars)) {
+        if (value === undefined || value === null) continue;
+        if (!valuesByField[key]) {
+          valuesByField[key] = [];
+        }
+        valuesByField[key].push(String(value));
+      }
+    }
+    return valuesByField;
+  }, [deploymentList?.results]);
+
+  const prefilledValues = useMemo(() => {
+    const values: Record<string, string> = {};
+    const cpuField = searchParams.get('cpu_field');
+    const cpuValue = searchParams.get('cpu');
+    if (cpuField && cpuValue !== null && Object.prototype.hasOwnProperty.call(properties, cpuField)) {
+      values[cpuField] = cpuValue;
+    }
+
+    const ramField = searchParams.get('ram_field');
+    const ramValue = searchParams.get('ram');
+    if (ramField && ramValue !== null && Object.prototype.hasOwnProperty.call(properties, ramField)) {
+      values[ramField] = ramValue;
+    }
+
+    return values;
+  }, [properties, searchParams]);
+
   const initialFormValues = useMemo((): Record<string, string> => {
     const values: Record<string, string> = {};
     for (const [key, prop] of Object.entries(properties)) {
       values[key] = prop.default !== undefined ? String(prop.default) : '';
     }
-    return values;
-  }, [properties]);
+    Object.assign(values, prefilledValues);
 
-  const [name, setName] = useState('');
+    const dynamicTemplates = item?.dynamic_field_templates ?? {};
+    for (const [field, template] of Object.entries(dynamicTemplates)) {
+      if (typeof template !== 'string' || template.trim() === '') continue;
+      if (!Object.prototype.hasOwnProperty.call(properties, field)) continue;
+      const renderedValue = renderDynamicTemplate(template, values);
+      values[field] = resolveSequenceSuffix(renderedValue, existingDynamicFieldValues[field] ?? []);
+    }
+
+    return values;
+  }, [existingDynamicFieldValues, item?.dynamic_field_templates, prefilledValues, properties]);
+
   const [formValues, setFormValues] = useState<Record<string, string>>(initialFormValues);
-  const [nameError, setNameError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dynamicFieldNames = useMemo(
+    () => parseCatalogDynamicFieldNames(item?.dynamic_name_field),
+    [item?.dynamic_name_field]
+  );
+  const disabledFieldSet = useMemo(() => {
+    const names = new Set<string>();
+    for (const field of item?.deploy_disabled_fields ?? []) {
+      if (typeof field === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field)) {
+        names.add(field);
+      }
+    }
+    return names;
+  }, [item?.deploy_disabled_fields]);
+  const hiddenFieldSet = useMemo(() => {
+    const names = new Set<string>();
+    for (const field of item?.deploy_hidden_fields ?? []) {
+      if (typeof field === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field)) {
+        names.add(field);
+      }
+    }
+    return names;
+  }, [item?.deploy_hidden_fields]);
 
   useEffect(() => {
     setFormValues(initialFormValues);
     setFieldErrors({});
   }, [initialFormValues]);
+
+  const generatedName = useMemo(() => {
+    const existingNames = deploymentList?.results?.map((deployment) => deployment.name) ?? [];
+    const dynamicField = dynamicFieldNames[0];
+    const effectiveTemplate =
+      item?.name_template || (dynamicField ? `{${dynamicField}} deployment` : undefined);
+    return generateCatalogName(
+      effectiveTemplate,
+      { user_org_name: item?.summary_fields?.organization?.name, ...formValues },
+      existingNames,
+      item?.name ?? 'deployment'
+    );
+  }, [deploymentList?.results, dynamicFieldNames, formValues, item?.name, item?.name_template, item?.summary_fields?.organization?.name]);
 
   const setValue = useCallback((key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
@@ -99,13 +214,9 @@ export function CatalogDeployWizard() {
   const validate = (): boolean => {
     let valid = true;
 
-    if (!name.trim()) {
-      setNameError(t('Deployment name is required.'));
-      valid = false;
-    }
-
     const errors: Record<string, string> = {};
     for (const key of requiredSet) {
+      if (hiddenFieldSet.has(key)) continue;
       if (!formValues[key]?.trim()) {
         errors[key] = t('This field is required.');
         valid = false;
@@ -121,9 +232,21 @@ export function CatalogDeployWizard() {
 
     setIsSubmitting(true);
     try {
+      const resolvedValues: Record<string, string> = { ...formValues };
+      const dynamicTemplates = item.dynamic_field_templates ?? {};
+      for (const [field, template] of Object.entries(dynamicTemplates)) {
+        if (typeof template !== 'string' || template.trim() === '') continue;
+        if (!Object.prototype.hasOwnProperty.call(properties, field)) continue;
+        const renderedValue = renderDynamicTemplate(template, resolvedValues);
+        resolvedValues[field] = resolveSequenceSuffix(
+          renderedValue,
+          existingDynamicFieldValues[field] ?? []
+        );
+      }
+
       const extraVars: Record<string, unknown> = {};
       for (const [key, prop] of Object.entries(properties)) {
-        const raw = formValues[key];
+        const raw = resolvedValues[key];
         if (raw === '' || raw === undefined) continue;
         if (prop.type === 'integer' || prop.type === 'number') {
           const parsed = Number(raw);
@@ -136,12 +259,12 @@ export function CatalogDeployWizard() {
       }
 
       await postRequest(awxAPI`/catalog_items/${id}/deploy/`, {
-        name: name.trim(),
+        name: generatedName,
         extra_vars: extraVars,
       });
       alertToaster.addAlert({
         variant: 'success',
-        title: t('Deployment started for "{{name}}"', { name: name.trim() }),
+        title: t('Deployment started for "{{name}}"', { name: generatedName }),
         timeout: 4000,
       });
       pageNavigate(AwxRoute.CatalogDeployments);
@@ -157,8 +280,8 @@ export function CatalogDeployWizard() {
   };
 
   const sortedEntries = [
-    ...Object.entries(properties).filter(([key]) => requiredSet.has(key)),
-    ...Object.entries(properties).filter(([key]) => !requiredSet.has(key)),
+    ...Object.entries(properties).filter(([key]) => requiredSet.has(key) && !hiddenFieldSet.has(key)),
+    ...Object.entries(properties).filter(([key]) => !requiredSet.has(key) && !hiddenFieldSet.has(key)),
   ];
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
@@ -179,20 +302,16 @@ export function CatalogDeployWizard() {
           <FormGroup label={t('Deployment name')} isRequired fieldId="deploy-name">
             <TextInput
               id="deploy-name"
-              value={name}
-              onChange={(_event, val) => {
-                setName(val);
-                setNameError('');
-              }}
+              value={generatedName}
+              onChange={() => undefined}
               isRequired
-              validated={nameError ? 'error' : 'default'}
-              placeholder={t('e.g. My Dev VM')}
+              isDisabled
             />
-            {nameError && (
-              <HelperText>
-                <HelperTextItem variant="error">{nameError}</HelperTextItem>
-              </HelperText>
-            )}
+            <HelperText>
+              <HelperTextItem>
+                {t('Auto-generated from your template and deploy form values.')}
+              </HelperTextItem>
+            </HelperText>
           </FormGroup>
 
           {sortedEntries.map(([key, prop]) => {
@@ -200,7 +319,7 @@ export function CatalogDeployWizard() {
             const isReq = requiredSet.has(key);
             const label = prop.title ?? key;
             const fieldId = `deploy-field-${key}`;
-
+            const isAdminDisabledField = disabledFieldSet.has(key);
             if (prop.enum && prop.enum.length > 0) {
               return (
                 <FormGroup key={key} label={label} isRequired={isReq} fieldId={fieldId}>
@@ -214,6 +333,7 @@ export function CatalogDeployWizard() {
                     value={formValues[key] ?? ''}
                     onChange={(_event, val) => setValue(key, val)}
                     validated={error ? 'error' : 'default'}
+                    isDisabled={isAdminDisabledField || isSubmitting}
                   >
                     {!isReq && <FormSelectOption value="" label={t('Select...')} />}
                     {prop.enum.map((opt) => (
@@ -243,6 +363,7 @@ export function CatalogDeployWizard() {
                   onChange={(_event, val) => setValue(key, val)}
                   validated={error ? 'error' : 'default'}
                   isRequired={isReq}
+                  isDisabled={isAdminDisabledField || isSubmitting}
                   {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
                   {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
                 />

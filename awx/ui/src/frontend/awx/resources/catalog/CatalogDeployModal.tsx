@@ -20,6 +20,7 @@ import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { AwxRoute } from '../../main/AwxRoutes';
+import { generateCatalogName, parseCatalogDynamicFieldNames } from './catalogNaming';
 
 interface SchemaProperty {
   type?: 'string' | 'integer' | 'number' | 'boolean';
@@ -46,6 +47,11 @@ interface DeploySurveyResponse {
   schema: JsonSchema;
 }
 
+interface CatalogDeploymentListResponse {
+  count: number;
+  results: Array<{ name: string }>;
+}
+
 export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
   const { t } = useTranslation();
   const pageNavigate = usePageNavigate();
@@ -55,6 +61,7 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
   const { data: surveyData } = useGet<DeploySurveyResponse>(
     awxAPI`/catalog_items/${String(item.id)}/deploy_survey/`
   );
+  const { data: deploymentList } = useGet<CatalogDeploymentListResponse>(item.related.deployments);
 
   const schema = useMemo(
     () => (surveyData?.schema ?? (item.extra_vars_schema ?? {})) as JsonSchema,
@@ -71,11 +78,43 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
     return vals;
   }, [properties]);
 
-  const [name, setName] = useState('');
   const [formValues, setFormValues] = useState<Record<string, string>>(initialFormValues);
-  const [nameError, setNameError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dynamicFieldNames = useMemo(
+    () => parseCatalogDynamicFieldNames(item.dynamic_name_field),
+    [item.dynamic_name_field]
+  );
+  const disabledFieldSet = useMemo(() => {
+    const names = new Set<string>();
+    for (const field of item.deploy_disabled_fields ?? []) {
+      if (typeof field === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field)) {
+        names.add(field);
+      }
+    }
+    return names;
+  }, [item.deploy_disabled_fields]);
+  const hiddenFieldSet = useMemo(() => {
+    const names = new Set<string>();
+    for (const field of item.deploy_hidden_fields ?? []) {
+      if (typeof field === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(field)) {
+        names.add(field);
+      }
+    }
+    return names;
+  }, [item.deploy_hidden_fields]);
+
+  const generatedName = useMemo(() => {
+    const existingNames = deploymentList?.results?.map((deployment) => deployment.name) ?? [];
+    const dynamicField = dynamicFieldNames[0];
+    const effectiveTemplate = item.name_template || (dynamicField ? `{${dynamicField}} deployment` : undefined);
+    return generateCatalogName(
+      effectiveTemplate,
+      { user_org_name: item.summary_fields?.organization?.name, ...formValues },
+      existingNames,
+      item.name
+    );
+  }, [deploymentList?.results, dynamicFieldNames, formValues, item.name, item.name_template, item.summary_fields?.organization?.name]);
 
   useEffect(() => {
     setFormValues(initialFormValues);
@@ -89,12 +128,9 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
 
   const validate = (): boolean => {
     let valid = true;
-    if (!name.trim()) {
-      setNameError(t('Deployment name is required.'));
-      valid = false;
-    }
     const errors: Record<string, string> = {};
     for (const key of requiredSet) {
+      if (hiddenFieldSet.has(key)) continue;
       if (!formValues[key]?.trim()) {
         errors[key] = t('This field is required.');
         valid = false;
@@ -120,12 +156,12 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
         }
       }
       await postRequest(awxAPI`/catalog_items/${String(item.id)}/deploy/`, {
-        name: name.trim(),
+        name: generatedName,
         extra_vars: extraVars,
       });
       alertToaster.addAlert({
         variant: 'success',
-        title: t('Deployment "{{name}}" started.', { name: name.trim() }),
+        title: t('Deployment "{{name}}" started.', { name: generatedName }),
         timeout: 4000,
       });
       onClose();
@@ -143,13 +179,14 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
 
   // Sort: required fields first, optional second, preserving insertion order within each group
   const sortedEntries = [
-    ...Object.entries(properties).filter(([k]) => requiredSet.has(k)),
-    ...Object.entries(properties).filter(([k]) => !requiredSet.has(k)),
+    ...Object.entries(properties).filter(([k]) => requiredSet.has(k) && !hiddenFieldSet.has(k)),
+    ...Object.entries(properties).filter(([k]) => !requiredSet.has(k) && !hiddenFieldSet.has(k)),
   ];
 
   return (
     <Modal
       title={t('Deploy: {{name}}', { name: item.name })}
+      aria-label={t('Deploy catalog item')}
       variant={ModalVariant.medium}
       isOpen
       hasNoBodyWrapper
@@ -175,20 +212,16 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
           <FormGroup label={t('Deployment name')} isRequired fieldId="deploy-name">
             <TextInput
               id="deploy-name"
-              value={name}
-              onChange={(_event, val) => {
-                setName(val);
-                setNameError('');
-              }}
+              value={generatedName}
+              onChange={() => undefined}
               isRequired
-              validated={nameError ? 'error' : 'default'}
-              placeholder={t('e.g. My Dev VM')}
+              isDisabled
             />
-            {nameError && (
-              <HelperText>
-                <HelperTextItem variant="error">{nameError}</HelperTextItem>
-              </HelperText>
-            )}
+            <HelperText>
+              <HelperTextItem>
+                {t('Auto-generated from your template and deploy form values.')}
+              </HelperTextItem>
+            </HelperText>
           </FormGroup>
 
           {/* Schema-driven survey fields */}
@@ -197,7 +230,7 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
             const isReq = requiredSet.has(key);
             const label = prop.title ?? key;
             const fieldId = `deploy-field-${key}`;
-
+            const isAdminDisabledField = disabledFieldSet.has(key);
             if (prop.enum && prop.enum.length > 0) {
               return (
                 <FormGroup key={key} label={label} isRequired={isReq} fieldId={fieldId}>
@@ -211,6 +244,7 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
                     value={formValues[key] ?? ''}
                     onChange={(_event, val) => setValue(key, val)}
                     validated={error ? 'error' : 'default'}
+                    isDisabled={isAdminDisabledField || isSubmitting}
                   >
                     {!isReq && <FormSelectOption value="" label={t('Select...')} />}
                     {prop.enum.map((opt) => (
@@ -240,6 +274,7 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
                   onChange={(_event, val) => setValue(key, val)}
                   validated={error ? 'error' : 'default'}
                   isRequired={isReq}
+                  isDisabled={isAdminDisabledField || isSubmitting}
                   {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
                   {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
                 />

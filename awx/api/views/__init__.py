@@ -7,8 +7,8 @@ import functools
 import html
 import itertools
 import json
-import logging
 import re
+import logging
 import requests
 import socket
 import sys
@@ -5326,6 +5326,39 @@ def _build_catalog_item_live_schema(item):
             if question.get('required'):
                 required_fields.add(variable)
 
+    dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
+    dynamic_field_templates = _parse_catalog_dynamic_field_templates(
+        item.dynamic_field_templates, dynamic_fields
+    )
+
+    for dynamic_field in dynamic_fields:
+        prop = schema['properties'].setdefault(
+            dynamic_field,
+            {
+                'type': 'string',
+                'title': dynamic_field,
+                'description': _('Dynamic field used as input for deployment naming.'),
+            },
+        )
+        template_default = dynamic_field_templates.get(dynamic_field, '').strip()
+        if template_default:
+            prop['default'] = template_default
+
+    # Ensure template-driven variables are editable in the deploy form, even when
+    # they are not declared in survey_spec or extra_vars_schema.
+    template = item.name_template or ''
+    for variable in set(re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', template)):
+        if variable == 'user_org_name':
+            continue
+        schema['properties'].setdefault(
+            variable,
+            {
+                'type': 'string',
+                'title': variable,
+                'description': _('Used by deployment name template.'),
+            },
+        )
+
     schema['required'] = sorted(required_fields)
     return schema
 
@@ -5347,6 +5380,105 @@ def _collect_deployment_saved_vars(deployment):
             saved_vars.update(artifacts)
 
     return saved_vars
+
+
+def _parse_catalog_launch_extra_vars(raw_extra_vars):
+    if isinstance(raw_extra_vars, dict):
+        return raw_extra_vars.copy()
+    if not isinstance(raw_extra_vars, str) or not raw_extra_vars.strip():
+        return None
+
+    try:
+        parsed = parse_yaml_or_json(raw_extra_vars, silent_failure=False)
+    except Exception:
+        return None
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    return None
+
+
+def _resolve_catalog_deployment_extra_vars(launch_extra_vars, workflow_job=None, terraform_job=None):
+    for job in (workflow_job, terraform_job):
+        if not job:
+            continue
+        effective_extra_vars = _parse_catalog_launch_extra_vars(getattr(job, 'extra_vars', None))
+        if effective_extra_vars is not None:
+            return effective_extra_vars
+
+    return launch_extra_vars.copy()
+
+
+def _normalize_catalog_name_component(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value).lower().strip())
+
+
+def _render_catalog_name_template(template, context):
+    def replace(match):
+        key = match.group(1)
+        return _normalize_catalog_name_component(context.get(key, ''))
+
+    rendered = re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', replace, template or '')
+    return rendered.strip()
+
+
+def _generate_catalog_name(template, context, existing_names, fallback_prefix):
+    rendered_base = _render_catalog_name_template(template, context) if template else ''
+    rendered_base = rendered_base or str(fallback_prefix).strip() or 'deployment'
+    if not rendered_base.endswith('+1'):
+        return rendered_base
+
+    base = rendered_base[:-2]
+    escaped_base = re.escape(base)
+    pattern = re.compile(rf'^{escaped_base}(?P<sequence>\d+)?$', re.IGNORECASE)
+
+    highest_sequence = 0
+    matched = False
+    for existing_name in existing_names:
+        if not existing_name:
+            continue
+        match = pattern.match(str(existing_name).strip())
+        if not match:
+            continue
+        matched = True
+        sequence = match.group('sequence')
+        highest_sequence = max(highest_sequence, int(sequence) if sequence else 1)
+
+    if not matched:
+        return f'{base}1'
+
+    return f'{base}{highest_sequence + 1}'
+
+
+def _parse_catalog_dynamic_name_fields(raw_value):
+    names = []
+    seen = set()
+    for token in (raw_value or '').split(','):
+        normalized = token.strip()
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', normalized):
+            continue
+        if normalized in seen:
+            continue
+        names.append(normalized)
+        seen.add(normalized)
+    return names
+
+
+def _parse_catalog_dynamic_field_templates(raw_value, dynamic_fields):
+    if not isinstance(raw_value, dict):
+        return {}
+
+    allowed_fields = set(dynamic_fields)
+    templates = {}
+    for key, value in raw_value.items():
+        if key not in allowed_fields:
+            continue
+        if not isinstance(value, str):
+            continue
+        templates[key] = value
+
+    return templates
 
 
 class CatalogItemDeploySurvey(GenericAPIView):
@@ -5378,10 +5510,6 @@ class CatalogItemDeploy(GenericAPIView):
     def post(self, request, *args, **kwargs):
         item = self.get_object()
 
-        name = request.data.get('name', '')
-        if not name:
-            return Response({'name': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
-
         extra_vars = request.data.get('extra_vars', None)
         if extra_vars is None:
             launch_extra_vars = {}
@@ -5389,6 +5517,25 @@ class CatalogItemDeploy(GenericAPIView):
             launch_extra_vars = extra_vars.copy()
         else:
             return Response({'extra_vars': ['This field must be a dictionary.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = request.data.get('name', '')
+        if isinstance(name, str) and name.strip():
+            name_template = name.strip()
+        else:
+            dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
+            if not item.name_template and dynamic_fields:
+                name_template = f'{{{dynamic_fields[0]}}} deployment'
+            else:
+                name_template = item.name_template or item.name
+
+        existing_names = item.deployments.values_list('name', flat=True)
+        organization_name = item.organization.name if item.organization_id else ''
+        name = _generate_catalog_name(
+            name_template,
+            {'user_org_name': organization_name, **launch_extra_vars},
+            existing_names,
+            item.name,
+        )
 
         launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
 
@@ -5407,6 +5554,12 @@ class CatalogItemDeploy(GenericAPIView):
             workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 
+        deployment_extra_vars = _resolve_catalog_deployment_extra_vars(
+            launch_extra_vars,
+            workflow_job=workflow_job,
+            terraform_job=terraform_job,
+        )
+
         deployment = models.CatalogDeployment.objects.create(
             catalog_item=item,
             name=name,
@@ -5414,7 +5567,7 @@ class CatalogItemDeploy(GenericAPIView):
             status='provisioning' if (workflow_job or terraform_job) else 'active',
             provision_job=workflow_job,
             terraform_provision_job=terraform_job,
-            extra_vars=launch_extra_vars,
+            extra_vars=deployment_extra_vars,
             last_failed_workflow_job=None,
         )
         if workflow_job:
@@ -5559,3 +5712,318 @@ class CatalogDeploymentRetry(GenericAPIView):
             deployment, context=self.get_serializer_context()
         )
         return Response(serializer.data)
+
+
+class CatalogDigitalOceanConnectorValidate(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/digitalocean/validate/
+
+    Verifies that the selected DigitalOcean credential is usable and can
+    authenticate against the DigitalOcean API.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'validate DigitalOcean cloud connector'
+
+    @staticmethod
+    def _normalize_do_token(raw_token):
+        token = raw_token or ''
+        if not isinstance(token, str):
+            token = str(token)
+        token = token.strip().strip('"').strip("'")
+        token = ''.join(ch for ch in token if ch.isprintable() and ch not in ('\n', '\r', '\t'))
+        if token.lower().startswith('bearer '):
+            token = token.split(' ', 1)[1].strip()
+        return token
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response({'credential_id': [_('A valid integer is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'digitalocean_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type DigitalOcean (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
+        if not do_token:
+            return Response(
+                {'credential_id': [_('Credential is missing the DigitalOcean API token (do_token).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                'Authorization': f'Bearer {do_token}',
+                'Accept': 'application/json',
+            }
+        )
+
+        try:
+            response = session.get('https://api.digitalocean.com/v2/account', timeout=20)
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': _('Could not reach DigitalOcean API. Check network connectivity.'),
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': _('DigitalOcean API request timed out.'),
+                }
+            )
+
+        if not response.ok:
+            message = response.text
+            try:
+                message = response.json().get('message', message)
+            except Exception:
+                pass
+            if response.status_code == 401:
+                detail = _(
+                    'Unable to authenticate with DigitalOcean. '
+                    'Make sure do_token contains a valid Personal Access Token '
+                    '(not a Spaces key or other credential). '
+                    'Generate one at: https://cloud.digitalocean.com/account/api/tokens'
+                )
+            else:
+                detail = _('DigitalOcean API error (HTTP %(code)s): %(message)s') % {
+                    'code': response.status_code,
+                    'message': message,
+                }
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': detail,
+                }
+            )
+
+        payload = response.json() or {}
+        account = payload.get('account') or {}
+
+        return Response(
+            {
+                'provider': 'digitalocean',
+                'credential_id': credential_id,
+                'validated': True,
+                'status': 'connected',
+                'account_email': account.get('email'),
+                'account_uuid': account.get('uuid'),
+                'detail': _('Successfully validated DigitalOcean connector credentials.'),
+                'validated_at': now().isoformat(),
+            }
+        )
+
+
+class CatalogDigitalOceanPullImages(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/digitalocean/pull_images/
+
+    Fetches DigitalOcean images and droplet size pricing automatically using
+    the selected DigitalOcean credential. No source URL is required.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull DigitalOcean image catalog and pricing'
+
+    @staticmethod
+    def _normalize_do_token(raw_token):
+        token = raw_token or ''
+        if not isinstance(token, str):
+            token = str(token)
+        token = token.strip().strip('"').strip("'")
+        token = ''.join(ch for ch in token if ch.isprintable() and ch not in ('\n', '\r', '\t'))
+        if token.lower().startswith('bearer '):
+            token = token.split(' ', 1)[1].strip()
+        return token
+
+    def _fetch_do_paginated(self, session, url, key, extra_params=None):
+        items = []
+        next_url = url
+        params = {'per_page': 200}
+        if isinstance(extra_params, dict):
+            params.update(extra_params)
+
+        while next_url:
+            response = session.get(next_url, params=params, timeout=20)
+            if not response.ok:
+                message = response.text
+                try:
+                    message = response.json().get('message', message)
+                except Exception:
+                    pass
+                if response.status_code == 401:
+                    message = _(
+                        '%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)'
+                    ) % {'message': message}
+                raise ParseError(_('DigitalOcean API error: %(message)s') % {'message': message})
+
+            payload = response.json()
+            items.extend(payload.get(key, []))
+            next_url = payload.get('links', {}).get('pages', {}).get('next')
+            params = None
+
+        return items
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response({'credential_id': [_('A valid integer is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'digitalocean_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type DigitalOcean (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
+        if not do_token:
+            return Response(
+                {'credential_id': [_('Credential is missing the DigitalOcean API token (do_token).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                'Authorization': f'Bearer {do_token}',
+                'Accept': 'application/json',
+            }
+        )
+
+        private_images = self._fetch_do_paginated(
+            session,
+            'https://api.digitalocean.com/v2/images',
+            'images',
+            extra_params={'private': 'true'},
+        )
+        public_distribution_images = self._fetch_do_paginated(
+            session,
+            'https://api.digitalocean.com/v2/images',
+            'images',
+            extra_params={'type': 'distribution'},
+        )
+        sizes = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/sizes', 'sizes')
+        raw_regions = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/regions', 'regions')
+        raw_vpcs = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/vpcs', 'vpcs')
+
+        # Private and public distribution images can overlap by id/slug; dedupe.
+        image_map = {}
+        for image in private_images + public_distribution_images:
+            image_key = image.get('id') or image.get('slug') or image.get('name')
+            if image_key is None:
+                continue
+            image_map[image_key] = image
+        images = list(image_map.values())
+
+        image_results = []
+        for image in images:
+            image_results.append(
+                {
+                    'id': image.get('id'),
+                    'slug': image.get('slug'),
+                    'name': image.get('name'),
+                    'distribution': image.get('distribution'),
+                    'type': image.get('type'),
+                    'status': image.get('status'),
+                    'public': bool(image.get('public', False)),
+                    'private': bool(not image.get('public', False)),
+                    'min_disk_size': image.get('min_disk_size'),
+                    'size_gigabytes': image.get('size_gigabytes'),
+                    'regions': image.get('regions', []),
+                }
+            )
+
+        pricing_results = []
+        for size in sizes:
+            pricing_results.append(
+                {
+                    'slug': size.get('slug'),
+                    'description': size.get('description'),
+                    'memory_mb': size.get('memory'),
+                    'vcpus': size.get('vcpus'),
+                    'disk_gb': size.get('disk'),
+                    'transfer_tb': size.get('transfer'),
+                    'price_monthly': size.get('price_monthly'),
+                    'price_hourly': size.get('price_hourly'),
+                    'available': size.get('available'),
+                    'regions': size.get('regions', []),
+                }
+            )
+
+        region_results = []
+        for region in raw_regions:
+            region_results.append(
+                {
+                    'slug': region.get('slug'),
+                    'name': region.get('name'),
+                    'available': bool(region.get('available', False)),
+                    'features': region.get('features', []),
+                }
+            )
+
+        vpc_results = []
+        for vpc in raw_vpcs:
+            vpc_results.append(
+                {
+                    'id': vpc.get('id'),
+                    'name': vpc.get('name'),
+                    'region': vpc.get('region'),
+                    'ip_range': vpc.get('ip_range'),
+                    'default': bool(vpc.get('default', False)),
+                    'created_at': vpc.get('created_at'),
+                }
+            )
+
+        return Response(
+            {
+                'provider': 'digitalocean',
+                'credential_id': credential_id,
+                'pulled_at': now().isoformat(),
+                'image_count': len(image_results),
+                'pricing_count': len(pricing_results),
+                'region_count': len(region_results),
+                'vpc_count': len(vpc_results),
+                'images': image_results,
+                'pricing': pricing_results,
+                'regions': region_results,
+                'vpcs': vpc_results,
+            }
+        )

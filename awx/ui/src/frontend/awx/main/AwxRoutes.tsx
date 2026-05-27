@@ -185,7 +185,13 @@ export enum AwxRoute {
   CatalogDeploymentPage = 'awx-catalog-deployment-page',
   CatalogDeploymentDetails = 'awx-catalog-deployment-details',
   CatalogAdminItems = 'awx-catalog-admin-items',
+  CatalogAdminVmSizes = 'awx-catalog-admin-vm-sizes',
   CatalogAdminDeployments = 'awx-catalog-admin-deployments',
+
+  // Cloud
+  Cloud = 'awx-cloud',
+  CloudConnections = 'awx-cloud-connections',
+  CloudProviderSettings = 'awx-cloud-provider-settings',
 
   // Access
   Access = 'awx-access',

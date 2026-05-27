@@ -31,6 +31,12 @@ export function CatalogItemDetails() {
       <PageDetail label={t('Organization')}>
         {item.summary_fields?.organization?.name ?? '-'}
       </PageDetail>
+      <PageDetail label={t('Name template')}>
+        {item.name_template || t('None')}
+      </PageDetail>
+      <PageDetail label={t('Dynamic source field')}>
+        {item.dynamic_name_field || t('None')}
+      </PageDetail>
       <PageDetail label={t('Provision workflow')}>
         {item.summary_fields?.provision_workflow?.name ?? t('None')}
       </PageDetail>

@@ -45,6 +45,9 @@ logger = logging.getLogger('awx.main.tasks.terraform')
 
 # Match any Terraform output key that starts with "host_ip"
 _HOST_IP_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
+_TF_VARIABLE_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+_TF_VARIABLE_BLOCK_RE = re.compile(r'(^|\n)\s*variable\s+"([a-zA-Z_][a-zA-Z0-9_]*)"\s*\{')
+_TF_BACKEND_BLOCK_RE = re.compile(r'(^|\n)\s*backend\s+"([a-zA-Z0-9_\-]+)"\s*\{')
 
 # ---------------------------------------------------------------------------
 # Container runtime / default execution environment
@@ -163,6 +166,142 @@ class RunTerraformJob(SourceControlMixin):
     # Extra-vars -> tfvars
     # ------------------------------------------------------------------
 
+    def _iter_root_terraform_files(self, working_dir):
+        try:
+            entries = os.listdir(working_dir)
+        except OSError:
+            return
+
+        for name in entries:
+            path = os.path.join(working_dir, name)
+            if not os.path.isfile(path):
+                continue
+            if name.endswith('.tf') or name.endswith('.tf.json'):
+                yield path
+
+    def _extract_tfjson_backend_names(self, data):
+        backend_names = set()
+        if not isinstance(data, dict):
+            return backend_names
+
+        terraform_blocks = data.get('terraform')
+        if isinstance(terraform_blocks, dict):
+            terraform_blocks = [terraform_blocks]
+        elif not isinstance(terraform_blocks, list):
+            return backend_names
+
+        for block in terraform_blocks:
+            if not isinstance(block, dict):
+                continue
+            backends = block.get('backend')
+            if isinstance(backends, dict):
+                backends = [backends]
+            elif not isinstance(backends, list):
+                continue
+            for backend in backends:
+                if isinstance(backend, dict):
+                    for name in backend.keys():
+                        if isinstance(name, str) and name:
+                            backend_names.add(name)
+
+        return backend_names
+
+    def _root_terraform_backend_kind(self, working_dir):
+        """
+        Return Terraform backend kind for the root module in ``working_dir``.
+
+        Returns:
+          - ``'local'`` when backend is implicit local (no backend block)
+            or explicitly ``backend \"local\"``
+          - ``'remote'`` when any non-local backend is declared
+          - ``None`` when no root Terraform files are present/readable
+        """
+        scanned = False
+        backend_names = set()
+
+        for path in self._iter_root_terraform_files(working_dir):
+            scanned = True
+            if path.endswith('.tf'):
+                try:
+                    with open(path, 'r') as fh:
+                        content = fh.read()
+                except OSError:
+                    continue
+                for _full, backend_name in _TF_BACKEND_BLOCK_RE.findall(content):
+                    backend_names.add(backend_name)
+
+            elif path.endswith('.tf.json'):
+                try:
+                    with open(path, 'r') as fh:
+                        data = json.load(fh)
+                except (OSError, ValueError, TypeError):
+                    continue
+                backend_names.update(self._extract_tfjson_backend_names(data))
+
+        if not scanned:
+            return None
+
+        if not backend_names:
+            return 'local'
+
+        if any(name != 'local' for name in backend_names):
+            return 'remote'
+
+        return 'local'
+
+    def _local_state_warning_message(self, working_dir, operation):
+        backend_kind = self._root_terraform_backend_kind(working_dir)
+        if backend_kind != 'local':
+            return None
+
+        action = 'destroy/deprovision' if operation == 'destroy' else operation
+        return (
+            'WARNING: Terraform root module appears to use local state. '
+            'AWX runs jobs in ephemeral working directories, so '
+            f'{action} may show no changes or miss resources created by earlier runs. '
+            'Configure a remote backend (for example S3, AzureRM, GCS, or Terraform Cloud) '
+            'to persist state across runs.'
+        )
+
+    def _get_declared_root_variables(self, working_dir):
+        """
+        Return ``(declared, scanned)`` for variables declared by the *root*
+        Terraform module in ``working_dir``.
+
+        - ``declared``: set of variable names
+        - ``scanned``: True when at least one root ``.tf`` / ``.tf.json`` file
+          was found and inspected
+        """
+        declared = set()
+        scanned = False
+
+        for path in self._iter_root_terraform_files(working_dir):
+            if path.endswith('.tf'):
+                scanned = True
+                try:
+                    with open(path, 'r') as fh:
+                        content = fh.read()
+                except OSError:
+                    continue
+                for _full, var_name in _TF_VARIABLE_BLOCK_RE.findall(content):
+                    declared.add(var_name)
+
+            elif path.endswith('.tf.json'):
+                scanned = True
+                try:
+                    with open(path, 'r') as fh:
+                        data = json.load(fh)
+                except (OSError, ValueError, TypeError):
+                    continue
+                if isinstance(data, dict):
+                    variables = data.get('variable')
+                    if isinstance(variables, dict):
+                        for var_name in variables.keys():
+                            if isinstance(var_name, str) and _TF_VARIABLE_NAME_RE.match(var_name):
+                                declared.add(var_name)
+
+        return declared, scanned
+
     def _write_tfvars(self, instance, working_dir):
         """
         Parse instance.extra_vars (JSON or YAML dict) and write an
@@ -195,6 +334,26 @@ class RunTerraformJob(SourceControlMixin):
                 instance.log_format,
             )
             return None
+
+        declared_vars, scanned_root_module = self._get_declared_root_variables(working_dir)
+        if scanned_root_module:
+            filtered = {k: v for k, v in data.items() if k in declared_vars}
+            dropped = sorted(set(data.keys()) - set(filtered.keys()))
+            if dropped:
+                logger.info(
+                    '%s skipping %d undeclared Terraform variable(s) from tfvars: %s',
+                    instance.log_format,
+                    len(dropped),
+                    dropped,
+                )
+            data = filtered
+
+            if not data:
+                logger.info(
+                    '%s no declared Terraform variables remain; skipping tfvars injection',
+                    instance.log_format,
+                )
+                return None
 
         tfvars_path = os.path.join(working_dir, 'awx.auto.tfvars.json')
         with open(tfvars_path, 'w') as fh:
@@ -777,6 +936,16 @@ class RunTerraformJob(SourceControlMixin):
                 raise RuntimeError(
                     f'Terraform directory does not exist: {working_dir}'
                 )
+
+            local_state_warning = self._local_state_warning_message(
+                working_dir,
+                self.instance.terraform_operation,
+            )
+            if local_state_warning:
+                warning_text = local_state_warning + '\n'
+                combined_output += warning_text + '\n'
+                logger.warning('%s %s', self.instance.log_format, local_state_warning)
+                self._write_event(warning_text)
 
             # 5. Write tfvars
             self._write_tfvars(self.instance, working_dir)

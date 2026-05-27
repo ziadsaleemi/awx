@@ -122,6 +122,101 @@ class TestWriteTfvars:
         result = task._write_tfvars(inst, str(tmp_path))
         assert result is None
 
+    def test_filters_undeclared_variables_to_root_module(self, tmp_path):
+        (tmp_path / 'main.tf').write_text(
+            'variable "region" {\n  type = string\n}\n'
+        )
+        task = _make_task()
+        inst = _make_instance(extra_vars='{"region": "us-east-1", "vm_id": "1234"}')
+
+        path = task._write_tfvars(inst, str(tmp_path))
+
+        assert path is not None
+        with open(path) as f:
+            data = json.load(f)
+        assert data == {'region': 'us-east-1'}
+
+    def test_skips_tfvars_when_root_module_declares_no_variables(self, tmp_path):
+        (tmp_path / 'main.tf').write_text('terraform {}\n')
+        task = _make_task()
+        inst = _make_instance(extra_vars='{"region": "us-east-1"}')
+
+        path = task._write_tfvars(inst, str(tmp_path))
+
+        assert path is None
+
+
+# ---------------------------------------------------------------------------
+# local state warning helpers
+# ---------------------------------------------------------------------------
+
+
+class TestLocalStateWarning:
+    def test_no_backend_block_defaults_to_local(self, tmp_path):
+        (tmp_path / 'main.tf').write_text('resource "null_resource" "x" {}\n')
+        task = _make_task()
+
+        kind = task._root_terraform_backend_kind(str(tmp_path))
+
+        assert kind == 'local'
+
+    def test_explicit_local_backend_detected(self, tmp_path):
+        (tmp_path / 'main.tf').write_text(
+            'terraform {\n  backend "local" {}\n}\n'
+        )
+        task = _make_task()
+
+        kind = task._root_terraform_backend_kind(str(tmp_path))
+
+        assert kind == 'local'
+
+    def test_remote_backend_detected(self, tmp_path):
+        (tmp_path / 'main.tf').write_text(
+            'terraform {\n  backend "s3" {}\n}\n'
+        )
+        task = _make_task()
+
+        kind = task._root_terraform_backend_kind(str(tmp_path))
+
+        assert kind == 'remote'
+
+    def test_tfjson_backend_detected(self, tmp_path):
+        (tmp_path / 'main.tf.json').write_text(
+            json.dumps(
+                {
+                    'terraform': {
+                        'backend': {
+                            'azurerm': {},
+                        }
+                    }
+                }
+            )
+        )
+        task = _make_task()
+
+        kind = task._root_terraform_backend_kind(str(tmp_path))
+
+        assert kind == 'remote'
+
+    def test_warning_emitted_for_destroy_on_local_backend(self, tmp_path):
+        (tmp_path / 'main.tf').write_text('terraform {}\n')
+        task = _make_task()
+
+        warning = task._local_state_warning_message(str(tmp_path), 'destroy')
+
+        assert warning is not None
+        assert 'destroy/deprovision' in warning
+
+    def test_warning_not_emitted_for_remote_backend(self, tmp_path):
+        (tmp_path / 'main.tf').write_text(
+            'terraform {\n  backend "gcs" {}\n}\n'
+        )
+        task = _make_task()
+
+        warning = task._local_state_warning_message(str(tmp_path), 'destroy')
+
+        assert warning is None
+
 
 # ---------------------------------------------------------------------------
 # _run_terraform

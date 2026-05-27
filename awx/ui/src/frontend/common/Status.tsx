@@ -121,6 +121,8 @@ function getColor(status: string | undefined) {
     case 'pending':
     case 'running':
     case 'skipped':
+    case 'provisioning':
+    case 'deprovisioning':
       return 'blue';
     case 'canceled':
     case 'changed':
@@ -128,9 +130,7 @@ function getColor(status: string | undefined) {
       return 'orange';
     case 'stopped':
       return undefined;
-    case 'deprovisioning':
     case 'disabled':
-    case 'provisioning':
     case 'starting':
     case 'waiting':
     case 'workers offline':
@@ -169,6 +169,8 @@ function getIcon(status: string | undefined) {
     case 'waiting':
       return ClockIcon;
     case 'running':
+    case 'provisioning':
+    case 'deprovisioning':
       return RunningIcon;
     case 'canceled':
     case 'changed':
@@ -176,8 +178,6 @@ function getIcon(status: string | undefined) {
       return ExclamationTriangleIcon;
     case 'disabled':
       return BanIcon;
-    case 'deprovisioning':
-    case 'provisioning':
     case 'skipped':
       return MinusCircleIcon;
     case 'starting':
