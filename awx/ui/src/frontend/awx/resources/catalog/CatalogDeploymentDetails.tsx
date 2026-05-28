@@ -16,6 +16,7 @@ import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { StatusCell } from '../../../common/Status';
+import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
 
 export function CatalogDeploymentDetails() {
   const { t } = useTranslation();
@@ -26,10 +27,12 @@ export function CatalogDeploymentDetails() {
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest();
 
-  const { data: deployment, error, isLoading, refresh } = useGetItem<CatalogDeployment>(
-    awxAPI`/catalog_deployments`,
-    id
-  );
+  const {
+    data: deployment,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<CatalogDeployment>(awxAPI`/catalog_deployments`, id);
 
   const handleDeprovision = async () => {
     try {
@@ -134,42 +137,35 @@ export function CatalogDeploymentDetails() {
           {t('Job #{{id}}', { id: deployment.deprovision_job })}
         </PageDetail>
       )}
-      <PageDetail label={t('Extra variables')}>
-        {deployment.extra_vars ? (
-          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-            {JSON.stringify(deployment.extra_vars, null, 2)}
-          </pre>
-        ) : (
-          '-'
-        )}
-      </PageDetail>
-      <PageDetail label={t('Last deprovision variables')}>
-        {deployment.last_deprovision_vars ? (
-          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-            {JSON.stringify(deployment.last_deprovision_vars, null, 2)}
-          </pre>
-        ) : (
-          '-'
-        )}
-      </PageDetail>
-      <PageDetail label={t('Provisioning history')}>
-        {deployment.provisioning_history?.length ? (
-          <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-            {JSON.stringify(deployment.provisioning_history, null, 2)}
-          </pre>
-        ) : (
-          '-'
-        )}
-      </PageDetail>
-      <PageDetail label={t('Deployed')}>
-        {new Date(deployment.created).toLocaleString()}
-      </PageDetail>
+      <PageDetailCodeEditor
+        label={t('Extra variables')}
+        value={deployment.extra_vars ? JSON.stringify(deployment.extra_vars, null, 2) : ''}
+        showCopyToClipboard
+      />
+      <PageDetailCodeEditor
+        label={t('Last deprovision variables')}
+        value={
+          deployment.last_deprovision_vars
+            ? JSON.stringify(deployment.last_deprovision_vars, null, 2)
+            : ''
+        }
+        showCopyToClipboard
+      />
+      <PageDetailCodeEditor
+        label={t('Provisioning history')}
+        value={
+          deployment.provisioning_history
+            ? JSON.stringify(deployment.provisioning_history, null, 2)
+            : ''
+        }
+        showCopyToClipboard
+      />
+      <PageDetail label={t('Deployed')}>{new Date(deployment.created).toLocaleString()}</PageDetail>
       <PageDetail label={t('Actions')}>
         <Button
           variant="secondary"
           isDisabled={
-            deployment.status !== 'failed' ||
-            !deployment.summary_fields?.user_capabilities?.retry
+            deployment.status !== 'failed' || !deployment.summary_fields?.user_capabilities?.retry
           }
           onClick={() => void handleRetry()}
         >

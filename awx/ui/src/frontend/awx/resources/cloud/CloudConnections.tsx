@@ -34,6 +34,10 @@ import {
   setCloudConnection,
 } from './cloudConnectionStore';
 import { cloudProviders } from './cloudProviders';
+import DigitalOceanLogo from '../../../assets/digitalocean.svg';
+import AWSLogo from '../../../assets/aws.svg';
+import AzureLogo from '../../../assets/azure.svg';
+import GCPLogo from '../../../assets/gcp.svg';
 
 interface CredentialListResponse {
   count: number;
@@ -51,79 +55,11 @@ function normalizeProviderToken(value: string | undefined) {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-const DigitalOceanLogo = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg
-    width="72"
-    height="72"
-    viewBox="0 0 100 100"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M50 0C22.3858 0 0 22.3858 0 50C0 77.6142 22.3858 100 50 100C77.6142 100 100 77.6142 100 50H78C78 65.464 65.464 78 50 78C34.536 78 22 65.464 22 50C22 34.536 34.536 22 50 22V0Z"
-      fill="#0080FF"
-    />
-    <rect x="58" y="22" width="16" height="16" fill="#0080FF" />
-    <rect x="78" y="42" width="16" height="16" fill="#0080FF" />
-  </svg>
-);
-
-const AwsLogo = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg
-    width="72"
-    height="72"
-    viewBox="0 0 100 100"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M50 10C27.9086 10 10 27.9086 10 50C10 72.0914 27.9086 90 50 90C72.0914 90 90 72.0914 90 50C90 27.9086 72.0914 10 50 10ZM50 78C34.536 78 22 65.464 22 50C22 34.536 34.536 22 50 22C65.464 22 78 34.536 78 50C78 65.464 65.464 78 50 78Z"
-      fill="#FF9900"
-    />
-    <path d="M38 46H62V54H38V46Z" fill="#FF9900" />
-    <path d="M46 64C56 68 64 60 64 60" stroke="#FF9900" strokeWidth="4" strokeLinecap="round" />
-  </svg>
-);
-
-const AzureLogo = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg
-    width="72"
-    height="72"
-    viewBox="0 0 100 100"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path d="M50 10L10 78H36L50 48L64 78H90L50 10Z" fill="#007FFF" />
-  </svg>
-);
-
-const GcpLogo = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg
-    width="72"
-    height="72"
-    viewBox="0 0 100 100"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M50 10C27.9086 10 10 27.9086 10 50C10 72.0914 27.9086 90 50 90C72.0914 90 90 72.0914 90 50C90 27.9086 72.0914 10 50 10Z"
-      fill="#4285F4"
-    />
-    <path d="M50 30H78V50H50V30Z" fill="#34A853" />
-    <path d="M50 50H78V70H50V50Z" fill="#FBBC05" />
-    <path d="M22 50H50V70H22V50Z" fill="#EA4335" />
-  </svg>
-);
-
 const providerLogos: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
   digitalocean: DigitalOceanLogo,
-  aws: AwsLogo,
+  aws: AWSLogo,
   azure: AzureLogo,
-  gcp: GcpLogo,
+  gcp: GCPLogo,
 };
 
 const StyledConnectionCard = styled(Card)`

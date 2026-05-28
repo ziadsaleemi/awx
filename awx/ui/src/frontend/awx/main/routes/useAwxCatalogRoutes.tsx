@@ -7,6 +7,7 @@ import { CatalogDeployWizard } from '../../resources/catalog/CatalogDeployWizard
 import { CatalogDeployments } from '../../resources/catalog/CatalogDeployments';
 import { CatalogDeploymentPage } from '../../resources/catalog/CatalogDeploymentPage';
 import { CatalogDeploymentDetails } from '../../resources/catalog/CatalogDeploymentDetails';
+import { CatalogDeploymentHistory } from '../../resources/catalog/CatalogDeploymentHistory';
 import { CatalogItems } from '../../resources/catalog/CatalogItems';
 import { CatalogItemPage } from '../../resources/catalog/CatalogItemPage';
 import { CatalogItemDetails } from '../../resources/catalog/CatalogItemDetails';
@@ -51,6 +52,11 @@ export function useAwxCatalogRoutes() {
                   id: AwxRoute.CatalogDeploymentDetails,
                   path: 'details',
                   element: <CatalogDeploymentDetails />,
+                },
+                {
+                  id: AwxRoute.CatalogDeploymentHistory,
+                  path: 'history',
+                  element: <CatalogDeploymentHistory />,
                 },
                 { path: '', element: <Navigate to="details" replace /> },
               ],

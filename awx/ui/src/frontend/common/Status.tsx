@@ -56,11 +56,13 @@ export function StatusLabel(props: { status?: string; dataCy?: string }) {
 function useLabel(status: string | undefined, t: (str: string) => string) {
   if (status === undefined) return t('Unknown');
   const labels: { [key: string]: string } = {
+    active: t('Active'),
     approved: t('Approved'),
     completed: t('Completed'),
     canceled: t('Canceled'),
     changed: t('Changed'),
     deleting: t('Deleting'),
+    destroyed: t('Destroyed'),
     denied: t('Denied'),
     'deprovision-fail': t('Deprovisioning fail'),
     deprovisioning: t('Deprovisioning'),
@@ -97,6 +99,7 @@ function useLabel(status: string | undefined, t: (str: string) => string) {
 
 function getColor(status: string | undefined) {
   switch (status) {
+    case 'active':
     case 'approved':
     case 'completed':
     case 'healthy':
@@ -126,6 +129,7 @@ function getColor(status: string | undefined) {
       return 'blue';
     case 'canceled':
     case 'changed':
+    case 'destroyed':
     case 'unknown':
       return 'orange';
     case 'stopped':
@@ -141,6 +145,7 @@ function getColor(status: string | undefined) {
 
 function getIcon(status: string | undefined) {
   switch (status) {
+    case 'active':
     case 'approved':
     case 'completed':
     case 'healthy':
@@ -174,6 +179,7 @@ function getIcon(status: string | undefined) {
       return RunningIcon;
     case 'canceled':
     case 'changed':
+    case 'destroyed':
     case 'unknown':
       return ExclamationTriangleIcon;
     case 'disabled':

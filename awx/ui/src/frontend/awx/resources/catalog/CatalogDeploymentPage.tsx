@@ -44,6 +44,11 @@ export function CatalogDeploymentPage() {
             page: AwxRoute.CatalogDeploymentDetails,
             dataCy: 'catalog-deployment-details-tab',
           },
+          {
+            label: t('Provisioning History'),
+            page: AwxRoute.CatalogDeploymentHistory,
+            dataCy: 'catalog-deployment-history-tab',
+          },
         ]}
         params={{ id: String(deployment.id) }}
       />
