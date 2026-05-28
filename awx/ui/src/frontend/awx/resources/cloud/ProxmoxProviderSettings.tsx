@@ -1,5 +1,5 @@
 /* eslint-disable i18next/no-literal-string */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -23,6 +23,7 @@ import {
   CubesIcon,
   InfoCircleIcon,
   NetworkIcon,
+  PlusCircleIcon,
   ServerIcon,
   StorageDomainIcon,
 } from '@patternfly/react-icons';
@@ -55,6 +56,7 @@ import {
   setCloudProviderData,
 } from './cloudConnectionStore';
 import ProxmoxLogo from '../../../assets/proxmox.svg';
+import { ConnectionModal } from './CloudConnections';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -801,11 +803,18 @@ export function ProxmoxProviderSettings() {
   const { activeAwxUser } = useAwxActiveUser();
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleModalClose = useCallback(() => {
+    setShowModal(false);
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
-  const connectionEntries = useMemo(() => getCloudConnections()['proxmox'] ?? [], []);
+  const connectionEntries = useMemo(() => getCloudConnections()['proxmox'] ?? [], [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
     [connectionEntries]
@@ -961,16 +970,25 @@ export function ProxmoxProviderSettings() {
               )
         }
         headerActions={
-          connectedEntries.length > 0 ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {connectedEntries.length > 0 && (
+              <Button
+                variant="primary"
+                onClick={() => void onPull()}
+                isLoading={isPulling}
+                isDisabled={isPulling}
+              >
+                {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              </Button>
+            )}
             <Button
-              variant="primary"
-              onClick={() => void onPull()}
-              isLoading={isPulling}
-              isDisabled={isPulling}
+              variant="secondary"
+              icon={<PlusCircleIcon />}
+              onClick={() => setShowModal(true)}
             >
-              {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              {t('Manage connections')}
             </Button>
-          ) : undefined
+          </div>
         }
       />
 
@@ -983,9 +1001,17 @@ export function ProxmoxProviderSettings() {
             </Title>
             <EmptyStateBody>
               {t(
-                'Go to Cloud Connections and add a Proxmox VE credential. Each connection maps to one Proxmox node or cluster endpoint.'
+                'Add a Proxmox VE credential to connect your hypervisor cluster. Each connection maps to one Proxmox node or cluster endpoint.'
               )}
             </EmptyStateBody>
+            <Button
+              variant="primary"
+              icon={<PlusCircleIcon />}
+              onClick={() => setShowModal(true)}
+              style={{ marginTop: 16 }}
+            >
+              {t('Add connection')}
+            </Button>
           </EmptyState>
         </PageSection>
       ) : (
@@ -1031,6 +1057,13 @@ export function ProxmoxProviderSettings() {
             <NetworksTab networks={allData.networks} />
           </PageTab>
         </PageTabs>
+      )}
+
+      {showModal && (
+        <ConnectionModal
+          providerId="proxmox"
+          onClose={handleModalClose}
+        />
       )}
     </PageLayout>
   );

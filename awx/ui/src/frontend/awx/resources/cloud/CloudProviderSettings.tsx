@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -13,7 +13,7 @@ import {
   Spinner,
   Title,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, ExclamationCircleIcon, InfoCircleIcon } from '@patternfly/react-icons';
+import { CheckCircleIcon, ExclamationCircleIcon, InfoCircleIcon, PlusCircleIcon } from '@patternfly/react-icons';
 import { postRequest } from '../../../common/crud/Data';
 import { isRequestError } from '../../../common/crud/RequestError';
 import {
@@ -43,6 +43,7 @@ import {
 } from './cloudConnectionStore';
 import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import { getCloudProviderLabel } from './cloudProviders';
+import { ConnectionModal } from './CloudConnections';
 import { AzureProviderSettings } from './AzureProviderSettings';
 import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
 import { VmwareProviderSettings } from './VmwareProviderSettings';
@@ -611,7 +612,8 @@ function DefaultProviderSettings(props: { provider: string }) {
   const alertToaster = usePageAlertToaster();
   const { activeAwxUser } = useAwxActiveUser();
   const providerLabel = getCloudProviderLabel(props.provider);
-  const connectionEntries = getCloudConnections()[props.provider] ?? [];
+  const [refreshKey, setRefreshKey] = useState(0);
+  const connectionEntries = useMemo(() => getCloudConnections()[props.provider] ?? [], [props.provider, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const connectedEntry = connectionEntries.find((e) => e.status === 'connected');
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
@@ -619,6 +621,12 @@ function DefaultProviderSettings(props: { provider: string }) {
   const cached = getCloudProviderData(props.provider);
   const [data, setData] = useState<DigitalOceanProviderData | null>(cached);
   const [isPulling, setIsPulling] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+
+  const handleModalClose = useCallback(() => {
+    setShowModal(false);
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   const isConnected = Boolean(connectedEntry);
 
@@ -711,23 +719,41 @@ function DefaultProviderSettings(props: { provider: string }) {
             : t('Not connected. Go to Cloud Connections to connect.')
         }
         headerActions={
-          providerSupportsPull ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {providerSupportsPull && (
+              <Button
+                variant="primary"
+                onClick={() => void onPull()}
+                isLoading={isPulling}
+                isDisabled={!isConnected || isPulling}
+                icon={isPulling ? <Spinner size="sm" /> : undefined}
+              >
+                {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              </Button>
+            )}
             <Button
-              variant="primary"
-              onClick={() => void onPull()}
-              isLoading={isPulling}
-              isDisabled={!isConnected || isPulling}
-              icon={isPulling ? <Spinner size="sm" /> : undefined}
+              variant="secondary"
+              icon={<PlusCircleIcon />}
+              onClick={() => setShowModal(true)}
             >
-              {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              {t('Manage connections')}
             </Button>
-          ) : undefined
+          </div>
         }
       />
       {!isConnected && (
         <PageSection style={{ paddingBottom: 0 }}>
-          <Alert isInline variant="warning" title={t('Provider not connected')}>
-            {t('Connect {{provider}} on the Cloud Connections page before pulling data.', {
+          <Alert
+            isInline
+            variant="warning"
+            title={t('Provider not connected')}
+            actionLinks={
+              <Button variant="link" isInline onClick={() => setShowModal(true)}>
+                {t('Manage connections')}
+              </Button>
+            }
+          >
+            {t('Connect {{provider}} credentials to start pulling data.', {
               provider: providerLabel,
             })}
           </Alert>
@@ -755,6 +781,13 @@ function DefaultProviderSettings(props: { provider: string }) {
           <NetworksTab vpcs={data?.vpcs ?? []} />
         </PageTab>
       </PageTabs>
+
+      {showModal && (
+        <ConnectionModal
+          providerId={props.provider}
+          onClose={handleModalClose}
+        />
+      )}
     </PageLayout>
   );
 }

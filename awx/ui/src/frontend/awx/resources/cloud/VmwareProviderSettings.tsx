@@ -1,5 +1,5 @@
 /* eslint-disable i18next/no-literal-string */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -21,6 +21,7 @@ import {
   CubesIcon,
   InfoCircleIcon,
   NetworkIcon,
+  PlusCircleIcon,
   ServerIcon,
   StorageDomainIcon,
 } from '@patternfly/react-icons';
@@ -54,6 +55,7 @@ import {
   setCloudProviderData,
 } from './cloudConnectionStore';
 import VmwareLogo from '../../../assets/vmware.svg';
+import { ConnectionModal } from './CloudConnections';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -577,11 +579,18 @@ export function VmwareProviderSettings() {
   const { activeAwxUser } = useAwxActiveUser();
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleModalClose = useCallback(() => {
+    setShowModal(false);
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
-  const connectionEntries = useMemo(() => getCloudConnections()['vmware'] ?? [], []);
+  const connectionEntries = useMemo(() => getCloudConnections()['vmware'] ?? [], [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
     [connectionEntries]
@@ -737,16 +746,25 @@ export function VmwareProviderSettings() {
               )
         }
         headerActions={
-          connectedEntries.length > 0 ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {connectedEntries.length > 0 && (
+              <Button
+                variant="primary"
+                onClick={() => void onPull()}
+                isLoading={isPulling}
+                isDisabled={isPulling}
+              >
+                {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              </Button>
+            )}
             <Button
-              variant="primary"
-              onClick={() => void onPull()}
-              isLoading={isPulling}
-              isDisabled={isPulling}
+              variant="secondary"
+              icon={<PlusCircleIcon />}
+              onClick={() => setShowModal(true)}
             >
-              {isPulling ? t('Pulling\u2026') : t('Pull data')}
+              {t('Manage connections')}
             </Button>
-          ) : undefined
+          </div>
         }
         logo={<img src={VmwareLogo as string} alt="VMware vSphere" style={{ height: 36 }} />}
       />
@@ -760,9 +778,17 @@ export function VmwareProviderSettings() {
             </Title>
             <EmptyStateBody>
               {t(
-                'Go to Cloud Connections and add a VMware vSphere credential. Each connection maps to one vCenter instance.'
+                'Add a VMware vSphere credential to connect your vCenter instance. Each connection maps to one vCenter.'
               )}
             </EmptyStateBody>
+            <Button
+              variant="primary"
+              icon={<PlusCircleIcon />}
+              onClick={() => setShowModal(true)}
+              style={{ marginTop: 16 }}
+            >
+              {t('Add connection')}
+            </Button>
           </EmptyState>
         </PageSection>
       ) : (
@@ -808,6 +834,13 @@ export function VmwareProviderSettings() {
             <DatacentersTab datacenters={allData.datacenters} clusters={allData.clusters} />
           </PageTab>
         </PageTabs>
+      )}
+
+      {showModal && (
+        <ConnectionModal
+          providerId="vmware"
+          onClose={handleModalClose}
+        />
       )}
     </PageLayout>
   );
