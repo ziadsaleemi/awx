@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -10,6 +11,9 @@ import {
   EmptyState,
   EmptyStateBody,
   EmptyStateIcon,
+  Modal,
+  ModalBoxBody,
+  ModalVariant,
   Spinner,
   Title,
 } from '@patternfly/react-core';
@@ -17,141 +21,118 @@ import { CubesIcon } from '@patternfly/react-icons';
 import {
   PageHeader,
   PageLayout,
-  usePageNavigate,
 } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGet } from '../../../common/crud/useGet';
 import { CatalogItem } from '../../interfaces/CatalogItem';
-import { AwxRoute } from '../../main/AwxRoutes';
+import { CatalogDeployContent } from './CatalogDeployWizard';
+
+// Per-provider icon config: brand colours + abbreviation
+import DigitalOceanLogo from '../../../assets/digitalocean.svg';
+import AWSLogo from '../../../assets/aws.svg';
+import AzureLogo from '../../../assets/azure.svg';
+import GCPLogo from '../../../assets/gcp.svg';
+import ProxmoxLogo from '../../../assets/proxmox.svg';
+import VmwareLogo from '../../../assets/vmware.svg';
+
+const PROVIDER_LOGOS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  digitalocean: DigitalOceanLogo,
+  azure: AzureLogo,
+  proxmox: ProxmoxLogo,
+  aws: AWSLogo,
+  vmware: VmwareLogo,
+  gcp: GCPLogo,
+};
+
+const PROVIDER_ICON_CONFIG: Record<string, { bg: string; fg: string; abbr: string; label: string }> = {
+  digitalocean: { bg: '#0080FF', fg: '#fff', abbr: 'DO', label: 'DigitalOcean' },
+  azure:        { bg: '#0078D4', fg: '#fff', abbr: 'Az', label: 'Microsoft Azure' },
+  proxmox:      { bg: '#E57000', fg: '#fff', abbr: 'PX', label: 'Proxmox VE' },
+  aws:          { bg: '#FF9900', fg: '#1a1a1a', abbr: 'AWS', label: 'Amazon AWS' },
+  vmware:       { bg: '#607078', fg: '#fff', abbr: 'VM', label: 'VMware vSphere' },
+  gcp:          { bg: '#4285F4', fg: '#fff', abbr: 'GCP', label: 'Google Cloud' },
+};
+
+function providerConfig(slug: string) {
+  return (
+    PROVIDER_ICON_CONFIG[slug] ??
+    { bg: '#6a9955', fg: '#fff', abbr: slug.slice(0, 2).toUpperCase(), label: slug }
+  );
+}
+
+const ProviderLogoBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  padding: 0;
+  margin: 0;
+
+  &:hover {
+    transform: scale(1.15);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--pf-v5-global--primary-color--100);
+    outline-offset: 4px;
+    border-radius: 2px;
+  }
+`;
+
+const ProviderFallbackBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #3a3d44;
+  color: #fff;
+  border: 1px solid var(--pf-v5-global--BorderColor--100);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: transform 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    transform: scale(1.05);
+    background: #474b54;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--pf-v5-global--primary-color--100);
+    outline-offset: 2px;
+  }
+`;
+
+function getProviderSlugs(item: CatalogItem): string[] {
+  if (item.available_providers && item.available_providers.length > 0) {
+    return item.available_providers;
+  }
+  const slugs = new Set<string>();
+  if (item.cloud_backends) Object.keys(item.cloud_backends).forEach((k) => slugs.add(k));
+  if (item.provider_workflows) Object.keys(item.provider_workflows).forEach((k) => slugs.add(k));
+  return [...slugs];
+}
 
 interface CatalogItemListResponse {
   count: number;
   results: CatalogItem[];
 }
 
-interface VmSizePreset {
-  name: string;
-  cpu: string;
-  ram: string;
-}
+// ─── Main Browse Page ─────────────────────────────────────────────────────────
 
-function extractSpecValue(
-  schema: Record<string, unknown> | null,
-  candidateKeys: string[]
-): string | undefined {
-  const properties =
-    schema && typeof schema === 'object'
-      ? (schema as { properties?: Record<string, unknown> }).properties ?? {}
-      : {};
-
-  const normalizedCandidates = candidateKeys.map((key) => key.toLowerCase());
-
-  const matchingEntry = Object.entries(properties).find(([key]) =>
-    normalizedCandidates.includes(key.toLowerCase())
-  );
-
-  if (!matchingEntry) {
-    return undefined;
-  }
-
-  const [, value] = matchingEntry;
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  const schemaField = value as {
-    default?: unknown;
-    minimum?: unknown;
-    enum?: unknown[];
-  };
-
-  if (schemaField.default !== undefined && schemaField.default !== null) {
-    return String(schemaField.default);
-  }
-
-  if (typeof schemaField.minimum === 'number') {
-    return String(schemaField.minimum);
-  }
-
-  if (Array.isArray(schemaField.enum) && schemaField.enum.length > 0) {
-    return String(schemaField.enum[0]);
-  }
-
-  return undefined;
-}
-
-function extractSpecFieldKey(
-  schema: Record<string, unknown> | null,
-  candidateKeys: string[]
-): string | undefined {
-  const properties =
-    schema && typeof schema === 'object'
-      ? (schema as { properties?: Record<string, unknown> }).properties ?? {}
-      : {};
-
-  const normalizedCandidates = candidateKeys.map((key) => key.toLowerCase());
-  return Object.keys(properties).find((key) => normalizedCandidates.includes(key.toLowerCase()));
-}
-
-function getVmSizePresets(schema: Record<string, unknown> | null): VmSizePreset[] {
-  if (!schema || typeof schema !== 'object') {
-    return [];
-  }
-
-  const raw = (schema as { x_vm_sizes?: unknown }).x_vm_sizes;
-  if (!raw || typeof raw !== 'object') {
-    return [];
-  }
-
-  const presets: VmSizePreset[] = [];
-  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!value || typeof value !== 'object') {
-      continue;
-    }
-    const obj = value as { cpu?: unknown; ram?: unknown; memory?: unknown };
-    const cpu = obj.cpu;
-    const ram = obj.ram ?? obj.memory;
-    if (cpu === undefined || ram === undefined) {
-      continue;
-    }
-    presets.push({
-      name,
-      cpu: String(cpu),
-      ram: String(ram),
-    });
-  }
-
-  return presets;
-}
+type DeployTarget = { item: CatalogItem; provider: string };
 
 export function CatalogBrowse() {
   const { t } = useTranslation();
-  const pageNavigate = usePageNavigate();
+  const [deployTarget, setDeployTarget] = useState<DeployTarget | null>(null);
 
   const { data, isLoading } = useGet<CatalogItemListResponse>(awxAPI`/catalog_items/`);
   const items = data?.results ?? [];
-
-  const deployFromSize = (item: CatalogItem, size: VmSizePreset) => {
-    const cpuField =
-      extractSpecFieldKey(item.extra_vars_schema, ['cpu', 'cpus', 'cores', 'vcpus']) ?? 'cpu';
-    const ramField =
-      extractSpecFieldKey(item.extra_vars_schema, [
-        'ram',
-        'memory',
-        'memory_mb',
-        'memory_gb',
-      ]) ?? 'ram';
-
-    pageNavigate(AwxRoute.CatalogDeploy, {
-      params: { id: String(item.id) },
-      query: {
-        cpu_field: cpuField,
-        cpu: size.cpu,
-        ram_field: ramField,
-        ram: size.ram,
-      },
-    });
-  };
 
   return (
     <PageLayout>
@@ -180,16 +161,42 @@ export function CatalogBrowse() {
               <GalleryItem key={item.id}>
                 <CatalogItemCard
                   item={item}
-                  onDeployFromSize={(size) => void deployFromSize(item, size)}
+                  onDeployProvider={(provider) => setDeployTarget({ item, provider })}
                 />
               </GalleryItem>
             ))}
           </Gallery>
         </div>
       )}
+
+      {/* Per-provider deploy modal */}
+      {deployTarget && (
+        <Modal
+          title={t('Deploy: {{name}}', { name: deployTarget.item.name })}
+          aria-label={t('Deploy {{name}} via {{provider}}', {
+            name: deployTarget.item.name,
+            provider: providerConfig(deployTarget.provider).label,
+          })}
+          variant={ModalVariant.large}
+          isOpen
+          hasNoBodyWrapper
+          onClose={() => setDeployTarget(null)}
+        >
+          <ModalBoxBody style={{ padding: '1.5rem 2rem' }}>
+            <CatalogDeployContent
+              item={deployTarget.item}
+              initialProvider={deployTarget.provider}
+              onDone={() => setDeployTarget(null)}
+              onCancel={() => setDeployTarget(null)}
+            />
+          </ModalBoxBody>
+        </Modal>
+      )}
     </PageLayout>
   );
 }
+
+// ─── Catalog Item Card ────────────────────────────────────────────────────────
 
 const StyledCatalogCard = styled(Card)`
   background-color: #222428 !important;
@@ -209,22 +216,15 @@ const StyledCatalogCard = styled(Card)`
 
 function CatalogItemCard({
   item,
-  onDeployFromSize,
+  onDeployProvider,
 }: {
   item: CatalogItem;
-  onDeployFromSize: (size: VmSizePreset) => void;
+  onDeployProvider: (provider: string) => void;
 }) {
   const { t } = useTranslation();
   const iconSrc =
     item.icon_data && item.icon_data.startsWith('data:image/') ? item.icon_data : item.icon_url;
-  const cpuSpec = extractSpecValue(item.extra_vars_schema, ['cpu', 'cpus', 'cores', 'vcpus']);
-  const ramSpec = extractSpecValue(item.extra_vars_schema, [
-    'ram',
-    'memory',
-    'memory_mb',
-    'memory_gb',
-  ]);
-  const vmSizes = getVmSizePresets(item.extra_vars_schema);
+  const slugs = getProviderSlugs(item);
 
   return (
     <StyledCatalogCard>
@@ -257,108 +257,49 @@ function CatalogItemCard({
           )}
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-            gap: '0.5rem',
-            marginTop: '0.9rem',
-          }}
-        >
+        {/* Cloud provider icon badges — click to open per-provider deploy modal */}
+        {slugs.length > 0 && (
           <div
             style={{
-              backgroundColor: '#1b1d22',
-              borderRadius: 6,
-              padding: '0.45rem 0.6rem',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '1rem',
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginTop: '1.25rem',
             }}
           >
-            <div style={{ fontSize: '0.72rem', color: 'var(--pf-global--Color--200)' }}>
-              {t('CPU')}
-            </div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{cpuSpec ?? '-'}</div>
+            {slugs.map((slug) => {
+              const cfg = providerConfig(slug);
+              const Logo = PROVIDER_LOGOS[slug];
+              if (Logo) {
+                return (
+                  <ProviderLogoBtn
+                    key={slug}
+                    type="button"
+                    title={t('Deploy via {{label}}', { label: cfg.label })}
+                    aria-label={t('Deploy via {{label}}', { label: cfg.label })}
+                    onClick={() => onDeployProvider(slug)}
+                  >
+                    <Logo style={{ height: '24px', width: 'auto' }} />
+                  </ProviderLogoBtn>
+                );
+              }
+              return (
+                <ProviderFallbackBtn
+                  key={slug}
+                  type="button"
+                  title={t('Deploy via {{label}}', { label: cfg.label })}
+                  aria-label={t('Deploy via {{label}}', { label: cfg.label })}
+                  onClick={() => onDeployProvider(slug)}
+                >
+                  {cfg.abbr}
+                </ProviderFallbackBtn>
+              );
+            })}
           </div>
-          <div
-            style={{
-              backgroundColor: '#1b1d22',
-              borderRadius: 6,
-              padding: '0.45rem 0.6rem',
-            }}
-          >
-            <div style={{ fontSize: '0.72rem', color: 'var(--pf-global--Color--200)' }}>
-              {t('RAM')}
-            </div>
-            <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{ramSpec ?? '-'}</div>
-          </div>
-        </div>
-
-        {item.summary_fields?.organization && (
-          <p
-            style={{
-              marginTop: '0.7rem',
-              fontSize: '0.8rem',
-              color: 'var(--pf-global--Color--200)',
-            }}
-          >
-            {t('Org: {{name}}', { name: item.summary_fields.organization.name })}
-          </p>
-        )}
-        {item.summary_fields?.terraform_job_template && (
-          <p
-            style={{
-              marginTop: '0.25rem',
-              fontSize: '0.8rem',
-              color: 'var(--pf-global--Color--200)',
-            }}
-          >
-            {t('Terraform: {{name}}', { name: item.summary_fields.terraform_job_template.name })}
-          </p>
         )}
       </CardBody>
-
-      {vmSizes.length > 0 && (
-        <div
-          style={{
-            padding: '0 1rem 1rem',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-            justifyContent: 'center',
-          }}
-        >
-          {vmSizes.map((size) => (
-            <button
-              key={`${item.id}-${size.name}`}
-              type="button"
-              onClick={() => onDeployFromSize(size)}
-              disabled={!item.summary_fields?.user_capabilities?.use}
-              style={{
-                border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                borderRadius: 999,
-                padding: '0.2rem 0.7rem',
-                background: 'var(--pf-v5-global--BackgroundColor--100)',
-                cursor: 'pointer',
-                fontSize: '0.78rem',
-                lineHeight: 1.2,
-              }}
-            >
-              {`${size.name}: ${size.cpu} CPU / ${size.ram} RAM`}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {vmSizes.length === 0 && (
-        <div
-          style={{
-            padding: '0 1rem 1rem',
-            textAlign: 'center',
-            fontSize: '0.8rem',
-            color: 'var(--pf-global--Color--200)',
-          }}
-        >
-          {t('No VM sizes configured')}
-        </div>
-      )}
     </StyledCatalogCard>
   );
 }

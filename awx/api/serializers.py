@@ -3978,6 +3978,10 @@ class CatalogItemSerializer(BaseSerializer):
             'deprovision_workflow',
             'override_workflow_limit',
             'extra_vars_schema',
+            'cloud_backends',
+            'provider_workflows',
+            'available_providers',
+            'provider_field_configs',
         )
 
     def get_related(self, obj):
@@ -3997,6 +4001,14 @@ class CatalogItemSerializer(BaseSerializer):
             res['deprovision_workflow'] = self.reverse(
                 'api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id}
             )
+        # Per-provider WJT survey links
+        if obj.provider_workflows and isinstance(obj.provider_workflows, dict):
+            res['provider_workflow_surveys'] = {
+                provider: self.reverse(
+                    'api:workflow_job_template_survey_spec', kwargs={'pk': wjt_pk}
+                )
+                for provider, wjt_pk in obj.provider_workflows.items()
+            }
         return res
 
     def get_summary_fields(self, obj):

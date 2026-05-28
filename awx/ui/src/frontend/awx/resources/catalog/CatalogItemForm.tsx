@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { Button, Checkbox, FormGroup, TextInput } from '@patternfly/react-core';
+import { Button, Checkbox, FormGroup, Switch, TextInput } from '@patternfly/react-core';
 import {
   LoadingPage,
   PageTab,
@@ -26,10 +26,19 @@ import { CatalogItem } from '../../interfaces/CatalogItem';
 import { PageFormSelectOrganization } from '../../access/organizations/components/PageFormOrganizationSelect';
 import { PageFormWorkflowJobTemplateSelect } from '../templates/components/PageFormWorkflowJobTemplateSelect';
 import { PageFormTerraformJobTemplateSelect } from '../templates/components/PageFormTerraformJobTemplateSelect';
+import { useSelectWorkflowJobTemplate } from '../templates/hooks/useSelectWorkflowJobTemplate';
+import { useSelectTerraformJobTemplate } from '../templates/hooks/useSelectTerraformJobTemplate';
 import { Survey } from '../../interfaces/Survey';
 import { PageFormGroup } from '../../../../framework/PageForm/Inputs/PageFormGroup';
-import { Controller, useController, useFormContext } from 'react-hook-form';
+import { Controller, useController, useFieldArray, useFormContext } from 'react-hook-form';
 import { parseCatalogDynamicFieldNames } from './catalogNaming';
+
+interface ProviderConfig {
+  provider: string;
+  tft_id: number | null;
+  wjt_id: number | null;
+  enabled: boolean;
+}
 
 interface CatalogItemFormValues {
   name: string;
@@ -47,6 +56,12 @@ interface CatalogItemFormValues {
   deprovision_workflow: number | null;
   override_workflow_limit: boolean;
   extra_vars_schema: string;
+  provider_configs: ProviderConfig[];
+  provider_field_configs: Record<string, {
+    disabled_fields: string[];
+    hidden_fields: string[];
+    field_templates: Record<string, string>;
+  }>;
 }
 
 const StyledUploadButton = styled.label`
@@ -189,7 +204,28 @@ function makeDefaultValues(item?: CatalogItem): CatalogItemFormValues {
     extra_vars_schema: item?.extra_vars_schema
       ? JSON.stringify(item.extra_vars_schema, null, 2)
       : '',
+    provider_configs: buildProviderConfigs(item),
+    provider_field_configs: item?.provider_field_configs ?? {},
   };
+}
+
+function buildProviderConfigs(item?: CatalogItem): ProviderConfig[] {
+  const allProviders = new Set<string>();
+  if (item?.available_providers) {
+    item.available_providers.forEach((p) => allProviders.add(p));
+  }
+  if (item?.cloud_backends) {
+    Object.keys(item.cloud_backends).forEach((p) => allProviders.add(p));
+  }
+  if (item?.provider_workflows) {
+    Object.keys(item.provider_workflows).forEach((p) => allProviders.add(p));
+  }
+  return Array.from(allProviders).map((provider) => ({
+    provider,
+    tft_id: (item?.cloud_backends as Record<string, number> | null)?.[provider] ?? null,
+    wjt_id: (item?.provider_workflows as Record<string, number> | null)?.[provider] ?? null,
+    enabled: item?.available_providers?.includes(provider) ?? false,
+  }));
 }
 
 export function CreateCatalogItem() {
@@ -198,7 +234,7 @@ export function CreateCatalogItem() {
 
   const onSubmit: PageFormSubmitHandler<CatalogItemFormValues> = async (values) => {
     let extra_vars_schema: Record<string, unknown> | null = null;
-    if (values.extra_vars_schema.trim()) {
+    if ((values.extra_vars_schema ?? '').trim()) {
       extra_vars_schema = JSON.parse(values.extra_vars_schema) as Record<string, unknown>;
     }
     const payload = {
@@ -217,6 +253,30 @@ export function CreateCatalogItem() {
       deprovision_workflow: values.deprovision_workflow,
       override_workflow_limit: values.override_workflow_limit,
       extra_vars_schema,
+      cloud_backends:
+        values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.tft_id != null)
+                .map((e) => [e.provider, e.tft_id as number])
+            )
+          : null,
+      provider_workflows:
+        values.provider_configs.filter((e) => e.provider && e.wjt_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.wjt_id != null)
+                .map((e) => [e.provider, e.wjt_id as number])
+            )
+          : null,
+      available_providers:
+        values.provider_configs.filter((e) => e.provider && e.enabled).length > 0
+          ? values.provider_configs.filter((e) => e.provider && e.enabled).map((e) => e.provider)
+          : null,
+      provider_field_configs:
+        Object.keys(values.provider_field_configs).length > 0
+          ? values.provider_field_configs
+          : null,
     };
     const created = await postRequest<CatalogItem, typeof payload>(
       awxAPI`/catalog_items/`,
@@ -256,7 +316,7 @@ export function EditCatalogItem() {
 
   const onSubmit: PageFormSubmitHandler<CatalogItemFormValues> = async (values) => {
     let extra_vars_schema: Record<string, unknown> | null = null;
-    if (values.extra_vars_schema.trim()) {
+    if ((values.extra_vars_schema ?? '').trim()) {
       extra_vars_schema = JSON.parse(values.extra_vars_schema) as Record<string, unknown>;
     }
     const payload = {
@@ -275,6 +335,30 @@ export function EditCatalogItem() {
       deprovision_workflow: values.deprovision_workflow,
       override_workflow_limit: values.override_workflow_limit,
       extra_vars_schema,
+      cloud_backends:
+        values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.tft_id != null)
+                .map((e) => [e.provider, e.tft_id as number])
+            )
+          : null,
+      provider_workflows:
+        values.provider_configs.filter((e) => e.provider && e.wjt_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.wjt_id != null)
+                .map((e) => [e.provider, e.wjt_id as number])
+            )
+          : null,
+      available_providers:
+        values.provider_configs.filter((e) => e.provider && e.enabled).length > 0
+          ? values.provider_configs.filter((e) => e.provider && e.enabled).map((e) => e.provider)
+          : null,
+      provider_field_configs:
+        Object.keys(values.provider_field_configs).length > 0
+          ? values.provider_field_configs
+          : null,
     };
     await requestPatch<typeof payload>(awxAPI`/catalog_items/${id}/`, payload);
     pageNavigate(AwxRoute.CatalogItemPage, { params: { id } });
@@ -300,6 +384,9 @@ export function EditCatalogItem() {
 
 function CatalogItemFormInputs() {
   const { t } = useTranslation();
+  const { watch } = useFormContext<CatalogItemFormValues>();
+  const providerConfigs = watch('provider_configs');
+  const enabledProviders = providerConfigs.filter((c) => c.enabled);
 
   return (
     <div style={{ width: '100%', gridColumn: '1 / -1' }}>
@@ -338,12 +425,7 @@ function CatalogItemFormInputs() {
               }}
             >
               <PageFormSelectOrganization<CatalogItemFormValues> name="organization" />
-              <PageFormWorkflowJobTemplateSelect<CatalogItemFormValues> name="provision_workflow" />
               <PageFormTerraformJobTemplateSelect<CatalogItemFormValues> name="terraform_job_template" />
-              <PageFormWorkflowJobTemplateSelect<CatalogItemFormValues>
-                name="deprovision_workflow"
-                workflowJobTemplatePath="deprovision_workflow"
-              />
             </div>
 
             <div
@@ -363,19 +445,6 @@ function CatalogItemFormInputs() {
                   'When enabled, deployments force terraform_override_limit=true so workflow-launched job templates can use Terraform-provided host limits.'
                 )}
               />
-            </div>
-          </div>
-        </PageTab>
-        <PageTab label={t('Form fields')}>
-          <div style={{ marginTop: 16 }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
               <PageFormTextArea<CatalogItemFormValues>
                 name="extra_vars_schema"
                 label={t('Extra variables schema')}
@@ -385,11 +454,336 @@ function CatalogItemFormInputs() {
                 )}
                 placeholder={extraVarsSchemaPlaceholder}
               />
-              <CatalogDynamicFieldSelector />
             </div>
           </div>
         </PageTab>
+        <PageTab label={t('Cloud providers')}>
+          <CloudProvidersTab />
+        </PageTab>
+        {enabledProviders.map((config) => (
+          <PageTab
+            key={config.provider}
+            label={`${PROVIDER_LABELS[config.provider] ?? config.provider} Fields`}
+          >
+            <ProviderFormFieldsTab provider={config.provider} wjtId={config.wjt_id ?? null} />
+          </PageTab>
+        ))}
       </PageTabs>
+    </div>
+  );
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  digitalocean: 'DigitalOcean',
+  proxmox: 'Proxmox VE',
+  vmware: 'VMware vSphere',
+  azure: 'Microsoft Azure',
+  aws: 'Amazon AWS',
+};
+
+interface CloudConnectionApiResult {
+  count: number;
+  results: Array<{
+    id: number;
+    provider_id: string;
+    name: string;
+    status: string;
+  }>;
+}
+
+function ProviderWjtSelector({ index }: { index: number }) {
+  const { t } = useTranslation();
+  const { control, watch } = useFormContext<CatalogItemFormValues>();
+  const openSelect = useSelectWorkflowJobTemplate();
+  const [localName, setLocalName] = useState<string | null>(null);
+  const providerConfigs = watch('provider_configs');
+  const idValue = providerConfigs[index]?.wjt_id ?? null;
+
+  const { data: wjtInfo } = useGet<{ id: number; name: string }>(
+    idValue != null && localName === null
+      ? awxAPI`/workflow_job_templates/${String(idValue)}/`
+      : undefined
+  );
+  const displayName = localName ?? wjtInfo?.name ?? (idValue != null ? `#${idValue}` : '');
+
+  return (
+    <FormGroup label={t('Survey workflow')}>
+      <Controller
+        control={control}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        name={`provider_configs.${index}.wjt_id` as any}
+        shouldUnregister={false}
+        render={({ field }) => (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <TextInput
+              value={displayName}
+              readOnlyVariant="default"
+              placeholder={t('Select workflow job template')}
+              style={{ flex: 1 }}
+            />
+            <Button
+              variant="control"
+              onClick={() =>
+                openSelect((wjt) => {
+                  field.onChange(wjt.id);
+                  setLocalName(wjt.name);
+                })
+              }
+            >
+              {t('Browse')}
+            </Button>
+            {idValue != null && (
+              <Button
+                variant="plain"
+                onClick={() => {
+                  field.onChange(null);
+                  setLocalName(null);
+                }}
+                aria-label={t('Clear')}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+        )}
+      />
+    </FormGroup>
+  );
+}
+
+function ProviderTftSelector({ index }: { index: number }) {
+  const { t } = useTranslation();
+  const { control, watch } = useFormContext<CatalogItemFormValues>();
+  const openSelect = useSelectTerraformJobTemplate();
+  const [localName, setLocalName] = useState<string | null>(null);
+  const providerConfigs = watch('provider_configs');
+  const idValue = providerConfigs[index]?.tft_id ?? null;
+
+  const { data: tftInfo } = useGet<{ id: number; name: string }>(
+    idValue != null && localName === null
+      ? awxAPI`/terraform_job_templates/${String(idValue)}/`
+      : undefined
+  );
+  const displayName = localName ?? tftInfo?.name ?? (idValue != null ? `#${idValue}` : '');
+
+  return (
+    <FormGroup label={t('Terraform template')}>
+      <Controller
+        control={control}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        name={`provider_configs.${index}.tft_id` as any}
+        shouldUnregister={false}
+        render={({ field }) => (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <TextInput
+              value={displayName}
+              readOnlyVariant="default"
+              placeholder={t('Select Terraform template')}
+              style={{ flex: 1 }}
+            />
+            <Button
+              variant="control"
+              onClick={() =>
+                openSelect((tft) => {
+                  field.onChange(tft.id);
+                  setLocalName(tft.name);
+                })
+              }
+            >
+              {t('Browse')}
+            </Button>
+            {idValue != null && (
+              <Button
+                variant="plain"
+                onClick={() => {
+                  field.onChange(null);
+                  setLocalName(null);
+                }}
+                aria-label={t('Clear')}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+        )}
+      />
+    </FormGroup>
+  );
+}
+
+function CloudProvidersTab() {
+  const { t } = useTranslation();
+  const { control, watch } = useFormContext<CatalogItemFormValues>();
+  const { fields, append } = useFieldArray({ control, name: 'provider_configs' });
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+
+  const { data: connectionsData } = useGet<CloudConnectionApiResult>(
+    awxAPI`/catalog_cloud/connections/`
+  );
+
+  const providerConfigs = watch('provider_configs');
+
+  // Ensure all connected providers appear in the field array
+  useEffect(() => {
+    if (!connectionsData?.results) return;
+    const providerIds = new Set(connectionsData.results.map((c) => c.provider_id));
+    providerIds.forEach((pid) => {
+      const exists = providerConfigs.some((c) => c.provider === pid);
+      if (!exists) {
+        append({ provider: pid, tft_id: null, wjt_id: null, enabled: false });
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionsData]);
+
+  // Group connections by provider_id
+  const providerGroups = useMemo(() => {
+    const groups: Record<string, Array<{ id: number; name: string; status: string }>> = {};
+    for (const conn of connectionsData?.results ?? []) {
+      if (!groups[conn.provider_id]) groups[conn.provider_id] = [];
+      groups[conn.provider_id].push({ id: conn.id, name: conn.name, status: conn.status });
+    }
+    return groups;
+  }, [connectionsData]);
+
+  const toggleExpand = (pid: string) =>
+    setExpandedProviders((prev) => ({ ...prev, [pid]: !prev[pid] }));
+
+  return (
+    <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
+      <p style={{ color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}>
+        {t(
+          'Enable cloud providers for this catalog item. Expand a provider to configure its connectors, Terraform job template, and survey workflow.'
+        )}
+      </p>
+      {fields.map((field, index) => {
+        const conns = providerGroups[field.provider] ?? [];
+        const hasConnected = conns.some((c) => c.status === 'connected');
+        const label = PROVIDER_LABELS[field.provider] ?? field.provider;
+        const enabled = providerConfigs[index]?.enabled ?? false;
+        const isExpanded = expandedProviders[field.provider] ?? false;
+
+        return (
+          <div
+            key={field.id}
+            style={{
+              border: `1px solid ${enabled ? 'var(--pf-v5-global--primary-color--100)' : 'var(--pf-v5-global--BorderColor--100)'}`,
+              borderRadius: 8,
+              overflow: 'hidden',
+              opacity: hasConnected ? 1 : 0.55,
+            }}
+          >
+            {/* Header row: expand toggle + provider name + enable switch */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 16px',
+                backgroundColor: enabled ? 'rgba(0,102,204,0.08)' : '#1b1d21',
+                cursor: hasConnected ? 'pointer' : 'default',
+              }}
+              onClick={() => hasConnected && toggleExpand(field.provider)}
+            >
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  transform: `rotate(${isExpanded ? 90 : 0}deg)`,
+                  transition: 'transform 0.15s ease',
+                  display: 'inline-block',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  userSelect: 'none',
+                }}
+              >
+                ▶
+              </span>
+              <span style={{ fontWeight: 600, fontSize: '0.95rem', flex: 1 }}>{label}</span>
+              {!hasConnected && (
+                <span style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--danger-color--100)' }}>
+                  {t('No active connector')}
+                </span>
+              )}
+              <Controller
+                control={control}
+                name={`provider_configs.${index}.enabled`}
+                render={({ field: f }) => (
+                  <Switch
+                    id={`provider_switch_${index}`}
+                    isChecked={f.value}
+                    onChange={(_e, checked) => {
+                      f.onChange(checked);
+                      if (checked && !isExpanded) toggleExpand(field.provider);
+                    }}
+                    isDisabled={!hasConnected}
+                    aria-label={t('Enable {{label}}', { label })}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+              />
+            </div>
+
+            {/* Collapsible body */}
+            {isExpanded && (
+              <div style={{ padding: '14px 20px 16px', backgroundColor: '#1b1d21' }}>
+                {/* Connector list */}
+                {conns.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 6 }}>
+                      {t('Connectors')}
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {conns.map((conn) => (
+                        <div
+                          key={conn.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 10px',
+                            borderRadius: 4,
+                            backgroundColor: '#222428',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: '50%',
+                              backgroundColor:
+                                conn.status === 'connected'
+                                  ? 'var(--pf-v5-global--success-color--100)'
+                                  : 'var(--pf-v5-global--danger-color--100)',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span style={{ flex: 1 }}>{conn.name}</span>
+                          <span style={{ color: 'var(--pf-v5-global--Color--200)', textTransform: 'capitalize' }}>
+                            {conn.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* TFT + WJT selectors */}
+                {enabled && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <ProviderTftSelector index={index} />
+                    <ProviderWjtSelector index={index} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {Object.keys(providerGroups).length === 0 && (
+        <div style={{ color: 'var(--pf-v5-global--Color--200)', fontSize: '0.875rem' }}>
+          {t('No cloud provider connections found. Add connections in Cloud Connectors first.')}
+        </div>
+      )}
     </div>
   );
 }
@@ -796,6 +1190,190 @@ function CatalogDynamicFieldSelector() {
     </PageFormGroup>
   );
 }
+
+// ─── Per-Provider Form Fields Tab ─────────────────────────────────────────────
+
+function ProviderFormFieldsTab({ provider, wjtId }: { provider: string; wjtId: number | null }) {
+  const { t } = useTranslation();
+  const { setValue, watch } = useFormContext<CatalogItemFormValues>();
+  const [cursorPositions, setCursorPositions] = useState<Record<string, number>>({});
+  const fieldInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const providerFieldConfigs = watch('provider_field_configs');
+  const cfg = providerFieldConfigs[provider] ?? {
+    disabled_fields: [],
+    hidden_fields: [],
+    field_templates: {},
+  };
+
+  // Use saved templates as the source of truth; derive local state lazily
+  const [fieldTemplates, setFieldTemplates] = useState<Record<string, string>>(
+    () => cfg.field_templates ?? {}
+  );
+
+  const { data: survey } = useGet<Survey>(
+    wjtId ? awxAPI`/workflow_job_templates/${wjtId.toString()}/survey_spec/` : undefined
+  );
+
+  const surveyVariables = useMemo(() => {
+    const names = new Set<string>();
+    for (const question of survey?.spec ?? []) {
+      if (templateVariablePattern.test(question.variable)) names.add(question.variable);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [survey?.spec]);
+
+  // Once survey loads, fill in defaults for any variable not yet in local state
+  useEffect(() => {
+    if (surveyVariables.length === 0) return;
+    setFieldTemplates((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const v of surveyVariables) {
+        if (!(v in next)) {
+          next[v] = cfg.field_templates?.[v] ?? `{${v}}`;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surveyVariables]);
+
+  const disabledSet = useMemo(() => new Set(cfg.disabled_fields), [cfg.disabled_fields]);
+  const hiddenSet = useMemo(() => new Set(cfg.hidden_fields), [cfg.hidden_fields]);
+
+  const saveConfig = (updates: Partial<typeof cfg>) => {
+    const next = { ...providerFieldConfigs };
+    next[provider] = { ...cfg, ...updates };
+    setValue('provider_field_configs', next, { shouldDirty: true });
+  };
+
+  const insertVariable = (variable: string, field: string) => {
+    const currentTemplate = fieldTemplates[field] ?? '';
+    const cursor = cursorPositions[field] ?? currentTemplate.length;
+    const tokenCtx = getTemplateTokenContext(currentTemplate, cursor);
+    const token = `{${variable}}`;
+    let updated: string;
+    let nextCursor: number;
+    if (tokenCtx) {
+      const before = currentTemplate.slice(0, tokenCtx.openBraceIndex);
+      const after = currentTemplate.slice(tokenCtx.cursorPosition);
+      updated = `${before}${token}${after}`;
+      nextCursor = before.length + token.length;
+    } else {
+      const needsSpacer = currentTemplate.length > 0 && !currentTemplate.endsWith(' ');
+      updated = `${currentTemplate}${needsSpacer ? ' ' : ''}${token}`;
+      nextCursor = updated.length;
+    }
+    const next = { ...fieldTemplates, [field]: updated };
+    setFieldTemplates(next);
+    setCursorPositions((prev) => ({ ...prev, [field]: nextCursor }));
+    saveConfig({ field_templates: next });
+    window.requestAnimationFrame(() => {
+      const input = fieldInputRefs.current[field];
+      input?.focus();
+      input?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  if (!wjtId) {
+    return (
+      <div style={{ marginTop: 16, fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
+        {t('No workflow job template linked for {{provider}}. Assign one in the Cloud providers tab to configure field overrides.', { provider: PROVIDER_LABELS[provider] ?? provider })}
+      </div>
+    );
+  }
+
+  if (surveyVariables.length === 0 && survey) {
+    return (
+      <div style={{ marginTop: 16, fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
+        {t('The linked workflow has no survey fields to configure.')}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <p style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
+        {t(
+          'Configure each survey field for {{provider}} deployments. Set a default value template, or mark the field as disabled or hidden in the deploy form.',
+          { provider: PROVIDER_LABELS[provider] ?? provider }
+        )}
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {surveyVariables.map((variable) => {
+          const tmpl = fieldTemplates[variable] ?? '';
+          const cursor = cursorPositions[variable] ?? tmpl.length;
+          const tokenCtx = getTemplateTokenContext(tmpl, cursor);
+          const fragment = tokenCtx?.typedFragment?.toLowerCase() ?? '';
+          const suggestions = tokenCtx
+            ? surveyVariables.filter((v) => v !== variable && v.toLowerCase().startsWith(fragment))
+            : [];
+
+          return (
+            <DynamicFieldRow key={variable}>
+              <div style={{ minWidth: 160, fontWeight: 600, fontSize: '0.875rem' }}>{variable}</div>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <TextInput
+                  id={`${provider}_tmpl_${variable}`}
+                  ref={(el) => { fieldInputRefs.current[variable] = el; }}
+                  value={tmpl}
+                  placeholder={t('Default value, e.g. {{{variable}}}', { variable })}
+                  autoComplete="off"
+                  onChange={(_e, val) => {
+                    const next = { ...fieldTemplates, [variable]: val };
+                    setFieldTemplates(next);
+                    setCursorPositions((prev) => ({ ...prev, [variable]: val.length }));
+                    saveConfig({ field_templates: next });
+                  }}
+                  onClick={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
+                  onKeyUp={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
+                  onSelect={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
+                />
+                {suggestions.length > 0 && tokenCtx && (
+                  <SuggestionDropdown>
+                    {suggestions.map((v) => (
+                      <SuggestionItem
+                        key={`${variable}-${v}`}
+                        variant="plain"
+                        onMouseDown={(e) => { e.preventDefault(); insertVariable(v, variable); }}
+                      >
+                        {`{${v}}`}
+                      </SuggestionItem>
+                    ))}
+                  </SuggestionDropdown>
+                )}
+              </div>
+              <Checkbox
+                id={`${provider}_disable_${variable}`}
+                label={t('Disable')}
+                isChecked={disabledSet.has(variable)}
+                onChange={(_e, checked) => {
+                  const next = new Set(disabledSet);
+                  if (checked) next.add(variable); else next.delete(variable);
+                  saveConfig({ disabled_fields: [...next] });
+                }}
+              />
+              <Checkbox
+                id={`${provider}_hide_${variable}`}
+                label={t('Hide')}
+                isChecked={hiddenSet.has(variable)}
+                onChange={(_e, checked) => {
+                  const next = new Set(hiddenSet);
+                  if (checked) next.add(variable); else next.delete(variable);
+                  saveConfig({ hidden_fields: [...next] });
+                }}
+              />
+            </DynamicFieldRow>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function CatalogNameTemplateInput() {
   const { t } = useTranslation();

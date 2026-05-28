@@ -460,6 +460,8 @@ export async function patchProviderState(
 export interface DigitalOceanAdminSettings {
   allowedSizeSlugs: string[] | null;
   allowedVpcIds: string[] | null;
+  allowedImageIds: number[] | null;
+  allowedRegionSlugs: string[] | null;
 }
 
 

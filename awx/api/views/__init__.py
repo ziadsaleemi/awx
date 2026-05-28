@@ -5539,13 +5539,28 @@ class CatalogItemDeploy(GenericAPIView):
 
         launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
 
+        # Resolve which TFT to use — support multi-cloud via target_provider
+        target_provider = request.data.get('target_provider', None)
+        if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
+            tft_id = item.cloud_backends[target_provider]
+            from awx.main.models.terraform import TerraformJobTemplate
+            try:
+                resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
+            except TerraformJobTemplate.DoesNotExist:
+                return Response(
+                    {'target_provider': ['Configured Terraform job template not found.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            resolved_tft = item.terraform_job_template
+
         workflow_job = None
         terraform_job = None
-        if item.terraform_job_template:
+        if resolved_tft:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
-            terraform_job = item.terraform_job_template.create_unified_job(**launch_kwargs)
+            terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
         elif item.provision_workflow:
             launch_kwargs = {}

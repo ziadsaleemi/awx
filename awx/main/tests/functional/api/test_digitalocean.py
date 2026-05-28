@@ -1,0 +1,511 @@
+"""
+End-to-end functional tests for the DigitalOcean cloud-provider integration.
+
+Covers:
+- CatalogItem.cloud_backends routing deploy to the correct TerraformJobTemplate
+- DigitalOcean-specific extra vars (do_droplet_size, do_image_id, do_region,
+  do_vpc_uuid) are forwarded to the deployment
+- Negative: target_provider pointing to a non-existent TFT pk → 400
+- Negative: invalid target_provider falls back to default TFT
+- CloudProviderState GET/PATCH with admin allow-list settings
+- Non-admin cannot PATCH provider state
+- cloud_backends serialized correctly in CatalogItem GET response
+- CloudProviderConnection activity stream entry is created on save
+"""
+
+import pytest
+
+from awx.api.versioning import reverse
+from awx.main.models import CatalogDeployment, CatalogItem
+from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
+from awx.main.models.terraform import TerraformJobTemplate
+
+
+# ---------------------------------------------------------------------------
+# Shared provider_data / admin_settings helpers
+# ---------------------------------------------------------------------------
+
+DO_PROVIDER_DATA = {
+    'images': [
+        {
+            'id': 101,
+            'name': 'Ubuntu 22.04 x64',
+            'distribution': 'Ubuntu',
+            'type': 'snapshot',
+            'private': False,
+            'min_disk_size': 25,
+            'status': 'available',
+            'slug': None,
+            'size_gigabytes': 2.5,
+            'regions': ['nyc3', 'sfo3'],
+        },
+        {
+            'id': 202,
+            'name': 'CentOS Stream 9 x64',
+            'distribution': 'CentOS',
+            'type': 'snapshot',
+            'private': False,
+            'min_disk_size': 20,
+            'status': 'available',
+            'slug': None,
+            'size_gigabytes': 2.0,
+            'regions': ['nyc3'],
+        },
+    ],
+    'pricing': [
+        {
+            'slug': 's-1vcpu-1gb',
+            'vcpus': 1,
+            'memory': 1024,
+            'disk': 25,
+            'transfer': 1.0,
+            'price_monthly': 6.0,
+            'price_hourly': 0.00893,
+            'available': True,
+        },
+        {
+            'slug': 's-2vcpu-2gb',
+            'vcpus': 2,
+            'memory': 2048,
+            'disk': 60,
+            'transfer': 3.0,
+            'price_monthly': 18.0,
+            'price_hourly': 0.02679,
+            'available': True,
+        },
+    ],
+    'regions': [
+        {
+            'slug': 'nyc3',
+            'name': 'New York 3',
+            'available': True,
+            'features': ['private_networking', 'backups'],
+        },
+        {
+            'slug': 'sfo3',
+            'name': 'San Francisco 3',
+            'available': True,
+            'features': ['private_networking'],
+        },
+    ],
+    'vpcs': [
+        {
+            'id': 'vpc-abc123',
+            'name': 'default-nyc3',
+            'region': 'nyc3',
+            'ip_range': '10.0.0.0/20',
+            'created_at': '2023-01-01T00:00:00Z',
+        },
+    ],
+}
+
+DO_ADMIN_SETTINGS = {
+    'allowedSizeSlugs': ['s-1vcpu-1gb'],
+    'allowedVpcIds': ['vpc-abc123'],
+    'allowedImageIds': [101],
+    'allowedRegionSlugs': ['nyc3'],
+}
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def do_provider_state():
+    """CloudProviderState for digitalocean with realistic data and admin allow-lists."""
+    return CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        provider_data=DO_PROVIDER_DATA,
+        admin_settings=DO_ADMIN_SETTINGS,
+    )
+
+
+@pytest.fixture
+def do_terraform_job_template(organization):
+    """TerraformJobTemplate representing the DigitalOcean deployment template."""
+    return TerraformJobTemplate.objects.create(
+        name='Deploy DigitalOcean Droplet',
+        organization=organization,
+    )
+
+
+@pytest.fixture
+def other_terraform_job_template(organization):
+    """A second TerraformJobTemplate for testing fallback behaviour."""
+    return TerraformJobTemplate.objects.create(
+        name='Default Deploy Template',
+        organization=organization,
+    )
+
+
+@pytest.fixture
+def do_catalog_item(organization, do_terraform_job_template):
+    """CatalogItem whose cloud_backends maps digitalocean → do_terraform_job_template."""
+    return CatalogItem.objects.create(
+        name='DigitalOcean VM',
+        organization=organization,
+        cloud_backends={'digitalocean': do_terraform_job_template.pk},
+        extra_vars_schema={
+            'type': 'object',
+            'properties': {
+                'vm_hostname': {'type': 'string', 'title': 'VM Hostname'},
+            },
+        },
+    )
+
+
+@pytest.fixture
+def multi_cloud_catalog_item(organization, do_terraform_job_template, other_terraform_job_template):
+    """CatalogItem with both a default TFT and a digitalocean cloud_backend."""
+    return CatalogItem.objects.create(
+        name='Multi-Cloud VM',
+        organization=organization,
+        terraform_job_template=other_terraform_job_template,
+        cloud_backends={'digitalocean': do_terraform_job_template.pk},
+        extra_vars_schema={
+            'type': 'object',
+            'properties': {
+                'vm_hostname': {'type': 'string'},
+            },
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Deploy routing tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_deploy_uses_cloud_backend_tft(post, admin_user, do_catalog_item, do_terraform_job_template):
+    """POSTing with target_provider=digitalocean routes through the mapped TFT."""
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': do_catalog_item.pk}),
+        {
+            'target_provider': 'digitalocean',
+            'extra_vars': {'vm_hostname': 'test-droplet'},
+        },
+        admin_user,
+        expect=201,
+    )
+
+    assert response.data is not None
+    deployment = CatalogDeployment.objects.filter(catalog_item=do_catalog_item).last()
+    assert deployment is not None
+    assert deployment.terraform_provision_job is not None
+    assert deployment.terraform_provision_job.terraform_job_template_id == do_terraform_job_template.pk
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_deploy_creates_deployment_record(post, admin_user, do_catalog_item):
+    """A CatalogDeployment record is persisted after a successful DO deploy."""
+    before_count = CatalogDeployment.objects.filter(catalog_item=do_catalog_item).count()
+
+    post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': do_catalog_item.pk}),
+        {
+            'target_provider': 'digitalocean',
+            'extra_vars': {'vm_hostname': 'droplet-1'},
+        },
+        admin_user,
+        expect=201,
+    )
+
+    after_count = CatalogDeployment.objects.filter(catalog_item=do_catalog_item).count()
+    assert after_count == before_count + 1
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_deploy_missing_tft_returns_400(post, admin_user, organization):
+    """cloud_backends pointing to a non-existent TFT pk returns HTTP 400."""
+    item = CatalogItem.objects.create(
+        name='Bad TFT Item',
+        organization=organization,
+        cloud_backends={'digitalocean': 999999},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'target_provider': 'digitalocean'},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'target_provider' in response.data
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_deploy_unknown_provider_falls_back_to_default(
+    post, admin_user, multi_cloud_catalog_item, other_terraform_job_template
+):
+    """target_provider not in cloud_backends falls back to terraform_job_template."""
+    post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': multi_cloud_catalog_item.pk}),
+        {
+            'target_provider': 'nonexistent-provider',
+            'extra_vars': {'vm_hostname': 'fallback-vm'},
+        },
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.filter(catalog_item=multi_cloud_catalog_item).last()
+    assert deployment is not None
+    assert deployment.terraform_provision_job is not None
+    assert deployment.terraform_provision_job.terraform_job_template_id == other_terraform_job_template.pk
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_deploy_no_provider_uses_default_tft(
+    post, admin_user, multi_cloud_catalog_item, other_terraform_job_template
+):
+    """No target_provider in POST body uses the default terraform_job_template."""
+    post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': multi_cloud_catalog_item.pk}),
+        {'extra_vars': {'vm_hostname': 'no-provider-vm'}},
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.filter(catalog_item=multi_cloud_catalog_item).last()
+    assert deployment is not None
+    assert deployment.terraform_provision_job is not None
+    assert deployment.terraform_provision_job.terraform_job_template_id == other_terraform_job_template.pk
+
+
+# ---------------------------------------------------------------------------
+# cloud_backends serialization tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_cloud_backends_in_get_response(get, admin_user, do_catalog_item, do_terraform_job_template):
+    """GET /catalog/ returns cloud_backends dict for a catalog item."""
+    from awx.api.urls.catalog import catalog_item_urls  # noqa: F401 - confirm import
+
+    # Use the list endpoint and find our item
+    response = get(
+        reverse('api:catalog_item_list'),
+        admin_user,
+        expect=200,
+    )
+    items = response.data['results']
+    match = next((i for i in items if i['id'] == do_catalog_item.pk), None)
+    assert match is not None
+    assert match['cloud_backends'] == {'digitalocean': do_terraform_job_template.pk}
+
+
+@pytest.mark.django_db
+def test_do_catalog_item_cloud_backends_null_when_unset(get, admin_user, organization):
+    """cloud_backends is null when not set on a catalog item."""
+    item = CatalogItem.objects.create(
+        name='No Cloud Backends',
+        organization=organization,
+    )
+    response = get(
+        reverse('api:catalog_item_list'),
+        admin_user,
+        expect=200,
+    )
+    items = response.data['results']
+    match = next((i for i in items if i['id'] == item.pk), None)
+    assert match is not None
+    assert match['cloud_backends'] is None
+
+
+# ---------------------------------------------------------------------------
+# CloudProviderState (admin settings) tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_do_provider_state_readable_by_admin(get, admin_user, do_provider_state):
+    """GET provider_state returns the admin allow-list settings."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    response = get(url, admin_user, expect=200)
+
+    assert response.data['provider_id'] == 'digitalocean'
+    admin_settings = response.data['admin_settings']
+    assert admin_settings['allowedSizeSlugs'] == ['s-1vcpu-1gb']
+    assert admin_settings['allowedImageIds'] == [101]
+    assert admin_settings['allowedRegionSlugs'] == ['nyc3']
+    assert admin_settings['allowedVpcIds'] == ['vpc-abc123']
+
+
+@pytest.mark.django_db
+def test_do_provider_state_readable_by_system_auditor(get, system_auditor, do_provider_state):
+    """System auditors can read provider state (read-only access)."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    response = get(url, system_auditor, expect=200)
+    assert response.data['provider_id'] == 'digitalocean'
+
+
+@pytest.mark.django_db
+def test_do_provider_state_patchable_by_admin(patch, admin_user, do_provider_state):
+    """PATCH by superuser updates admin allow-list settings."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    new_settings = {
+        'admin_settings': {
+            'allowedSizeSlugs': ['s-1vcpu-1gb', 's-2vcpu-2gb'],
+            'allowedVpcIds': ['vpc-abc123'],
+            'allowedImageIds': [101, 202],
+            'allowedRegionSlugs': ['nyc3', 'sfo3'],
+        }
+    }
+    response = patch(url, new_settings, admin_user, expect=200)
+
+    assert response.data['admin_settings']['allowedSizeSlugs'] == ['s-1vcpu-1gb', 's-2vcpu-2gb']
+    assert response.data['admin_settings']['allowedImageIds'] == [101, 202]
+    assert response.data['admin_settings']['allowedRegionSlugs'] == ['nyc3', 'sfo3']
+
+    # Confirm persisted
+    do_provider_state.refresh_from_db()
+    assert do_provider_state.admin_settings['allowedImageIds'] == [101, 202]
+
+
+@pytest.mark.django_db
+def test_do_provider_state_not_patchable_by_non_admin(patch, rando, do_provider_state):
+    """Non-admin user cannot PATCH provider state."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    patch(
+        url,
+        {'admin_settings': {'allowedSizeSlugs': ['s-2vcpu-2gb']}},
+        rando,
+        expect=403,
+    )
+
+
+@pytest.mark.django_db
+def test_do_provider_state_get_creates_record_if_missing(get, admin_user):
+    """GET on a non-existent provider_id creates the record automatically."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'test-provider'})
+    response = get(url, admin_user, expect=200)
+    assert response.data['provider_id'] == 'test-provider'
+    assert CloudProviderState.objects.filter(provider_id='test-provider').exists()
+
+
+@pytest.mark.django_db
+def test_do_provider_state_provider_data_present(get, admin_user, do_provider_state):
+    """provider_data is returned and contains images, pricing, regions, vpcs."""
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    response = get(url, admin_user, expect=200)
+
+    provider_data = response.data['provider_data']
+    assert len(provider_data['images']) == 2
+    assert len(provider_data['pricing']) == 2
+    assert len(provider_data['regions']) == 2
+    assert len(provider_data['vpcs']) == 1
+
+    image_ids = [img['id'] for img in provider_data['images']]
+    assert 101 in image_ids
+    assert 202 in image_ids
+
+
+# ---------------------------------------------------------------------------
+# CloudProviderConnection tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_do_cloud_provider_connection_list(get, admin_user):
+    """GET /catalog_cloud/connections/ returns a paginated list."""
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='My DO Connection',
+        status='connected',
+    )
+    url = reverse('api:catalog_cloud_connection_list')
+    response = get(url, admin_user, expect=200)
+    assert response.data['count'] >= 1
+    names = [c['name'] for c in response.data['results']]
+    assert 'My DO Connection' in names
+
+
+@pytest.mark.django_db
+def test_do_cloud_provider_connection_detail(get, admin_user):
+    """GET /catalog_cloud/connections/<pk>/ returns connection fields."""
+    conn = CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Detail Test Connection',
+        status='disconnected',
+    )
+    url = reverse('api:catalog_cloud_connection_detail', kwargs={'pk': conn.pk})
+    response = get(url, admin_user, expect=200)
+    assert response.data['provider_id'] == 'digitalocean'
+    assert response.data['name'] == 'Detail Test Connection'
+    assert response.data['status'] == 'disconnected'
+
+
+@pytest.mark.django_db
+def test_do_cloud_provider_connection_not_accessible_by_non_admin(get, rando):
+    """Non-admin cannot list cloud provider connections."""
+    url = reverse('api:catalog_cloud_connection_list')
+    get(url, rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_do_cloud_provider_connection_activity_stream_on_create(admin_user):
+    """Creating a CloudProviderConnection generates an activity stream entry."""
+    from awx.main.models import ActivityStream
+
+    before_count = ActivityStream.objects.filter(operation='create').count()
+
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Activity Stream Test',
+        status='disconnected',
+    )
+
+    after_count = ActivityStream.objects.filter(operation='create').count()
+    assert after_count > before_count
+
+
+@pytest.mark.django_db
+def test_do_cloud_provider_state_activity_stream_on_create(admin_user):
+    """Creating a CloudProviderState generates an activity stream entry."""
+    from awx.main.models import ActivityStream
+
+    before_count = ActivityStream.objects.filter(operation='create').count()
+
+    CloudProviderState.objects.create(
+        provider_id='digitalocean-activity-test',
+        admin_settings=DO_ADMIN_SETTINGS,
+    )
+
+    after_count = ActivityStream.objects.filter(operation='create').count()
+    assert after_count > before_count
+
+
+# ---------------------------------------------------------------------------
+# DigitalOcean extra vars forwarding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_do_deploy_extra_vars_forwarded(post, admin_user, do_catalog_item):
+    """DigitalOcean-specific extra vars are stored in the deployment record."""
+    post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': do_catalog_item.pk}),
+        {
+            'target_provider': 'digitalocean',
+            'extra_vars': {
+                'vm_hostname': 'my-droplet',
+                'do_droplet_size': 's-1vcpu-1gb',
+                'do_image_id': 101,
+                'do_region': 'nyc3',
+                'do_vpc_uuid': 'vpc-abc123',
+            },
+        },
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.filter(catalog_item=do_catalog_item).last()
+    assert deployment is not None
+    assert deployment.extra_vars.get('vm_hostname') == 'my-droplet'
+    assert deployment.extra_vars.get('do_droplet_size') == 's-1vcpu-1gb'
+    assert deployment.extra_vars.get('do_region') == 'nyc3'
+    assert deployment.extra_vars.get('do_image_id') == 101
+    assert deployment.extra_vars.get('do_vpc_uuid') == 'vpc-abc123'

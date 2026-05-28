@@ -188,6 +188,8 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E22 | **Azure VM Sizes pricing column** — VM Sizes tab in Azure provider now fetches live Linux on-demand prices from the Azure Retail Prices API (public, no auth) per primary region and displays a `Price/hr` column alongside CPU/memory/GPU specs | High | ✅ |
 | E23 | **Provider page header layout** — action buttons (`Pull data`, `Manage connections`) moved to page header right side; `Last pull: [timestamp]` shown right-aligned below the buttons; applies to both DigitalOcean and Azure provider pages | Medium | ✅ |
 | E24 | **Catalog deployment page header** — deployed date and action buttons (`Retry provision`, `Deprovision`) with inline status badge moved from the Details tab into the page header right side; Details tab now shows only data fields | Medium | ✅ |
+| E25 | **Catalog browse provider logos** — show actual, borderless cloud provider logos (DigitalOcean, Azure, AWS, VMware, GCP, Proxmox) on catalog cards instead of circular abbreviations | Medium | ✅ |
+
 
 ---
 

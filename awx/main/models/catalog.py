@@ -129,6 +129,43 @@ class CatalogItem(CommonModelNameNotUnique):
             'If null, no extra-var form is shown.'
         ),
     )
+    cloud_backends = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Mapping of cloud provider id to TerraformJobTemplate pk for multi-cloud deployments. '
+            'e.g. {"digitalocean": 5, "azure": 12}. When set, the deploy wizard offers a provider selector.'
+        ),
+    )
+    provider_workflows = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Mapping of cloud provider slug to WorkflowJobTemplate pk whose survey drives the '
+            'provider-specific deploy form fields. e.g. {"digitalocean": 25, "proxmox": 21}.'
+        ),
+    )
+    available_providers = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'List of cloud provider slugs this catalog item is available on. '
+            'Drives the provider tabs shown to users. e.g. ["digitalocean", "proxmox", "azure"]. '
+            'If null, only providers in cloud_backends/provider_workflows are shown.'
+        ),
+    )
+    provider_field_configs = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Per-provider deploy-form field configuration. '
+            'Maps provider slug to {disabled_fields: [], hidden_fields: [], field_templates: {}}.'
+        ),
+    )
 
     # ------------------------------------------------------------------ #
     # RBAC roles                                                           #

@@ -302,7 +302,11 @@ function DigitalOceanOverviewTab(props: {
   );
 }
 
-function ImagesTab(props: { images: DigitalOceanImage[] }) {
+function ImagesTab(props: {
+  images: DigitalOceanImage[];
+  enabledImages: Set<number>;
+  onToggleImage: (id: number, enabled: boolean) => void;
+}) {
   const { t } = useTranslation();
   const tableColumns = useMemo<ITableColumn<DigitalOceanImage>[]>(
     () => [
@@ -340,6 +344,17 @@ function ImagesTab(props: { images: DigitalOceanImage[] }) {
         sort: 'status',
       },
       {
+        header: t('Allowed'),
+        cell: (img) => (
+          <Switch
+            id={`image-allowed-${img.id}`}
+            isChecked={props.enabledImages.has(img.id)}
+            onChange={(_evt, checked) => props.onToggleImage(img.id, checked)}
+            aria-label={img.name}
+          />
+        ),
+      },
+      {
         header: t('ID'),
         type: 'text',
         value: (img) => img.id?.toString(),
@@ -364,7 +379,7 @@ function ImagesTab(props: { images: DigitalOceanImage[] }) {
         table: 'expanded',
       },
     ],
-    [t]
+    [t, props.enabledImages, props.onToggleImage]
   );
 
   const view = useInMemoryView<DigitalOceanImage>({
@@ -502,7 +517,11 @@ function SizesTab(props: {
   );
 }
 
-function RegionsTab(props: { regions: DigitalOceanRegion[] }) {
+function RegionsTab(props: {
+  regions: DigitalOceanRegion[];
+  enabledRegions: Set<string>;
+  onToggleRegion: (slug: string, enabled: boolean) => void;
+}) {
   const { t } = useTranslation();
   const tableColumns = useMemo<ITableColumn<DigitalOceanRegion>[]>(
     () => [
@@ -525,6 +544,17 @@ function RegionsTab(props: { regions: DigitalOceanRegion[] }) {
         ),
       },
       {
+        header: t('Allowed'),
+        cell: (region) => (
+          <Switch
+            id={`region-allowed-${region.slug}`}
+            isChecked={props.enabledRegions.has(region.slug)}
+            onChange={(_evt, checked) => props.onToggleRegion(region.slug, checked)}
+            aria-label={region.name}
+          />
+        ),
+      },
+      {
         header: t('Features'),
         cell: (region) => <TextCell text={region.features?.slice(0, 4).join(', ') || '-'} />,
       },
@@ -535,7 +565,7 @@ function RegionsTab(props: { regions: DigitalOceanRegion[] }) {
         table: 'expanded',
       },
     ],
-    [t]
+    [t, props.enabledRegions, props.onToggleRegion]
   );
 
   const view = useInMemoryView<DigitalOceanRegion>({
@@ -655,6 +685,8 @@ function DefaultProviderSettings(props: { provider: string }) {
   const [adminSettings, setAdminSettings] = useState<DigitalOceanAdminSettings>({
     allowedSizeSlugs: null,
     allowedVpcIds: null,
+    allowedImageIds: null,
+    allowedRegionSlugs: null,
   });
 
   // Load connections and previously pulled provider data from the database.
@@ -680,6 +712,8 @@ function DefaultProviderSettings(props: { provider: string }) {
 
   const allSizeSlugs = useMemo(() => data?.pricing.map((s) => s.slug) ?? [], [data]);
   const allVpcIds = useMemo(() => data?.vpcs.map((v) => v.id) ?? [], [data]);
+  const allImageIds = useMemo(() => data?.images.map((img) => img.id) ?? [], [data]);
+  const allRegionSlugs = useMemo(() => data?.regions.map((r) => r.slug) ?? [], [data]);
 
   const enabledSizes = useMemo<Set<string>>(
     () =>
@@ -694,6 +728,20 @@ function DefaultProviderSettings(props: { provider: string }) {
         ? new Set(allVpcIds)
         : new Set(adminSettings.allowedVpcIds),
     [adminSettings.allowedVpcIds, allVpcIds]
+  );
+  const enabledImages = useMemo<Set<number>>(
+    () =>
+      adminSettings.allowedImageIds === null
+        ? new Set(allImageIds)
+        : new Set(adminSettings.allowedImageIds),
+    [adminSettings.allowedImageIds, allImageIds]
+  );
+  const enabledRegions = useMemo<Set<string>>(
+    () =>
+      adminSettings.allowedRegionSlugs === null
+        ? new Set(allRegionSlugs)
+        : new Set(adminSettings.allowedRegionSlugs),
+    [adminSettings.allowedRegionSlugs, allRegionSlugs]
   );
 
   const onToggleSize = useCallback(
@@ -714,6 +762,26 @@ function DefaultProviderSettings(props: { provider: string }) {
       saveAdminSettings({ ...adminSettings, allowedVpcIds: [...next] });
     },
     [enabledVpcs, adminSettings, saveAdminSettings]
+  );
+
+  const onToggleImage = useCallback(
+    (id: number, enabled: boolean) => {
+      const next = new Set(enabledImages);
+      if (enabled) next.add(id);
+      else next.delete(id);
+      saveAdminSettings({ ...adminSettings, allowedImageIds: [...next] });
+    },
+    [enabledImages, adminSettings, saveAdminSettings]
+  );
+
+  const onToggleRegion = useCallback(
+    (slug: string, enabled: boolean) => {
+      const next = new Set(enabledRegions);
+      if (enabled) next.add(slug);
+      else next.delete(slug);
+      saveAdminSettings({ ...adminSettings, allowedRegionSlugs: [...next] });
+    },
+    [enabledRegions, adminSettings, saveAdminSettings]
   );
 
   const handleModalClose = useCallback(() => {
@@ -879,13 +947,13 @@ function DefaultProviderSettings(props: { provider: string }) {
           />
         </PageTab>
         <PageTab label={t('Images') + (data ? count(data.images.length) : '')}>
-          <ImagesTab images={data?.images ?? []} />
+          <ImagesTab images={data?.images ?? []} enabledImages={enabledImages} onToggleImage={onToggleImage} />
         </PageTab>
         <PageTab label={t('Droplet sizes') + (data ? count(data.pricing.length) : '')}>
           <SizesTab pricing={data?.pricing ?? []} enabledSizes={enabledSizes} onToggleSize={onToggleSize} />
         </PageTab>
         <PageTab label={t('Regions') + (data ? count(data.regions.length) : '')}>
-          <RegionsTab regions={data?.regions ?? []} />
+          <RegionsTab regions={data?.regions ?? []} enabledRegions={enabledRegions} onToggleRegion={onToggleRegion} />
         </PageTab>
         <PageTab label={t('Networks') + (data ? count(data.vpcs.length) : '')}>
           <NetworksTab vpcs={data?.vpcs ?? []} enabledVpcs={enabledVpcs} onToggleVpc={onToggleVpc} />

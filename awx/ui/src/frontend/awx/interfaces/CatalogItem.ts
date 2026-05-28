@@ -17,6 +17,13 @@ export interface CatalogItem {
   deprovision_workflow: number | null;
   override_workflow_limit: boolean;
   extra_vars_schema: Record<string, unknown> | null;
+  cloud_backends: Record<string, number> | null;
+  provider_workflows: Record<string, number> | null;
+  available_providers: string[] | null;
+  provider_field_configs: Record<
+    string,
+    { disabled_fields: string[]; hidden_fields: string[]; field_templates: Record<string, string> }
+  > | null;
   created: string;
   modified: string;
   summary_fields: {
@@ -37,5 +44,6 @@ export interface CatalogItem {
     provision_workflow?: string;
     terraform_job_template?: string;
     deprovision_workflow?: string;
+    provider_workflow_surveys?: Record<string, string>;
   };
 }
