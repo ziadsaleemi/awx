@@ -1,16 +1,13 @@
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { Button } from '@patternfly/react-core';
 import {
   LoadingPage,
   PageDetail,
   PageDetails,
   useGetPageUrl,
   usePageNavigate,
-  usePageAlertToaster,
 } from '../../../../framework';
 import { useGetItem } from '../../../common/crud/useGet';
-import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
@@ -24,8 +21,6 @@ export function CatalogDeploymentDetails() {
   const id = params.id ?? '';
   const getPageUrl = useGetPageUrl();
   const pageNavigate = usePageNavigate();
-  const alertToaster = usePageAlertToaster();
-  const postRequest = usePostRequest();
 
   const {
     data: deployment,
@@ -34,48 +29,8 @@ export function CatalogDeploymentDetails() {
     refresh,
   } = useGetItem<CatalogDeployment>(awxAPI`/catalog_deployments`, id);
 
-  const handleDeprovision = async () => {
-    try {
-      await postRequest(awxAPI`/catalog_deployments/${id}/deprovision/`, {});
-      alertToaster.addAlert({
-        variant: 'success',
-        title: t('Deprovision started'),
-        timeout: 4000,
-      });
-      refresh();
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Failed to deprovision'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
-  const handleRetry = async () => {
-    try {
-      await postRequest(awxAPI`/catalog_deployments/${id}/retry/`, {});
-      alertToaster.addAlert({
-        variant: 'success',
-        title: t('Retry started'),
-        timeout: 4000,
-      });
-      refresh();
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Failed to retry deployment'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !deployment) return <LoadingPage />;
-
-  const canDeprovision = !['deprovisioning', 'destroyed', 'provisioning', 'pending'].includes(
-    deployment.status
-  );
 
   return (
     <PageDetails>
@@ -160,26 +115,7 @@ export function CatalogDeploymentDetails() {
         }
         showCopyToClipboard
       />
-      <PageDetail label={t('Deployed')}>{new Date(deployment.created).toLocaleString()}</PageDetail>
-      <PageDetail label={t('Actions')}>
-        <Button
-          variant="secondary"
-          isDisabled={
-            deployment.status !== 'failed' || !deployment.summary_fields?.user_capabilities?.retry
-          }
-          onClick={() => void handleRetry()}
-        >
-          {t('Retry provision')}
-        </Button>
-        <Button
-          variant="danger"
-          isDisabled={!canDeprovision}
-          onClick={() => void handleDeprovision()}
-          style={{ marginLeft: '0.75rem' }}
-        >
-          {t('Deprovision')}
-        </Button>
-      </PageDetail>
     </PageDetails>
   );
 }
+

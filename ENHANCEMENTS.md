@@ -184,6 +184,10 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E18 | **Cloud RBAC hardening** — Cloud sidebar visibility and cloud management pages now require admin-level access (superuser/system auditor); credential `use` capability is enforced before provider connection attempts | High | ✅ |
 | E19 | **DigitalOcean cloud credential type** — added managed migration for `DigitalOcean (Terraform)` credential type (`digitalocean_terraform`) so users can create and select DigitalOcean credentials in AWX | High | ✅ |
 | E20 | **Automated DigitalOcean image + pricing pull** — Cloud provider settings now call a backend endpoint that uses the selected DigitalOcean credential to pull all available images and droplet pricing, then renders both lists in the UI without manual source URL input | High | ✅ |
+| E21 | **DigitalOcean Overview tab** — first tab on the DigitalOcean provider page shows a connection card with credential info, four stat boxes (images, droplet sizes, regions, networks) pulling from pulled data, and an info panel with provider description and last-pull timestamp | High | ✅ |
+| E22 | **Azure VM Sizes pricing column** — VM Sizes tab in Azure provider now fetches live Linux on-demand prices from the Azure Retail Prices API (public, no auth) per primary region and displays a `Price/hr` column alongside CPU/memory/GPU specs | High | ✅ |
+| E23 | **Provider page header layout** — action buttons (`Pull data`, `Manage connections`) moved to page header right side; `Last pull: [timestamp]` shown right-aligned below the buttons; applies to both DigitalOcean and Azure provider pages | Medium | ✅ |
+| E24 | **Catalog deployment page header** — deployed date and action buttons (`Retry provision`, `Deprovision`) with inline status badge moved from the Details tab into the page header right side; Details tab now shows only data fields | Medium | ✅ |
 
 ---
 
@@ -218,6 +222,62 @@ Sprint 9  →  E5–E8 (Catalog admin UI + role-based redirect)
 Sprint 10 →  F1–F7 (Proxmox end-to-end + docs)
 Sprint 11 →  B2–B6 (remaining cloud provider credential types)
 ```
+
+---
+
+---
+
+## Phase G — AI & Platform Intelligence *(Future Development — AAP Parity)*
+
+Features present in Red Hat Ansible Automation Platform (AAP) that are not yet in this AWX fork. These require significant backend and UI work and are tracked here for future planning.
+
+### G1 — Ansible Lightspeed AI Assistant
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language | High | ⬜ |
+| G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | ⬜ |
+| G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ⬜ |
+| G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ⬜ |
+
+### G2 — Automation Insights Dashboard
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G2a | **ROI / value measurement dashboards** — compute and display automation ROI (hours saved, cost avoidance) based on job runtimes and configurable host/hour values | Medium | ⬜ |
+| G2b | **Real-time actionable insights** — AI-driven anomaly detection on job failure rates, execution times, and inventory drift; surface recommendations in the dashboard | Medium | ⬜ |
+| G2c | **Performance metrics panels** — expanded dashboard cards for capacity utilisation trends, slowest templates, and most-failed hosts over configurable time windows | Medium | ⬜ |
+
+### G3 — MCP Server (Model Context Protocol)
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G3a | **MCP server endpoint** — expose AWX resources (job templates, inventories, credentials, deployments) via the Model Context Protocol so external AI agents can discover and invoke automation without custom integrations | High | ⬜ |
+| G3b | **RAG policy injection** — pipeline to embed organisation policies and best-practice docs into a vector store; MCP server retrieves relevant context and injects it into AI agent prompts before execution | Medium | ⬜ |
+| G3c | **MCP auth + audit** — OAuth2 token scoping for MCP clients; every MCP-initiated action logged to the Activity Stream with `triggered_by: mcp_agent` | High | ⬜ |
+
+### G4 — AI-Assisted Inventory Generation
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G4a | **Natural-language inventory builder** — UI wizard where users describe their infrastructure in plain text; AI generates a structured AWX inventory (groups, hosts, variables) as a preview before saving | Medium | ⬜ |
+| G4b | **Cloud resource → inventory AI mapping** — extend the existing cloud provider pull to use an AI step that suggests inventory group structure and variable mappings from pulled resource metadata | Medium | ⬜ |
+
+### G5 — Automation Orchestrator (Multi-Mode Canvas)
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G5a | **Multi-mode workflow canvas** — extend the workflow visualiser to support three node types side-by-side: deterministic (existing Ansible/Terraform), event-driven (EDA rulebook activations), and AI-driven (Lightspeed-generated tasks) | High | ⬜ |
+| G5b | **Event-Driven Ansible (EDA) integration** — connect AWX to an EDA Controller instance; surface rulebook activations as workflow nodes; show event source status in the sidebar | High | ⬜ |
+| G5c | **AI-driven node type** — workflow node that delegates execution plan generation to the configured AI model at runtime; human-approval gate before execution | Medium | ⬜ |
+
+### G6 — OPA (Open Policy Agent) Guardrails
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | ⬜ |
+| G6b | **Policy management UI** — Settings section to upload/edit Rego policy bundles; test panel to evaluate a sample launch request against current policies | Medium | ⬜ |
+| G6c | **AI-action guardrails** — OPA policies specifically scoped to MCP/AI-initiated actions; e.g. block AI agents from launching destructive jobs without a human-approval workflow node | High | ⬜ |
 
 ---
 

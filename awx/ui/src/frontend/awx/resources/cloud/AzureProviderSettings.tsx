@@ -1310,34 +1310,39 @@ export function AzureProviderSettings() {
     <PageLayout>
       <PageHeader
         title={t('Microsoft Azure')}
-        description={
-          connectedEntries.length > 0
-            ? t('{{n}} connection(s) active — Azure resources available for Terraform jobs.', {
-                n: connectedEntries.length,
-              })
-            : t(
-                'No active connections. Add and connect an Azure credential on the Cloud Connections page.'
-              )
-        }
+        description={t('Azure subscription management for administrators.')}
         headerActions={
-          <div style={{ display: 'flex', gap: 8 }}>
-            {connectedEntries.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {connectedEntries.length > 0 && (
+                <Button
+                  variant="primary"
+                  onClick={() => void onPull()}
+                  isLoading={isPulling}
+                  isDisabled={isPulling}
+                >
+                  {isPulling ? t('Pulling\u2026') : t('Pull data')}
+                </Button>
+              )}
               <Button
-                variant="primary"
-                onClick={() => void onPull()}
-                isLoading={isPulling}
-                isDisabled={isPulling}
+                variant="secondary"
+                icon={<PlusCircleIcon />}
+                onClick={() => setShowModal(true)}
               >
-                {isPulling ? t('Pulling\u2026') : t('Pull data')}
+                {t('Manage connections')}
               </Button>
+            </div>
+            {allData.pulledAt && (
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('Last pull: {{time}}', { time: new Date(allData.pulledAt).toLocaleString() })}
+              </span>
             )}
-            <Button
-              variant="secondary"
-              icon={<PlusCircleIcon />}
-              onClick={() => setShowModal(true)}
-            >
-              {t('Manage connections')}
-            </Button>
           </div>
         }
         logo={<img src={AzureLogo as string} alt="Microsoft Azure" style={{ height: 36 }} />}

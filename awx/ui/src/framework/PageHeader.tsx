@@ -73,6 +73,7 @@ export interface PageHeaderProps {
   titleHelpTitle?: string;
   titleHelp?: string | string[];
   titleDocLink?: string;
+  titleAdornment?: ReactNode;
   description?: null | string | string[];
   controls?: ReactNode;
   headerActions?: ReactNode;
@@ -183,6 +184,13 @@ export function PageHeader(props: PageHeaderProps) {
                     </Button>
                   </Title>
                 </Popover>
+              ) : props.titleAdornment ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Title data-cy="page-title" headingLevel="h1">
+                    {title}
+                  </Title>
+                  {props.titleAdornment}
+                </div>
               ) : (
                 <Title data-cy="page-title" headingLevel="h1">
                   {title}

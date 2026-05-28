@@ -709,35 +709,51 @@ function DefaultProviderSettings(props: { provider: string }) {
     <PageLayout>
       <PageHeader
         title={t('{{provider}}', { provider: providerLabel })}
-        description={
-          isConnected
-            ? providerSupportsPull
-              ? pulledAt
-                ? t('Last pull: {{time}}', { time: pulledAt })
-                : t('Connected. Click "Pull data" to load provider resources.')
-              : t('Connected.')
-            : t('Not connected. Go to Cloud Connections to connect.')
-        }
+        description={t('Cloud provider configuration for administrators.')}
         headerActions={
-          <div style={{ display: 'flex', gap: 8 }}>
-            {providerSupportsPull && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {providerSupportsPull && (
+                <Button
+                  variant="primary"
+                  onClick={() => void onPull()}
+                  isLoading={isPulling}
+                  isDisabled={!isConnected || isPulling}
+                  icon={isPulling ? <Spinner size="sm" /> : undefined}
+                >
+                  {isPulling ? t('Pulling\u2026') : t('Pull data')}
+                </Button>
+              )}
               <Button
-                variant="primary"
-                onClick={() => void onPull()}
-                isLoading={isPulling}
-                isDisabled={!isConnected || isPulling}
-                icon={isPulling ? <Spinner size="sm" /> : undefined}
+                variant="secondary"
+                icon={<PlusCircleIcon />}
+                onClick={() => setShowModal(true)}
               >
-                {isPulling ? t('Pulling\u2026') : t('Pull data')}
+                {t('Manage connections')}
               </Button>
+            </div>
+            {pulledAt && (
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('Last pull: {{time}}', { time: pulledAt })}
+              </span>
             )}
-            <Button
-              variant="secondary"
-              icon={<PlusCircleIcon />}
-              onClick={() => setShowModal(true)}
-            >
-              {t('Manage connections')}
-            </Button>
+            {!isConnected && !pulledAt && (
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--300)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('Not connected')}
+              </span>
+            )}
           </div>
         }
       />
