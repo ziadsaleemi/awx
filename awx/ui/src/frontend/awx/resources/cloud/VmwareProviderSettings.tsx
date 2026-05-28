@@ -777,7 +777,7 @@ export function VmwareProviderSettings() {
             </Button>
           </div>
         }
-        logo={<img src={VmwareLogo as string} alt="VMware vSphere" style={{ height: 36 }} />}
+        logo={<VmwareLogo style={{ height: 36, width: 'auto' }} />}
       />
 
       {connectionEntries.length === 0 ? (

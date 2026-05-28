@@ -19,6 +19,7 @@ export interface CatalogItem {
   extra_vars_schema: Record<string, unknown> | null;
   cloud_backends: Record<string, number> | null;
   provider_workflows: Record<string, number> | null;
+  provider_deprovision_workflows: Record<string, number> | null;
   available_providers: string[] | null;
   provider_field_configs: Record<
     string,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
+  Alert,
   Button,
   Form,
   FormGroup,
@@ -228,6 +229,15 @@ export function CatalogDeployContent({
     }
     return allProviders[0] ?? '';
   });
+
+  // When the modal is opened from a specific provider icon, lock to that provider
+  // and skip rendering tabs for other providers.
+  const lockedProvider = initialProvider ?? null;
+  const isProviderConfigured = (p: string) =>
+    Boolean(
+      (item.provider_workflows && item.provider_workflows[p]) ||
+        (item.cloud_backends && item.cloud_backends[p])
+    );
 
   const PROVIDER_LABELS: Record<string, string> = {
     digitalocean: 'DigitalOcean',
@@ -514,14 +524,27 @@ export function CatalogDeployContent({
 
   return (
     <Form>
-          {/* Provider tabs — one per cloud/hypervisor backend */}
-          {allProviders.length > 0 ? (
+          {/* Provider tabs — one per cloud/hypervisor backend.
+              When opened from a specific cloud icon (lockedProvider), restrict to that provider only. */}
+          {lockedProvider && !isProviderConfigured(lockedProvider) ? (
+            <Alert
+              variant="warning"
+              isInline
+              title={t('{{provider}} is not configured', {
+                provider: PROVIDER_LABELS[lockedProvider] ?? lockedProvider,
+              })}
+            >
+              {t(
+                'No workflow or Terraform template is configured for this provider on this catalog item. Ask an administrator to configure it in the catalog item settings.'
+              )}
+            </Alert>
+          ) : (lockedProvider ? [lockedProvider] : allProviders).length > 0 ? (
             <Tabs
               activeKey={selectedProvider}
               onSelect={(_evt, key) => setSelectedProvider(String(key))}
               style={{ marginBottom: '1.5rem' }}
             >
-              {allProviders.map((p) => {
+              {(lockedProvider ? [lockedProvider] : allProviders).map((p) => {
                 const tabLabel = PROVIDER_LABELS[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
                 return (
                   <Tab key={p} eventKey={p} title={<TabTitleText>{tabLabel}</TabTitleText>}>
@@ -746,7 +769,12 @@ export function CatalogDeployContent({
           </FormGroup>
 
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
-            <Button variant="primary" onClick={() => void onSubmit()} isLoading={isSubmitting}>
+            <Button
+              variant="primary"
+              onClick={() => void onSubmit()}
+              isLoading={isSubmitting}
+              isDisabled={Boolean(lockedProvider) && !isProviderConfigured(lockedProvider!)}
+            >
               {t('Deploy')}
             </Button>
             <Button

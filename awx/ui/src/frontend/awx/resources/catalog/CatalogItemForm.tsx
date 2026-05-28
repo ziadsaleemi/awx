@@ -2,7 +2,23 @@ import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { Button, Checkbox, FormGroup, Switch, TextInput } from '@patternfly/react-core';
+import {
+  Button,
+  Checkbox,
+  DataList,
+  DataListCell,
+  DataListContent,
+  DataListItem,
+  DataListItemCells,
+  DataListItemRow,
+  DataListToggle,
+  FormGroup,
+  Grid,
+  GridItem,
+  Label,
+  Switch,
+  TextInput,
+} from '@patternfly/react-core';
 import {
   LoadingPage,
   PageTab,
@@ -24,10 +40,10 @@ import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { PageFormSelectOrganization } from '../../access/organizations/components/PageFormOrganizationSelect';
-import { PageFormWorkflowJobTemplateSelect } from '../templates/components/PageFormWorkflowJobTemplateSelect';
-import { PageFormTerraformJobTemplateSelect } from '../templates/components/PageFormTerraformJobTemplateSelect';
 import { useSelectWorkflowJobTemplate } from '../templates/hooks/useSelectWorkflowJobTemplate';
-import { useSelectTerraformJobTemplate } from '../templates/hooks/useSelectTerraformJobTemplate';
+import { PageAsyncSingleSelect } from '../../../../framework/PageInputs/PageAsyncSingleSelect';
+import { requestGet } from '../../../common/crud/Data';
+import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { Survey } from '../../interfaces/Survey';
 import { PageFormGroup } from '../../../../framework/PageForm/Inputs/PageFormGroup';
 import { Controller, useController, useFieldArray, useFormContext } from 'react-hook-form';
@@ -37,6 +53,7 @@ interface ProviderConfig {
   provider: string;
   tft_id: number | null;
   wjt_id: number | null;
+  dwjt_id: number | null;
   enabled: boolean;
 }
 
@@ -220,10 +237,14 @@ function buildProviderConfigs(item?: CatalogItem): ProviderConfig[] {
   if (item?.provider_workflows) {
     Object.keys(item.provider_workflows).forEach((p) => allProviders.add(p));
   }
+  if (item?.provider_deprovision_workflows) {
+    Object.keys(item.provider_deprovision_workflows).forEach((p) => allProviders.add(p));
+  }
   return Array.from(allProviders).map((provider) => ({
     provider,
     tft_id: (item?.cloud_backends as Record<string, number> | null)?.[provider] ?? null,
     wjt_id: (item?.provider_workflows as Record<string, number> | null)?.[provider] ?? null,
+    dwjt_id: (item?.provider_deprovision_workflows as Record<string, number> | null)?.[provider] ?? null,
     enabled: item?.available_providers?.includes(provider) ?? false,
   }));
 }
@@ -267,6 +288,14 @@ export function CreateCatalogItem() {
               values.provider_configs
                 .filter((e) => e.provider && e.wjt_id != null)
                 .map((e) => [e.provider, e.wjt_id as number])
+            )
+          : null,
+      provider_deprovision_workflows:
+        values.provider_configs.filter((e) => e.provider && e.dwjt_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.dwjt_id != null)
+                .map((e) => [e.provider, e.dwjt_id as number])
             )
           : null,
       available_providers:
@@ -351,6 +380,14 @@ export function EditCatalogItem() {
                 .map((e) => [e.provider, e.wjt_id as number])
             )
           : null,
+      provider_deprovision_workflows:
+        values.provider_configs.filter((e) => e.provider && e.dwjt_id != null).length > 0
+          ? Object.fromEntries(
+              values.provider_configs
+                .filter((e) => e.provider && e.dwjt_id != null)
+                .map((e) => [e.provider, e.dwjt_id as number])
+            )
+          : null,
       available_providers:
         values.provider_configs.filter((e) => e.provider && e.enabled).length > 0
           ? values.provider_configs.filter((e) => e.provider && e.enabled).map((e) => e.provider)
@@ -425,7 +462,6 @@ function CatalogItemFormInputs() {
               }}
             >
               <PageFormSelectOrganization<CatalogItemFormValues> name="organization" />
-              <PageFormTerraformJobTemplateSelect<CatalogItemFormValues> name="terraform_job_template" />
             </div>
 
             <div
@@ -504,7 +540,36 @@ function ProviderWjtSelector({ index }: { index: number }) {
       ? awxAPI`/workflow_job_templates/${String(idValue)}/`
       : undefined
   );
-  const displayName = localName ?? wjtInfo?.name ?? (idValue != null ? `#${idValue}` : '');
+  useEffect(() => {
+    if (wjtInfo?.name) setLocalName(wjtInfo.name);
+  }, [wjtInfo?.name]);
+
+  const queryOptions = async (options: {
+    next?: string | number;
+    search?: string;
+    signal?: AbortSignal;
+  }) => {
+    const params = new URLSearchParams();
+    params.set('page_size', '20');
+    params.set('order_by', 'name');
+    if (options.next) params.set('name__gt', String(options.next));
+    if (options.search) params.set('name__icontains', options.search);
+    try {
+      const url = awxAPI`/workflow_job_templates/` + '?' + params.toString();
+      const response = await requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+        url,
+        options.signal
+      );
+      const results = response.results ?? [];
+      return {
+        remaining: response.count - results.length,
+        options: results.map((r) => ({ label: r.name, value: r.id })),
+        next: results[results.length - 1]?.name,
+      };
+    } catch {
+      return { remaining: 0, options: [], next: 0 };
+    }
+  };
 
   return (
     <FormGroup label={t('Survey workflow')}>
@@ -515,23 +580,27 @@ function ProviderWjtSelector({ index }: { index: number }) {
         shouldUnregister={false}
         render={({ field }) => (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <TextInput
-              value={displayName}
-              readOnlyVariant="default"
-              placeholder={t('Select workflow job template')}
-              style={{ flex: 1 }}
-            />
-            <Button
-              variant="control"
-              onClick={() =>
-                openSelect((wjt) => {
-                  field.onChange(wjt.id);
-                  setLocalName(wjt.name);
-                })
-              }
-            >
-              {t('Browse')}
-            </Button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PageAsyncSingleSelect<number>
+                id={`wjt-${index}`}
+                placeholder={t('Select workflow job template')}
+                queryPlaceholder={t('Loading workflows…')}
+                queryErrorText={t('Error loading workflows')}
+                value={(idValue as number) ?? undefined}
+                onSelect={(v) => {
+                  field.onChange(v ?? null);
+                  setLocalName(null);
+                }}
+                queryOptions={queryOptions}
+                queryLabel={(v) => <>{localName ?? `#${String(v)}`}</>}
+                onBrowse={() =>
+                  openSelect((wjt) => {
+                    field.onChange(wjt.id);
+                    setLocalName(wjt.name);
+                  })
+                }
+              />
+            </div>
             {idValue != null && (
               <Button
                 variant="plain"
@@ -551,47 +620,80 @@ function ProviderWjtSelector({ index }: { index: number }) {
   );
 }
 
-function ProviderTftSelector({ index }: { index: number }) {
+function ProviderDeprovisionWjtSelector({ index }: { index: number }) {
   const { t } = useTranslation();
   const { control, watch } = useFormContext<CatalogItemFormValues>();
-  const openSelect = useSelectTerraformJobTemplate();
+  const openSelect = useSelectWorkflowJobTemplate();
   const [localName, setLocalName] = useState<string | null>(null);
   const providerConfigs = watch('provider_configs');
-  const idValue = providerConfigs[index]?.tft_id ?? null;
+  const idValue = providerConfigs[index]?.dwjt_id ?? null;
 
-  const { data: tftInfo } = useGet<{ id: number; name: string }>(
+  const { data: wjtInfo } = useGet<{ id: number; name: string }>(
     idValue != null && localName === null
-      ? awxAPI`/terraform_job_templates/${String(idValue)}/`
+      ? awxAPI`/workflow_job_templates/${String(idValue)}/`
       : undefined
   );
-  const displayName = localName ?? tftInfo?.name ?? (idValue != null ? `#${idValue}` : '');
+  useEffect(() => {
+    if (wjtInfo?.name) setLocalName(wjtInfo.name);
+  }, [wjtInfo?.name]);
+
+  const queryOptions = async (options: {
+    next?: string | number;
+    search?: string;
+    signal?: AbortSignal;
+  }) => {
+    const params = new URLSearchParams();
+    params.set('page_size', '20');
+    params.set('order_by', 'name');
+    if (options.next) params.set('name__gt', String(options.next));
+    if (options.search) params.set('name__icontains', options.search);
+    try {
+      const url = awxAPI`/workflow_job_templates/` + '?' + params.toString();
+      const response = await requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+        url,
+        options.signal
+      );
+      const results = response.results ?? [];
+      return {
+        remaining: response.count - results.length,
+        options: results.map((r) => ({ label: r.name, value: r.id })),
+        next: results[results.length - 1]?.name,
+      };
+    } catch {
+      return { remaining: 0, options: [], next: 0 };
+    }
+  };
 
   return (
-    <FormGroup label={t('Terraform template')}>
+    <FormGroup label={t('Deprovision workflow')}>
       <Controller
         control={control}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        name={`provider_configs.${index}.tft_id` as any}
+        name={`provider_configs.${index}.dwjt_id` as any}
         shouldUnregister={false}
         render={({ field }) => (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <TextInput
-              value={displayName}
-              readOnlyVariant="default"
-              placeholder={t('Select Terraform template')}
-              style={{ flex: 1 }}
-            />
-            <Button
-              variant="control"
-              onClick={() =>
-                openSelect((tft) => {
-                  field.onChange(tft.id);
-                  setLocalName(tft.name);
-                })
-              }
-            >
-              {t('Browse')}
-            </Button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PageAsyncSingleSelect<number>
+                id={`dwjt-${index}`}
+                placeholder={t('Select deprovision workflow')}
+                queryPlaceholder={t('Loading workflows…')}
+                queryErrorText={t('Error loading workflows')}
+                value={(idValue as number) ?? undefined}
+                onSelect={(v) => {
+                  field.onChange(v ?? null);
+                  setLocalName(null);
+                }}
+                queryOptions={queryOptions}
+                queryLabel={(v) => <>{localName ?? `#${String(v)}`}</>}
+                onBrowse={() =>
+                  openSelect((wjt) => {
+                    field.onChange(wjt.id);
+                    setLocalName(wjt.name);
+                  })
+                }
+              />
+            </div>
             {idValue != null && (
               <Button
                 variant="plain"
@@ -630,7 +732,7 @@ function CloudProvidersTab() {
     providerIds.forEach((pid) => {
       const exists = providerConfigs.some((c) => c.provider === pid);
       if (!exists) {
-        append({ provider: pid, tft_id: null, wjt_id: null, enabled: false });
+        append({ provider: pid, tft_id: null, wjt_id: null, dwjt_id: null, enabled: false });
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -650,139 +752,125 @@ function CloudProvidersTab() {
     setExpandedProviders((prev) => ({ ...prev, [pid]: !prev[pid] }));
 
   return (
-    <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
-      <p style={{ color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}>
+    <div style={{ marginTop: 16 }}>
+      <p style={{ color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
         {t(
-          'Enable cloud providers for this catalog item. Expand a provider to configure its connectors, Terraform job template, and survey workflow.'
+          'Enable cloud providers for this catalog item and select the survey workflow for each.'
         )}
       </p>
-      {fields.map((field, index) => {
-        const conns = providerGroups[field.provider] ?? [];
-        const hasConnected = conns.some((c) => c.status === 'connected');
-        const label = PROVIDER_LABELS[field.provider] ?? field.provider;
-        const enabled = providerConfigs[index]?.enabled ?? false;
-        const isExpanded = expandedProviders[field.provider] ?? false;
+      {fields.length > 0 ? (
+        <DataList aria-label={t('Cloud provider configurations')} isCompact>
+          {fields.map((field, index) => {
+            const conns = providerGroups[field.provider] ?? [];
+            const hasConnected = conns.some((c) => c.status === 'connected');
+            const label = PROVIDER_LABELS[field.provider] ?? field.provider;
+            const enabled = providerConfigs[index]?.enabled ?? false;
+            const isExpanded = (expandedProviders[field.provider] ?? false) && hasConnected;
+            const rowId = `provider-label-${field.provider}`;
+            const expandId = `provider-expand-${field.provider}`;
 
-        return (
-          <div
-            key={field.id}
-            style={{
-              border: `1px solid ${enabled ? 'var(--pf-v5-global--primary-color--100)' : 'var(--pf-v5-global--BorderColor--100)'}`,
-              borderRadius: 8,
-              overflow: 'hidden',
-              opacity: hasConnected ? 1 : 0.55,
-            }}
-          >
-            {/* Header row: expand toggle + provider name + enable switch */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '12px 16px',
-                backgroundColor: enabled ? 'rgba(0,102,204,0.08)' : '#1b1d21',
-                cursor: hasConnected ? 'pointer' : 'default',
-              }}
-              onClick={() => hasConnected && toggleExpand(field.provider)}
-            >
-              <span
-                style={{
-                  fontWeight: 700,
-                  fontSize: '0.9rem',
-                  transform: `rotate(${isExpanded ? 90 : 0}deg)`,
-                  transition: 'transform 0.15s ease',
-                  display: 'inline-block',
-                  color: 'var(--pf-v5-global--Color--200)',
-                  userSelect: 'none',
-                }}
-              >
-                ▶
-              </span>
-              <span style={{ fontWeight: 600, fontSize: '0.95rem', flex: 1 }}>{label}</span>
-              {!hasConnected && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--danger-color--100)' }}>
-                  {t('No active connector')}
-                </span>
-              )}
-              <Controller
-                control={control}
-                name={`provider_configs.${index}.enabled`}
-                render={({ field: f }) => (
-                  <Switch
-                    id={`provider_switch_${index}`}
-                    isChecked={f.value}
-                    onChange={(_e, checked) => {
-                      f.onChange(checked);
-                      if (checked && !isExpanded) toggleExpand(field.provider);
-                    }}
-                    isDisabled={!hasConnected}
-                    aria-label={t('Enable {{label}}', { label })}
-                    onClick={(e) => e.stopPropagation()}
+            return (
+              <DataListItem key={field.id} aria-labelledby={rowId} isExpanded={isExpanded}>
+                <DataListItemRow>
+                  <DataListToggle
+                    onClick={() => hasConnected && toggleExpand(field.provider)}
+                    isExpanded={isExpanded}
+                    id={`provider-toggle-${field.provider}`}
+                    aria-controls={expandId}
                   />
-                )}
-              />
-            </div>
-
-            {/* Collapsible body */}
-            {isExpanded && (
-              <div style={{ padding: '14px 20px 16px', backgroundColor: '#1b1d21' }}>
-                {/* Connector list */}
-                {conns.length > 0 && (
-                  <div style={{ marginBottom: 14 }}>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 6 }}>
-                      {t('Connectors')}
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {conns.map((conn) => (
-                        <div
-                          key={conn.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '6px 10px',
-                            borderRadius: 4,
-                            backgroundColor: '#222428',
-                            fontSize: '0.85rem',
-                          }}
-                        >
-                          <span
-                            style={{
-                              width: 8,
-                              height: 8,
-                              borderRadius: '50%',
-                              backgroundColor:
-                                conn.status === 'connected'
-                                  ? 'var(--pf-v5-global--success-color--100)'
-                                  : 'var(--pf-v5-global--danger-color--100)',
-                              flexShrink: 0,
-                            }}
-                          />
-                          <span style={{ flex: 1 }}>{conn.name}</span>
-                          <span style={{ color: 'var(--pf-v5-global--Color--200)', textTransform: 'capitalize' }}>
-                            {conn.status}
-                          </span>
-                        </div>
-                      ))}
+                  <DataListItemCells
+                    dataListCells={[
+                      <DataListCell key="label">
+                        <span id={rowId} style={{ fontWeight: 600 }}>
+                          {label}
+                        </span>
+                        {!hasConnected && (
+                          <Label color="red" isCompact style={{ marginLeft: 8 }}>
+                            {t('No active connector')}
+                          </Label>
+                        )}
+                      </DataListCell>,
+                      <DataListCell key="switch" isFilled={false} alignRight>
+                        <Controller
+                          control={control}
+                          name={`provider_configs.${index}.enabled`}
+                          render={({ field: f }) => (
+                            <Switch
+                              id={`provider-switch-${index}`}
+                              isChecked={f.value}
+                              onChange={(_e, checked) => {
+                                f.onChange(checked);
+                                if (checked && !isExpanded) toggleExpand(field.provider);
+                              }}
+                              isDisabled={!hasConnected}
+                              aria-label={t('Enable {{label}}', { label })}
+                              label={t('Enabled')}
+                              labelOff={t('Disabled')}
+                            />
+                          )}
+                        />
+                      </DataListCell>,
+                    ]}
+                  />
+                </DataListItemRow>
+                <DataListContent
+                  aria-label={t('{{label}} configuration', { label })}
+                  id={expandId}
+                  isHidden={!isExpanded}
+                >
+                  {conns.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <p
+                        style={{
+                          fontSize: '0.85rem',
+                          fontWeight: 600,
+                          color: 'var(--pf-v5-global--Color--200)',
+                          marginBottom: 8,
+                        }}
+                      >
+                        {t('Connectors')}
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {conns.map((conn) => (
+                          <Label
+                            key={conn.id}
+                            color={conn.status === 'connected' ? 'green' : 'red'}
+                            isCompact
+                          >
+                            {conn.name}{' '}
+                            <span
+                              style={{
+                                fontSize: '0.75rem',
+                                textTransform: 'capitalize',
+                                opacity: 0.8,
+                              }}
+                            >
+                              ({conn.status})
+                            </span>
+                          </Label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {/* TFT + WJT selectors */}
-                {enabled && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <ProviderTftSelector index={index} />
-                    <ProviderWjtSelector index={index} />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {Object.keys(providerGroups).length === 0 && (
-        <div style={{ color: 'var(--pf-v5-global--Color--200)', fontSize: '0.875rem' }}>
+                  )}
+                  {enabled && (
+                    <Grid hasGutter>
+                      <GridItem sm={12} lg={6}>
+                        <ProviderWjtSelector index={index} />
+                      </GridItem>
+                      <GridItem sm={12} lg={6}>
+                        <ProviderDeprovisionWjtSelector index={index} />
+                      </GridItem>
+                    </Grid>
+                  )}
+                </DataListContent>
+              </DataListItem>
+            );
+          })}
+        </DataList>
+      ) : (
+        <p style={{ color: 'var(--pf-v5-global--Color--200)', fontSize: '0.875rem' }}>
           {t('No cloud provider connections found. Add connections in Cloud Connectors first.')}
-        </div>
+        </p>
       )}
     </div>
   );

@@ -1350,7 +1350,7 @@ export function AzureProviderSettings() {
             )}
           </div>
         }
-        logo={<img src={AzureLogo as string} alt="Microsoft Azure" style={{ height: 36 }} />}
+        logo={<AzureLogo style={{ height: 36, width: 'auto' }} />}
       />
 
       {connectionEntries.length === 0 ? (

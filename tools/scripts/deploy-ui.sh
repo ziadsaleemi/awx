@@ -151,7 +151,9 @@ echo "  uwsgi restarted. (${STEP_TIME_DEPLOY}s)"
 
 # ── Step 5: Verify ─────────────────────────────────────────────────────────────
 HTTP_CODE=$(curl -sk https://localhost:8043/ -o /dev/null -w "%{http_code}")
+set +o pipefail
 JS_SRC=$(curl -sk https://localhost:8043/ | grep -o 'src="/static/awx/[^"]*\.js"' | head -1)
+set -o pipefail
 
 TOTAL=$(( SECONDS - DEPLOY_START ))
 [[ $NO_BUILD -eq 0 ]] && BUILD_DISPLAY="${STEP_TIME_BUILD}s" || BUILD_DISPLAY="skipped"

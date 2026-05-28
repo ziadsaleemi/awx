@@ -97,7 +97,7 @@ function DigitalOceanOverviewTab(props: {
             >
               <CardBody style={{ padding: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                  <img src={DigitalOceanLogo as string} alt="DigitalOcean" style={{ width: 36, height: 36 }} />
+                  <DigitalOceanLogo style={{ width: 36, height: 36 }} />
                   <div>
                     <Title headingLevel="h3" size="md" style={{ color: '#fff', fontWeight: 600 }}>
                       {t('DigitalOcean')}
