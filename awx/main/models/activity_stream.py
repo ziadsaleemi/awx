@@ -83,6 +83,8 @@ class ActivityStream(models.Model):
     role = models.ManyToManyField("Role", blank=True)
     instance = models.ManyToManyField("Instance", blank=True)
     instance_group = models.ManyToManyField("InstanceGroup", blank=True)
+    cloud_provider_connection = models.ManyToManyField("CloudProviderConnection", blank=True)
+    cloud_provider_state = models.ManyToManyField("CloudProviderState", blank=True)
 
     setting = models.JSONField(default=dict, blank=True)
 

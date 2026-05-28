@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
@@ -6,12 +6,10 @@ import {
   Button,
   Card,
   CardBody,
-  Checkbox,
   Grid,
   GridItem,
   Label,
   PageSection,
-  SearchInput,
   Spinner,
   Switch,
   Title,
@@ -389,7 +387,11 @@ function ImagesTab(props: { images: DigitalOceanImage[] }) {
   );
 }
 
-function SizesTab(props: { pricing: DigitalOceanSize[] }) {
+function SizesTab(props: {
+  pricing: DigitalOceanSize[];
+  enabledSizes: Set<string>;
+  onToggleSize: (slug: string, enabled: boolean) => void;
+}) {
   const { t } = useTranslation();
   const tableColumns = useMemo<ITableColumn<DigitalOceanSize>[]>(
     () => [
@@ -448,6 +450,17 @@ function SizesTab(props: { pricing: DigitalOceanSize[] }) {
         ),
       },
       {
+        header: t('Allowed'),
+        cell: (size) => (
+          <Switch
+            id={`size-allowed-${size.slug}`}
+            isChecked={props.enabledSizes.has(size.slug)}
+            onChange={(_evt, checked) => props.onToggleSize(size.slug, checked)}
+            aria-label={size.slug}
+          />
+        ),
+      },
+      {
         header: t('Description'),
         type: 'text',
         value: (size) => size.description,
@@ -466,7 +479,7 @@ function SizesTab(props: { pricing: DigitalOceanSize[] }) {
         table: 'expanded',
       },
     ],
-    [t]
+    [t, props.enabledSizes, props.onToggleSize]
   );
 
   const view = useInMemoryView<DigitalOceanSize>({
@@ -545,7 +558,11 @@ function RegionsTab(props: { regions: DigitalOceanRegion[] }) {
   );
 }
 
-function NetworksTab(props: { vpcs: DigitalOceanVpc[] }) {
+function NetworksTab(props: {
+  vpcs: DigitalOceanVpc[];
+  enabledVpcs: Set<string>;
+  onToggleVpc: (id: string, enabled: boolean) => void;
+}) {
   const { t } = useTranslation();
   const tableColumns = useMemo<ITableColumn<DigitalOceanVpc>[]>(
     () => [
@@ -576,6 +593,17 @@ function NetworksTab(props: { vpcs: DigitalOceanVpc[] }) {
           ),
       },
       {
+        header: t('Allowed'),
+        cell: (vpc) => (
+          <Switch
+            id={`vpc-allowed-${vpc.id}`}
+            isChecked={props.enabledVpcs.has(vpc.id)}
+            onChange={(_evt, checked) => props.onToggleVpc(vpc.id, checked)}
+            aria-label={vpc.name}
+          />
+        ),
+      },
+      {
         header: t('VPC ID'),
         type: 'text',
         value: (vpc) => vpc.id,
@@ -588,7 +616,7 @@ function NetworksTab(props: { vpcs: DigitalOceanVpc[] }) {
         table: 'expanded',
       },
     ],
-    [t]
+    [t, props.enabledVpcs, props.onToggleVpc]
   );
 
   const view = useInMemoryView<DigitalOceanVpc>({
@@ -611,419 +639,6 @@ function NetworksTab(props: { vpcs: DigitalOceanVpc[] }) {
   );
 }
 
-// ── Admin Controls components ────────────────────────────────────────────────
-
-function AllowlistRow(props: {
-  id: string;
-  selected: boolean;
-  onSelect: (checked: boolean) => void;
-  enabled: boolean;
-  onToggle: (enabled: boolean) => void;
-  primary: string;
-  secondary?: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '0.65rem 1.25rem',
-        borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-        background: props.selected ? 'var(--pf-v5-global--BackgroundColor--200)' : 'transparent',
-        opacity: props.enabled ? 1 : 0.45,
-        transition: 'opacity 0.15s, background 0.1s',
-      }}
-    >
-      <Checkbox
-        id={`sel-${props.id}`}
-        isChecked={props.selected}
-        onChange={(_evt, checked) => props.onSelect(checked)}
-        aria-label={props.id}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 500, fontSize: '0.875rem', lineHeight: 1.3 }}>{props.primary}</div>
-        {props.secondary && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--pf-v5-global--Color--200)', marginTop: 2 }}>
-            {props.secondary}
-          </div>
-        )}
-      </div>
-      <Switch
-        id={`sw-${props.id}`}
-        isChecked={props.enabled}
-        onChange={(_evt, checked) => props.onToggle(checked)}
-        aria-label={props.primary}
-        label={t('Enabled')}
-        labelOff={t('Disabled')}
-      />
-    </div>
-  );
-}
-
-function AllowlistSection(props: {
-  title: string;
-  description: string;
-  enabledCount: number;
-  totalCount: number;
-  filter: string;
-  onFilterChange: (v: string) => void;
-  filteredIds: string[];
-  selected: Set<string>;
-  onSelectAll: (checked: boolean) => void;
-  onEnableAll: () => void;
-  onDisableAll: () => void;
-  onEnableSelected: () => void;
-  onDisableSelected: () => void;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation();
-  const selectedCount = props.selected.size;
-  const allFilteredSelected =
-    props.filteredIds.length > 0 && props.filteredIds.every((id) => props.selected.has(id));
-  const someFilteredSelected = props.filteredIds.some((id) => props.selected.has(id));
-  const badgeColor =
-    props.totalCount === 0
-      ? ('grey' as const)
-      : props.enabledCount === 0
-        ? ('red' as const)
-        : props.enabledCount === props.totalCount
-          ? ('green' as const)
-          : ('blue' as const);
-
-  return (
-    <Card
-      style={{
-        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-        borderRadius: 6,
-        overflow: 'hidden',
-      }}
-    >
-      <CardBody style={{ padding: 0 }}>
-        {/* section header */}
-        <div
-          style={{
-            padding: '1rem 1.25rem',
-            borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
-            <div>
-              <h3 style={{ fontWeight: 600, fontSize: '1rem', marginBottom: 4 }}>{props.title}</h3>
-              <span style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)' }}>
-                {props.description}
-              </span>
-            </div>
-            <Label color={badgeColor} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {t('{{enabled}} / {{total}} enabled', {
-                enabled: props.enabledCount,
-                total: props.totalCount,
-              })}
-            </Label>
-          </div>
-          {/* toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <SearchInput
-              placeholder={t('Filter…')}
-              value={props.filter}
-              onChange={(_evt, val) => props.onFilterChange(val)}
-              onClear={() => props.onFilterChange('')}
-            />
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              {selectedCount > 0 && (
-                <>
-                  <Button variant="link" isInline onClick={props.onEnableSelected}>
-                    {t('Enable {{n}} selected', { n: selectedCount })}
-                  </Button>
-                  <Button variant="link" isInline onClick={props.onDisableSelected}>
-                    {t('Disable {{n}} selected', { n: selectedCount })}
-                  </Button>
-                  <div
-                    style={{
-                      width: 1,
-                      height: 20,
-                      background: 'var(--pf-v5-global--BorderColor--100)',
-                    }}
-                  />
-                </>
-              )}
-              <Button variant="secondary" onClick={props.onEnableAll}>
-                {t('Enable all')}
-              </Button>
-              <Button
-                variant="secondary"
-                style={{ color: 'var(--pf-v5-global--danger-color--100)' }}
-                onClick={props.onDisableAll}
-              >
-                {t('Disable all')}
-              </Button>
-            </div>
-          </div>
-        </div>
-        {/* column header row */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: '0.5rem 1.25rem',
-            borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-            background: 'var(--pf-v5-global--BackgroundColor--200)',
-            fontSize: '0.72rem',
-            fontWeight: 600,
-            color: 'var(--pf-v5-global--Color--200)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}
-        >
-          <Checkbox
-            id={`selall-${props.title.replace(/\s/g, '')}`}
-            isChecked={allFilteredSelected}
-            isIndeterminate={!allFilteredSelected && someFilteredSelected}
-            onChange={(_evt, checked) => props.onSelectAll(checked)}
-            aria-label={t('Select all')}
-          />
-          <span style={{ flex: 1 }}>{t('Name / Details')}</span>
-          <span style={{ minWidth: 110, textAlign: 'right' }}>{t('Allowed')}</span>
-        </div>
-        {/* scrollable items */}
-        <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-          {props.totalCount === 0 ? (
-            <div
-              style={{
-                padding: '2.5rem 1.25rem',
-                textAlign: 'center',
-                color: 'var(--pf-v5-global--Color--200)',
-              }}
-            >
-              {t('No data available — pull provider data first.')}
-            </div>
-          ) : props.filteredIds.length === 0 ? (
-            <div
-              style={{
-                padding: '2rem 1.25rem',
-                textAlign: 'center',
-                color: 'var(--pf-v5-global--Color--200)',
-              }}
-            >
-              {t('No results match the current filter.')}
-            </div>
-          ) : (
-            props.children
-          )}
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-function AdminControlsTab(props: { pricing: DigitalOceanSize[]; vpcs: DigitalOceanVpc[] }) {
-  const { t } = useTranslation();
-  const [settings, setSettings] = useState<DigitalOceanAdminSettings>({
-    allowedSizeSlugs: null,
-    allowedVpcIds: null,
-  });
-  const [sizeFilter, setSizeFilter] = useState('');
-  const [vpcFilter, setVpcFilter] = useState('');
-  const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set());
-  const [selectedVpcs, setSelectedVpcs] = useState<Set<string>>(new Set());
-
-  // Load persisted admin settings from the database on mount.
-  useEffect(() => {
-    void fetchProviderState('digitalocean').then((state) => {
-      if (state?.admin_settings) {
-        setSettings(state.admin_settings);
-      }
-    });
-  }, []);
-
-  const allSizeSlugs = useMemo(() => props.pricing.map((s) => s.slug), [props.pricing]);
-  const allVpcIds = useMemo(() => props.vpcs.map((v) => v.id), [props.vpcs]);
-
-  const enabledSizes = useMemo<Set<string>>(
-    () =>
-      settings.allowedSizeSlugs === null
-        ? new Set(allSizeSlugs)
-        : new Set(settings.allowedSizeSlugs),
-    [settings.allowedSizeSlugs, allSizeSlugs]
-  );
-  const enabledVpcs = useMemo<Set<string>>(
-    () =>
-      settings.allowedVpcIds === null ? new Set(allVpcIds) : new Set(settings.allowedVpcIds),
-    [settings.allowedVpcIds, allVpcIds]
-  );
-
-  const save = useCallback(
-    (next: DigitalOceanAdminSettings) => {
-      setSettings(next);
-      void patchProviderState('digitalocean', { admin_settings: next });
-    },
-    []
-  );
-
-  const updateSizeEnabled = useCallback(
-    (slugs: string[], enabled: boolean) => {
-      const next = new Set(enabledSizes);
-      for (const slug of slugs) {
-        if (enabled) next.add(slug);
-        else next.delete(slug);
-      }
-      save({ ...settings, allowedSizeSlugs: [...next] });
-    },
-    [enabledSizes, settings, save]
-  );
-
-  const updateVpcEnabled = useCallback(
-    (ids: string[], enabled: boolean) => {
-      const next = new Set(enabledVpcs);
-      for (const id of ids) {
-        if (enabled) next.add(id);
-        else next.delete(id);
-      }
-      save({ ...settings, allowedVpcIds: [...next] });
-    },
-    [enabledVpcs, settings, save]
-  );
-
-  const filteredSizes = useMemo(
-    () =>
-      props.pricing.filter(
-        (s) =>
-          !sizeFilter ||
-          s.slug.toLowerCase().includes(sizeFilter.toLowerCase()) ||
-          (s.description ?? '').toLowerCase().includes(sizeFilter.toLowerCase())
-      ),
-    [props.pricing, sizeFilter]
-  );
-  const filteredVpcs = useMemo(
-    () =>
-      props.vpcs.filter(
-        (v) =>
-          !vpcFilter ||
-          v.name.toLowerCase().includes(vpcFilter.toLowerCase()) ||
-          v.region.toLowerCase().includes(vpcFilter.toLowerCase()) ||
-          v.ip_range.toLowerCase().includes(vpcFilter.toLowerCase())
-      ),
-    [props.vpcs, vpcFilter]
-  );
-
-  const filteredSizeSlugs = useMemo(() => filteredSizes.map((s) => s.slug), [filteredSizes]);
-  const filteredVpcIds = useMemo(() => filteredVpcs.map((v) => v.id), [filteredVpcs]);
-
-  return (
-    <PageSection style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
-      <div
-        style={{
-          maxWidth: 1400,
-          margin: '0 auto',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 28,
-        }}
-      >
-        <AllowlistSection
-          title={t('Allowed Droplet Sizes')}
-          description={t(
-            'Control which droplet sizes users can select when creating deployments.'
-          )}
-          enabledCount={enabledSizes.size}
-          totalCount={props.pricing.length}
-          filter={sizeFilter}
-          onFilterChange={setSizeFilter}
-          filteredIds={filteredSizeSlugs}
-          selected={selectedSizes}
-          onSelectAll={(checked) =>
-            setSelectedSizes(checked ? new Set(filteredSizeSlugs) : new Set())
-          }
-          onEnableAll={() => save({ ...settings, allowedSizeSlugs: null })}
-          onDisableAll={() => save({ ...settings, allowedSizeSlugs: [] })}
-          onEnableSelected={() => {
-            updateSizeEnabled([...selectedSizes], true);
-            setSelectedSizes(new Set());
-          }}
-          onDisableSelected={() => {
-            updateSizeEnabled([...selectedSizes], false);
-            setSelectedSizes(new Set());
-          }}
-        >
-          {filteredSizes.map((size) => (
-            <AllowlistRow
-              key={size.slug}
-              id={size.slug}
-              selected={selectedSizes.has(size.slug)}
-              onSelect={(checked) => {
-                const next = new Set(selectedSizes);
-                if (checked) next.add(size.slug);
-                else next.delete(size.slug);
-                setSelectedSizes(next);
-              }}
-              enabled={enabledSizes.has(size.slug)}
-              onToggle={(enabled) => updateSizeEnabled([size.slug], enabled)}
-              primary={size.slug}
-              secondary={`${size.vcpus} vCPU · ${
-                size.memory_mb >= 1024
-                  ? `${(size.memory_mb / 1024).toFixed(0)} GB RAM`
-                  : `${size.memory_mb} MB RAM`
-              } · ${size.disk_gb} GB disk · $${size.price_hourly.toFixed(5)}/hr`}
-            />
-          ))}
-        </AllowlistSection>
-
-        <AllowlistSection
-          title={t('Allowed VPC Networks')}
-          description={t('Control which VPC networks users can deploy into.')}
-          enabledCount={enabledVpcs.size}
-          totalCount={props.vpcs.length}
-          filter={vpcFilter}
-          onFilterChange={setVpcFilter}
-          filteredIds={filteredVpcIds}
-          selected={selectedVpcs}
-          onSelectAll={(checked) =>
-            setSelectedVpcs(checked ? new Set(filteredVpcIds) : new Set())
-          }
-          onEnableAll={() => save({ ...settings, allowedVpcIds: null })}
-          onDisableAll={() => save({ ...settings, allowedVpcIds: [] })}
-          onEnableSelected={() => {
-            updateVpcEnabled([...selectedVpcs], true);
-            setSelectedVpcs(new Set());
-          }}
-          onDisableSelected={() => {
-            updateVpcEnabled([...selectedVpcs], false);
-            setSelectedVpcs(new Set());
-          }}
-        >
-          {filteredVpcs.map((vpc) => (
-            <AllowlistRow
-              key={vpc.id}
-              id={vpc.id}
-              selected={selectedVpcs.has(vpc.id)}
-              onSelect={(checked) => {
-                const next = new Set(selectedVpcs);
-                if (checked) next.add(vpc.id);
-                else next.delete(vpc.id);
-                setSelectedVpcs(next);
-              }}
-              enabled={enabledVpcs.has(vpc.id)}
-              onToggle={(enabled) => updateVpcEnabled([vpc.id], enabled)}
-              primary={vpc.name}
-              secondary={`${vpc.region} · ${vpc.ip_range}${vpc.default ? ' · Default VPC' : ''}`}
-            />
-          ))}
-        </AllowlistSection>
-      </div>
-    </PageSection>
-  );
-}
-
 function DefaultProviderSettings(props: { provider: string }) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
@@ -1037,6 +652,10 @@ function DefaultProviderSettings(props: { provider: string }) {
   const [data, setData] = useState<DigitalOceanProviderData | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [adminSettings, setAdminSettings] = useState<DigitalOceanAdminSettings>({
+    allowedSizeSlugs: null,
+    allowedVpcIds: null,
+  });
 
   // Load connections and previously pulled provider data from the database.
   useEffect(() => {
@@ -1045,8 +664,57 @@ function DefaultProviderSettings(props: { provider: string }) {
       if (state?.provider_data) {
         setData(state.provider_data as DigitalOceanProviderData);
       }
+      if (state?.admin_settings) {
+        setAdminSettings(state.admin_settings);
+      }
     });
   }, [props.provider]);
+
+  const saveAdminSettings = useCallback(
+    (next: DigitalOceanAdminSettings) => {
+      setAdminSettings(next);
+      void patchProviderState(props.provider, { admin_settings: next });
+    },
+    [props.provider]
+  );
+
+  const allSizeSlugs = useMemo(() => data?.pricing.map((s) => s.slug) ?? [], [data]);
+  const allVpcIds = useMemo(() => data?.vpcs.map((v) => v.id) ?? [], [data]);
+
+  const enabledSizes = useMemo<Set<string>>(
+    () =>
+      adminSettings.allowedSizeSlugs === null
+        ? new Set(allSizeSlugs)
+        : new Set(adminSettings.allowedSizeSlugs),
+    [adminSettings.allowedSizeSlugs, allSizeSlugs]
+  );
+  const enabledVpcs = useMemo<Set<string>>(
+    () =>
+      adminSettings.allowedVpcIds === null
+        ? new Set(allVpcIds)
+        : new Set(adminSettings.allowedVpcIds),
+    [adminSettings.allowedVpcIds, allVpcIds]
+  );
+
+  const onToggleSize = useCallback(
+    (slug: string, enabled: boolean) => {
+      const next = new Set(enabledSizes);
+      if (enabled) next.add(slug);
+      else next.delete(slug);
+      saveAdminSettings({ ...adminSettings, allowedSizeSlugs: [...next] });
+    },
+    [enabledSizes, adminSettings, saveAdminSettings]
+  );
+
+  const onToggleVpc = useCallback(
+    (id: string, enabled: boolean) => {
+      const next = new Set(enabledVpcs);
+      if (enabled) next.add(id);
+      else next.delete(id);
+      saveAdminSettings({ ...adminSettings, allowedVpcIds: [...next] });
+    },
+    [enabledVpcs, adminSettings, saveAdminSettings]
+  );
 
   const handleModalClose = useCallback(() => {
     setShowModal(false);
@@ -1214,16 +882,13 @@ function DefaultProviderSettings(props: { provider: string }) {
           <ImagesTab images={data?.images ?? []} />
         </PageTab>
         <PageTab label={t('Droplet sizes') + (data ? count(data.pricing.length) : '')}>
-          <SizesTab pricing={data?.pricing ?? []} />
+          <SizesTab pricing={data?.pricing ?? []} enabledSizes={enabledSizes} onToggleSize={onToggleSize} />
         </PageTab>
         <PageTab label={t('Regions') + (data ? count(data.regions.length) : '')}>
           <RegionsTab regions={data?.regions ?? []} />
         </PageTab>
         <PageTab label={t('Networks') + (data ? count(data.vpcs.length) : '')}>
-          <NetworksTab vpcs={data?.vpcs ?? []} />
-        </PageTab>
-        <PageTab label={t('Admin controls')}>
-          <AdminControlsTab pricing={data?.pricing ?? []} vpcs={data?.vpcs ?? []} />
+          <NetworksTab vpcs={data?.vpcs ?? []} enabledVpcs={enabledVpcs} onToggleVpc={onToggleVpc} />
         </PageTab>
       </PageTabs>
 

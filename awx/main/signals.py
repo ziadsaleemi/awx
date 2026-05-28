@@ -331,6 +331,8 @@ def model_serializer_mapping():
         models.WorkflowApproval: serializers.WorkflowApprovalActivityStreamSerializer,
         models.WorkflowApprovalTemplate: serializers.WorkflowApprovalTemplateSerializer,
         models.WorkflowJob: serializers.WorkflowJobSerializer,
+        models.CloudProviderConnection: serializers.CloudProviderConnectionSerializer,
+        models.CloudProviderState: serializers.CloudProviderStateSerializer,
     }
 
 

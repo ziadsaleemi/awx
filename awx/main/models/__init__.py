@@ -256,6 +256,8 @@ activity_stream_registrar.connect(WorkflowJobTemplateNode)
 activity_stream_registrar.connect(WorkflowJob)
 activity_stream_registrar.connect(WorkflowApproval)
 activity_stream_registrar.connect(WorkflowApprovalTemplate)
+activity_stream_registrar.connect(CloudProviderConnection)
+activity_stream_registrar.connect(CloudProviderState)
 
 # Register models
 permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, TerraformJobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)

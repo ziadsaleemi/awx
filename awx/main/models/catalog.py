@@ -322,6 +322,9 @@ class CloudProviderConnection(models.Model):
     )
     updated_at = models.DateTimeField(auto_now=True)
 
+    def get_absolute_url(self, request=None):
+        return reverse('api:catalog_cloud_connection_detail', kwargs={'pk': self.pk}, request=request)
+
 
 class CloudProviderState(models.Model):
     """
@@ -362,3 +365,6 @@ class CloudProviderState(models.Model):
         default=None,
         help_text=_('General provider settings (allow template pull, allowed networks, etc.).'),
     )
+
+    def get_absolute_url(self, request=None):
+        return reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': self.provider_id}, request=request)

@@ -196,6 +196,8 @@ SUMMARIZABLE_FK_FIELDS = {
     'approved_or_denied_by': ('id', 'username', 'first_name', 'last_name'),
     'credential_type': DEFAULT_SUMMARY_FIELDS,
     'resource': ('ansible_id', 'resource_type'),
+    'cloud_provider_connection': ('id', 'name', 'provider_id', 'status'),
+    'cloud_provider_state': ('id', 'provider_id', 'pulled_at'),
 }
 
 
@@ -6442,6 +6444,8 @@ class ActivityStreamSerializer(BaseSerializer):
             ('ad_hoc_command', ('id', 'name', 'status', 'limit')),
             ('workflow_approval', ('id', 'name', 'unified_job_id')),
             ('instance', ('id', 'hostname')),
+            ('cloud_provider_connection', ('id', 'name', 'provider_id', 'status')),
+            ('cloud_provider_state', ('id', 'provider_id', 'pulled_at')),
         ]
         # Optimization - do not attempt to summarize all fields, pair down to only relations that exist
         if not obj:
