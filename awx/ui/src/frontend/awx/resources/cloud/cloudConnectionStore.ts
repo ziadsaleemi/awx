@@ -1,8 +1,10 @@
-import { cloudProviders } from './cloudProviders';
+import { requestGet, postRequest, requestPatch, requestDelete } from '../../../common/crud/Data';
+import { awxAPI } from '../../common/api/awx-utils';
 
-const cloudConnectionsStorageKey = 'awx-cloud-connections-v2';
-const cloudProviderSettingsStorageKey = 'awx-cloud-provider-settings';
-const cloudProviderDataStorageKey = 'awx-cloud-provider-data';
+/**
+ * Dispatch this custom event after any connection change so that other
+ * components (e.g. the navigation routes) can react without polling.
+ */
 export const cloudConnectionsChangedEvent = 'awx-cloud-connections-changed';
 
 export type CloudConnectionStatus = 'connected' | 'disconnected' | 'misconfigured';
@@ -312,154 +314,152 @@ export interface AzureProviderData {
   vm_sizes: AzureVMSize[];
 }
 
-function isBrowser() {
-  return typeof window !== 'undefined';
+// ── API response types ────────────────────────────────────────────────────────
+
+interface ApiCloudConnection {
+  id: number;
+  provider_id: string;
+  name: string;
+  status: CloudConnectionStatus;
+  credential: number | null;
+  credential_name: string;
+  error: string;
+  updated_at: string;
 }
 
-function readStore(): Record<string, CloudConnectionEntry[]> {
-  if (!isBrowser()) return {};
-  const raw = window.localStorage.getItem(cloudConnectionsStorageKey);
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as Record<string, CloudConnectionEntry[]>;
-  } catch {
-    return {};
-  }
+interface ApiConnectionListResponse {
+  count: number;
+  results: ApiCloudConnection[];
 }
 
-function writeStore(store: Record<string, CloudConnectionEntry[]>) {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(cloudConnectionsStorageKey, JSON.stringify(store));
-  window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
+export interface ApiCloudProviderState {
+  id: number;
+  provider_id: string;
+  pulled_at: string | null;
+  provider_data: unknown;
+  admin_settings: DigitalOceanAdminSettings | null;
+  provider_settings: CloudProviderSettingsState | null;
 }
 
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-/** Returns all connections grouped by providerId. Each provider maps to an array (may be empty). */
-export function getCloudConnections(): Record<string, CloudConnectionEntry[]> {
-  const stored = readStore();
-  const result: Record<string, CloudConnectionEntry[]> = {};
-  for (const provider of cloudProviders) {
-    result[provider.id] = stored[provider.id] ?? [];
-  }
-  return result;
-}
-
-/** Adds a new connection entry for a provider and returns it. */
-export function addCloudConnection(
-  providerId: string,
-  entry: Omit<CloudConnectionEntry, 'id' | 'providerId' | 'updatedAt'>
-): CloudConnectionEntry {
-  const id = generateId();
-  const newEntry: CloudConnectionEntry = {
-    ...entry,
-    id,
-    providerId,
-    updatedAt: new Date().toISOString(),
-  };
-  const store = readStore();
-  store[providerId] = [...(store[providerId] ?? []), newEntry];
-  writeStore(store);
-  return newEntry;
-}
-
-/** Updates an existing connection entry by id. */
-export function updateCloudConnection(
-  providerId: string,
-  id: string,
-  partial: Partial<Omit<CloudConnectionEntry, 'id' | 'providerId'>>
-) {
-  const store = readStore();
-  const entries = store[providerId] ?? [];
-  store[providerId] = entries.map((e) =>
-    e.id === id ? { ...e, ...partial, id, providerId, updatedAt: new Date().toISOString() } : e
-  );
-  writeStore(store);
-}
-
-/** Removes a connection entry by id. */
-export function removeCloudConnection(providerId: string, id: string) {
-  const store = readStore();
-  store[providerId] = (store[providerId] ?? []).filter((e) => e.id !== id);
-  writeStore(store);
-}
-
-export function getConnectedCloudProviders() {
-  const connections = getCloudConnections();
-  return cloudProviders
-    .map((p) => p.id)
-    .filter((id) => connections[id]?.some((e) => e.status === 'connected'));
-}
-
-function makeDefaultProviderSettingsState(): CloudProviderSettingsState {
+function apiConnectionToEntry(conn: ApiCloudConnection): CloudConnectionEntry {
   return {
-    allowTemplatePull: true,
-    allowedTemplatePatterns: '',
-    allowedNetworks: '',
-    lastTemplatePullAt: '',
+    id: String(conn.id),
+    name: conn.name,
+    providerId: conn.provider_id,
+    status: conn.status,
+    credentialId: conn.credential,
+    credentialName: conn.credential_name,
+    error: conn.error,
+    updatedAt: conn.updated_at,
   };
 }
 
-export function getCloudProviderSettings(provider: string) {
-  const defaults = makeDefaultProviderSettingsState();
-  if (!isBrowser()) {
-    return defaults;
-  }
+// ── Connection CRUD ───────────────────────────────────────────────────────────
 
-  const raw = window.localStorage.getItem(cloudProviderSettingsStorageKey);
-  if (!raw) {
-    return defaults;
-  }
+/** Fetches all connections, optionally filtered to a single provider. */
+export async function fetchCloudConnections(providerId?: string): Promise<CloudConnectionEntry[]> {
+  const url = providerId
+    ? awxAPI`/catalog_cloud/connections/?provider_id=${providerId}`
+    : awxAPI`/catalog_cloud/connections/`;
+  const data = await requestGet<ApiConnectionListResponse>(url);
+  return (data.results ?? []).map(apiConnectionToEntry);
+}
 
+/** Creates a new connection for the given provider and returns the saved entry. */
+export async function createCloudConnection(
+  providerId: string,
+  entry: Pick<CloudConnectionEntry, 'name' | 'status' | 'credentialId' | 'credentialName' | 'error'>
+): Promise<CloudConnectionEntry> {
+  const payload = {
+    provider_id: providerId,
+    name: entry.name,
+    status: entry.status,
+    credential: entry.credentialId,
+    credential_name: entry.credentialName,
+    error: entry.error,
+  };
+  const conn = await postRequest<ApiCloudConnection, typeof payload>(
+    awxAPI`/catalog_cloud/connections/`,
+    payload
+  );
+  return apiConnectionToEntry(conn);
+}
+
+/**
+ * Partially updates an existing connection.
+ * `id` must be the numeric DB id represented as a string.
+ */
+export async function updateCloudConnectionApi(
+  id: string,
+  partial: Partial<Pick<CloudConnectionEntry, 'name' | 'status' | 'credentialId' | 'credentialName' | 'error'>>
+): Promise<CloudConnectionEntry> {
+  const payload: Record<string, unknown> = {};
+  if (partial.name !== undefined) payload.name = partial.name;
+  if (partial.status !== undefined) payload.status = partial.status;
+  if (partial.credentialId !== undefined) payload.credential = partial.credentialId;
+  if (partial.credentialName !== undefined) payload.credential_name = partial.credentialName;
+  if (partial.error !== undefined) payload.error = partial.error;
+  const conn = await requestPatch<ApiCloudConnection>(
+    awxAPI`/catalog_cloud/connections/${id}/`,
+    payload
+  );
+  return apiConnectionToEntry(conn);
+}
+
+/** Deletes a connection by its numeric DB id (passed as string). */
+export async function removeCloudConnectionApi(id: string): Promise<void> {
+  await requestDelete<void>(
+    awxAPI`/catalog_cloud/connections/${id}/`,
+    new AbortController().signal
+  );
+}
+
+// ── Provider state ────────────────────────────────────────────────────────────
+
+/**
+ * Fetches the provider state record (pulled data, admin settings, provider
+ * settings) for the given provider id.  Returns null on any error so callers
+ * can treat it as "not yet saved".
+ */
+export async function fetchProviderState(providerId: string): Promise<ApiCloudProviderState | null> {
   try {
-    const parsed = JSON.parse(raw) as Record<string, Partial<CloudProviderSettingsState>>;
-    return {
-      ...defaults,
-      ...(parsed[provider] ?? {}),
-    };
+    return await requestGet<ApiCloudProviderState>(
+      awxAPI`/catalog_cloud/provider_state/${providerId}/`
+    );
   } catch {
-    return defaults;
+    return null;
   }
 }
 
-export function setCloudProviderSettings(provider: string, settings: CloudProviderSettingsState) {
-  if (!isBrowser()) {
-    return;
-  }
-
-  const raw = window.localStorage.getItem(cloudProviderSettingsStorageKey);
-  const parsed = raw ? (JSON.parse(raw) as Record<string, CloudProviderSettingsState>) ?? {} : {};
-  parsed[provider] = settings;
-  window.localStorage.setItem(cloudProviderSettingsStorageKey, JSON.stringify(parsed));
-}
-
-export function getCloudProviderData(provider: string): unknown {
-  if (!isBrowser()) {
-    return null;
-  }
-  const raw = window.localStorage.getItem(cloudProviderDataStorageKey);
-  if (!raw) {
-    return null;
-  }
+/**
+ * Partially updates provider state fields.  Only the keys included in
+ * `partial` are sent to the server.
+ */
+export async function patchProviderState(
+  providerId: string,
+  partial: Partial<Pick<ApiCloudProviderState, 'provider_data' | 'admin_settings' | 'provider_settings' | 'pulled_at'>>
+): Promise<ApiCloudProviderState | null> {
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed[provider] ?? null;
+    return await requestPatch<ApiCloudProviderState>(
+      awxAPI`/catalog_cloud/provider_state/${providerId}/`,
+      partial
+    );
   } catch {
     return null;
   }
 }
 
-export function setCloudProviderData(provider: string, data: DigitalOceanProviderData) {
-  if (!isBrowser()) {
-    return;
-  }
-  const raw = window.localStorage.getItem(cloudProviderDataStorageKey);
-  const parsed = raw ? (JSON.parse(raw) as Record<string, DigitalOceanProviderData>) ?? {} : {};
-  parsed[provider] = data;
-  window.localStorage.setItem(cloudProviderDataStorageKey, JSON.stringify(parsed));
+// ── DigitalOcean admin allow-list settings ────────────────────────────────────
+
+/**
+ * Persisted admin controls for DigitalOcean.
+ * `null` means "all items are allowed" (default state before any change).
+ * An empty array means "none are allowed".
+ * A non-empty array is the explicit allowed set.
+ */
+export interface DigitalOceanAdminSettings {
+  allowedSizeSlugs: string[] | null;
+  allowedVpcIds: string[] | null;
 }
+
+

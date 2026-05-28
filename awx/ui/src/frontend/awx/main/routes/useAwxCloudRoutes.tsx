@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
@@ -6,27 +6,33 @@ import { CloudConnections } from '../../resources/cloud/CloudConnections';
 import { CloudProviderSettings } from '../../resources/cloud/CloudProviderSettings';
 import {
   cloudConnectionsChangedEvent,
-  getConnectedCloudProviders,
+  fetchCloudConnections,
 } from '../../resources/cloud/cloudConnectionStore';
 import { getCloudProviderLabel } from '../../resources/cloud/cloudProviders';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCloudRoutes() {
   const { t } = useTranslation();
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
-  useEffect(() => {
-    const listener = () => setRefreshKey((value) => value + 1);
-    window.addEventListener(cloudConnectionsChangedEvent, listener);
-    window.addEventListener('storage', listener);
-    return () => {
-      window.removeEventListener(cloudConnectionsChangedEvent, listener);
-      window.removeEventListener('storage', listener);
-    };
+  const refreshConnectedProviders = useCallback(() => {
+    void fetchCloudConnections().then((entries) => {
+      const providers = [
+        ...new Set(entries.filter((e) => e.status === 'connected').map((e) => e.providerId)),
+      ];
+      setConnectedProviders(providers);
+    });
   }, []);
 
+  useEffect(() => {
+    refreshConnectedProviders();
+    window.addEventListener(cloudConnectionsChangedEvent, refreshConnectedProviders);
+    return () => {
+      window.removeEventListener(cloudConnectionsChangedEvent, refreshConnectedProviders);
+    };
+  }, [refreshConnectedProviders]);
+
   return useMemo<PageNavigationItem>(() => {
-    const connectedProviders = getConnectedCloudProviders();
     return {
       id: AwxRoute.Cloud,
       label: t('Cloud'),
@@ -50,5 +56,5 @@ export function useAwxCloudRoutes() {
         },
       ],
     };
-  }, [refreshKey, t]);
+  }, [connectedProviders, t]);
 }

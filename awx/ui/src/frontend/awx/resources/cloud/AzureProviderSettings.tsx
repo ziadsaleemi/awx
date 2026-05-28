@@ -1,5 +1,5 @@
 /* eslint-disable i18next/no-literal-string */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -61,12 +61,11 @@ import {
   AzureVMSize,
   AzureVNet,
   CloudConnectionEntry,
-  addCloudConnection,
-  getCloudConnections,
-  getCloudProviderData,
-  removeCloudConnection,
-  setCloudProviderData,
-  updateCloudConnection,
+  createCloudConnection,
+  fetchCloudConnections,
+  fetchProviderState,
+  removeCloudConnectionApi,
+  updateCloudConnectionApi,
 } from './cloudConnectionStore';
 import AzureLogo from '../../../assets/azure.svg';
 
@@ -1019,13 +1018,19 @@ export function AzureProviderSettings() {
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [connectingId, setConnectingId] = useState<string | null>(null);
-  const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>(
-    () => getCloudConnections()
-  );
+  const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
+  const [rawProviderData, setRawProviderData] = useState<unknown>(null);
 
-  const refreshConnections = useCallback(() => {
-    setConnections(getCloudConnections());
+  const loadConnections = useCallback(() => {
+    void fetchCloudConnections('azure').then(setConnectionEntries);
   }, []);
+
+  useEffect(() => {
+    loadConnections();
+    void fetchProviderState('azure').then((state) => {
+      if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+    });
+  }, [loadConnections]);
 
   const { data: credData } = useGet<{ count: number; results: Credential[] }>(
     awxAPI`/credentials/?order_by=name&page_size=200`
@@ -1044,7 +1049,6 @@ export function AzureProviderSettings() {
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
-  const connectionEntries = useMemo(() => connections['azure'] ?? [], [connections]);
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
     [connectionEntries]
@@ -1052,13 +1056,13 @@ export function AzureProviderSettings() {
 
   const connectionDataMap = useMemo(() => {
     const map: Record<string, AzureProviderData> = {};
-    const raw = getCloudProviderData('azure');
+    const raw = rawProviderData;
     for (const entry of connectionEntries) {
       const data = getConnectionData(entry, raw);
       if (data) map[entry.id] = data;
     }
     return map;
-  }, [connectionEntries]);
+  }, [connectionEntries, rawProviderData]);
 
   const allData = useMemo<AzureProviderData>(() => {
     const agg: AzureProviderData = {
@@ -1106,12 +1110,12 @@ export function AzureProviderSettings() {
       setConnectingId(entryId);
       try {
         await requestGet(awxAPI`/credentials/${credentialId.toString()}/`);
-        updateCloudConnection('azure', entryId, {
+        await updateCloudConnectionApi(entryId, {
           status: 'connected',
           credentialId,
           error: '',
         });
-        refreshConnections();
+        loadConnections();
         alertToaster.addAlert({ variant: 'success', title: t('Connected.') });
       } catch (err) {
         const detail =
@@ -1120,12 +1124,12 @@ export function AzureProviderSettings() {
             : err instanceof Error
               ? err.message
               : String(err);
-        updateCloudConnection('azure', entryId, {
+        await updateCloudConnectionApi(entryId, {
           status: 'misconfigured',
           credentialId,
           error: detail,
         });
-        refreshConnections();
+        loadConnections();
         alertToaster.addAlert({
           variant: 'danger',
           title: t('Failed to connect.'),
@@ -1135,39 +1139,39 @@ export function AzureProviderSettings() {
         setConnectingId(null);
       }
     },
-    [alertToaster, refreshConnections, t]
+    [alertToaster, loadConnections, t]
   );
 
   const onDisconnect = useCallback(
-    (entryId: string) => {
-      updateCloudConnection('azure', entryId, { status: 'disconnected', error: '' });
-      refreshConnections();
+    async (entryId: string) => {
+      await updateCloudConnectionApi(entryId, { status: 'disconnected', error: '' });
+      loadConnections();
     },
-    [refreshConnections]
+    [loadConnections]
   );
 
   const onRemove = useCallback(
-    (entryId: string) => {
-      removeCloudConnection('azure', entryId);
-      refreshConnections();
+    async (entryId: string) => {
+      await removeCloudConnectionApi(entryId);
+      loadConnections();
     },
-    [refreshConnections]
+    [loadConnections]
   );
 
   const onAddAndConnect = useCallback(
     async (name: string, credentialId: number) => {
       const cred = credData?.results?.find((c) => c.id === credentialId);
-      const newEntry = addCloudConnection('azure', {
+      const newEntry = await createCloudConnection('azure', {
         name,
         status: 'disconnected',
         credentialId,
         credentialName: cred?.name ?? '',
         error: '',
       });
-      refreshConnections();
+      loadConnections();
       await onConnect(newEntry.id, credentialId);
     },
-    [credData, onConnect, refreshConnections]
+    [credData, loadConnections, onConnect]
   );
 
   const onPull = async () => {
@@ -1221,7 +1225,8 @@ export function AzureProviderSettings() {
         vm_sizes: result.vm_sizes ?? [],
       };
 
-      setCloudProviderData('azure', newData);
+      // Update local state so UI refreshes immediately (backend already persisted it).
+      setRawProviderData(newData);
 
       const totalResources =
         (result.resource_group_count ?? 0) +

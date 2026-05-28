@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -32,10 +32,11 @@ import { Credential } from '../../interfaces/Credential';
 import {
   CloudConnectionEntry,
   CloudConnectionStatus,
-  addCloudConnection,
-  getCloudConnections,
-  removeCloudConnection,
-  updateCloudConnection,
+  cloudConnectionsChangedEvent,
+  createCloudConnection,
+  fetchCloudConnections,
+  removeCloudConnectionApi,
+  updateCloudConnectionApi,
 } from './cloudConnectionStore';
 import { cloudProviders } from './cloudProviders';
 import DigitalOceanLogo from '../../../assets/digitalocean.svg';
@@ -117,13 +118,22 @@ export function CloudConnections() {
   const { t } = useTranslation();
   const { activeAwxUser } = useAwxActiveUser();
   const [activeModalProviderId, setActiveModalProviderId] = useState<string | null>(null);
-  const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>(() =>
-    getCloudConnections()
-  );
+  const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>({});
 
   const refreshConnections = useCallback(() => {
-    setConnections(getCloudConnections());
+    void fetchCloudConnections().then((entries) => {
+      const grouped: Record<string, CloudConnectionEntry[]> = {};
+      for (const e of entries) {
+        if (!grouped[e.providerId]) grouped[e.providerId] = [];
+        grouped[e.providerId].push(e);
+      }
+      setConnections(grouped);
+    });
   }, []);
+
+  useEffect(() => {
+    refreshConnections();
+  }, [refreshConnections]);
 
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
@@ -227,13 +237,15 @@ export function ConnectionModal(props: {
   const { providerId, onClose } = props;
 
   const [connectingId, setConnectingId] = useState<string | null>(null);
-  const [entries, setEntries] = useState<CloudConnectionEntry[]>(
-    () => getCloudConnections()[providerId] ?? []
-  );
+  const [entries, setEntries] = useState<CloudConnectionEntry[]>([]);
 
   const refreshModalConnections = useCallback(() => {
-    setEntries(getCloudConnections()[providerId] ?? []);
+    void fetchCloudConnections(providerId).then(setEntries);
   }, [providerId]);
+
+  useEffect(() => {
+    refreshModalConnections();
+  }, [refreshModalConnections]);
 
   const { data } = useGet<CredentialListResponse>(
     awxAPI`/credentials/?order_by=name&page_size=200`
@@ -281,11 +293,12 @@ export function ConnectionModal(props: {
   const onConnect = async (entryId: string, credentialId: number) => {
     const credentialObject = credentials.find((c) => c.id === credentialId);
     if (!credentialObject?.summary_fields?.user_capabilities?.use) {
-      updateCloudConnection(providerId, entryId, {
+      await updateCloudConnectionApi(entryId, {
         status: 'misconfigured',
         error: t('Selected credential is not usable by the current user.'),
       });
       refreshModalConnections();
+      window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
       alertToaster.addAlert({
         variant: 'danger',
         title: t('You do not have permission to use this credential.'),
@@ -308,13 +321,14 @@ export function ConnectionModal(props: {
       } else {
         await requestGet<Credential>(awxAPI`/credentials/${credentialId.toString()}/`);
       }
-      updateCloudConnection(providerId, entryId, {
+      await updateCloudConnectionApi(entryId, {
         status: 'connected',
         credentialId,
         credentialName: credentialObject.name,
         error: '',
       });
       refreshModalConnections();
+      window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
       alertToaster.addAlert({
         variant: 'success',
         title: t('Connected.'),
@@ -326,13 +340,14 @@ export function ConnectionModal(props: {
           : err instanceof Error
             ? err.message
             : String(err);
-      updateCloudConnection(providerId, entryId, {
+      await updateCloudConnectionApi(entryId, {
         status: 'misconfigured',
         credentialId,
         credentialName: credentialObject.name,
         error: errorDetails,
       });
       refreshModalConnections();
+      window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Failed to connect.'),
@@ -343,19 +358,21 @@ export function ConnectionModal(props: {
     }
   };
 
-  const onDisconnect = (entryId: string) => {
-    updateCloudConnection(providerId, entryId, { status: 'disconnected', error: '' });
+  const onDisconnect = async (entryId: string) => {
+    await updateCloudConnectionApi(entryId, { status: 'disconnected', error: '' });
     refreshModalConnections();
+    window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
   };
 
-  const onRemove = (entryId: string) => {
-    removeCloudConnection(providerId, entryId);
+  const onRemove = async (entryId: string) => {
+    await removeCloudConnectionApi(entryId);
     refreshModalConnections();
+    window.dispatchEvent(new Event(cloudConnectionsChangedEvent));
   };
 
   const onAddAndConnect = async (name: string, credentialId: number) => {
     const cred = credentials.find((c) => c.id === credentialId);
-    const newEntry = addCloudConnection(providerId, {
+    const newEntry = await createCloudConnection(providerId, {
       name,
       status: 'disconnected',
       credentialId,
@@ -443,7 +460,7 @@ export function ConnectionModal(props: {
                       <Button
                         variant="secondary"
                         isSmall
-                        onClick={() => onDisconnect(entry.id)}
+                        onClick={() => void onDisconnect(entry.id)}
                         style={{ marginRight: '0.4rem' }}
                       >
                         {t('Disconnect')}
@@ -466,7 +483,7 @@ export function ConnectionModal(props: {
                       variant="plain"
                       isSmall
                       isDisabled={!!connectingId}
-                      onClick={() => onRemove(entry.id)}
+                      onClick={() => void onRemove(entry.id)}
                       aria-label={t('Remove connection')}
                     >
                       <TrashIcon />

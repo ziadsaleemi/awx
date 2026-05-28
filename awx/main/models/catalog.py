@@ -14,7 +14,7 @@ from awx.main.models.base import CommonModelNameNotUnique
 
 logger = logging.getLogger('awx.main.models.catalog')
 
-__all__ = ['CatalogItem', 'CatalogDeployment']
+__all__ = ['CatalogItem', 'CatalogDeployment', 'CloudProviderConnection', 'CloudProviderState']
 
 
 class CatalogItem(CommonModelNameNotUnique):
@@ -269,3 +269,96 @@ class CatalogDeployment(CommonModelNameNotUnique):
 
     def get_absolute_url(self, request=None):
         return reverse('api:catalog_deployment_detail', kwargs={'pk': self.pk}, request=request)
+
+
+CLOUD_CONNECTION_STATUS_CHOICES = [
+    ('connected', _('Connected')),
+    ('disconnected', _('Disconnected')),
+    ('misconfigured', _('Misconfigured')),
+]
+
+
+class CloudProviderConnection(models.Model):
+    """
+    A named connection entry linking a cloud provider to an AWX credential.
+    Previously stored in browser localStorage; now persisted in the database.
+    """
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('provider_id', 'name')
+
+    provider_id = models.CharField(
+        max_length=64,
+        help_text=_('Identifier of the cloud provider (e.g. digitalocean, azure, proxmox).'),
+    )
+    name = models.CharField(
+        max_length=512,
+        help_text=_('Human-readable display name for this connection.'),
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=CLOUD_CONNECTION_STATUS_CHOICES,
+        default='disconnected',
+    )
+    credential = models.ForeignKey(
+        'Credential',
+        related_name='cloud_provider_connections',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+    )
+    credential_name = models.CharField(
+        max_length=512,
+        blank=True,
+        default='',
+        help_text=_('Cached display name of the credential.'),
+    )
+    error = models.TextField(
+        blank=True,
+        default='',
+        help_text=_('Last error message, if any.'),
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class CloudProviderState(models.Model):
+    """
+    Per-provider singleton storing pulled resource data and admin allow-list
+    settings.  Previously stored in browser localStorage.
+    """
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('provider_id',)
+
+    provider_id = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text=_('Identifier of the cloud provider (e.g. digitalocean).'),
+    )
+    pulled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_('Timestamp of the last successful data pull.'),
+    )
+    provider_data = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_('Raw pulled resource data (images, sizes, regions, VPCs, etc.).'),
+    )
+    admin_settings = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_('Admin allow-list settings for this provider (e.g. allowed size slugs).'),
+    )
+    provider_settings = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_('General provider settings (allow template pull, allowed networks, etc.).'),
+    )

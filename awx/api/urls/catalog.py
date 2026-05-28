@@ -18,6 +18,9 @@ from awx.api.views import (
     CatalogProxmoxPullResources,
     CatalogVmwarePullResources,
     CatalogAzurePullResources,
+    CloudProviderConnectionList,
+    CloudProviderConnectionDetail,
+    CloudProviderStateDetail,
 )
 
 catalog_item_urls = [
@@ -36,6 +39,21 @@ catalog_deployment_urls = [
 ]
 
 catalog_cloud_urls = [
+    re_path(
+        r'^connections/$',
+        CloudProviderConnectionList.as_view(),
+        name='catalog_cloud_connection_list',
+    ),
+    re_path(
+        r'^connections/(?P<pk>[0-9]+)/$',
+        CloudProviderConnectionDetail.as_view(),
+        name='catalog_cloud_connection_detail',
+    ),
+    re_path(
+        r'^provider_state/(?P<provider_id>[a-z0-9_-]+)/$',
+        CloudProviderStateDetail.as_view(),
+        name='catalog_cloud_provider_state_detail',
+    ),
     re_path(
         r'^connectors/digitalocean/validate/$',
         CatalogDigitalOceanConnectorValidate.as_view(),

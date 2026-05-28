@@ -1,5 +1,5 @@
 /* eslint-disable i18next/no-literal-string */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -51,9 +51,8 @@ import {
   ProxmoxProviderData,
   ProxmoxStorage,
   ProxmoxVM,
-  getCloudConnections,
-  getCloudProviderData,
-  setCloudProviderData,
+  fetchCloudConnections,
+  fetchProviderState,
 } from './cloudConnectionStore';
 import ProxmoxLogo from '../../../assets/proxmox.svg';
 import { ConnectionModal } from './CloudConnections';
@@ -804,17 +803,28 @@ export function ProxmoxProviderSettings() {
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
+  const [rawProviderData, setRawProviderData] = useState<unknown>(null);
+
+  const loadData = useCallback(() => {
+    void fetchCloudConnections('proxmox').then(setConnectionEntries);
+    void fetchProviderState('proxmox').then((state) => {
+      if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+    });
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleModalClose = useCallback(() => {
     setShowModal(false);
-    setRefreshKey((k) => k + 1);
+    void fetchCloudConnections('proxmox').then(setConnectionEntries);
   }, []);
 
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
-  const connectionEntries = useMemo(() => getCloudConnections()['proxmox'] ?? [], [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
     [connectionEntries]
@@ -823,7 +833,7 @@ export function ProxmoxProviderSettings() {
   // Load and map connection data
   const connectionDataMap = useMemo(() => {
     const map: Record<string, ProxmoxProviderData> = {};
-    const raw = getCloudProviderData('proxmox');
+    const raw = rawProviderData;
     for (const entry of connectionEntries) {
       const data = getConnectionData(entry, raw);
       if (data) {
@@ -831,7 +841,7 @@ export function ProxmoxProviderSettings() {
       }
     }
     return map;
-  }, [connectionEntries]);
+  }, [connectionEntries, rawProviderData]);
 
   // Aggregate data from all connected connections
   const allData = useMemo<ProxmoxProviderData>(() => {
@@ -909,7 +919,8 @@ export function ProxmoxProviderSettings() {
         storage: result.storage ?? [],
         networks: result.networks ?? [],
       };
-      setCloudProviderData('proxmox', newData);
+      // Update local state so UI refreshes immediately (backend already persisted it).
+      setRawProviderData(newData);
       alertToaster.addAlert({
         variant: 'success',
         title: t(

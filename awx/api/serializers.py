@@ -93,6 +93,8 @@ from awx.main.models import (
     TerraformJobTemplate,
     CatalogItem,
     CatalogDeployment,
+    CloudProviderConnection,
+    CloudProviderState,
     UnifiedJob,
     UnifiedJobTemplate,
     WorkflowApproval,
@@ -4071,6 +4073,19 @@ class CatalogDeploymentSerializer(BaseSerializer):
         if obj.catalog_item and obj.catalog_item.organization_id:
             d['organization'] = {'id': obj.catalog_item.organization_id, 'name': obj.catalog_item.organization.name}
         return d
+
+
+class CloudProviderConnectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CloudProviderConnection
+        fields = ('id', 'provider_id', 'name', 'status', 'credential', 'credential_name', 'error', 'updated_at')
+        read_only_fields = ('updated_at',)
+
+
+class CloudProviderStateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CloudProviderState
+        fields = ('id', 'provider_id', 'pulled_at', 'provider_data', 'admin_settings', 'provider_settings')
 
 
 class WorkflowJobTemplateSerializer(LabelsListMixin, UnifiedJobTemplateSerializer):

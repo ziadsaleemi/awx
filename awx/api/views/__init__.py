@@ -5714,6 +5714,85 @@ class CatalogDeploymentRetry(GenericAPIView):
         return Response(serializer.data)
 
 
+# ── Cloud provider connection + state API views ──────────────────────────────
+
+
+class CloudProviderConnectionList(ListCreateAPIView):
+    """
+    GET  /api/v2/catalog_cloud/connections/
+    POST /api/v2/catalog_cloud/connections/
+    """
+
+    model = models.CloudProviderConnection
+    serializer_class = serializers.CloudProviderConnectionSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def get_queryset(self):
+        qs = models.CloudProviderConnection.objects.all()
+        provider_id = self.request.query_params.get('provider_id')
+        if provider_id:
+            qs = qs.filter(provider_id=provider_id)
+        return qs
+
+    def post(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can manage cloud connections.'))
+        return super().post(request, *args, **kwargs)
+
+
+class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/v2/catalog_cloud/connections/<pk>/
+    PATCH  /api/v2/catalog_cloud/connections/<pk>/
+    DELETE /api/v2/catalog_cloud/connections/<pk>/
+    """
+
+    model = models.CloudProviderConnection
+    serializer_class = serializers.CloudProviderConnectionSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can delete cloud connections.'))
+        return super().destroy(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can update cloud connections.'))
+        return super().update(request, *args, **kwargs)
+
+
+class CloudProviderStateDetail(GenericAPIView):
+    """
+    GET   /api/v2/catalog_cloud/provider_state/<provider_id>/
+    PATCH /api/v2/catalog_cloud/provider_state/<provider_id>/
+
+    Retrieves or updates per-provider state (pulled data, admin settings,
+    provider settings).  Creates the record on first PATCH.
+    """
+
+    serializer_class = serializers.CloudProviderStateSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def _get_or_create(self, provider_id):
+        obj, _ = models.CloudProviderState.objects.get_or_create(provider_id=provider_id)
+        return obj
+
+    def get(self, request, provider_id, *args, **kwargs):
+        obj = self._get_or_create(provider_id)
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data)
+
+    def patch(self, request, provider_id, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can update provider state.'))
+        obj = self._get_or_create(provider_id)
+        serializer = self.get_serializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
 class CatalogDigitalOceanConnectorValidate(GenericAPIView):
     """
     POST /api/v2/catalog_cloud/connectors/digitalocean/validate/
@@ -6012,21 +6091,28 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 }
             )
 
-        return Response(
-            {
-                'provider': 'digitalocean',
-                'credential_id': credential_id,
-                'pulled_at': now().isoformat(),
-                'image_count': len(image_results),
-                'pricing_count': len(pricing_results),
-                'region_count': len(region_results),
-                'vpc_count': len(vpc_results),
-                'images': image_results,
-                'pricing': pricing_results,
-                'regions': region_results,
-                'vpcs': vpc_results,
-            }
-        )
+        pulled_at = now()
+        response_data = {
+            'provider': 'digitalocean',
+            'credential_id': credential_id,
+            'pulled_at': pulled_at.isoformat(),
+            'image_count': len(image_results),
+            'pricing_count': len(pricing_results),
+            'region_count': len(region_results),
+            'vpc_count': len(vpc_results),
+            'images': image_results,
+            'pricing': pricing_results,
+            'regions': region_results,
+            'vpcs': vpc_results,
+        }
+
+        # Persist pulled data to the database so it survives across sessions.
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='digitalocean')
+        state.pulled_at = pulled_at
+        state.provider_data = response_data
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
 
 
 class CatalogProxmoxPullResources(GenericAPIView):
