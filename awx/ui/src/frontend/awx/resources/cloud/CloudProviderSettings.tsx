@@ -28,6 +28,7 @@ import {
   setCloudProviderData,
 } from './cloudConnectionStore';
 import { getCloudProviderLabel } from './cloudProviders';
+import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
 
 interface PullApiResponse {
   pulled_at: string;
@@ -348,12 +349,13 @@ function NetworksTab(props: { vpcs: DigitalOceanVpc[] }) {
   );
 }
 
-export function CloudProviderSettings(props: { provider: string }) {
+function DefaultProviderSettings(props: { provider: string }) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
   const { activeAwxUser } = useAwxActiveUser();
   const providerLabel = getCloudProviderLabel(props.provider);
-  const connectionState = getCloudConnections()[props.provider];
+  const connectionEntries = getCloudConnections()[props.provider] ?? [];
+  const connectedEntry = connectionEntries.find((e) => e.status === 'connected');
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
@@ -361,7 +363,7 @@ export function CloudProviderSettings(props: { provider: string }) {
   const [data, setData] = useState<DigitalOceanProviderData | null>(cached);
   const [isPulling, setIsPulling] = useState(false);
 
-  const isConnected = connectionState?.status === 'connected';
+  const isConnected = Boolean(connectedEntry);
 
   if (!canManageCloud) {
     return (
@@ -379,8 +381,13 @@ export function CloudProviderSettings(props: { provider: string }) {
     );
   }
 
+  const providerSupportsPull = props.provider === 'digitalocean';
+
   const onPull = async () => {
-    if (!isConnected || !connectionState?.credentialId) {
+    if (!providerSupportsPull) {
+      return;
+    }
+    if (!isConnected || !connectedEntry?.credentialId) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Connect {{provider}} first before pulling data.', { provider: providerLabel }),
@@ -392,7 +399,7 @@ export function CloudProviderSettings(props: { provider: string }) {
     try {
       const result = await postRequest<PullApiResponse, { credential_id: number }>(
         awxAPI`/catalog_cloud/connectors/digitalocean/pull_images/`,
-        { credential_id: connectionState.credentialId }
+        { credential_id: connectedEntry!.credentialId! }
       );
       const newData: DigitalOceanProviderData = {
         pulledAt: result.pulled_at,
@@ -439,21 +446,25 @@ export function CloudProviderSettings(props: { provider: string }) {
         title={t('{{provider}}', { provider: providerLabel })}
         description={
           isConnected
-            ? pulledAt
-              ? t('Last pull: {{time}}', { time: pulledAt })
-              : t('Connected. Click "Pull data" to load provider resources.')
+            ? providerSupportsPull
+              ? pulledAt
+                ? t('Last pull: {{time}}', { time: pulledAt })
+                : t('Connected. Click "Pull data" to load provider resources.')
+              : t('Connected.')
             : t('Not connected. Go to Cloud Connections to connect.')
         }
         headerActions={
-          <Button
-            variant="primary"
-            onClick={() => void onPull()}
-            isLoading={isPulling}
-            isDisabled={!isConnected || isPulling}
-            icon={isPulling ? <Spinner size="sm" /> : undefined}
-          >
-            {isPulling ? t('Pulling…') : t('Pull data')}
-          </Button>
+          providerSupportsPull ? (
+            <Button
+              variant="primary"
+              onClick={() => void onPull()}
+              isLoading={isPulling}
+              isDisabled={!isConnected || isPulling}
+              icon={isPulling ? <Spinner size="sm" /> : undefined}
+            >
+              {isPulling ? t('Pulling\u2026') : t('Pull data')}
+            </Button>
+          ) : undefined
         }
       />
       {!isConnected && (
@@ -481,4 +492,11 @@ export function CloudProviderSettings(props: { provider: string }) {
       </PageTabs>
     </PageLayout>
   );
+}
+
+export function CloudProviderSettings(props: { provider: string }) {
+  if (props.provider === 'proxmox') {
+    return <ProxmoxProviderSettings />;
+  }
+  return <DefaultProviderSettings provider={props.provider} />;
 }

@@ -6027,3 +6027,180 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 'vpcs': vpc_results,
             }
         )
+
+
+class CatalogProxmoxPullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/proxmox/pull_resources/
+
+    Fetches live inventory from a Proxmox VE cluster using the selected
+    Proxmox VE credential. Returns nodes, VMs (QEMU), LXC containers,
+    storage pools, and network interfaces.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull Proxmox VE cluster inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'proxmox_ve':
+            return Response(
+                {'credential_id': [_('Credential must be of type Proxmox VE.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pm_api_url = (credential.get_input('pm_api_url', default='') or '').rstrip('/')
+        pm_api_token_id = credential.get_input('pm_api_token_id', default='') or ''
+        pm_api_token_secret = credential.get_input('pm_api_token_secret', default='') or ''
+        pm_tls_insecure = credential.get_input('pm_tls_insecure', default=False)
+
+        if not pm_api_url:
+            return Response(
+                {'credential_id': [_('Credential is missing pm_api_url.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not pm_api_token_id or not pm_api_token_secret:
+            return Response(
+                {'credential_id': [_('Credential is missing pm_api_token_id or pm_api_token_secret.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update({
+            'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
+            'Accept': 'application/json',
+        })
+        session.verify = not bool(pm_tls_insecure)
+
+        def _get(path):
+            url = f'{pm_api_url}/{path.lstrip("/")}'
+            resp = session.get(url, timeout=20)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    detail = resp.json().get('errors') or resp.json().get('message') or detail
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('Proxmox API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            return resp.json().get('data', []) or []
+
+        # ── cluster/resources gives a flat list of every resource ───────────
+        raw_resources = _get('/cluster/resources')
+
+        node_results = []
+        vm_results = []
+        container_results = []
+
+        node_names = []
+        for item in raw_resources:
+            rtype = item.get('type')
+            if rtype == 'node':
+                node_results.append({
+                    'node': item.get('node', ''),
+                    'status': item.get('status', 'unknown'),
+                    'type': 'node',
+                    'maxcpu': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                })
+                node_names.append(item.get('node', ''))
+            elif rtype == 'qemu':
+                vm_results.append({
+                    'vmid': item.get('vmid', 0),
+                    'name': item.get('name', ''),
+                    'status': item.get('status', 'stopped'),
+                    'node': item.get('node', ''),
+                    'cpus': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                    'type': 'qemu',
+                })
+            elif rtype == 'lxc':
+                container_results.append({
+                    'vmid': item.get('vmid', 0),
+                    'name': item.get('name', ''),
+                    'status': item.get('status', 'stopped'),
+                    'node': item.get('node', ''),
+                    'cpus': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                    'type': 'lxc',
+                })
+
+        # ── storage ──────────────────────────────────────────────────────────
+        storage_raw = _get('/storage')
+        storage_results = []
+        for s in storage_raw:
+            storage_results.append({
+                'storage': s.get('storage', ''),
+                'type': s.get('type', ''),
+                'status': 'active' if s.get('active', 0) else 'inactive',
+                'nodes': s.get('nodes', ''),
+                'avail': s.get('avail', 0),
+                'total': s.get('total', 0),
+                'used': s.get('used', 0),
+                'shared': bool(s.get('shared', 0)),
+                'content': s.get('content', ''),
+            })
+
+        # ── networks (per-node) ───────────────────────────────────────────────
+        network_results = []
+        for node_name in node_names:
+            try:
+                ifaces = _get(f'/nodes/{node_name}/network')
+            except Exception:
+                continue
+            for iface in ifaces:
+                network_results.append({
+                    'iface': iface.get('iface', ''),
+                    'type': iface.get('type', 'eth'),
+                    'node': node_name,
+                    'active': bool(iface.get('active', 0)),
+                    'address': iface.get('address', ''),
+                    'netmask': iface.get('netmask', ''),
+                    'cidr': iface.get('cidr', ''),
+                    'bridge_ports': iface.get('bridge_ports', ''),
+                    'comments': iface.get('comments', ''),
+                })
+
+        return Response({
+            'provider': 'proxmox',
+            'credential_id': credential_id,
+            'pulled_at': now().isoformat(),
+            'node_count': len(node_results),
+            'vm_count': len(vm_results),
+            'container_count': len(container_results),
+            'storage_count': len(storage_results),
+            'network_count': len(network_results),
+            'nodes': node_results,
+            'vms': vm_results,
+            'containers': container_results,
+            'storage': storage_results,
+            'networks': network_results,
+        })

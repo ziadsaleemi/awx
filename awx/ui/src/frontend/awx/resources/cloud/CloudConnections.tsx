@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
 import {
@@ -17,6 +17,7 @@ import {
   Modal,
   PageSection,
   Spinner,
+  TextInput,
 } from '@patternfly/react-core';
 import { postRequest, requestGet } from '../../../common/crud/Data';
 import { isRequestError } from '../../../common/crud/RequestError';
@@ -29,15 +30,19 @@ import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { CubesIcon } from '@patternfly/react-icons';
 import { Credential } from '../../interfaces/Credential';
 import {
+  CloudConnectionEntry,
   CloudConnectionStatus,
+  addCloudConnection,
   getCloudConnections,
-  setCloudConnection,
+  removeCloudConnection,
+  updateCloudConnection,
 } from './cloudConnectionStore';
 import { cloudProviders } from './cloudProviders';
 import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import AWSLogo from '../../../assets/aws.svg';
 import AzureLogo from '../../../assets/azure.svg';
 import GCPLogo from '../../../assets/gcp.svg';
+import ProxmoxLogo from '../../../assets/proxmox.svg';
 
 interface CredentialListResponse {
   count: number;
@@ -60,6 +65,15 @@ const providerLogos: Record<string, React.ComponentType<React.SVGProps<SVGSVGEle
   aws: AWSLogo,
   azure: AzureLogo,
   gcp: GCPLogo,
+  proxmox: ProxmoxLogo,
+};
+
+const providerAliases: Record<string, string[]> = {
+  digitalocean: ['digitalocean', 'digitaloceanterraform', 'do'],
+  aws: ['aws', 'amazonwebservices', 'amazon'],
+  azure: ['azure', 'azurerm', 'microsoftazure'],
+  gcp: ['gcp', 'googlecloud', 'googlecloudplatform'],
+  proxmox: ['proxmox', 'proxmoxve', 'proxmoxvirtualenvironment', 'bpgproxmox'],
 };
 
 const StyledConnectionCard = styled(Card)`
@@ -90,27 +104,30 @@ function StatusBadge(props: { status: CloudConnectionStatus }) {
   return <Label color="grey">{t('Disconnected')}</Label>;
 }
 
+function overallStatus(entries: CloudConnectionEntry[]): CloudConnectionStatus {
+  if (entries.some((e) => e.status === 'connected')) return 'connected';
+  if (entries.some((e) => e.status === 'misconfigured')) return 'misconfigured';
+  return 'disconnected';
+}
+
 export function CloudConnections() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
   const { activeAwxUser } = useAwxActiveUser();
-  const [connectingProvider, setConnectingProvider] = useState('');
+  const [connectingId, setConnectingId] = useState<string | null>(null);
   const [activeModalProviderId, setActiveModalProviderId] = useState<string | null>(null);
-  const [credentialsByProvider, setCredentialsByProvider] = useState<Record<string, string>>(() => {
-    const stored = getCloudConnections();
-    return Object.fromEntries(
-      cloudProviders.map((provider) => [
-        provider.id,
-        String(stored[provider.id]?.credentialId ?? ''),
-      ])
-    );
-  });
+  const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>(() =>
+    getCloudConnections()
+  );
+
+  const refreshConnections = useCallback(() => {
+    setConnections(getCloudConnections());
+  }, []);
 
   const { data, isLoading, error, refresh } = useGet<CredentialListResponse>(
     awxAPI`/credentials/?order_by=name&page_size=200`
   );
   const credentials = data?.results ?? [];
-  const connectionState = getCloudConnections();
   const canManageCloud =
     Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
@@ -126,10 +143,26 @@ export function CloudConnections() {
         typeName.includes('cloud')
       );
     });
-
-    // Some API responses may omit cloud discriminator fields for certain custom credential types.
     return filtered.length ? filtered : credentials;
   }, [credentials]);
+
+  const getProviderCredentials = useCallback(
+    (providerId: string) => {
+      const aliases = providerAliases[providerId] ?? [providerId];
+      return cloudCredentials.filter((credential) => {
+        const searchFields = [
+          credential.credential_type__namespace,
+          credential.credential_type__kind,
+          credential.kind,
+          credential.summary_fields?.credential_type?.name,
+          credential.name,
+        ];
+        const haystack = searchFields.map((v) => normalizeProviderToken(v)).join(' ');
+        return aliases.some((alias) => haystack.includes(normalizeProviderToken(alias)));
+      });
+    },
+    [cloudCredentials]
+  );
 
   if (!canManageCloud) {
     return (
@@ -151,55 +184,14 @@ export function CloudConnections() {
     return <AwxError error={error} handleRefresh={refresh} />;
   }
 
-  const getProviderCredentials = (providerId: string) => {
-    const providerAliases: Record<string, string[]> = {
-      digitalocean: ['digitalocean', 'digitaloceanterraform', 'do'],
-      aws: ['aws', 'amazonwebservices', 'amazon'],
-      azure: ['azure', 'azurerm', 'microsoftazure'],
-      gcp: ['gcp', 'googlecloud', 'googlecloudplatform'],
-    };
-    const aliases = providerAliases[providerId] ?? [providerId];
-    const filtered = cloudCredentials.filter((credential) => {
-      const searchFields = [
-        credential.credential_type__namespace,
-        credential.credential_type__kind,
-        credential.kind,
-        credential.summary_fields?.credential_type?.name,
-        credential.name,
-      ];
-      const haystack = searchFields.map((value) => normalizeProviderToken(value)).join(' ');
-      return aliases.some((alias) => haystack.includes(normalizeProviderToken(alias)));
-    });
-    return filtered;
-  };
-
-  const onConnect = async (providerId: string) => {
-    const selectedCredential = credentialsByProvider[providerId];
-    if (!selectedCredential) {
-      setCloudConnection(providerId, {
+  const onConnect = async (providerId: string, entryId: string, credentialId: number) => {
+    const credentialObject = credentials.find((c) => c.id === credentialId);
+    if (!credentialObject?.summary_fields?.user_capabilities?.use) {
+      updateCloudConnection(providerId, entryId, {
         status: 'misconfigured',
-        credentialId: null,
-        credentialName: '',
-        error: t('No credential selected.'),
-      });
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Select a credential before connecting.'),
-      });
-      return;
-    }
-
-    const credentialId = Number(selectedCredential);
-    const selectedCredentialObject = credentials.find(
-      (credential) => credential.id === credentialId
-    );
-    if (!selectedCredentialObject?.summary_fields?.user_capabilities?.use) {
-      setCloudConnection(providerId, {
-        status: 'misconfigured',
-        credentialId,
-        credentialName: selectedCredentialObject?.name ?? '',
         error: t('Selected credential is not usable by the current user.'),
       });
+      refreshConnections();
       alertToaster.addAlert({
         variant: 'danger',
         title: t('You do not have permission to use this credential.'),
@@ -207,9 +199,7 @@ export function CloudConnections() {
       return;
     }
 
-    const credentialName = selectedCredentialObject.name;
-
-    setConnectingProvider(providerId);
+    setConnectingId(entryId);
     try {
       if (providerId === 'digitalocean') {
         const validation = await postRequest<
@@ -224,59 +214,69 @@ export function CloudConnections() {
       } else {
         await requestGet<Credential>(awxAPI`/credentials/${credentialId.toString()}/`);
       }
-      setCloudConnection(providerId, {
+      updateCloudConnection(providerId, entryId, {
         status: 'connected',
         credentialId,
-        credentialName,
+        credentialName: credentialObject.name,
         error: '',
       });
+      refreshConnections();
       alertToaster.addAlert({
         variant: 'success',
-        title: t('{{provider}} connected.', {
-          provider:
-            cloudProviders.find((provider) => provider.id === providerId)?.label ?? providerId,
-        }),
+        title: t('Connected.'),
       });
-    } catch (error) {
+    } catch (err) {
       const errorDetails =
-        isRequestError(error) && error.details
-          ? error.details
-          : error instanceof Error
-            ? error.message
-            : String(error);
-      setCloudConnection(providerId, {
+        isRequestError(err) && err.details
+          ? err.details
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      updateCloudConnection(providerId, entryId, {
         status: 'misconfigured',
         credentialId,
-        credentialName,
+        credentialName: credentialObject.name,
         error: errorDetails,
       });
+      refreshConnections();
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Failed to connect {{provider}}.', {
-          provider:
-            cloudProviders.find((provider) => provider.id === providerId)?.label ?? providerId,
-        }),
+        title: t('Failed to connect.'),
         children: errorDetails,
       });
     } finally {
-      setConnectingProvider('');
+      setConnectingId(null);
     }
   };
 
-  const onDisconnect = (providerId: string) => {
-    setCloudConnection(providerId, {
+  const onDisconnect = (providerId: string, entryId: string) => {
+    updateCloudConnection(providerId, entryId, {
       status: 'disconnected',
-      credentialId: null,
-      credentialName: '',
       error: '',
     });
-    alertToaster.addAlert({
-      variant: 'info',
-      title: t('{{provider}} disconnected.', {
-        provider:
-          cloudProviders.find((provider) => provider.id === providerId)?.label ?? providerId,
-      }),
+    refreshConnections();
+  };
+
+  const onRemove = (providerId: string, entryId: string) => {
+    removeCloudConnection(providerId, entryId);
+    refreshConnections();
+  };
+
+  const onAddAndConnect = async (
+    providerId: string,
+    name: string,
+    credentialId: number
+  ) => {
+    const credentialObject = credentials.find((c) => c.id === credentialId);
+    const newEntry = addCloudConnection(providerId, {
+      name,
+      status: 'disconnected',
+      credentialId,
+      credentialName: credentialObject?.name ?? '',
+      error: '',
     });
+    refreshConnections();
+    await onConnect(providerId, newEntry.id, credentialId);
   };
 
   return (
@@ -284,7 +284,7 @@ export function CloudConnections() {
       <PageHeader
         title={t('Cloud Connections')}
         description={t(
-          'Configure provider connectivity by selecting a cloud credential per provider. Successful checks show a green connected status.'
+          'Configure provider connectivity. Each provider supports multiple named connections — useful for multiple accounts or nodes.'
         )}
       />
       <PageSection>
@@ -295,8 +295,10 @@ export function CloudConnections() {
         ) : (
           <Gallery hasGutter minWidths={{ default: '280px' }}>
             {cloudProviders.map((provider) => {
-              const state = connectionState[provider.id];
+              const entries = connections[provider.id] ?? [];
+              const status = overallStatus(entries);
               const ProviderLogo = providerLogos[provider.id] ?? CubesIcon;
+              const connectedCount = entries.filter((e) => e.status === 'connected').length;
               return (
                 <GalleryItem key={provider.id}>
                   <StyledConnectionCard onClick={() => setActiveModalProviderId(provider.id)}>
@@ -327,37 +329,15 @@ export function CloudConnections() {
                         gap: '0.5rem',
                       }}
                     >
-                      <div
-                        style={{
-                          minHeight: '2.5rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <StatusBadge status={state.status} />
+                      <StatusBadge status={status} />
+                      <div style={{ fontSize: '0.82rem', color: 'var(--pf-global--Color--200)' }}>
+                        {entries.length === 0
+                          ? t('No connections — click to add.')
+                          : t('{{connected}} of {{total}} connected', {
+                              connected: connectedCount,
+                              total: entries.length,
+                            })}
                       </div>
-                      {state.status === 'connected' && state.credentialName ? (
-                        <div
-                          style={{
-                            fontSize: '0.82rem',
-                            color: 'var(--pf-global--Color--200)',
-                            marginTop: '0.4rem',
-                          }}
-                        >
-                          {t('Credential: {{name}}', { name: state.credentialName })}
-                        </div>
-                      ) : (
-                        <div
-                          style={{
-                            fontSize: '0.82rem',
-                            color: 'var(--pf-global--Color--200)',
-                            marginTop: '0.4rem',
-                          }}
-                        >
-                          {t('Click to connect.')}
-                        </div>
-                      )}
                     </CardBody>
                   </StyledConnectionCard>
                 </GalleryItem>
@@ -372,12 +352,12 @@ export function CloudConnections() {
           onClose={() => setActiveModalProviderId(null)}
           credentials={credentials}
           getProviderCredentials={getProviderCredentials}
-          connectionState={connectionState}
-          credentialsByProvider={credentialsByProvider}
-          setCredentialsByProvider={setCredentialsByProvider}
+          entries={connections[activeModalProviderId] ?? []}
           onConnect={onConnect}
           onDisconnect={onDisconnect}
-          connectingProvider={connectingProvider}
+          onRemove={onRemove}
+          onAddAndConnect={onAddAndConnect}
+          connectingId={connectingId}
         />
       )}
     </PageLayout>
@@ -389,75 +369,61 @@ function ConnectionModal(props: {
   onClose: () => void;
   credentials: Credential[];
   getProviderCredentials: (providerId: string) => Credential[];
-  connectionState: ReturnType<typeof getCloudConnections>;
-  credentialsByProvider: Record<string, string>;
-  setCredentialsByProvider: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  onConnect: (providerId: string) => Promise<void>;
-  onDisconnect: (providerId: string) => void;
-  connectingProvider: string;
+  entries: CloudConnectionEntry[];
+  onConnect: (providerId: string, entryId: string, credentialId: number) => Promise<void>;
+  onDisconnect: (providerId: string, entryId: string) => void;
+  onRemove: (providerId: string, entryId: string) => void;
+  onAddAndConnect: (providerId: string, name: string, credentialId: number) => Promise<void>;
+  connectingId: string | null;
 }) {
   const { t } = useTranslation();
   const {
     providerId,
     onClose,
-    credentials,
     getProviderCredentials,
-    connectionState,
-    credentialsByProvider,
-    setCredentialsByProvider,
+    entries,
     onConnect,
     onDisconnect,
-    connectingProvider,
+    onRemove,
+    onAddAndConnect,
+    connectingId,
   } = props;
 
   const provider = cloudProviders.find((p) => p.id === providerId);
   const providerLabel = provider?.label ?? providerId;
   const providerCredentials = getProviderCredentials(providerId);
-  const state = connectionState[providerId];
-  const selectedCredentialId = Number(credentialsByProvider[providerId] ?? '0');
-  const selectedCredential = credentials.find((item) => item.id === selectedCredentialId);
-  const canUseSelectedCredential =
-    !selectedCredential || Boolean(selectedCredential.summary_fields?.user_capabilities?.use);
 
-  const isConnecting = connectingProvider === providerId;
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCredentialId, setNewCredentialId] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+
+  const handleAdd = async () => {
+    if (!newName.trim() || !newCredentialId) return;
+    setIsAdding(true);
+    try {
+      await onAddAndConnect(providerId, newName.trim(), Number(newCredentialId));
+      setNewName('');
+      setNewCredentialId('');
+      setShowAddForm(false);
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
   return (
     <Modal
-      title={t('Connect {{provider}}', { provider: providerLabel })}
+      title={t('{{provider}} Connections', { provider: providerLabel })}
       isOpen
       onClose={onClose}
       variant="medium"
       actions={[
-        <Button
-          key="connect"
-          variant="primary"
-          onClick={() => void onConnect(providerId)}
-          isLoading={isConnecting}
-          isDisabled={!canUseSelectedCredential || isConnecting}
-        >
-          {t('Connect')}
-        </Button>,
-        <Button
-          key="disconnect"
-          variant="secondary"
-          onClick={() => {
-            onDisconnect(providerId);
-            onClose();
-          }}
-          isDisabled={isConnecting || state.status === 'disconnected'}
-        >
-          {t('Disconnect')}
-        </Button>,
-        <Button key="cancel" variant="link" onClick={onClose} isDisabled={isConnecting}>
-          {t('Cancel')}
+        <Button key="close" variant="primary" onClick={onClose}>
+          {t('Close')}
         </Button>,
       ]}
     >
       <div style={{ display: 'grid', gap: 16 }}>
-        <div>
-          <StatusBadge status={state.status} />
-        </div>
-
         {providerId === 'digitalocean' && (
           <Alert isInline variant="info" title={t('DigitalOcean token requirement')}>
             {t(
@@ -465,49 +431,170 @@ function ConnectionModal(props: {
             )}
           </Alert>
         )}
-
-        <FormGroup label={t('Credential')} fieldId={`${providerId}-credential`}>
-          <FormSelect
-            id={`${providerId}-credential`}
-            value={credentialsByProvider[providerId] ?? ''}
-            onChange={(_, value) =>
-              setCredentialsByProvider((current) => ({
-                ...current,
-                [providerId]: String(value),
-              }))
-            }
-          >
-            <FormSelectOption value="" label={t('Select a credential')} isPlaceholder />
-            {providerCredentials.map((credential) => (
-              <FormSelectOption
-                key={credential.id}
-                value={credential.id.toString()}
-                label={credential.name}
-              />
-            ))}
-          </FormSelect>
-        </FormGroup>
-
-        {state.error && (
-          <Alert isInline variant="danger" title={t('Connection error')}>
-            {state.error}
-            {providerId === 'digitalocean' &&
-              state.error.includes('Unable to authenticate you') && (
-                <div style={{ marginTop: 8 }}>
-                  {t(
-                    'Fix: create a new Personal Access Token in DigitalOcean (API section), update do_token on this credential, then reconnect.'
-                  )}
-                </div>
-              )}
+        {providerId === 'proxmox' && (
+          <Alert isInline variant="info" title={t('Proxmox VE credential')}>
+            {t(
+              'Select a Proxmox VE credential. Each connection maps to one Proxmox node or cluster and injects TF_VAR_pm_* variables into Terraform jobs.'
+            )}
           </Alert>
         )}
 
-        {!canUseSelectedCredential && (
-          <Alert isInline variant="warning" title={t('Credential is not usable')}>
-            {t('Select a credential with use permission to connect this provider.')}
-          </Alert>
+        {/* Existing connections list */}
+        {entries.length > 0 && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                <th style={{ padding: '6px 8px' }}>{t('Name')}</th>
+                <th style={{ padding: '6px 8px' }}>{t('Status')}</th>
+                <th style={{ padding: '6px 8px' }}>{t('Credential')}</th>
+                <th style={{ padding: '6px 8px' }} />
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => {
+                const isThisConnecting = connectingId === entry.id;
+                return (
+                  <>
+                    <tr key={entry.id} style={{ borderBottom: entry.error ? 'none' : '1px solid #eee' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 500 }}>{entry.name}</td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <StatusBadge status={entry.status} />
+                      </td>
+                      <td style={{ padding: '6px 8px', color: '#888' }}>
+                        {entry.credentialName || '-'}
+                      </td>
+                      <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                        <Button
+                          variant="secondary"
+                          isSmall
+                          isLoading={isThisConnecting}
+                          isDisabled={!!connectingId || entry.status === 'connected'}
+                          onClick={() => {
+                            if (entry.credentialId) {
+                              void onConnect(providerId, entry.id, entry.credentialId);
+                            }
+                          }}
+                          style={{ marginRight: '0.4rem' }}
+                        >
+                          {t('Reconnect')}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          isSmall
+                          isDisabled={!!connectingId || entry.status !== 'connected'}
+                          onClick={() => onDisconnect(providerId, entry.id)}
+                          style={{ marginRight: '0.4rem' }}
+                        >
+                          {t('Disconnect')}
+                        </Button>
+                        <Button
+                          variant="plain"
+                          isSmall
+                          isDisabled={!!connectingId}
+                          onClick={() => onRemove(providerId, entry.id)}
+                          aria-label={t('Remove connection')}
+                        >
+                          ✕
+                        </Button>
+                      </td>
+                    </tr>
+                    {entry.error && (
+                      <tr key={`${entry.id}-err`} style={{ borderBottom: '1px solid #eee' }}>
+                        <td colSpan={4} style={{ padding: '0 8px 6px 8px' }}>
+                          <span style={{ color: 'var(--pf-v5-global--danger-color--100)', fontSize: '0.8rem' }}>
+                            {entry.error}
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {entries.length === 0 && !showAddForm && (
+          <div style={{ color: '#888', textAlign: 'center', padding: '0.5rem 0' }}>
+            {t('No connections yet. Click "Add connection" below.')}
+          </div>
+        )}
+
+        {/* Add connection form */}
+        {showAddForm ? (
+          <div
+            style={{
+              border: '1px solid var(--pf-v5-global--BorderColor--100)',
+              borderRadius: 6,
+              padding: '1rem',
+              display: 'grid',
+              gap: 12,
+            }}
+          >
+            <FormGroup label={t('Connection name')} fieldId={`${providerId}-new-name`} isRequired>
+              <TextInput
+                id={`${providerId}-new-name`}
+                value={newName}
+                onChange={(_, value) => setNewName(value)}
+                placeholder={t('e.g. Production node')}
+                isDisabled={isAdding}
+              />
+            </FormGroup>
+            <FormGroup label={t('Credential')} fieldId={`${providerId}-new-credential`} isRequired>
+              <FormSelect
+                id={`${providerId}-new-credential`}
+                value={newCredentialId}
+                onChange={(_, value) => setNewCredentialId(String(value))}
+                isDisabled={isAdding}
+              >
+                <FormSelectOption value="" label={t('Select a credential')} isPlaceholder />
+                {providerCredentials.map((credential) => (
+                  <FormSelectOption
+                    key={credential.id}
+                    value={credential.id.toString()}
+                    label={credential.name}
+                  />
+                ))}
+              </FormSelect>
+            </FormGroup>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                variant="primary"
+                isSmall
+                isLoading={isAdding}
+                isDisabled={!newName.trim() || !newCredentialId || isAdding}
+                onClick={() => void handleAdd()}
+              >
+                {t('Connect')}
+              </Button>
+              <Button
+                variant="link"
+                isSmall
+                isDisabled={isAdding}
+                onClick={() => {
+                  setShowAddForm(false);
+                  setNewName('');
+                  setNewCredentialId('');
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <Button
+              variant="secondary"
+              isSmall
+              isDisabled={!!connectingId}
+              onClick={() => setShowAddForm(true)}
+            >
+              {t('+ Add connection')}
+            </Button>
+          </div>
         )}
       </div>
     </Modal>
   );
 }
+

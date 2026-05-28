@@ -1,13 +1,26 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { Label } from '@patternfly/react-core';
-import { LoadingPage, useGetPageUrl } from '../../../../framework';
+import { CubesIcon } from '@patternfly/react-icons';
+import {
+  DateTimeCell,
+  ITableColumn,
+  LoadingPage,
+  PageLayout,
+  PageTable,
+  TextCell,
+  useGetPageUrl,
+  useInMemoryView,
+  usePageNavigate,
+} from '../../../../framework';
 import { useGetItem } from '../../../common/crud/useGet';
+import { StatusCell } from '../../../common/Status';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
+
+type HistoryEntry = CatalogDeployment['provisioning_history'][number] & { _idx: number };
 
 function formatDuration(startIso: string, finishIso?: string): string {
   const start = new Date(startIso).valueOf();
@@ -26,145 +39,121 @@ function historyEntryDuration(entry: { created: string; finished?: string; statu
   return formatDuration(entry.created, entry.finished);
 }
 
-function statusVariant(status: string): 'blue' | 'green' | 'red' | 'orange' | 'grey' {
-  switch (status) {
-    case 'successful': return 'green';
-    case 'failed':     return 'red';
-    case 'running':    return 'blue';
-    case 'canceled':   return 'orange';
-    default:           return 'grey';
-  }
-}
-
 export function CatalogDeploymentHistory() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const id = params.id ?? '';
   const getPageUrl = useGetPageUrl();
+  const pageNavigate = usePageNavigate();
 
   const { data: deployment, error, isLoading, refresh } = useGetItem<CatalogDeployment>(
     awxAPI`/catalog_deployments`,
     id
   );
 
-  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
-  const toggleRow = (idx: number) =>
-    setExpandedRows((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  const items = useMemo<HistoryEntry[]>(
+    () =>
+      (deployment?.provisioning_history ?? []).map((entry, idx) => ({ ...entry, _idx: idx })),
+    [deployment]
+  );
+
+  const tableColumns = useMemo<ITableColumn<HistoryEntry>[]>(
+    () => [
+      {
+        header: t('#'),
+        cell: (entry) => <TextCell text={String(entry._idx + 1)} />,
+        minWidth: 40,
+      },
+      {
+        header: t('Action'),
+        cell: (entry) => (
+          <TextCell
+            text={entry.action.charAt(0).toUpperCase() + entry.action.slice(1)}
+          />
+        ),
+      },
+      {
+        header: t('Status'),
+        cell: (entry) => <StatusCell status={entry.status} />,
+      },
+      {
+        header: t('Started'),
+        cell: (entry) => <DateTimeCell value={entry.created} />,
+      },
+      {
+        header: t('Finished'),
+        cell: (entry) =>
+          entry.finished ? <DateTimeCell value={entry.finished} /> : <TextCell text="-" />,
+      },
+      {
+        header: t('Duration'),
+        cell: (entry) => <TextCell text={historyEntryDuration(entry)} />,
+      },
+      {
+        header: t('Job'),
+        cell: (entry) =>
+          entry.job_id ? (
+            <TextCell
+              text={t('Job #{{id}}', { id: entry.job_id })}
+              to={getPageUrl(AwxRoute.TerraformJobPage, { params: { id: String(entry.job_id) } })}
+              onClick={() =>
+                pageNavigate(AwxRoute.TerraformJobPage, {
+                  params: { id: String(entry.job_id) },
+                })
+              }
+            />
+          ) : (
+            <TextCell text="-" />
+          ),
+      },
+    ],
+    [t, getPageUrl, pageNavigate]
+  );
+
+  const view = useInMemoryView<HistoryEntry>({
+    items,
+    keyFn: (entry) => entry._idx,
+    tableColumns,
+    disableQueryString: true,
+  });
+
+  const expandedRow = useMemo(
+    () => (entry: HistoryEntry) => {
+      if (!entry.details || Object.keys(entry.details).length === 0) return null;
+      return (
+        <pre
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '0.8rem',
+            margin: 0,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {JSON.stringify(entry.details, null, 2)}
+        </pre>
+      );
+    },
+    []
+  );
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !deployment) return <LoadingPage />;
 
-  const history = deployment.provisioning_history ?? [];
-
-  if (!history.length) {
-    return (
-      <div style={{ padding: '1.5rem', color: '#888' }}>
-        {t('No provisioning history yet.')}
-      </div>
-    );
-  }
-
   return (
-    <div style={{ padding: '1rem', overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '2px solid #ddd' }}>
-            <th style={{ padding: '6px 8px', width: '1.5rem' }} />
-            <th style={{ padding: '6px 8px' }}>#</th>
-            <th style={{ padding: '6px 8px' }}>{t('Action')}</th>
-            <th style={{ padding: '6px 8px' }}>{t('Status')}</th>
-            <th style={{ padding: '6px 8px' }}>{t('Started')}</th>
-            <th style={{ padding: '6px 8px' }}>{t('Finished')}</th>
-            <th style={{ padding: '6px 8px' }}>{t('Duration')}</th>
-            <th style={{ padding: '6px 8px' }}>{t('Job')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {history.map((entry, idx) => {
-            const hasDetails = entry.details && Object.keys(entry.details).length > 0;
-            const isExpanded = !!expandedRows[idx];
-            return (
-              <>
-                <tr
-                  key={`row-${idx}`}
-                  style={{ borderBottom: isExpanded ? 'none' : '1px solid #eee' }}
-                >
-                  <td style={{ padding: '6px 8px' }}>
-                    {hasDetails && (
-                      <button
-                        onClick={() => toggleRow(idx)}
-                        aria-label={isExpanded ? t('Collapse') : t('Expand')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: 0,
-                          fontSize: '0.75rem',
-                          color: '#666',
-                        }}
-                      >
-                        {isExpanded ? '▼' : '▶'}
-                      </button>
-                    )}
-                  </td>
-                  <td style={{ padding: '6px 8px', color: '#888' }}>{idx + 1}</td>
-                  <td style={{ padding: '6px 8px', textTransform: 'capitalize' }}>{entry.action}</td>
-                  <td style={{ padding: '6px 8px' }}>
-                    <Label color={statusVariant(entry.status)} isCompact>
-                      {entry.status}
-                    </Label>
-                  </td>
-                  <td style={{ padding: '6px 8px' }}>
-                    {new Date(entry.created).toLocaleString()}
-                  </td>
-                  <td style={{ padding: '6px 8px' }}>
-                    {entry.finished ? new Date(entry.finished).toLocaleString() : '-'}
-                  </td>
-                  <td style={{ padding: '6px 8px', fontVariantNumeric: 'tabular-nums' }}>
-                    {historyEntryDuration(entry)}
-                  </td>
-                  <td style={{ padding: '6px 8px' }}>
-                    {entry.job_id ? (
-                      <a
-                        href={getPageUrl(AwxRoute.Jobs)}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          /* navigate to job detail */
-                        }}
-                      >
-                        {t('Job #{{id}}', { id: entry.job_id })}
-                      </a>
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                </tr>
-                {isExpanded && hasDetails && (
-                  <tr
-                    key={`details-${idx}`}
-                    style={{ borderBottom: '1px solid #eee', background: '#f9f9f9' }}
-                  >
-                    <td />
-                    <td colSpan={7} style={{ padding: '4px 8px 10px 24px' }}>
-                      <pre
-                        style={{
-                          fontFamily: 'monospace',
-                          fontSize: '0.8rem',
-                          margin: 0,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {JSON.stringify(entry.details, null, 2)}
-                      </pre>
-                    </td>
-                  </tr>
-                )}
-              </>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <PageLayout>
+      <PageTable<HistoryEntry>
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading history')}
+        emptyStateTitle={t('No provisioning history yet.')}
+        emptyStateIcon={CubesIcon}
+        emptyStateDescription={t('This deployment has no provisioning history.')}
+        expandedRow={expandedRow}
+        disableListView
+        disableCardView
+        {...view}
+        defaultSubtitle={t('Provisioning History')}
+      />
+    </PageLayout>
   );
 }

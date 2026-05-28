@@ -15,6 +15,7 @@ from awx.api.views import (
     CatalogDeploymentRetry,
     CatalogDigitalOceanConnectorValidate,
     CatalogDigitalOceanPullImages,
+    CatalogProxmoxPullResources,
 )
 
 catalog_item_urls = [
@@ -42,5 +43,10 @@ catalog_cloud_urls = [
         r'^connectors/digitalocean/pull_images/$',
         CatalogDigitalOceanPullImages.as_view(),
         name='catalog_cloud_digitalocean_pull_images',
+    ),
+    re_path(
+        r'^connectors/proxmox/pull_resources/$',
+        CatalogProxmoxPullResources.as_view(),
+        name='catalog_cloud_proxmox_pull_resources',
     ),
 ]
