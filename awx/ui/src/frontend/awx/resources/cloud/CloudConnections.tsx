@@ -71,7 +71,7 @@ const providerLogos: Record<string, React.ComponentType<React.SVGProps<SVGSVGEle
 const providerAliases: Record<string, string[]> = {
   digitalocean: ['digitalocean', 'digitaloceanterraform', 'do'],
   aws: ['aws', 'amazonwebservices', 'amazon'],
-  azure: ['azure', 'azurerm', 'microsoftazure'],
+  azure: ['azure', 'azurerm', 'microsoftazure', 'azurermterraform'],
   gcp: ['gcp', 'googlecloud', 'googlecloudplatform'],
   proxmox: ['proxmox', 'proxmoxve', 'proxmoxvirtualenvironment', 'bpgproxmox'],
 };

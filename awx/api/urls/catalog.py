@@ -16,6 +16,8 @@ from awx.api.views import (
     CatalogDigitalOceanConnectorValidate,
     CatalogDigitalOceanPullImages,
     CatalogProxmoxPullResources,
+    CatalogVmwarePullResources,
+    CatalogAzurePullResources,
 )
 
 catalog_item_urls = [
@@ -48,5 +50,15 @@ catalog_cloud_urls = [
         r'^connectors/proxmox/pull_resources/$',
         CatalogProxmoxPullResources.as_view(),
         name='catalog_cloud_proxmox_pull_resources',
+    ),
+    re_path(
+        r'^connectors/vmware/pull_resources/$',
+        CatalogVmwarePullResources.as_view(),
+        name='catalog_cloud_vmware_pull_resources',
+    ),
+    re_path(
+        r'^connectors/azure/pull_resources/$',
+        CatalogAzurePullResources.as_view(),
+        name='catalog_cloud_azure_pull_resources',
     ),
 ]

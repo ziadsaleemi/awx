@@ -9,6 +9,7 @@ export const cloudProviders: CloudProvider[] = [
   { id: 'azure', label: 'Azure' },
   { id: 'gcp', label: 'GCP' },
   { id: 'proxmox', label: 'Proxmox VE' },
+  { id: 'vmware', label: 'VMware vSphere' },
 ];
 
 export function getCloudProviderLabel(providerId: string) {

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80" width="72" height="72">
+  <!-- Cloud outline representing VMware vSphere -->
+  <ellipse cx="38" cy="50" rx="28" ry="20" fill="#607078"/>
+  <ellipse cx="62" cy="54" rx="22" ry="17" fill="#607078"/>
+  <ellipse cx="50" cy="38" rx="20" ry="18" fill="#607078"/>
+  <ellipse cx="50" cy="46" rx="34" ry="22" fill="#607078"/>
+  <!-- Stylised V chevron in white -->
+  <polyline points="28,28 50,58 72,28" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -8,11 +8,6 @@ import {
   Button,
   Card,
   CardBody,
-  CardTitle,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
   EmptyState,
   EmptyStateBody,
   EmptyStateIcon,
@@ -95,13 +90,6 @@ const DarkCard = styled(Card)`
   background-color: #222428 !important;
   border: 1px solid var(--pf-v5-global--BorderColor--100) !important;
   box-shadow: var(--pf-v5-global--BoxShadow--sm) !important;
-`;
-
-const StatCard = styled(Card)`
-  text-align: center;
-  padding: 0.25rem 0;
-  background-color: #2c2e33 !important;
-  border: 1px solid var(--pf-v5-global--BorderColor--100) !important;
 `;
 
 // ─── sub-tabs ────────────────────────────────────────────────────────────────
@@ -475,40 +463,23 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: ProxmoxProvi
   const stCount = data?.storage?.length ?? 0;
 
   return (
-    <DarkCard style={{ height: '100%' }}>
+    <DarkCard style={{ height: '100%', borderRadius: 8 }}>
       <CardBody
         style={{
           display: 'flex',
           flexDirection: 'column',
           height: '100%',
-          justifyContent: 'space-between',
+          padding: '1.25rem',
+          gap: 16,
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            width: '100%',
-            gap: 16,
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <CardTitle style={{ marginBottom: '0.75rem', padding: 0 }}>{entry.name}</CardTitle>
-            <DescriptionList isCompact style={{ wordBreak: 'break-word' }}>
-              <DescriptionListGroup>
-                <DescriptionListTerm>{t('Credential')}</DescriptionListTerm>
-                <DescriptionListDescription>
-                  {entry.credentialName || '-'}
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup style={{ marginTop: '0.5rem' }}>
-                <DescriptionListTerm>{t('Last synced')}</DescriptionListTerm>
-                <DescriptionListDescription>
-                  {data?.pulledAt ? new Date(data.pulledAt).toLocaleString() : t('Never')}
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-            </DescriptionList>
+        {/* Header line */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ServerIcon style={{ color: '#e57000', fontSize: '1.1rem' }} />
+            <span style={{ fontWeight: 600, fontSize: '1.05rem', color: '#fff' }}>
+              {entry.name}
+            </span>
           </div>
           <div style={{ flexShrink: 0 }}>
             {entry.status === 'connected' ? (
@@ -521,29 +492,111 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: ProxmoxProvi
           </div>
         </div>
 
+        {/* Credential info panel */}
+        <div
+          style={{
+            background: '#1b1c20',
+            borderRadius: 6,
+            padding: '0.75rem',
+            border: '1px solid var(--pf-v5-global--BorderColor--100)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '0.82rem',
+              marginBottom: 6,
+            }}
+          >
+            <span style={{ color: 'var(--pf-v5-global--Color--200)' }}>{t('Credential')}</span>
+            <span
+              style={{ fontWeight: 500, color: '#fff', textAlign: 'right', wordBreak: 'break-all' }}
+            >
+              {entry.credentialName || '-'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+            <span style={{ color: 'var(--pf-v5-global--Color--200)' }}>{t('Last synced')}</span>
+            <span style={{ color: '#fff', fontWeight: 500 }}>
+              {data?.pulledAt ? new Date(data.pulledAt).toLocaleTimeString() : t('Never')}
+            </span>
+          </div>
+        </div>
+
+        {/* Discovered resources stats */}
         {data && (
-          <Grid hasGutter style={{ marginTop: '1.25rem' }}>
-            {[
-              { icon: <ServerIcon />, label: t('Nodes'), value: nodeCount },
-              { icon: <CubesIcon />, label: t('VMs'), value: vmCount },
-              { icon: <CubesIcon />, label: t('Containers'), value: ctCount },
-              { icon: <StorageDomainIcon />, label: t('Storage'), value: stCount },
-            ].map(({ icon, label, value }) => (
-              <GridItem key={label} span={6}>
-                <StatCard>
-                  <CardBody style={{ padding: '0.75rem 0.5rem' }}>
-                    <div style={{ color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}>
-                      {icon}
+          <div style={{ marginTop: 'auto' }}>
+            <div
+              style={{
+                fontSize: '0.75rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: 'var(--pf-v5-global--Color--200)',
+                marginBottom: '0.6rem',
+                fontWeight: 600,
+              }}
+            >
+              {t('Discovered Resources')}
+            </div>
+            <Grid hasGutter>
+              {[
+                {
+                  icon: <ServerIcon style={{ color: '#39a5dc' }} />,
+                  label: t('Nodes'),
+                  value: nodeCount,
+                },
+                {
+                  icon: <CubesIcon style={{ color: '#2b9af3' }} />,
+                  label: t('VMs'),
+                  value: vmCount,
+                },
+                {
+                  icon: <CubesIcon style={{ color: '#ec7a08' }} />,
+                  label: t('CTs'),
+                  value: ctCount,
+                },
+                {
+                  icon: <StorageDomainIcon style={{ color: '#f0ab00' }} />,
+                  label: t('Storage'),
+                  value: stCount,
+                },
+              ].map(({ icon, label, value }) => (
+                <GridItem key={label} span={6}>
+                  <div
+                    style={{
+                      background: '#2c2e33',
+                      border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                      borderRadius: 6,
+                      padding: '0.5rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    {icon}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          color: '#fff',
+                          lineHeight: 1.1,
+                        }}
+                      >
+                        {value}
+                      </div>
+                      <div
+                        style={{ fontSize: '0.68rem', color: 'var(--pf-v5-global--Color--200)' }}
+                      >
+                        {label}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{value}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)' }}>
-                      {label}
-                    </div>
-                  </CardBody>
-                </StatCard>
-              </GridItem>
-            ))}
-          </Grid>
+                  </div>
+                </GridItem>
+              ))}
+            </Grid>
+          </div>
         )}
 
         {entry.error && (
@@ -551,7 +604,7 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: ProxmoxProvi
             isInline
             variant="danger"
             title={t('Connection error')}
-            style={{ marginTop: '1rem' }}
+            style={{ marginTop: 'auto', fontSize: '0.8rem' }}
           >
             {entry.error}
           </Alert>
@@ -604,111 +657,139 @@ function OverviewTab(props: {
 
   return (
     <PageSection style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
-      <div style={{ display: 'grid', gap: 24, maxWidth: 1200, margin: '0 auto' }}>
-        {/* How it works banner */}
-        <Alert
-          isInline
-          variant="info"
-          title={t('How Proxmox VE credentials are used')}
-          customIcon={<InfoCircleIcon />}
-        >
-          {t(
-            'Each connected credential automatically injects Terraform variables (TF_VAR_pm_api_url, TF_VAR_pm_user, TF_VAR_pm_password / TF_VAR_pm_api_token_id, TF_VAR_pm_api_token_secret) into Terraform job templates that reference this provider. No manual variable configuration is needed per job.'
-          )}
-        </Alert>
-
-        {/* Connection summary cards */}
-        <div>
-          <Title headingLevel="h3" size="md" style={{ marginBottom: '0.75rem' }}>
-            {t('Connections')}
-            <Badge style={{ marginLeft: 8 }}>{connectionEntries.length}</Badge>
-          </Title>
-          <Grid hasGutter>
-            {connectionEntries.map((entry) => (
-              <GridItem key={entry.id} sm={12} md={6} lg={4}>
-                <ConnectionCard entry={entry} data={connectionDataMap[entry.id] || null} />
-              </GridItem>
-            ))}
-          </Grid>
-        </div>
-
-        {/* Terraform variable reference */}
-        <DarkCard>
-          <CardBody>
-            <CardTitle style={{ marginBottom: '1rem' }}>
-              <ProxmoxLogo
-                style={{ width: 20, height: 20, marginRight: 8, verticalAlign: 'middle' }}
-              />
-              {t('Terraform variable reference')}
-            </CardTitle>
-            <p
-              style={{
-                color: 'var(--pf-v5-global--Color--200)',
-                marginBottom: '0.75rem',
-                fontSize: '0.875rem',
-              }}
-            >
-              {t(
-                'The following environment variables are injected into Terraform job templates when a Proxmox VE connection is active. Use these in your Terraform provider configuration.'
-              )}
-            </p>
+      <Grid hasGutter style={{ maxWidth: 1400, margin: '0 auto' }}>
+        {/* Left Column: Connections list */}
+        <GridItem sm={12} lg={8} xl={9}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Title headingLevel="h3" size="md" style={{ color: '#fff', fontWeight: 600 }}>
+              {t('Active Connections')}
+              <Badge style={{ marginLeft: 8, background: '#e57000', color: '#fff' }}>
+                {connectionEntries.length}
+              </Badge>
+            </Title>
             <Grid hasGutter>
-              {[
-                {
-                  variable: 'TF_VAR_pm_api_url',
-                  description: t('Proxmox API endpoint, e.g. https://node:8006/api2/json'),
-                },
-                {
-                  variable: 'TF_VAR_pm_user',
-                  description: t('API user, e.g. root@pam (used with password auth)'),
-                },
-                {
-                  variable: 'TF_VAR_pm_password',
-                  description: t('API user password (used with password auth)'),
-                },
-                {
-                  variable: 'TF_VAR_pm_api_token_id',
-                  description: t('API token ID, e.g. user@pam!tokenid (used with token auth)'),
-                },
-                {
-                  variable: 'TF_VAR_pm_api_token_secret',
-                  description: t('API token secret UUID (used with token auth)'),
-                },
-                {
-                  variable: 'TF_VAR_pm_tls_insecure',
-                  description: t('Set true to disable TLS certificate verification'),
-                },
-              ].map(({ variable, description }) => (
-                <GridItem key={variable} sm={12} md={6}>
-                  <div
-                    style={{
-                      background: '#1b1c20',
-                      border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                      borderRadius: 6,
-                      padding: '0.6rem 0.8rem',
-                    }}
-                  >
-                    <code
-                      style={{
-                        color: '#e57000',
-                        fontSize: '0.8rem',
-                        fontFamily: 'monospace',
-                        display: 'block',
-                        marginBottom: '0.2rem',
-                      }}
-                    >
-                      {variable}
-                    </code>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)' }}>
-                      {description}
-                    </span>
-                  </div>
+              {connectionEntries.map((entry) => (
+                <GridItem key={entry.id} sm={12} md={6} xl={4}>
+                  <ConnectionCard entry={entry} data={connectionDataMap[entry.id] || null} />
                 </GridItem>
               ))}
             </Grid>
-          </CardBody>
-        </DarkCard>
-      </div>
+          </div>
+        </GridItem>
+
+        {/* Right Column: Variable Reference & Info Sidebar */}
+        <GridItem sm={12} lg={4} xl={3}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Quick explanation panel */}
+            <DarkCard>
+              <CardBody style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <InfoCircleIcon
+                    style={{ color: '#39a5dc', fontSize: '1.2rem', marginTop: 2, flexShrink: 0 }}
+                  />
+                  <div>
+                    <h4
+                      style={{
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        color: '#fff',
+                        marginBottom: 6,
+                      }}
+                    >
+                      {t('How credentials work')}
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: '0.78rem',
+                        color: 'var(--pf-v5-global--Color--200)',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {t(
+                        'Connected credentials automatically inject standard Terraform variables into job templates that use this provider. No manual variable mapping is required.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </CardBody>
+            </DarkCard>
+
+            {/* Variable Reference List */}
+            <DarkCard>
+              <CardBody style={{ padding: '1.25rem' }}>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '1rem' }}
+                >
+                  <ProxmoxLogo style={{ width: 18, height: 18 }} />
+                  <h4 style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>
+                    {t('Terraform Variables')}
+                  </h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    {
+                      variable: 'TF_VAR_pm_api_url',
+                      description: t('Proxmox API endpoint, e.g. https://node:8006/api2/json'),
+                    },
+                    {
+                      variable: 'TF_VAR_pm_user',
+                      description: t('API user (e.g. root@pam)'),
+                    },
+                    {
+                      variable: 'TF_VAR_pm_password',
+                      description: t('API user password'),
+                    },
+                    {
+                      variable: 'TF_VAR_pm_api_token_id',
+                      description: t('API token ID (e.g. user@pam!tokenid)'),
+                    },
+                    {
+                      variable: 'TF_VAR_pm_api_token_secret',
+                      description: t('API token secret UUID'),
+                    },
+                    {
+                      variable: 'TF_VAR_pm_tls_insecure',
+                      description: t('Disable TLS cert verification (true/false)'),
+                    },
+                  ].map(({ variable, description }) => (
+                    <div
+                      key={variable}
+                      style={{
+                        background: '#1b1c20',
+                        border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                        borderRadius: 6,
+                        padding: '0.6rem 0.75rem',
+                      }}
+                    >
+                      <code
+                        style={{
+                          color: '#e57000',
+                          fontSize: '0.75rem',
+                          fontFamily: 'monospace',
+                          display: 'block',
+                          marginBottom: '0.15rem',
+                        }}
+                      >
+                        {variable}
+                      </code>
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          color: 'var(--pf-v5-global--Color--200)',
+                          lineHeight: 1.3,
+                          display: 'block',
+                        }}
+                      >
+                        {description}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </CardBody>
+            </DarkCard>
+          </div>
+        </GridItem>
+      </Grid>
     </PageSection>
   );
 }

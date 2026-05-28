@@ -1,6 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Button, Label, PageSection, Spinner } from '@patternfly/react-core';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  Grid,
+  GridItem,
+  Label,
+  PageSection,
+  Spinner,
+  Title,
+} from '@patternfly/react-core';
+import { CheckCircleIcon, ExclamationCircleIcon, InfoCircleIcon } from '@patternfly/react-icons';
 import { postRequest } from '../../../common/crud/Data';
 import { isRequestError } from '../../../common/crud/RequestError';
 import {
@@ -18,6 +31,7 @@ import { EmptyStateUnauthorized } from '../../../../framework/components/EmptySt
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
+  CloudConnectionEntry,
   DigitalOceanImage,
   DigitalOceanProviderData,
   DigitalOceanRegion,
@@ -27,8 +41,11 @@ import {
   getCloudProviderData,
   setCloudProviderData,
 } from './cloudConnectionStore';
+import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import { getCloudProviderLabel } from './cloudProviders';
+import { AzureProviderSettings } from './AzureProviderSettings';
 import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
+import { VmwareProviderSettings } from './VmwareProviderSettings';
 
 interface PullApiResponse {
   pulled_at: string;
@@ -40,6 +57,246 @@ interface PullApiResponse {
   pricing: DigitalOceanSize[];
   regions: DigitalOceanRegion[];
   vpcs: DigitalOceanVpc[];
+}
+
+function DigitalOceanOverviewTab(props: {
+  connectedEntry: CloudConnectionEntry | undefined;
+  data: DigitalOceanProviderData | null;
+  onPull: () => void;
+  isPulling: boolean;
+}) {
+  const { t } = useTranslation();
+  const { connectedEntry, data } = props;
+  const isConnected = Boolean(connectedEntry);
+  const pulledAt = data?.pulledAt ? new Date(data.pulledAt).toLocaleString() : null;
+
+  const stats = [
+    { label: t('Images'), value: data?.images.length ?? 0, color: '#38a169' },
+    { label: t('Droplet Sizes'), value: data?.pricing.length ?? 0, color: '#0078D4' },
+    { label: t('Regions'), value: data?.regions.length ?? 0, color: '#805ad5' },
+    { label: t('VPCs'), value: data?.vpcs.length ?? 0, color: '#d69e2e' },
+  ];
+
+  return (
+    <PageSection style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
+      <Grid hasGutter style={{ maxWidth: 1400, margin: '0 auto' }}>
+        {/* ── left: connection + stats ── */}
+        <GridItem sm={12} lg={8} xl={9}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* connection card */}
+            <Card
+              style={{
+                background: '#222428',
+                border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                boxShadow: 'var(--pf-v5-global--BoxShadow--sm)',
+              }}
+            >
+              <CardBody style={{ padding: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <img src={DigitalOceanLogo as string} alt="DigitalOcean" style={{ width: 36, height: 36 }} />
+                  <div>
+                    <Title headingLevel="h3" size="md" style={{ color: '#fff', fontWeight: 600 }}>
+                      {t('DigitalOcean')}
+                    </Title>
+                    {isConnected ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <CheckCircleIcon style={{ color: '#38a169', fontSize: '0.85rem' }} />
+                        <span style={{ fontSize: '0.8rem', color: '#38a169' }}>
+                          {t('Connected')} — {connectedEntry!.credentialName}
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        <ExclamationCircleIcon style={{ color: '#e53e3e', fontSize: '0.85rem' }} />
+                        <span style={{ fontSize: '0.8rem', color: '#e53e3e' }}>
+                          {t('Not connected')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {pulledAt && (
+                    <span
+                      style={{
+                        marginLeft: 'auto',
+                        fontSize: '0.75rem',
+                        color: 'var(--pf-v5-global--Color--200)',
+                      }}
+                    >
+                      {t('Last pull: {{time}}', { time: pulledAt })}
+                    </span>
+                  )}
+                </div>
+
+                {/* stat boxes */}
+                <Grid hasGutter>
+                  {stats.map((s) => (
+                    <GridItem key={s.label} sm={6} md={3}>
+                      <div
+                        style={{
+                          background: '#1b1c20',
+                          border: `1px solid ${s.color}55`,
+                          borderRadius: 8,
+                          padding: '0.85rem 1rem',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: '1.6rem',
+                            fontWeight: 700,
+                            color: s.color,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {s.value}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--pf-v5-global--Color--200)',
+                            marginTop: 4,
+                          }}
+                        >
+                          {s.label}
+                        </div>
+                      </div>
+                    </GridItem>
+                  ))}
+                </Grid>
+              </CardBody>
+            </Card>
+
+            {!isConnected && (
+              <Alert isInline variant="warning" title={t('Provider not connected')}>
+                {t(
+                  'Go to Cloud Connections and connect a DigitalOcean credential to pull resources.'
+                )}
+              </Alert>
+            )}
+          </div>
+        </GridItem>
+
+        {/* ── right: info panel ── */}
+        <GridItem sm={12} lg={4} xl={3}>
+          <Card
+            style={{
+              background: '#222428',
+              border: '1px solid var(--pf-v5-global--BorderColor--100)',
+              boxShadow: 'var(--pf-v5-global--BoxShadow--sm)',
+            }}
+          >
+            <CardBody style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <InfoCircleIcon
+                  style={{ color: '#0069e0', fontSize: '1.2rem', marginTop: 2, flexShrink: 0 }}
+                />
+                <div>
+                  <h4
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '0.9rem',
+                      color: '#fff',
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t('DigitalOcean credentials')}
+                  </h4>
+                  <p
+                    style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--pf-v5-global--Color--200)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {t(
+                      'Connect a DigitalOcean personal access token. Pull data to inventory available images, droplet sizes, regions, and VPCs for use in Terraform deployments.'
+                    )}
+                  </p>
+                  <div
+                    style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+                  >
+                    {[
+                      {
+                        variable: 'DIGITALOCEAN_TOKEN',
+                        description: t('Personal access token with read scope'),
+                      },
+                    ].map(({ variable, description }) => (
+                      <div
+                        key={variable}
+                        style={{
+                          background: '#1b1c20',
+                          border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                          borderRadius: 6,
+                          padding: '0.6rem 0.75rem',
+                        }}
+                      >
+                        <code
+                          style={{
+                            color: '#0069e0',
+                            fontSize: '0.75rem',
+                            fontFamily: 'monospace',
+                            display: 'block',
+                            marginBottom: '0.15rem',
+                          }}
+                        >
+                          {variable}
+                        </code>
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            color: 'var(--pf-v5-global--Color--200)',
+                            lineHeight: 1.3,
+                            display: 'block',
+                          }}
+                        >
+                          {description}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginTop: 16 }}>
+                    <h4
+                      style={{
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        color: '#fff',
+                        marginBottom: 8,
+                      }}
+                    >
+                      {t('Available data')}
+                    </h4>
+                    {[
+                      t('Distro & custom images'),
+                      t('Droplet size catalogue with pricing'),
+                      t('All regions & feature flags'),
+                      t('VPC networks per region'),
+                    ].map((item) => (
+                      <div
+                        key={item}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginBottom: 6,
+                          fontSize: '0.8rem',
+                          color: 'var(--pf-v5-global--Color--200)',
+                        }}
+                      >
+                        <CheckCircleIcon style={{ color: '#38a169', fontSize: '0.75rem', flexShrink: 0 }} />
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardBody>
+          </Card>
+        </GridItem>
+      </Grid>
+    </PageSection>
+  );
 }
 
 function ImagesTab(props: { images: DigitalOceanImage[] }) {
@@ -477,6 +734,14 @@ function DefaultProviderSettings(props: { provider: string }) {
         </PageSection>
       )}
       <PageTabs>
+        <PageTab label={t('Overview')}>
+          <DigitalOceanOverviewTab
+            connectedEntry={connectedEntry}
+            data={data}
+            onPull={() => void onPull()}
+            isPulling={isPulling}
+          />
+        </PageTab>
         <PageTab label={t('Images') + (data ? count(data.images.length) : '')}>
           <ImagesTab images={data?.images ?? []} />
         </PageTab>
@@ -495,8 +760,8 @@ function DefaultProviderSettings(props: { provider: string }) {
 }
 
 export function CloudProviderSettings(props: { provider: string }) {
-  if (props.provider === 'proxmox') {
-    return <ProxmoxProviderSettings />;
-  }
+  if (props.provider === 'azure') return <AzureProviderSettings />;
+  if (props.provider === 'proxmox') return <ProxmoxProviderSettings />;
+  if (props.provider === 'vmware') return <VmwareProviderSettings />;
   return <DefaultProviderSettings provider={props.provider} />;
 }

@@ -152,6 +152,166 @@ export interface ProxmoxProviderData {
   networks: ProxmoxNetwork[];
 }
 
+// ── VMware vSphere data types ─────────────────────────────────────────────────
+
+export interface VmwareDatacenter {
+  id: string;
+  name: string;
+}
+
+export interface VmwareCluster {
+  id: string;
+  name: string;
+  datacenter_id?: string;
+  ha_enabled: boolean;
+  drs_enabled: boolean;
+  host_count: number;
+}
+
+export interface VmwareHost {
+  id: string;
+  name: string;
+  cluster_id?: string;
+  power_state: 'POWERED_ON' | 'POWERED_OFF' | 'STANDBY' | string;
+  connection_state: 'CONNECTED' | 'DISCONNECTED' | 'NOT_RESPONDING' | string;
+  cpu_count?: number;
+  memory_size_mib?: number;
+}
+
+export interface VmwareVM {
+  id: string;
+  name: string;
+  power_state: 'POWERED_ON' | 'POWERED_OFF' | 'SUSPENDED' | string;
+  host_id?: string;
+  memory_size_mib: number;
+  cpu_count: number;
+}
+
+export interface VmwareNetwork {
+  id: string;
+  name: string;
+  type: 'STANDARD_PORTGROUP' | 'DISTRIBUTED_PORTGROUP' | 'OPAQUE_NETWORK' | string;
+}
+
+export interface VmwareDatastore {
+  id: string;
+  name: string;
+  type: 'VMFS' | 'NFS' | 'NFS41' | 'VSAN' | 'VVOL' | string;
+  capacity_mb: number;
+  free_space_mb: number;
+  accessible: boolean;
+}
+
+export interface VmwareProviderData {
+  pulledAt: string;
+  connectionId: string;
+  datacenters: VmwareDatacenter[];
+  clusters: VmwareCluster[];
+  hosts: VmwareHost[];
+  vms: VmwareVM[];
+  networks: VmwareNetwork[];
+  datastores: VmwareDatastore[];
+}
+
+// ── Azure data types ──────────────────────────────────────────────────────────
+
+export interface AzureSubscription {
+  id: string;
+  display_name: string;
+  state: string;
+  tenant_id: string;
+}
+
+export interface AzureResourceGroup {
+  id: string;
+  name: string;
+  location: string;
+  provisioning_state: string;
+  tags?: Record<string, string>;
+}
+
+export interface AzureVM {
+  id: string;
+  name: string;
+  location: string;
+  resource_group: string;
+  vm_size: string;
+  os_type: 'Windows' | 'Linux' | string;
+  power_state?: string;
+  provisioning_state: string;
+  tags?: Record<string, string>;
+}
+
+export interface AzureVNet {
+  id: string;
+  name: string;
+  location: string;
+  resource_group: string;
+  address_space: string[];
+  provisioning_state: string;
+}
+
+export interface AzureStorageAccount {
+  id: string;
+  name: string;
+  location: string;
+  resource_group: string;
+  kind: string;
+  sku: string;
+  provisioning_state: string;
+}
+
+export interface AzureLocation {
+  id: string;
+  name: string;
+  display_name: string;
+  region_type: string;
+}
+
+export interface AzureVMImage {
+  id: string;
+  name: string;
+  publisher: string;
+  offer: string;
+  sku: string;
+  version: string;
+  os_type: string;       // "Linux" | "Windows" | ""
+  image_type: string;    // "marketplace" | "custom" | "gallery"
+  location: string;
+  urn: string;           // publisher:offer:sku:version (Terraform reference)
+  description?: string;
+}
+
+export interface AzureVMSize {
+  name: string;           // e.g. "Standard_D4s_v5"
+  tier: string;           // "Standard" | "Basic"
+  family: string;         // e.g. "standardDSv5Family"
+  vcpus: number;
+  memory_gb: number;
+  gpus: number;
+  max_data_disks: number;
+  max_nics: number;
+  premium_io: boolean;
+  ultra_ssd: boolean;
+  accelerated_networking: boolean;
+  zones: string[];
+  location: string;
+  price_per_hour: number | null;  // Linux pay-as-you-go USD/hr (null if not available)
+}
+
+export interface AzureProviderData {
+  pulledAt: string;
+  connectionId: string;
+  subscription_id: string;
+  resource_groups: AzureResourceGroup[];
+  vms: AzureVM[];
+  vnets: AzureVNet[];
+  storage_accounts: AzureStorageAccount[];
+  locations: AzureLocation[];
+  vm_images: AzureVMImage[];
+  vm_sizes: AzureVMSize[];
+}
+
 function isBrowser() {
   return typeof window !== 'undefined';
 }

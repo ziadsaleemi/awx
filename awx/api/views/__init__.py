@@ -6204,3 +6204,710 @@ class CatalogProxmoxPullResources(GenericAPIView):
             'storage': storage_results,
             'networks': network_results,
         })
+
+
+class CatalogVmwarePullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/vmware/pull_resources/
+
+    Fetches live inventory from a VMware vCenter server using the selected
+    VMware vSphere credential. Returns datacenters, clusters, hosts, VMs,
+    networks, and datastores via the vSphere REST API.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull VMware vSphere inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'vmware':
+            return Response(
+                {'credential_id': [_('Credential must be of type VMware vCenter.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
+        vcenter_user = credential.get_input('username', default='') or ''
+        vcenter_pass = credential.get_input('password', default='') or ''
+        validate_certs = credential.get_input('validate_certs', default=True)
+
+        if not vcenter_host:
+            return Response(
+                {'credential_id': [_('Credential is missing the host field.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not vcenter_user or not vcenter_pass:
+            return Response(
+                {'credential_id': [_('Credential is missing username or password.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Normalise the base URL — accept bare hostname or full URL
+        if not vcenter_host.startswith(('http://', 'https://')):
+            vcenter_host = f'https://{vcenter_host}'
+
+        session = requests.Session()
+        session.verify = bool(validate_certs)
+
+        # ── Authenticate: obtain a vSphere REST session token ────────────────
+        auth_url = f'{vcenter_host}/rest/com/vmware/cis/session'
+        try:
+            auth_resp = session.post(auth_url, auth=(vcenter_user, vcenter_pass), timeout=20)
+        except requests.RequestException as exc:
+            raise ParseError(
+                _('Could not connect to vCenter (%(host)s): %(exc)s')
+                % {'host': vcenter_host, 'exc': str(exc)}
+            )
+
+        if not auth_resp.ok:
+            raise ParseError(
+                _('vCenter authentication failed (%(status)s). Check credentials.')
+                % {'status': auth_resp.status_code}
+            )
+
+        session_token = auth_resp.json().get('value', '')
+        if not session_token:
+            raise ParseError(_('vCenter returned an empty session token.'))
+
+        session.headers.update({
+            'vmware-api-session-id': session_token,
+            'Accept': 'application/json',
+        })
+
+        def _get(path):
+            url = f'{vcenter_host}/rest{path}'
+            resp = session.get(url, timeout=20)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    detail = resp.json().get('value', {}).get('messages', [{}])[0].get('default_message', detail)
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('vCenter API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            return resp.json().get('value', []) or []
+
+        try:
+            # ── Datacenters ──────────────────────────────────────────────────
+            raw_dcs = _get('/vcenter/datacenter')
+            datacenters = [
+                {'id': dc.get('datacenter', ''), 'name': dc.get('name', '')}
+                for dc in raw_dcs
+            ]
+
+            # ── Clusters ────────────────────────────────────────────────────
+            raw_clusters = _get('/vcenter/cluster')
+            clusters = [
+                {
+                    'id': c.get('cluster', ''),
+                    'name': c.get('name', ''),
+                    'datacenter_id': c.get('datacenter', ''),
+                    'ha_enabled': bool(c.get('ha_enabled', False)),
+                    'drs_enabled': bool(c.get('drs_enabled', False)),
+                    'host_count': c.get('host_count', 0),
+                }
+                for c in raw_clusters
+            ]
+
+            # ── Hosts ────────────────────────────────────────────────────────
+            raw_hosts = _get('/vcenter/host')
+            hosts = [
+                {
+                    'id': h.get('host', ''),
+                    'name': h.get('name', ''),
+                    'cluster_id': h.get('cluster', ''),
+                    'power_state': h.get('power_state', ''),
+                    'connection_state': h.get('connection_state', ''),
+                    'cpu_count': h.get('cpu_count', 0),
+                    'memory_size_mib': h.get('memory_size_MiB', 0),
+                }
+                for h in raw_hosts
+            ]
+
+            # ── VMs ──────────────────────────────────────────────────────────
+            raw_vms = _get('/vcenter/vm')
+            vms = [
+                {
+                    'id': vm.get('vm', ''),
+                    'name': vm.get('name', ''),
+                    'power_state': vm.get('power_state', ''),
+                    'host_id': vm.get('host', ''),
+                    'memory_size_mib': vm.get('memory_size_MiB', 0),
+                    'cpu_count': vm.get('cpu_count', 0),
+                }
+                for vm in raw_vms
+            ]
+
+            # ── Networks ─────────────────────────────────────────────────────
+            raw_networks = _get('/vcenter/network')
+            networks = [
+                {
+                    'id': n.get('network', ''),
+                    'name': n.get('name', ''),
+                    'type': n.get('type', ''),
+                }
+                for n in raw_networks
+            ]
+
+            # ── Datastores ───────────────────────────────────────────────────
+            raw_datastores = _get('/vcenter/datastore')
+            datastores = [
+                {
+                    'id': ds.get('datastore', ''),
+                    'name': ds.get('name', ''),
+                    'type': ds.get('type', ''),
+                    'capacity_mb': ds.get('capacity', 0),
+                    'free_space_mb': ds.get('free_space', 0),
+                    'accessible': bool(ds.get('accessible', True)),
+                }
+                for ds in raw_datastores
+            ]
+
+        finally:
+            # Always log out the session to avoid orphaned sessions on vCenter
+            try:
+                session.delete(f'{vcenter_host}/rest/com/vmware/cis/session', timeout=10)
+            except Exception:
+                pass
+
+        return Response({
+            'provider': 'vmware',
+            'credential_id': credential_id,
+            'pulled_at': now().isoformat(),
+            'datacenter_count': len(datacenters),
+            'cluster_count': len(clusters),
+            'host_count': len(hosts),
+            'vm_count': len(vms),
+            'network_count': len(networks),
+            'datastore_count': len(datastores),
+            'datacenters': datacenters,
+            'clusters': clusters,
+            'hosts': hosts,
+            'vms': vms,
+            'networks': networks,
+            'datastores': datastores,
+        })
+
+
+class CatalogAzurePullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/azure/pull_resources/
+
+    Fetches live inventory from an Azure subscription using the Azure Resource
+    Manager REST API and the selected Azure Resource Manager (Terraform)
+    credential. Returns resource groups, VMs, virtual networks, storage
+    accounts, and available locations.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull Azure subscription inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'azure_rm_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type Azure Resource Manager (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        subscription_id = credential.get_input('arm_subscription_id', default='') or ''
+        client_id = credential.get_input('arm_client_id', default='') or ''
+        client_secret = credential.get_input('arm_client_secret', default='') or ''
+        tenant_id = credential.get_input('arm_tenant_id', default='') or ''
+        environment = credential.get_input('arm_environment', default='') or ''
+
+        for field, label in (
+            (subscription_id, 'arm_subscription_id'),
+            (client_id, 'arm_client_id'),
+            (client_secret, 'arm_client_secret'),
+            (tenant_id, 'arm_tenant_id'),
+        ):
+            if not field:
+                return Response(
+                    {'credential_id': [_('Credential is missing %(field)s.') % {'field': label}]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ── Select Azure cloud endpoints ─────────────────────────────────────
+        env_map = {
+            'AzureUSGovernment': {
+                'login': 'https://login.microsoftonline.us',
+                'arm': 'https://management.usgovcloudapi.net',
+                'scope': 'https://management.usgovcloudapi.net/.default',
+            },
+            'AzureChinaCloud': {
+                'login': 'https://login.chinacloudapi.cn',
+                'arm': 'https://management.chinacloudapi.cn',
+                'scope': 'https://management.chinacloudapi.cn/.default',
+            },
+            'AzureGermanCloud': {
+                'login': 'https://login.microsoftonline.de',
+                'arm': 'https://management.microsoftazure.de',
+                'scope': 'https://management.microsoftazure.de/.default',
+            },
+        }
+        endpoints = env_map.get(environment, {
+            'login': 'https://login.microsoftonline.com',
+            'arm': 'https://management.azure.com',
+            'scope': 'https://management.azure.com/.default',
+        })
+
+        arm_base = endpoints['arm'].rstrip('/')
+
+        # ── Obtain an OAuth2 access token via client credentials ─────────────
+        token_url = f"{endpoints['login']}/{tenant_id}/oauth2/v2.0/token"
+        try:
+            token_resp = requests.post(
+                token_url,
+                data={
+                    'grant_type': 'client_credentials',
+                    'client_id': client_id,
+                    'client_secret': client_secret,
+                    'scope': endpoints['scope'],
+                },
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            raise ParseError(
+                _('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)}
+            )
+
+        if not token_resp.ok:
+            try:
+                error_detail = token_resp.json().get('error_description', token_resp.text)
+            except Exception:
+                error_detail = token_resp.text
+            raise ParseError(
+                _('Azure authentication failed (%(status)s): %(detail)s')
+                % {'status': token_resp.status_code, 'detail': error_detail}
+            )
+
+        access_token = token_resp.json().get('access_token', '')
+        if not access_token:
+            raise ParseError(_('Azure returned an empty access token.'))
+
+        api_version_map = {
+            'resourcegroups': '2021-04-01',
+            'virtualmachines': '2023-07-01',
+            'virtualnetworks': '2023-09-01',
+            'storageaccounts': '2023-01-01',
+            'locations': '2022-12-01',
+        }
+
+        arm_session = requests.Session()
+        arm_session.headers.update({
+            'Authorization': f'Bearer {access_token}',
+            'Accept': 'application/json',
+        })
+
+        def _arm_get(path, api_version):
+            url = f'{arm_base}{path}'
+            params = {'api-version': api_version}
+            resp = arm_session.get(url, params=params, timeout=30)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    err = resp.json()
+                    detail = err.get('error', {}).get('message', detail)
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('Azure API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            data = resp.json()
+            return data.get('value', []) or []
+
+        sub_prefix = f'/subscriptions/{subscription_id}'
+
+        # ── List all subscriptions the SP can access (for diagnostics) ────────
+        accessible_subscriptions = []
+        subscription_accessible = None
+        try:
+            subs_resp = arm_session.get(
+                f'{arm_base}/subscriptions',
+                params={'api-version': '2022-12-01'},
+                timeout=20,
+            )
+            if subs_resp.ok:
+                raw_subs = subs_resp.json().get('value', [])
+                accessible_subscriptions = [
+                    {
+                        'id': s.get('subscriptionId', ''),
+                        'name': s.get('displayName', ''),
+                        'state': s.get('state', ''),
+                    }
+                    for s in raw_subs
+                ]
+                accessible_ids = {s['id'] for s in accessible_subscriptions}
+                subscription_accessible = subscription_id in accessible_ids
+        except Exception:
+            pass
+
+        # ── Resource Groups ───────────────────────────────────────────────────
+        raw_rgs = _arm_get(f'{sub_prefix}/resourcegroups', api_version_map['resourcegroups'])
+        resource_groups = [
+            {
+                'id': rg.get('id', ''),
+                'name': rg.get('name', ''),
+                'location': rg.get('location', ''),
+                'provisioning_state': rg.get('properties', {}).get('provisioningState', ''),
+                'tags': rg.get('tags') or {},
+            }
+            for rg in raw_rgs
+        ]
+
+        # ── Virtual Machines ──────────────────────────────────────────────────
+        raw_vms = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Compute/virtualMachines',
+            api_version_map['virtualmachines'],
+        )
+        vms = []
+        for vm in raw_vms:
+            props = vm.get('properties', {})
+            os_profile = props.get('osProfile', {})
+            storage_profile = props.get('storageProfile', {})
+            os_disk = storage_profile.get('osDisk', {})
+            # Power state comes from instance view; omit to avoid per-VM calls
+            vms.append({
+                'id': vm.get('id', ''),
+                'name': vm.get('name', ''),
+                'location': vm.get('location', ''),
+                'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
+                'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
+                'os_type': os_disk.get('osType', ''),
+                'provisioning_state': props.get('provisioningState', ''),
+                'tags': vm.get('tags') or {},
+            })
+
+        # ── Virtual Networks ──────────────────────────────────────────────────
+        raw_vnets = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Network/virtualNetworks',
+            api_version_map['virtualnetworks'],
+        )
+        vnets = [
+            {
+                'id': vn.get('id', ''),
+                'name': vn.get('name', ''),
+                'location': vn.get('location', ''),
+                'resource_group': vn.get('id', '').split('/')[4] if vn.get('id') else '',
+                'address_space': vn.get('properties', {}).get('addressSpace', {}).get('addressPrefixes', []),
+                'provisioning_state': vn.get('properties', {}).get('provisioningState', ''),
+            }
+            for vn in raw_vnets
+        ]
+
+        # ── Storage Accounts ──────────────────────────────────────────────────
+        raw_storage = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Storage/storageAccounts',
+            api_version_map['storageaccounts'],
+        )
+        storage_accounts = [
+            {
+                'id': sa.get('id', ''),
+                'name': sa.get('name', ''),
+                'location': sa.get('location', ''),
+                'resource_group': sa.get('id', '').split('/')[4] if sa.get('id') else '',
+                'kind': sa.get('kind', ''),
+                'sku': sa.get('sku', {}).get('name', ''),
+                'provisioning_state': sa.get('properties', {}).get('provisioningState', ''),
+            }
+            for sa in raw_storage
+        ]
+
+        # ── Locations ─────────────────────────────────────────────────────────
+        raw_locations = _arm_get(
+            f'{sub_prefix}/locations',
+            api_version_map['locations'],
+        )
+        locations = [
+            {
+                'id': loc.get('id', ''),
+                'name': loc.get('name', ''),
+                'display_name': loc.get('displayName', ''),
+                'region_type': loc.get('metadata', {}).get('regionType', 'Physical'),
+            }
+            for loc in raw_locations
+        ]
+
+        # ── VM Images ─────────────────────────────────────────────────────────
+        # Primary location: prefer eastus, otherwise first physical location
+        physical_locs = [l for l in locations if l.get('region_type') == 'Physical']
+        primary_location = next(
+            (l['name'] for l in physical_locs if l['name'] == 'eastus'),
+            physical_locs[0]['name'] if physical_locs else 'eastus',
+        )
+
+        vm_images = []
+
+        # 1 — Custom managed images in the subscription
+        try:
+            raw_custom = _arm_get(
+                f'{sub_prefix}/providers/Microsoft.Compute/images',
+                '2023-07-01',
+            )
+            for img in raw_custom:
+                props = img.get('properties', {})
+                os_disk = props.get('storageProfile', {}).get('osDisk', {})
+                rg = img.get('id', '').split('/')[4] if img.get('id') else ''
+                vm_images.append({
+                    'id': img.get('id', ''),
+                    'name': img.get('name', ''),
+                    'publisher': '',
+                    'offer': '',
+                    'sku': '',
+                    'version': '',
+                    'os_type': os_disk.get('osType', ''),
+                    'image_type': 'custom',
+                    'location': img.get('location', ''),
+                    'urn': img.get('id', ''),
+                    'description': f'Custom image · resource group: {rg}',
+                })
+        except Exception:
+            pass
+
+        # 2 — Compute gallery images
+        try:
+            raw_galleries = _arm_get(
+                f'{sub_prefix}/providers/Microsoft.Compute/galleries',
+                '2023-07-01',
+            )
+            for gallery in raw_galleries:
+                gallery_name = gallery.get('name', '')
+                gallery_rg = gallery.get('id', '').split('/')[4] if gallery.get('id') else ''
+                try:
+                    gallery_images = _arm_get(
+                        f'{sub_prefix}/resourceGroups/{gallery_rg}'
+                        f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
+                        '2023-07-01',
+                    )
+                    for gimg in gallery_images:
+                        gprops = gimg.get('properties', {})
+                        ident = gprops.get('identifier', {})
+                        vm_images.append({
+                            'id': gimg.get('id', ''),
+                            'name': gimg.get('name', ''),
+                            'publisher': ident.get('publisher', ''),
+                            'offer': ident.get('offer', ''),
+                            'sku': ident.get('sku', ''),
+                            'version': '',
+                            'os_type': gprops.get('osType', ''),
+                            'image_type': 'gallery',
+                            'location': gimg.get('location', ''),
+                            'urn': gimg.get('id', ''),
+                            'description': f'Compute Gallery: {gallery_name}',
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 3 — Popular marketplace images: resolve latest version via ARM
+        _CURATED = [
+            # Ubuntu
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS Gen2'},
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS'},
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-focal', 'sku': '20_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 20.04 LTS Gen2'},
+            # Windows Server
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter-azure-edition', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter Azure Edition'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2019-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2019 Datacenter'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2016-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2016 Datacenter'},
+            # RHEL
+            {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '9-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 9 LVM Gen2'},
+            {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '8-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 8 LVM Gen2'},
+            # Debian
+            {'publisher': 'Debian', 'offer': 'debian-12', 'sku': '12', 'os_type': 'Linux', 'name': 'Debian 12'},
+            {'publisher': 'Debian', 'offer': 'debian-11', 'sku': '11', 'os_type': 'Linux', 'name': 'Debian 11'},
+            # SUSE
+            {'publisher': 'SUSE', 'offer': 'sles-15-sp5', 'sku': 'gen2', 'os_type': 'Linux', 'name': 'SUSE Linux Enterprise 15 SP5 Gen2'},
+            # CentOS (legacy but still deployed)
+            {'publisher': 'OpenLogic', 'offer': 'CentOS', 'sku': '8_5-gen2', 'os_type': 'Linux', 'name': 'CentOS 8.5 Gen2'},
+        ]
+
+        _img_api = '2023-07-01'
+        for curated in _CURATED:
+            pub, offer, sku = curated['publisher'], curated['offer'], curated['sku']
+            versions_url = (
+                f'{arm_base}{sub_prefix}/providers/Microsoft.Compute'
+                f'/locations/{primary_location}/publishers/{pub}'
+                f'/artifacttypes/vmimage/offers/{offer}/skus/{sku}/versions'
+            )
+            try:
+                vresp = arm_session.get(
+                    versions_url,
+                    params={'api-version': _img_api, '$top': '1', '$orderby': 'name desc'},
+                    timeout=10,
+                )
+                if vresp.ok:
+                    versions = vresp.json()
+                    latest = versions[0].get('name', 'latest') if versions else 'latest'
+                    vm_images.append({
+                        'id': f'marketplace/{pub}/{offer}/{sku}',
+                        'name': curated['name'],
+                        'publisher': pub,
+                        'offer': offer,
+                        'sku': sku,
+                        'version': latest,
+                        'os_type': curated['os_type'],
+                        'image_type': 'marketplace',
+                        'location': primary_location,
+                        'urn': f'{pub}:{offer}:{sku}:{latest}',
+                        'description': '',
+                    })
+            except Exception:
+                pass
+
+        # ── VM Sizes ──────────────────────────────────────────────────────────
+        vm_sizes = []
+        try:
+            _sku_api = '2021-07-01'
+            skus_resp = arm_session.get(
+                f'https://management.azure.com/subscriptions/{subscription_id}'
+                f'/providers/Microsoft.Compute/skus',
+                params={
+                    'api-version': _sku_api,
+                    '$filter': f"location eq '{primary_location}'",
+                },
+                timeout=30,
+            )
+            if skus_resp.ok:
+                for sku_item in skus_resp.json().get('value', []):
+                    if sku_item.get('resourceType') != 'virtualMachines':
+                        continue
+                    # Skip location-restricted SKUs
+                    if any(
+                        r.get('type') == 'Location'
+                        for r in sku_item.get('restrictions', [])
+                    ):
+                        continue
+                    caps = {
+                        c['name']: c['value']
+                        for c in sku_item.get('capabilities', [])
+                    }
+                    # Zones for this location
+                    zones = []
+                    for li in sku_item.get('locationInfo', []):
+                        if li.get('location', '').lower() == primary_location.lower():
+                            zones = sorted(li.get('zones', []))
+                    vm_sizes.append({
+                        'name': sku_item.get('name', ''),
+                        'tier': sku_item.get('tier', ''),
+                        'family': sku_item.get('family', ''),
+                        'vcpus': int(caps.get('vCPUs', 0) or 0),
+                        'memory_gb': float(caps.get('MemoryGB', 0) or 0),
+                        'gpus': int(caps.get('GPUs', 0) or 0),
+                        'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
+                        'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
+                        'premium_io': caps.get('PremiumIO', '').lower() == 'true',
+                        'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
+                        'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
+                        'zones': zones,
+                        'location': primary_location,
+                    })
+                vm_sizes.sort(key=lambda s: (s['family'], s['name']))
+        except Exception:
+            pass
+
+        # ── VM Pricing (Azure Retail Prices API — public, no auth) ───────────
+        price_map: dict = {}
+        try:
+            prices_url = 'https://prices.azure.com/api/retail/prices'
+            prices_params: dict = {
+                'api-version': '2023-01-01-preview',
+                '$filter': (
+                    f"serviceName eq 'Virtual Machines' and "
+                    f"armRegionName eq '{primary_location}' and "
+                    f"priceType eq 'Consumption'"
+                ),
+            }
+            while True:
+                pr = requests.get(prices_url, params=prices_params, timeout=20)
+                if not pr.ok:
+                    break
+                pr_data = pr.json()
+                for item in pr_data.get('Items', []):
+                    sku_name = item.get('armSkuName', '')
+                    meter_name = item.get('meterName', '')
+                    # Keep Linux on-demand only (skip Windows, Spot, Low Priority)
+                    if any(kw in meter_name for kw in ('Windows', 'Spot', 'Low Priority')):
+                        continue
+                    price = item.get('retailPrice', 0.0)
+                    if sku_name and price > 0 and sku_name not in price_map:
+                        price_map[sku_name] = price
+                next_link = pr_data.get('NextPageLink')
+                if not next_link:
+                    break
+                prices_url = next_link
+                prices_params = {}
+        except Exception:
+            pass
+
+        # Attach price to each vm_size entry
+        for s in vm_sizes:
+            s['price_per_hour'] = price_map.get(s['name'])
+
+        return Response({
+            'provider': 'azure',
+            'credential_id': credential_id,
+            'subscription_id': subscription_id,
+            'pulled_at': now().isoformat(),
+            'resource_group_count': len(resource_groups),
+            'vm_count': len(vms),
+            'vnet_count': len(vnets),
+            'storage_account_count': len(storage_accounts),
+            'location_count': len(locations),
+            'vm_image_count': len(vm_images),
+            'vm_size_count': len(vm_sizes),
+            'resource_groups': resource_groups,
+            'vms': vms,
+            'vnets': vnets,
+            'storage_accounts': storage_accounts,
+            'locations': locations,
+            'vm_images': vm_images,
+            'vm_sizes': vm_sizes,
+            'subscription_accessible': subscription_accessible,
+            'accessible_subscriptions': accessible_subscriptions,
+        })
