@@ -11,6 +11,7 @@ import { CatalogDeploymentHistory } from '../../resources/catalog/CatalogDeploym
 import { CatalogItems } from '../../resources/catalog/CatalogItems';
 import { CatalogItemPage } from '../../resources/catalog/CatalogItemPage';
 import { CatalogItemDetails } from '../../resources/catalog/CatalogItemDetails';
+import { CatalogItemCloudProviders } from '../../resources/catalog/CatalogItemCloudProviders';
 import { CreateCatalogItem, EditCatalogItem } from '../../resources/catalog/CatalogItemForm';
 import { CatalogAdminDeployments } from '../../resources/catalog/CatalogAdminDeployments';
 import { CatalogVmSizes } from '../../resources/catalog/CatalogVmSizes';
@@ -89,6 +90,11 @@ export function useAwxCatalogRoutes() {
                   id: AwxRoute.CatalogItemDetails,
                   path: 'details',
                   element: <CatalogItemDetails />,
+                },
+                {
+                  id: AwxRoute.CatalogItemCloudProviders,
+                  path: 'cloud-providers',
+                  element: <CatalogItemCloudProviders />,
                 },
                 { path: '', element: <Navigate to="details" replace /> },
               ],

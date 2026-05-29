@@ -12,7 +12,6 @@ import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { AwxRoute } from '../../main/AwxRoutes';
-
 export function CatalogItemPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -42,6 +41,11 @@ export function CatalogItemPage() {
             label: t('Details'),
             page: AwxRoute.CatalogItemDetails,
             dataCy: 'catalog-item-details-tab',
+          },
+          {
+            label: t('Cloud Providers'),
+            page: AwxRoute.CatalogItemCloudProviders,
+            dataCy: 'catalog-item-cloud-providers-tab',
           },
         ]}
         params={{ id: String(item.id) }}

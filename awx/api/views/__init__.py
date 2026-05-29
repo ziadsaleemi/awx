@@ -5541,22 +5541,42 @@ class CatalogItemDeploy(GenericAPIView):
 
         # Resolve which TFT to use — support multi-cloud via target_provider
         target_provider = request.data.get('target_provider', None)
-        if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
-            tft_id = item.cloud_backends[target_provider]
-            from awx.main.models.terraform import TerraformJobTemplate
+        resolved_workflow = None
+        # provider_workflows takes highest priority — a configured WFT overrides any TFT
+        resolved_workflow = None
+        resolved_tft = None
+        if target_provider and item.provider_workflows and target_provider in item.provider_workflows:
+            wf_id = item.provider_workflows[target_provider]
             try:
-                resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
-            except TerraformJobTemplate.DoesNotExist:
-                return Response(
-                    {'target_provider': ['Configured Terraform job template not found.']},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        else:
-            resolved_tft = item.terraform_job_template
+                from awx.main.models import WorkflowJobTemplate
+                resolved_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
+            except WorkflowJobTemplate.DoesNotExist:
+                pass
+
+        # Only look up a TFT when no per-provider workflow is configured
+        if resolved_workflow is None:
+            if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
+                tft_id = item.cloud_backends[target_provider]
+                from awx.main.models.terraform import TerraformJobTemplate
+                try:
+                    resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
+                except TerraformJobTemplate.DoesNotExist:
+                    return Response(
+                        {'target_provider': ['Configured Terraform job template not found.']},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                resolved_tft = item.terraform_job_template
 
         workflow_job = None
         terraform_job = None
-        if resolved_tft:
+        if resolved_workflow:
+            launch_kwargs = {}
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = launch_extra_vars
+            workflow_job = resolved_workflow.create_unified_job(**launch_kwargs)
+            workflow_job.signal_start()
+        elif resolved_tft:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
@@ -5584,6 +5604,7 @@ class CatalogItemDeploy(GenericAPIView):
             terraform_provision_job=terraform_job,
             extra_vars=deployment_extra_vars,
             last_failed_workflow_job=None,
+            target_provider=target_provider or '',
         )
         if workflow_job:
             deployment.append_history_entry('provision', job=workflow_job, status='running')
@@ -5633,11 +5654,27 @@ class CatalogDeploymentDeprovision(GenericAPIView):
 
         workflow_job = None
         saved_vars = _collect_deployment_saved_vars(deployment)
-        if deployment.catalog_item and deployment.catalog_item.deprovision_workflow:
+
+        # Resolve per-provider deprovision workflow when available
+        resolved_deprovision_workflow = None
+        item = deployment.catalog_item
+        if item:
+            stored_provider = deployment.target_provider
+            if stored_provider and item.provider_deprovision_workflows and stored_provider in item.provider_deprovision_workflows:
+                wf_id = item.provider_deprovision_workflows[stored_provider]
+                try:
+                    from awx.main.models import WorkflowJobTemplate
+                    resolved_deprovision_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
+                except WorkflowJobTemplate.DoesNotExist:
+                    pass
+            if resolved_deprovision_workflow is None:
+                resolved_deprovision_workflow = item.deprovision_workflow
+
+        if resolved_deprovision_workflow:
             launch_kwargs = {}
             if saved_vars:
                 launch_kwargs['extra_vars'] = saved_vars
-            workflow_job = deployment.catalog_item.deprovision_workflow.create_unified_job(**launch_kwargs)
+            workflow_job = resolved_deprovision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 
         deployment.status = 'deprovisioning'

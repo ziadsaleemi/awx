@@ -265,6 +265,12 @@ class CatalogDeployment(CommonModelNameNotUnique):
         default=None,
         on_delete=models.SET_NULL,
     )
+    target_provider = models.CharField(
+        max_length=128,
+        blank=True,
+        default='',
+        help_text=_('Cloud provider slug selected at deploy time, used to route deprovision to the correct workflow.'),
+    )
     extra_vars = models.JSONField(
         blank=True,
         null=True,

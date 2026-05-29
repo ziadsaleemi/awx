@@ -178,6 +178,7 @@ export enum AwxRoute {
   CatalogItems = 'awx-catalog-items',
   CatalogItemPage = 'awx-catalog-item-page',
   CatalogItemDetails = 'awx-catalog-item-details',
+  CatalogItemCloudProviders = 'awx-catalog-item-cloud-providers',
   CreateCatalogItem = 'awx-create-catalog-item',
   EditCatalogItem = 'awx-edit-catalog-item',
   CatalogDeploy = 'awx-catalog-deploy',
