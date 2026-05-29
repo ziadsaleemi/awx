@@ -34,8 +34,6 @@ import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { generateCatalogName, parseCatalogDynamicFieldNames } from './catalogNaming';
 import {
   fetchProviderState,
-  DigitalOceanProviderData,
-  DigitalOceanAdminSettings,
 } from '../cloud/cloudConnectionStore';
 
 interface SchemaProperty {
@@ -335,39 +333,38 @@ export function CatalogDeployContent({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // DigitalOcean-specific state
-  const [doData, setDoData] = useState<DigitalOceanProviderData | null>(null);
-  const [doAdminSettings, setDoAdminSettings] = useState<DigitalOceanAdminSettings | null>(null);
-  const [doRegion, setDoRegion] = useState('');
-  const [doSize, setDoSize] = useState('');
-  const [doImage, setDoImage] = useState('');
-  const [doVpc, setDoVpc] = useState('');
-
-  // Generic provider state for dynamic field sources
+  // Generic provider state for dynamic field source resolution
   const [providerStateData, setProviderStateData] = useState<Record<string, unknown> | null>(null);
   const [providerAdminSettings, setProviderAdminSettings] = useState<unknown>(null);
 
+  // Fetch provider state for dynamic field source resolution.
+  // For DigitalOcean, provider_data is a flat object { regions, pricing, images, vpcs }.
+  // For other providers, provider_data is keyed by connection ID; aggregate arrays into a flat dict.
   useEffect(() => {
-    if (selectedProvider === 'digitalocean') {
-      void fetchProviderState('digitalocean').then((state) => {
-        if (state?.provider_data) {
-          setDoData(state.provider_data as DigitalOceanProviderData);
-        }
-        if (state?.admin_settings) {
-          setDoAdminSettings(state.admin_settings as DigitalOceanAdminSettings);
-        }
-      });
+    if (!selectedProvider) {
+      setProviderStateData(null);
+      setProviderAdminSettings(null);
+      return;
     }
-  }, [selectedProvider]);
-
-  // Fetch generic provider state for dynamic field source resolution.
-  // provider_data is now keyed by connection ID; aggregate all connections into a flat structure.
-  useEffect(() => {
-    if (selectedProvider && selectedProvider !== 'digitalocean') {
-      void fetchProviderState(selectedProvider).then((state) => {
-        const rawData = state?.provider_data as Record<string, unknown> | null | undefined;
-        if (rawData && typeof rawData === 'object') {
-          // Merge arrays from all connection entries into a single flat dict
+    void fetchProviderState(selectedProvider).then((state) => {
+      const rawData = state?.provider_data as Record<string, unknown> | null | undefined;
+      if (rawData && typeof rawData === 'object') {
+        if (selectedProvider === 'digitalocean') {
+          // DO data is a flat object — map to generic key names used by resolveDynamicOptions
+          const doRaw = rawData as {
+            regions?: unknown[];
+            pricing?: unknown[];
+            images?: unknown[];
+            vpcs?: unknown[];
+          };
+          setProviderStateData({
+            regions: doRaw.regions ?? [],
+            droplet_sizes: doRaw.pricing ?? [],
+            droplet_images: doRaw.images ?? [],
+            vpcs: doRaw.vpcs ?? [],
+          });
+        } else {
+          // Other providers: keyed by connection ID — merge arrays from all connections
           const aggregated: Record<string, unknown[]> = {};
           for (const connData of Object.values(rawData)) {
             if (connData && typeof connData === 'object') {
@@ -383,74 +380,18 @@ export function CatalogDeployContent({
             }
           }
           setProviderStateData(aggregated);
-        } else {
-          setProviderStateData(null);
         }
-        setProviderAdminSettings(state?.admin_settings ?? null);
-      });
-    } else {
-      setProviderStateData(null);
-      setProviderAdminSettings(null);
-    }
+      } else {
+        setProviderStateData(null);
+      }
+      setProviderAdminSettings(state?.admin_settings ?? null);
+    });
   }, [selectedProvider]);
-
-  // Allowed regions: intersection of admin allowlist + available flag
-  const allowedRegions = useMemo(() => {
-    if (!doData) return [];
-    return doData.regions.filter(
-      (r) =>
-        r.available &&
-        (!doAdminSettings?.allowedRegionSlugs ||
-          doAdminSettings.allowedRegionSlugs.includes(r.slug))
-    );
-  }, [doData, doAdminSettings]);
-
-  // Allowed sizes: admin allowlist, further narrowed to the selected region when set
-  const allowedSizes = useMemo(() => {
-    if (!doData) return [];
-    return doData.pricing.filter(
-      (s) =>
-        s.available !== false &&
-        (!doAdminSettings?.allowedSizeSlugs || doAdminSettings.allowedSizeSlugs.includes(s.slug)) &&
-        (!doRegion || !s.regions || s.regions.length === 0 || s.regions.includes(doRegion))
-    );
-  }, [doData, doAdminSettings, doRegion]);
-
-  // Allowed images: admin allowlist, further narrowed to the selected region when set
-  const allowedImages = useMemo(() => {
-    if (!doData) return [];
-    return doData.images.filter(
-      (img) =>
-        (!doAdminSettings?.allowedImageIds || doAdminSettings.allowedImageIds.includes(img.id)) &&
-        (!doRegion || !img.regions || img.regions.length === 0 || img.regions.includes(doRegion))
-    );
-  }, [doData, doAdminSettings, doRegion]);
-
-  // Allowed VPCs: admin allowlist, further narrowed to the selected region when set
-  const allowedVpcs = useMemo(() => {
-    if (!doData) return [];
-    return doData.vpcs.filter(
-      (v) =>
-        (!doAdminSettings?.allowedVpcIds || doAdminSettings.allowedVpcIds.includes(v.id)) &&
-        (!doRegion || v.region === doRegion)
-    );
-  }, [doData, doAdminSettings, doRegion]);
-
-  // When region changes, clear downstream selections that are no longer valid
-  useEffect(() => {
-    if (doSize && !allowedSizes.some((s) => s.slug === doSize)) setDoSize('');
-    if (doImage && !allowedImages.some((img) => String(img.id) === doImage)) setDoImage('');
-    if (doVpc && !allowedVpcs.some((v) => v.id === doVpc)) setDoVpc('');
-  }, [doRegion, allowedSizes, allowedImages, allowedVpcs, doSize, doImage, doVpc]);
 
   // When provider changes, reset form values so stale fields from a previous survey don't persist
   useEffect(() => {
     setFormValues({});
     setFieldErrors({});
-    setDoRegion('');
-    setDoSize('');
-    setDoImage('');
-    setDoVpc('');
   }, [selectedProvider]);
   const dynamicFieldNames = useMemo(
     () => parseCatalogDynamicFieldNames(item.dynamic_name_field),
@@ -549,14 +490,6 @@ export function CatalogDeployContent({
         }
       }
 
-      // Inject DigitalOcean-specific extra vars when provider is selected
-      if (selectedProvider === 'digitalocean') {
-        if (doSize) extraVars['do_droplet_size'] = doSize;
-        if (doImage) extraVars['do_image_id'] = Number(doImage) || doImage;
-        if (doRegion) extraVars['do_region'] = doRegion;
-        if (doVpc) extraVars['do_vpc_uuid'] = doVpc;
-      }
-
       const body: Record<string, unknown> = {
         name: generatedName,
         extra_vars: extraVars,
@@ -617,75 +550,6 @@ export function CatalogDeployContent({
                     {/* Only render content for the active tab so hooks/schema stay in sync */}
                     {selectedProvider === p && (
                       <div style={{ paddingTop: '1.25rem' }}>
-                        {/* DigitalOcean infrastructure selectors */}
-                        {p === 'digitalocean' && doData && (
-                          <>
-                            <FormGroup label={t('Region')} isRequired fieldId="do-region">
-                              <FormSelect
-                                id="do-region"
-                                value={doRegion}
-                                onChange={(_evt, val) => setDoRegion(val)}
-                              >
-                                <FormSelectOption value="" label={t('— Select region —')} />
-                                {allowedRegions.map((r) => (
-                                  <FormSelectOption key={r.slug} value={r.slug} label={r.name} />
-                                ))}
-                              </FormSelect>
-                            </FormGroup>
-                            <FormGroup label={t('Droplet size')} isRequired fieldId="do-size">
-                              <FormSelect
-                                id="do-size"
-                                value={doSize}
-                                onChange={(_evt, val) => setDoSize(val)}
-                                isDisabled={!doRegion}
-                              >
-                                <FormSelectOption value="" label={doRegion ? t('— Select size —') : t('— Select a region first —')} />
-                                {allowedSizes.map((s) => (
-                                  <FormSelectOption
-                                    key={s.slug}
-                                    value={s.slug}
-                                    label={`${s.slug} — ${s.vcpus} vCPU · ${(s.memory_mb / 1024).toFixed(0)} GB RAM · $${s.price_monthly.toFixed(0)}/mo`}
-                                  />
-                                ))}
-                              </FormSelect>
-                            </FormGroup>
-                            <FormGroup label={t('Image')} isRequired fieldId="do-image">
-                              <FormSelect
-                                id="do-image"
-                                value={doImage}
-                                onChange={(_evt, val) => setDoImage(val)}
-                                isDisabled={!doRegion}
-                              >
-                                <FormSelectOption value="" label={doRegion ? t('— Select image —') : t('— Select a region first —')} />
-                                {allowedImages.map((img) => (
-                                  <FormSelectOption
-                                    key={img.id}
-                                    value={String(img.id)}
-                                    label={`${img.name} (${img.distribution})`}
-                                  />
-                                ))}
-                              </FormSelect>
-                            </FormGroup>
-                            <FormGroup label={t('VPC')} fieldId="do-vpc">
-                              <FormSelect
-                                id="do-vpc"
-                                value={doVpc}
-                                onChange={(_evt, val) => setDoVpc(val)}
-                                isDisabled={!doRegion}
-                              >
-                                <FormSelectOption value="" label={doRegion ? t('— Select VPC (optional) —') : t('— Select a region first —')} />
-                                {allowedVpcs.map((v) => (
-                                  <FormSelectOption
-                                    key={v.id}
-                                    value={v.id}
-                                    label={`${v.name} (${v.ip_range})`}
-                                  />
-                                ))}
-                              </FormSelect>
-                            </FormGroup>
-                          </>
-                        )}
-
                         {/* Dynamic fields from the provider's WJT survey (or catalog deploy_survey fallback) */}
                         {sortedEntries.map(([key, prop]) => {
                           const fieldError = fieldErrors[key];
@@ -769,6 +633,39 @@ export function CatalogDeployContent({
                             ) {
                               dynamicOptions = dynamicOptions.filter((opt) =>
                                 azureAdmin.allowedVMSizeNames!.includes(opt)
+                              );
+                            }
+                          }
+
+                          // Apply admin allow-list for DigitalOcean resources
+                          if (dynamicOptions.length > 0 && selectedProvider === 'digitalocean') {
+                            const doAdmin = providerAdminSettings as {
+                              allowedRegionSlugs?: string[] | null;
+                              allowedSizeSlugs?: string[] | null;
+                              allowedVpcIds?: string[] | null;
+                            } | null;
+                            if (
+                              dynamicSourcePath?.startsWith('regions.') &&
+                              doAdmin?.allowedRegionSlugs != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                doAdmin.allowedRegionSlugs!.includes(opt)
+                              );
+                            }
+                            if (
+                              dynamicSourcePath?.startsWith('droplet_sizes.') &&
+                              doAdmin?.allowedSizeSlugs != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                doAdmin.allowedSizeSlugs!.includes(opt)
+                              );
+                            }
+                            if (
+                              dynamicSourcePath === 'vpcs.id' &&
+                              doAdmin?.allowedVpcIds != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                doAdmin.allowedVpcIds!.includes(opt)
                               );
                             }
                           }

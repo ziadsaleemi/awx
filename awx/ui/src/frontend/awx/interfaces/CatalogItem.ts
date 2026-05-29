@@ -23,7 +23,14 @@ export interface CatalogItem {
   available_providers: string[] | null;
   provider_field_configs: Record<
     string,
-    { disabled_fields: string[]; hidden_fields: string[]; field_templates: Record<string, string>; dynamic_field_sources: Record<string, string> }
+    {
+      disabled_fields: string[];
+      hidden_fields: string[];
+      field_templates: Record<string, string>;
+      dynamic_field_sources: Record<string, string>;
+      target_inventory?: number | null;
+      target_group?: string;
+    }
   > | null;
   created: string;
   modified: string;

@@ -279,6 +279,7 @@ export function CatalogItemCloudProviders() {
                   )}
                 </div>
               </div>
+
             </div>
           );
         })}

@@ -81,6 +81,8 @@ interface CatalogItemFormValues {
     hidden_fields: string[];
     field_templates: Record<string, string>;
     dynamic_field_sources: Record<string, string>;
+    target_inventory?: number | null;
+    target_group?: string;
   }>;
 }
 
@@ -1306,6 +1308,14 @@ const PROVIDER_SOURCE_OPTIONS: Record<string, Array<{ value: string; label: stri
     { value: 'vm_images.name', label: 'VM Images → name' },
     { value: 'vm_sizes.name', label: 'VM Sizes → name' },
   ],
+  digitalocean: [
+    { value: 'regions.slug', label: 'Regions → slug' },
+    { value: 'regions.name', label: 'Regions → name' },
+    { value: 'droplet_sizes.slug', label: 'Droplet Sizes → slug' },
+    { value: 'droplet_images.name', label: 'Images → name' },
+    { value: 'vpcs.id', label: 'VPCs → ID' },
+    { value: 'vpcs.name', label: 'VPCs → name' },
+  ],
 };
 
 function ProviderFormFieldsTab({ provider }: { provider: string }) {
@@ -1358,6 +1368,49 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surveyVariables]);
 
+  // --- Inventory & group targeting via WJT's TFT node ---
+  const { data: wjtNodesData } = useGet<{
+    count: number;
+    results: Array<{
+      id: number;
+      unified_job_template: number | null;
+      summary_fields: { unified_job_template?: { unified_job_type: string } };
+    }>;
+  }>(wjtId ? awxAPI`/workflow_job_templates/${String(wjtId)}/workflow_nodes/` : undefined);
+
+  const tftNodeId = useMemo(
+    () =>
+      wjtNodesData?.results?.find(
+        (n) => n.summary_fields?.unified_job_template?.unified_job_type === 'terraform_job'
+      )?.unified_job_template ?? null,
+    [wjtNodesData]
+  );
+
+  const { data: tftData } = useGet<{ id: number; target_inventory: number | null; target_group: string }>(
+    tftNodeId ? awxAPI`/terraform_job_templates/${String(tftNodeId)}/` : undefined
+  );
+
+  const { data: invListData } = useGet<{ count: number; results: Array<{ id: number; name: string }> }>(
+    awxAPI`/inventories/`,
+    { page_size: '200' }
+  );
+  const inventoryList = invListData?.results ?? [];
+
+  const tftInitRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = tftNodeId ? String(tftNodeId) : null;
+    if (!tftData || !key || tftInitRef.current === key) return;
+    tftInitRef.current = key;
+    const current = providerFieldConfigs[provider] ?? {};
+    if (!('target_inventory' in current) && !('target_group' in current)) {
+      const next = { ...providerFieldConfigs };
+      const defaults = { disabled_fields: [] as string[], hidden_fields: [] as string[], field_templates: {} as Record<string, string>, dynamic_field_sources: {} as Record<string, string> };
+      next[provider] = { ...defaults, ...current, target_inventory: tftData.target_inventory ?? null, target_group: tftData.target_group ?? '' };
+      setValue('provider_field_configs', next, { shouldDirty: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tftData, tftNodeId]);
+
   const disabledSet = useMemo(() => new Set(cfg.disabled_fields), [cfg.disabled_fields]);
   const hiddenSet = useMemo(() => new Set(cfg.hidden_fields), [cfg.hidden_fields]);
 
@@ -1365,6 +1418,18 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     const next = { ...providerFieldConfigs };
     next[provider] = { ...cfg, ...updates };
     setValue('provider_field_configs', next, { shouldDirty: true });
+  };
+
+  const handleInventoryGroupChange = async (
+    field: 'target_inventory' | 'target_group',
+    value: number | null | string
+  ) => {
+    saveConfig({ [field]: value });
+    if (tftNodeId) {
+      await requestPatch(awxAPI`/terraform_job_templates/${String(tftNodeId)}/`, {
+        [field]: value,
+      });
+    }
   };
 
   const insertVariable = (variable: string, field: string) => {
@@ -1403,22 +1468,82 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     );
   }
 
-  if (surveyVariables.length === 0 && survey) {
-    return (
-      <div style={{ marginTop: 16, fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
-        {t('The linked workflow has no survey fields to configure.')}
-      </div>
-    );
-  }
-
   return (
     <div style={{ marginTop: 16 }}>
-      <p style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
-        {t(
-          'Configure each survey field for {{provider}} deployments. Set a default value template, or mark the field as disabled or hidden in the deploy form.',
-          { provider: PROVIDER_LABELS[provider] ?? provider }
-        )}
-      </p>
+      {tftNodeId && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            background: '#1b1d21',
+            border: '1px solid var(--pf-v5-global--BorderColor--100)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 10 }}>
+            {t('Provisioning target')}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+            <div>
+              <label
+                htmlFor={`pft_inv_${provider}`}
+                style={{
+                  color: 'var(--pf-v5-global--Color--200)',
+                  display: 'block',
+                  marginBottom: 4,
+                  fontSize: '0.8rem',
+                }}
+              >
+                {t('Target inventory')}
+              </label>
+              <FormSelect
+                id={`pft_inv_${provider}`}
+                value={String(cfg.target_inventory ?? '')}
+                onChange={(_e, val) => void handleInventoryGroupChange('target_inventory', val ? Number(val) : null)}
+                aria-label={t('Target inventory')}
+              >
+                <FormSelectOption value="" label={t('— not configured —')} />
+                {inventoryList.map((inv) => (
+                  <FormSelectOption key={inv.id} value={String(inv.id)} label={inv.name} />
+                ))}
+              </FormSelect>
+            </div>
+            <div>
+              <label
+                htmlFor={`pft_grp_${provider}`}
+                style={{
+                  color: 'var(--pf-v5-global--Color--200)',
+                  display: 'block',
+                  marginBottom: 4,
+                  fontSize: '0.8rem',
+                }}
+              >
+                {t('Target group')}
+              </label>
+              <TextInput
+                id={`pft_grp_${provider}`}
+                value={cfg.target_group ?? ''}
+                onChange={(_e, val) => void handleInventoryGroupChange('target_group', val)}
+                placeholder={t('e.g. terraform_provisioned')}
+                aria-label={t('Target group')}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      {surveyVariables.length === 0 && survey && (
+        <div style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
+          {t('The linked workflow has no survey fields to configure.')}
+        </div>
+      )}
+      {surveyVariables.length > 0 && (
+        <p style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
+          {t(
+            'Configure each survey field for {{provider}} deployments. Set a default value template, or mark the field as disabled or hidden in the deploy form.',
+            { provider: PROVIDER_LABELS[provider] ?? provider }
+          )}
+        </p>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {surveyVariables.map((variable) => {
           const tmpl = fieldTemplates[variable] ?? '';

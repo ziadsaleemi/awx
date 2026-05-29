@@ -5541,6 +5541,17 @@ class CatalogItemDeploy(GenericAPIView):
 
         # Resolve which TFT to use — support multi-cloud via target_provider
         target_provider = request.data.get('target_provider', None)
+
+        # Inject per-provider inventory/group config into extra_vars so workflow
+        # nodes (e.g. Configure VM) can target the correct AWX inventory and group.
+        if target_provider and item.provider_field_configs:
+            pfc = item.provider_field_configs.get(target_provider, {})
+            catalog_target_inventory = pfc.get('target_inventory', '')
+            catalog_target_group = pfc.get('target_group', '')
+            if catalog_target_inventory:
+                launch_extra_vars['catalog_target_inventory'] = catalog_target_inventory
+            if catalog_target_group:
+                launch_extra_vars['catalog_target_group'] = catalog_target_group
         resolved_workflow = None
         # provider_workflows takes highest priority — a configured WFT overrides any TFT
         resolved_workflow = None
