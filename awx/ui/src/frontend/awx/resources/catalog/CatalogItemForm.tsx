@@ -1396,6 +1396,13 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
   );
   const inventoryList = invListData?.results ?? [];
 
+  const selectedInventoryId = cfg.target_inventory ?? null;
+  const { data: groupListData } = useGet<{ count: number; results: Array<{ id: number; name: string }> }>(
+    selectedInventoryId ? awxAPI`/inventories/${String(selectedInventoryId)}/groups/` : undefined,
+    selectedInventoryId ? { page_size: '200' } : undefined
+  );
+  const groupList = groupListData?.results ?? [];
+
   const tftInitRef = useRef<string | null>(null);
   useEffect(() => {
     const key = tftNodeId ? String(tftNodeId) : null;
@@ -1520,13 +1527,18 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
               >
                 {t('Target group')}
               </label>
-              <TextInput
+              <FormSelect
                 id={`pft_grp_${provider}`}
                 value={cfg.target_group ?? ''}
                 onChange={(_e, val) => void handleInventoryGroupChange('target_group', val)}
-                placeholder={t('e.g. terraform_provisioned')}
                 aria-label={t('Target group')}
-              />
+                isDisabled={!selectedInventoryId}
+              >
+                <FormSelectOption value="" label={selectedInventoryId ? t('— select a group —') : t('— select an inventory first —')} />
+                {groupList.map((grp) => (
+                  <FormSelectOption key={grp.id} value={grp.name} label={grp.name} />
+                ))}
+              </FormSelect>
             </div>
           </div>
         </div>
