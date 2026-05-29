@@ -15,7 +15,10 @@ import {
   GridItem,
   Label,
   PageSection,
+  Switch,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core';
 import {
   CubesIcon,
@@ -43,6 +46,7 @@ import { EmptyStateUnauthorized } from '../../../../framework/components/EmptySt
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   CloudConnectionEntry,
+  VmwareAdminSettings,
   VmwareCluster,
   VmwareDatacenter,
   VmwareDatastore,
@@ -52,6 +56,7 @@ import {
   VmwareVM,
   fetchCloudConnections,
   fetchProviderState,
+  patchProviderState,
 } from './cloudConnectionStore';
 import VmwareLogo from '../../../assets/vmware.svg';
 import { ConnectionModal } from './CloudConnections';
@@ -201,8 +206,15 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
   );
 }
 
-function DatastoresTab(props: { datastores: VmwareDatastore[] }) {
+function DatastoresTab(props: {
+  datastores: VmwareDatastore[];
+  adminSettings?: VmwareAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { datastores, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedDatastoreNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<VmwareDatastore>[]>(
     () => [
       {
@@ -236,32 +248,67 @@ function DatastoresTab(props: { datastores: VmwareDatastore[] }) {
         header: t('Free Space'),
         cell: (ds) => <TextCell text={fmtMiB(ds.free_space_mb)} />,
       },
+      ...(onToggle
+        ? [
+            {
+              header: t('Available in Catalog'),
+              cell: (ds: VmwareDatastore) => {
+                const isAllowed = allowedNames === null || allowedNames.includes(ds.name);
+                return (
+                  <Switch
+                    isChecked={isAllowed}
+                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(ds.name, checked)}
+                    label={t('Allowed')}
+                    labelOff={t('Denied')}
+                  />
+                );
+              },
+            },
+          ]
+        : []),
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<VmwareDatastore>({
     keyFn: (ds) => ds.id,
-    items: props.datastores,
+    items: datastores,
     tableColumns,
   });
 
   return (
-    <PageTable<VmwareDatastore>
-      id="vmware-datastores-table"
-      tableColumns={tableColumns}
-      errorStateTitle={t('Error loading datastores')}
-      emptyStateTitle={t('No datastores found')}
-      emptyStateDescription={t('Pull data from vCenter to discover datastores.')}
-      disableListView
-      disableCardView
-      {...view}
-    />
+    <>
+      {onToggle && allowedNames !== null && (
+        <Alert isInline variant="info" title={t('Datastore allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+          {t('{{count}} of {{total}} datastores are available to catalog deployments.', {
+            count: allowedNames.length,
+            total: datastores.length,
+          })}
+        </Alert>
+      )}
+      <PageTable<VmwareDatastore>
+        id="vmware-datastores-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading datastores')}
+        emptyStateTitle={t('No datastores found')}
+        emptyStateDescription={t('Pull data from vCenter to discover datastores.')}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
   );
 }
 
-function NetworksTab(props: { networks: VmwareNetwork[] }) {
+function NetworksTab(props: {
+  networks: VmwareNetwork[];
+  adminSettings?: VmwareAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { networks, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedNetworkNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<VmwareNetwork>[]>(
     () => [
       {
@@ -282,27 +329,55 @@ function NetworksTab(props: { networks: VmwareNetwork[] }) {
         header: t('ID'),
         cell: (n) => <TextCell text={n.id} />,
       },
+      ...(onToggle
+        ? [
+            {
+              header: t('Available in Catalog'),
+              cell: (n: VmwareNetwork) => {
+                const isAllowed = allowedNames === null || allowedNames.includes(n.name);
+                return (
+                  <Switch
+                    isChecked={isAllowed}
+                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(n.name, checked)}
+                    label={t('Allowed')}
+                    labelOff={t('Denied')}
+                  />
+                );
+              },
+            },
+          ]
+        : []),
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<VmwareNetwork>({
     keyFn: (n) => n.id,
-    items: props.networks,
+    items: networks,
     tableColumns,
   });
 
   return (
-    <PageTable<VmwareNetwork>
-      id="vmware-networks-table"
-      tableColumns={tableColumns}
-      errorStateTitle={t('Error loading networks')}
-      emptyStateTitle={t('No networks found')}
-      emptyStateDescription={t('Pull data from vCenter to discover networks and port groups.')}
-      disableListView
-      disableCardView
-      {...view}
-    />
+    <>
+      {onToggle && allowedNames !== null && (
+        <Alert isInline variant="info" title={t('Network allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+          {t('{{count}} of {{total}} networks are available to catalog deployments.', {
+            count: allowedNames.length,
+            total: networks.length,
+          })}
+        </Alert>
+      )}
+      <PageTable<VmwareNetwork>
+        id="vmware-networks-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading networks')}
+        emptyStateTitle={t('No networks found')}
+        emptyStateDescription={t('Pull data from vCenter to discover networks and port groups.')}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
   );
 }
 
@@ -581,11 +656,14 @@ export function VmwareProviderSettings() {
   const [showModal, setShowModal] = useState(false);
   const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
   const [rawProviderData, setRawProviderData] = useState<unknown>(null);
+  const [adminSettings, setAdminSettings] = useState<VmwareAdminSettings | null>(null);
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadData = useCallback(() => {
     void fetchCloudConnections('vmware').then(setConnectionEntries);
     void fetchProviderState('vmware').then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+      setAdminSettings((state?.admin_settings as VmwareAdminSettings | null) ?? null);
     });
   }, []);
 
@@ -651,9 +729,73 @@ export function VmwareProviderSettings() {
     return agg;
   }, [connectedEntries, connectionDataMap]);
 
+  // Active data based on connector switcher
+  const activeData = useMemo<VmwareProviderData>(() => {
+    if (selectedConnectorId === 'all') return allData;
+    return (
+      connectionDataMap[selectedConnectorId] ?? {
+        pulledAt: '',
+        connectionId: '',
+        datacenters: [],
+        clusters: [],
+        hosts: [],
+        vms: [],
+        networks: [],
+        datastores: [],
+      }
+    );
+  }, [selectedConnectorId, allData, connectionDataMap]);
+
+  // Admin toggle handlers
+  const onToggleNetwork = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedNetworkNames ?? null;
+      let next: string[] | null;
+      if (allowed) {
+        if (current === null) return; // already all-allowed
+        next = [...current, name];
+      } else {
+        next =
+          current === null
+            ? allData.networks.map((n) => n.name).filter((n) => n !== name)
+            : current.filter((n) => n !== name);
+      }
+      const newSettings: VmwareAdminSettings = {
+        allowedNetworkNames: next,
+        allowedDatastoreNames: adminSettings?.allowedDatastoreNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('vmware', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.networks]
+  );
+
+  const onToggleDatastore = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedDatastoreNames ?? null;
+      let next: string[] | null;
+      if (allowed) {
+        if (current === null) return;
+        next = [...current, name];
+      } else {
+        next =
+          current === null
+            ? allData.datastores.map((d) => d.name).filter((n) => n !== name)
+            : current.filter((n) => n !== name);
+      }
+      const newSettings: VmwareAdminSettings = {
+        allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
+        allowedDatastoreNames: next,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('vmware', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.datastores]
+  );
+
   const onPull = async () => {
-    const firstConnected = connectedEntries[0];
-    if (!firstConnected?.credentialId) {
+    const toPull = connectedEntries.filter((e) => e.credentialId);
+    if (toPull.length === 0) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Connect a VMware vSphere credential first.'),
@@ -662,69 +804,53 @@ export function VmwareProviderSettings() {
     }
 
     setIsPulling(true);
-    try {
-      const result = await postRequest<
-        {
-          pulled_at: string;
-          vm_count: number;
-          host_count: number;
-          datastore_count: number;
-          network_count: number;
-          datacenter_count: number;
-          cluster_count: number;
-          vms: VmwareVM[];
-          hosts: VmwareHost[];
-          datastores: VmwareDatastore[];
-          networks: VmwareNetwork[];
-          datacenters: VmwareDatacenter[];
-          clusters: VmwareCluster[];
-        },
-        { credential_id: number }
-      >(awxAPI`/catalog_cloud/connectors/vmware/pull_resources/`, {
-        credential_id: firstConnected.credentialId,
-      });
+    let successCount = 0;
+    let errorCount = 0;
 
-      const newData: VmwareProviderData = {
-        pulledAt: result.pulled_at,
-        connectionId: firstConnected.id,
-        datacenters: result.datacenters ?? [],
-        clusters: result.clusters ?? [],
-        hosts: result.hosts ?? [],
-        vms: result.vms ?? [],
-        networks: result.networks ?? [],
-        datastores: result.datastores ?? [],
-      };
+    for (const conn of toPull) {
+      try {
+        await postRequest<
+          { pulled_at: string; vm_count: number; host_count: number; datastore_count: number; network_count: number },
+          { credential_id: number }
+        >(awxAPI`/catalog_cloud/connectors/vmware/pull_resources/`, {
+          credential_id: conn.credentialId!,
+        });
+        successCount++;
+      } catch (err) {
+        errorCount++;
+        const detail =
+          isRequestError(err) && err.details
+            ? err.details
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        alertToaster.addAlert({
+          variant: 'warning',
+          title: t('Failed to pull from "{{name}}"', { name: conn.name }),
+          children: detail,
+        });
+      }
+    }
 
-      // Update local state so UI refreshes immediately (backend already persisted it).
-      setRawProviderData(newData);
+    // Reload from DB after all pulls complete
+    const state = await fetchProviderState('vmware');
+    if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
 
+    if (successCount > 0) {
       alertToaster.addAlert({
-        variant: 'success',
-        title: t(
-          'Pulled {{vms}} VMs, {{hosts}} hosts, {{datastores}} datastores, {{networks}} networks.',
-          {
-            vms: result.vm_count ?? 0,
-            hosts: result.host_count ?? 0,
-            datastores: result.datastore_count ?? 0,
-            networks: result.network_count ?? 0,
-          }
-        ),
+        variant: errorCount === 0 ? 'success' : 'warning',
+        title: t('Pulled data from {{n}} of {{total}} connection(s).', {
+          n: successCount,
+          total: toPull.length,
+        }),
       });
-    } catch (err) {
-      const detail =
-        isRequestError(err) && err.details
-          ? err.details
-          : err instanceof Error
-            ? err.message
-            : String(err);
+    } else {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Failed to pull VMware vSphere data'),
-        children: detail,
+        title: t('Failed to pull VMware vSphere data from all connections.'),
       });
-    } finally {
-      setIsPulling(false);
     }
+    setIsPulling(false);
   };
 
   if (!canManageCloud) {
@@ -757,7 +883,24 @@ export function VmwareProviderSettings() {
               )
         }
         headerActions={
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {connectedEntries.length > 1 && (
+              <ToggleGroup aria-label={t('Select connection to view')}>
+                <ToggleGroupItem
+                  text={t('All')}
+                  isSelected={selectedConnectorId === 'all'}
+                  onChange={() => setSelectedConnectorId('all')}
+                />
+                {connectedEntries.map((e) => (
+                  <ToggleGroupItem
+                    key={e.id}
+                    text={e.name}
+                    isSelected={selectedConnectorId === e.id}
+                    onChange={() => setSelectedConnectorId(e.id)}
+                  />
+                ))}
+              </ToggleGroup>
+            )}
             {connectedEntries.length > 0 && (
               <Button
                 variant="primary"
@@ -812,37 +955,45 @@ export function VmwareProviderSettings() {
           </PageTab>
           <PageTab
             label={
-              t('Virtual Machines') + (allData.vms.length > 0 ? ` (${allData.vms.length})` : '')
+              t('Virtual Machines') + (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab vms={allData.vms} />
+            <VMsTab vms={activeData.vms} />
           </PageTab>
           <PageTab
-            label={t('Hosts') + (allData.hosts.length > 0 ? ` (${allData.hosts.length})` : '')}
+            label={t('Hosts') + (activeData.hosts.length > 0 ? ` (${activeData.hosts.length})` : '')}
           >
-            <HostsTab hosts={allData.hosts} />
-          </PageTab>
-          <PageTab
-            label={
-              t('Datastores') + (allData.datastores.length > 0 ? ` (${allData.datastores.length})` : '')
-            }
-          >
-            <DatastoresTab datastores={allData.datastores} />
+            <HostsTab hosts={activeData.hosts} />
           </PageTab>
           <PageTab
             label={
-              t('Networks') + (allData.networks.length > 0 ? ` (${allData.networks.length})` : '')
+              t('Datastores') + (activeData.datastores.length > 0 ? ` (${activeData.datastores.length})` : '')
             }
           >
-            <NetworksTab networks={allData.networks} />
+            <DatastoresTab
+              datastores={activeData.datastores}
+              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleDatastore(name, allowed) : undefined}
+            />
+          </PageTab>
+          <PageTab
+            label={
+              t('Networks') + (activeData.networks.length > 0 ? ` (${activeData.networks.length})` : '')
+            }
+          >
+            <NetworksTab
+              networks={activeData.networks}
+              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleNetwork(name, allowed) : undefined}
+            />
           </PageTab>
           <PageTab
             label={
               t('Datacenters') +
-              (allData.datacenters.length > 0 ? ` (${allData.datacenters.length})` : '')
+              (activeData.datacenters.length > 0 ? ` (${activeData.datacenters.length})` : '')
             }
           >
-            <DatacentersTab datacenters={allData.datacenters} clusters={allData.clusters} />
+            <DatacentersTab datacenters={activeData.datacenters} clusters={activeData.clusters} />
           </PageTab>
         </PageTabs>
       )}

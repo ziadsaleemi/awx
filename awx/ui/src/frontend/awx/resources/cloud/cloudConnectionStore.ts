@@ -161,6 +161,24 @@ export interface ProxmoxAdminSettings {
   allowedTemplateNames: string[] | null;
 }
 
+/** Admin-configurable allow-list for VMware vSphere resources shown to end users. */
+export interface VmwareAdminSettings {
+  /** null = all networks allowed; array = explicit allowlist by network name */
+  allowedNetworkNames: string[] | null;
+  /** null = all datastores allowed; array = explicit allowlist by datastore name */
+  allowedDatastoreNames: string[] | null;
+}
+
+/** Admin-configurable allow-list for Azure resources shown to end users. */
+export interface AzureAdminSettings {
+  /** null = all VM images allowed; array = explicit allowlist by URN */
+  allowedVMImageUrns: string[] | null;
+  /** null = all locations allowed; array = explicit allowlist by location name */
+  allowedLocationNames: string[] | null;
+  /** null = all VM sizes allowed; array = explicit allowlist by size name */
+  allowedVMSizeNames: string[] | null;
+}
+
 // ── VMware vSphere data types ─────────────────────────────────────────────────
 
 export interface VmwareDatacenter {
@@ -344,7 +362,7 @@ export interface ApiCloudProviderState {
   provider_id: string;
   pulled_at: string | null;
   provider_data: unknown;
-  admin_settings: DigitalOceanAdminSettings | ProxmoxAdminSettings | null;
+  admin_settings: DigitalOceanAdminSettings | ProxmoxAdminSettings | VmwareAdminSettings | AzureAdminSettings | null;
   provider_settings: CloudProviderSettingsState | null;
 }
 

@@ -1299,8 +1299,12 @@ const PROVIDER_SOURCE_OPTIONS: Record<string, Array<{ value: string; label: stri
   ],
   azure: [
     { value: 'locations.name', label: 'Locations → name' },
+    { value: 'locations.display_name', label: 'Locations → display name' },
     { value: 'resource_groups.name', label: 'Resource Groups → name' },
     { value: 'vnets.name', label: 'VNets → name' },
+    { value: 'vm_images.urn', label: 'VM Images → URN (Terraform ref)' },
+    { value: 'vm_images.name', label: 'VM Images → name' },
+    { value: 'vm_sizes.name', label: 'VM Sizes → name' },
   ],
 };
 

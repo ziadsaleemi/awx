@@ -104,10 +104,10 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     if (q.max !== undefined) prop.maximum = q.max;
 
     if (q.type === 'multiplechoice' && q.choices) {
-      prop.enum = q.choices
-        .split('\n')
-        .map((c) => c.trim())
-        .filter(Boolean);
+      const choicesArr = Array.isArray(q.choices)
+        ? q.choices
+        : String(q.choices).split('\n');
+      prop.enum = choicesArr.map((c) => c.trim()).filter(Boolean);
     }
 
     properties[q.variable] = prop;
@@ -712,6 +712,63 @@ export function CatalogDeployContent({
                             if (proxmoxAdmin?.allowedTemplateNames != null) {
                               dynamicOptions = dynamicOptions.filter((opt) =>
                                 proxmoxAdmin.allowedTemplateNames!.includes(opt)
+                              );
+                            }
+                          }
+
+                          // Apply admin allow-list for VMware resources
+                          if (dynamicOptions.length > 0 && selectedProvider === 'vmware') {
+                            const vmwareAdmin = providerAdminSettings as {
+                              allowedNetworkNames?: string[] | null;
+                              allowedDatastoreNames?: string[] | null;
+                            } | null;
+                            if (
+                              dynamicSourcePath?.startsWith('networks.') &&
+                              vmwareAdmin?.allowedNetworkNames != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                vmwareAdmin.allowedNetworkNames!.includes(opt)
+                              );
+                            }
+                            if (
+                              dynamicSourcePath?.startsWith('datastores.') &&
+                              vmwareAdmin?.allowedDatastoreNames != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                vmwareAdmin.allowedDatastoreNames!.includes(opt)
+                              );
+                            }
+                          }
+
+                          // Apply admin allow-list for Azure resources
+                          if (dynamicOptions.length > 0 && selectedProvider === 'azure') {
+                            const azureAdmin = providerAdminSettings as {
+                              allowedVMImageUrns?: string[] | null;
+                              allowedLocationNames?: string[] | null;
+                              allowedVMSizeNames?: string[] | null;
+                            } | null;
+                            if (
+                              dynamicSourcePath?.startsWith('vm_images.') &&
+                              azureAdmin?.allowedVMImageUrns != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                azureAdmin.allowedVMImageUrns!.includes(opt)
+                              );
+                            }
+                            if (
+                              dynamicSourcePath?.startsWith('locations.') &&
+                              azureAdmin?.allowedLocationNames != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                azureAdmin.allowedLocationNames!.includes(opt)
+                              );
+                            }
+                            if (
+                              dynamicSourcePath?.startsWith('vm_sizes.') &&
+                              azureAdmin?.allowedVMSizeNames != null
+                            ) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                azureAdmin.allowedVMSizeNames!.includes(opt)
                               );
                             }
                           }

@@ -20,8 +20,11 @@ import {
   Modal,
   ModalVariant,
   PageSection,
+  Switch,
   TextInput,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core';
 import {
   CubesIcon,
@@ -52,6 +55,7 @@ import { awxAPI } from '../../common/api/awx-utils';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
+  AzureAdminSettings,
   AzureLocation,
   AzureProviderData,
   AzureResourceGroup,
@@ -64,6 +68,7 @@ import {
   createCloudConnection,
   fetchCloudConnections,
   fetchProviderState,
+  patchProviderState,
   removeCloudConnectionApi,
   updateCloudConnectionApi,
 } from './cloudConnectionStore';
@@ -139,8 +144,14 @@ function ResourceGroupsTab(props: { resourceGroups: AzureResourceGroup[] }) {
   );
 }
 
-function VMImagesTab(props: { vmImages: AzureVMImage[] }) {
+function VMImagesTab(props: {
+  vmImages: AzureVMImage[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (urn: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { vmImages, adminSettings, onToggle } = props;
+  const allowedUrns = adminSettings?.allowedVMImageUrns ?? null;
 
   const tableColumns = useMemo<ITableColumn<AzureVMImage>[]>(
     () => [
@@ -194,32 +205,66 @@ function VMImagesTab(props: { vmImages: AzureVMImage[] }) {
           <code style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>{img.urn}</code>
         ),
       },
+      ...(onToggle
+        ? [
+            {
+              header: t('Available in Catalog'),
+              cell: (img: AzureVMImage) => {
+                const isAllowed = allowedUrns === null || allowedUrns.includes(img.urn);
+                return (
+                  <Switch
+                    isChecked={isAllowed}
+                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(img.urn, checked)}
+                    label={t('Allowed')}
+                    labelOff={t('Denied')}
+                  />
+                );
+              },
+            },
+          ]
+        : []),
     ],
-    [t]
+    [t, allowedUrns, onToggle]
   );
 
   const view = useInMemoryView<AzureVMImage>({
     keyFn: (img) => img.id,
-    items: props.vmImages,
+    items: vmImages,
     tableColumns,
   });
 
   return (
-    <PageTable<AzureVMImage>
-      id="azure-vm-images-table"
-      tableColumns={tableColumns}
-      errorStateTitle={t('Error loading VM images')}
-      emptyStateTitle={t('No VM images found')}
-      emptyStateDescription={t('Pull data from Azure to discover available VM images.')}
-      disableListView
-      disableCardView
-      {...view}
-    />
+    <>
+      {onToggle && allowedUrns !== null && (
+        <Alert isInline variant="info" title={t('VM Image allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+          {t('{{count}} of {{total}} VM images are available to catalog deployments.', {
+            count: allowedUrns.length,
+            total: vmImages.length,
+          })}
+        </Alert>
+      )}
+      <PageTable<AzureVMImage>
+        id="azure-vm-images-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading VM images')}
+        emptyStateTitle={t('No VM images found')}
+        emptyStateDescription={t('Pull data from Azure to discover available VM images.')}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
   );
 }
 
-function VMSizesTab(props: { vmSizes: AzureVMSize[] }) {
+function VMSizesTab(props: {
+  vmSizes: AzureVMSize[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { vmSizes, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedVMSizeNames ?? null;
 
   const tableColumns = useMemo<ITableColumn<AzureVMSize>[]>(
     () => [
@@ -288,27 +333,55 @@ function VMSizesTab(props: { vmSizes: AzureVMSize[] }) {
         header: t('Zones'),
         cell: (s) => <TextCell text={s.zones.length > 0 ? s.zones.join(', ') : '-'} />,
       },
+      ...(onToggle
+        ? [
+            {
+              header: t('Available in Catalog'),
+              cell: (s: AzureVMSize) => {
+                const isAllowed = allowedNames === null || allowedNames.includes(s.name);
+                return (
+                  <Switch
+                    isChecked={isAllowed}
+                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(s.name, checked)}
+                    label={t('Allowed')}
+                    labelOff={t('Denied')}
+                  />
+                );
+              },
+            },
+          ]
+        : []),
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<AzureVMSize>({
     keyFn: (s) => `${s.location}:${s.name}`,
-    items: props.vmSizes,
+    items: vmSizes,
     tableColumns,
   });
 
   return (
-    <PageTable<AzureVMSize>
-      id="azure-vm-sizes-table"
-      tableColumns={tableColumns}
-      errorStateTitle={t('Error loading VM sizes')}
-      emptyStateTitle={t('No VM sizes found')}
-      emptyStateDescription={t('Pull data from Azure to discover available VM sizes for your region.')}
-      disableListView
-      disableCardView
-      {...view}
-    />
+    <>
+      {onToggle && allowedNames !== null && (
+        <Alert isInline variant="info" title={t('VM Size allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+          {t('{{count}} of {{total}} VM sizes are available to catalog deployments.', {
+            count: allowedNames.length,
+            total: vmSizes.length,
+          })}
+        </Alert>
+      )}
+      <PageTable<AzureVMSize>
+        id="azure-vm-sizes-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading VM sizes')}
+        emptyStateTitle={t('No VM sizes found')}
+        emptyStateDescription={t('Pull data from Azure to discover available VM sizes for your region.')}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
   );
 }
 
@@ -507,8 +580,15 @@ function StorageTab(props: { storageAccounts: AzureStorageAccount[] }) {
   );
 }
 
-function LocationsTab(props: { locations: AzureLocation[] }) {
+function LocationsTab(props: {
+  locations: AzureLocation[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { locations, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedLocationNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<AzureLocation>[]>(
     () => [
       {
@@ -530,27 +610,55 @@ function LocationsTab(props: { locations: AzureLocation[] }) {
         header: t('Type'),
         cell: (loc) => <Label color="blue">{loc.region_type || 'Physical'}</Label>,
       },
+      ...(onToggle
+        ? [
+            {
+              header: t('Available in Catalog'),
+              cell: (loc: AzureLocation) => {
+                const isAllowed = allowedNames === null || allowedNames.includes(loc.name);
+                return (
+                  <Switch
+                    isChecked={isAllowed}
+                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(loc.name, checked)}
+                    label={t('Allowed')}
+                    labelOff={t('Denied')}
+                  />
+                );
+              },
+            },
+          ]
+        : []),
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<AzureLocation>({
     keyFn: (loc) => loc.id,
-    items: props.locations,
+    items: locations,
     tableColumns,
   });
 
   return (
-    <PageTable<AzureLocation>
-      id="azure-locations-table"
-      tableColumns={tableColumns}
-      errorStateTitle={t('Error loading locations')}
-      emptyStateTitle={t('No locations found')}
-      emptyStateDescription={t('Pull data from Azure to discover available regions.')}
-      disableListView
-      disableCardView
-      {...view}
-    />
+    <>
+      {onToggle && allowedNames !== null && (
+        <Alert isInline variant="info" title={t('Location allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+          {t('{{count}} of {{total}} locations are available to catalog deployments.', {
+            count: allowedNames.length,
+            total: locations.length,
+          })}
+        </Alert>
+      )}
+      <PageTable<AzureLocation>
+        id="azure-locations-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading locations')}
+        emptyStateTitle={t('No locations found')}
+        emptyStateDescription={t('Pull data from Azure to discover available regions.')}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
   );
 }
 
@@ -1020,6 +1128,8 @@ export function AzureProviderSettings() {
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
   const [rawProviderData, setRawProviderData] = useState<unknown>(null);
+  const [adminSettings, setAdminSettings] = useState<AzureAdminSettings | null>(null);
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadConnections = useCallback(() => {
     void fetchCloudConnections('azure').then(setConnectionEntries);
@@ -1029,6 +1139,7 @@ export function AzureProviderSettings() {
     loadConnections();
     void fetchProviderState('azure').then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+      setAdminSettings((state?.admin_settings as AzureAdminSettings | null) ?? null);
     });
   }, [loadConnections]);
 
@@ -1105,6 +1216,98 @@ export function AzureProviderSettings() {
     return agg;
   }, [connectedEntries, connectionDataMap]);
 
+  // Active data based on connector switcher
+  const activeData = useMemo<AzureProviderData>(() => {
+    if (selectedConnectorId === 'all') return allData;
+    return (
+      connectionDataMap[selectedConnectorId] ?? {
+        pulledAt: '',
+        connectionId: '',
+        subscription_id: '',
+        resource_groups: [],
+        vms: [],
+        vnets: [],
+        storage_accounts: [],
+        locations: [],
+        vm_images: [],
+        vm_sizes: [],
+      }
+    );
+  }, [selectedConnectorId, allData, connectionDataMap]);
+
+  // Admin toggle handlers
+  const onToggleVMImage = useCallback(
+    async (urn: string, allowed: boolean) => {
+      const current = adminSettings?.allowedVMImageUrns ?? null;
+      let next: string[] | null;
+      if (allowed) {
+        if (current === null) return;
+        next = [...current, urn];
+      } else {
+        next =
+          current === null
+            ? allData.vm_images.map((i) => i.urn).filter((u) => u !== urn)
+            : current.filter((u) => u !== urn);
+      }
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: next,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.vm_images]
+  );
+
+  const onToggleLocation = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedLocationNames ?? null;
+      let next: string[] | null;
+      if (allowed) {
+        if (current === null) return;
+        next = [...current, name];
+      } else {
+        next =
+          current === null
+            ? allData.locations.map((l) => l.name).filter((n) => n !== name)
+            : current.filter((n) => n !== name);
+      }
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: next,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.locations]
+  );
+
+  const onToggleVMSize = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedVMSizeNames ?? null;
+      let next: string[] | null;
+      if (allowed) {
+        if (current === null) return;
+        next = [...current, name];
+      } else {
+        next =
+          current === null
+            ? allData.vm_sizes.map((s) => s.name).filter((n) => n !== name)
+            : current.filter((n) => n !== name);
+      }
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: next,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.vm_sizes]
+  );
+
   const onConnect = useCallback(
     async (entryId: string, credentialId: number) => {
       setConnectingId(entryId);
@@ -1175,8 +1378,8 @@ export function AzureProviderSettings() {
   );
 
   const onPull = async () => {
-    const firstConnected = connectedEntries[0];
-    if (!firstConnected?.credentialId) {
+    const toPull = connectedEntries.filter((e) => e.credentialId);
+    if (toPull.length === 0) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Connect an Azure credential first.'),
@@ -1185,114 +1388,53 @@ export function AzureProviderSettings() {
     }
 
     setIsPulling(true);
-    try {
-      const result = await postRequest<
-        {
-          pulled_at: string;
-          subscription_id: string;
-          resource_group_count: number;
-          vm_count: number;
-          vnet_count: number;
-          storage_account_count: number;
-          location_count: number;
-          vm_image_count: number;
-          vm_size_count: number;
-          resource_groups: AzureResourceGroup[];
-          vms: AzureVM[];
-          vnets: AzureVNet[];
-          storage_accounts: AzureStorageAccount[];
-          locations: AzureLocation[];
-          vm_images: AzureVMImage[];
-          vm_sizes: AzureVMSize[];
-          subscription_accessible: boolean | null;
-          accessible_subscriptions: { id: string; name: string; state: string }[];
-        },
-        { credential_id: number }
-      >(awxAPI`/catalog_cloud/connectors/azure/pull_resources/`, {
-        credential_id: firstConnected.credentialId,
-      });
+    let successCount = 0;
+    let errorCount = 0;
 
-      const newData: AzureProviderData = {
-        pulledAt: result.pulled_at,
-        connectionId: firstConnected.id,
-        subscription_id: result.subscription_id ?? '',
-        resource_groups: result.resource_groups ?? [],
-        vms: result.vms ?? [],
-        vnets: result.vnets ?? [],
-        storage_accounts: result.storage_accounts ?? [],
-        locations: result.locations ?? [],
-        vm_images: result.vm_images ?? [],
-        vm_sizes: result.vm_sizes ?? [],
-      };
-
-      // Update local state so UI refreshes immediately (backend already persisted it).
-      setRawProviderData(newData);
-
-      const totalResources =
-        (result.resource_group_count ?? 0) +
-        (result.vm_count ?? 0) +
-        (result.vnet_count ?? 0) +
-        (result.storage_account_count ?? 0);
-
-      const imageCount = result.vm_image_count ?? 0;
-
-      // Warn if 0 resources — likely a permissions issue
-      if (totalResources === 0 && result.subscription_accessible === false) {
-        const accessibleList = (result.accessible_subscriptions ?? [])
-          .map((s) => `${s.name} (${s.id})`)
-          .join(', ');
+    for (const conn of toPull) {
+      try {
+        await postRequest<
+          { pulled_at: string; subscription_id: string; resource_group_count: number },
+          { credential_id: number }
+        >(awxAPI`/catalog_cloud/connectors/azure/pull_resources/`, {
+          credential_id: conn.credentialId!,
+        });
+        successCount++;
+      } catch (err) {
+        errorCount++;
+        const detail =
+          isRequestError(err) && err.details
+            ? err.details
+            : err instanceof Error
+              ? err.message
+              : String(err);
         alertToaster.addAlert({
           variant: 'warning',
-          title: t('No resources found — subscription not accessible'),
-          children: t(
-            'The service principal cannot access subscription {{sub}}. ' +
-              'Assign it a Reader role at the subscription scope in the Azure portal. ' +
-              (accessibleList
-                ? `Accessible subscriptions: ${accessibleList}`
-                : 'No subscriptions were found for this service principal.'),
-            { sub: result.subscription_id }
-          ),
-        });
-      } else if (totalResources === 0) {
-        alertToaster.addAlert({
-          variant: 'warning',
-          title: t('Pulled 0 resources'),
-          children: t(
-            'The subscription {{sub}} is accessible but no resource groups, VMs, VNets, or storage accounts were found. ' +
-              'Verify the service principal has Reader role and that resources exist in this subscription.',
-            { sub: result.subscription_id }
-          ),
-        });
-      } else {
-        alertToaster.addAlert({
-          variant: 'success',
-          title: t(
-            'Pulled {{rgs}} resource groups, {{vms}} VMs, {{vnets}} VNets, {{storage}} storage accounts, {{images}} VM images.',
-            {
-              rgs: result.resource_group_count ?? 0,
-              vms: result.vm_count ?? 0,
-              vnets: result.vnet_count ?? 0,
-              storage: result.storage_account_count ?? 0,
-              images: imageCount,
-            }
-          ),
+          title: t('Failed to pull from "{{name}}"', { name: conn.name }),
+          children: detail,
         });
       }
-    } catch (err) {
-      const detail =
-        isRequestError(err) && err.details
-          ? err.details
-          : err instanceof Error
-            ? err.message
-            : String(err);
+    }
+
+    // Reload from DB after all pulls complete
+    const state = await fetchProviderState('azure');
+    if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+
+    if (successCount > 0) {
+      alertToaster.addAlert({
+        variant: errorCount === 0 ? 'success' : 'warning',
+        title: t('Pulled data from {{n}} of {{total}} connection(s).', {
+          n: successCount,
+          total: toPull.length,
+        }),
+      });
+    } else {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Failed to pull Azure data'),
-        children: detail,
+        title: t('Failed to pull Azure data from all connections.'),
       });
-    } finally {
-      setIsPulling(false);
     }
+    setIsPulling(false);
   };
 
   if (!canManageCloud) {
@@ -1318,7 +1460,24 @@ export function AzureProviderSettings() {
         description={t('Azure subscription management for administrators.')}
         headerActions={
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {connectedEntries.length > 1 && (
+                <ToggleGroup aria-label={t('Select connection to view')}>
+                  <ToggleGroupItem
+                    text={t('All')}
+                    isSelected={selectedConnectorId === 'all'}
+                    onChange={() => setSelectedConnectorId('all')}
+                  />
+                  {connectedEntries.map((e) => (
+                    <ToggleGroupItem
+                      key={e.id}
+                      text={e.name}
+                      isSelected={selectedConnectorId === e.id}
+                      onChange={() => setSelectedConnectorId(e.id)}
+                    />
+                  ))}
+                </ToggleGroup>
+              )}
               {connectedEntries.length > 0 && (
                 <Button
                   variant="primary"
@@ -1386,58 +1545,70 @@ export function AzureProviderSettings() {
           <PageTab
             label={
               t('Resource Groups') +
-              (allData.resource_groups.length > 0 ? ` (${allData.resource_groups.length})` : '')
+              (activeData.resource_groups.length > 0 ? ` (${activeData.resource_groups.length})` : '')
             }
           >
-            <ResourceGroupsTab resourceGroups={allData.resource_groups} />
+            <ResourceGroupsTab resourceGroups={activeData.resource_groups} />
           </PageTab>
           <PageTab
             label={
               t('Virtual Machines') +
-              (allData.vms.length > 0 ? ` (${allData.vms.length})` : '')
+              (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab vms={allData.vms} />
+            <VMsTab vms={activeData.vms} />
           </PageTab>
           <PageTab
             label={
               t('Virtual Networks') +
-              (allData.vnets.length > 0 ? ` (${allData.vnets.length})` : '')
+              (activeData.vnets.length > 0 ? ` (${activeData.vnets.length})` : '')
             }
           >
-            <VNetsTab vnets={allData.vnets} />
+            <VNetsTab vnets={activeData.vnets} />
           </PageTab>
           <PageTab
             label={
               t('Storage') +
-              (allData.storage_accounts.length > 0 ? ` (${allData.storage_accounts.length})` : '')
+              (activeData.storage_accounts.length > 0 ? ` (${activeData.storage_accounts.length})` : '')
             }
           >
-            <StorageTab storageAccounts={allData.storage_accounts} />
+            <StorageTab storageAccounts={activeData.storage_accounts} />
           </PageTab>
           <PageTab
             label={
               t('Locations') +
-              (allData.locations.length > 0 ? ` (${allData.locations.length})` : '')
+              (activeData.locations.length > 0 ? ` (${activeData.locations.length})` : '')
             }
           >
-            <LocationsTab locations={allData.locations} />
+            <LocationsTab
+              locations={activeData.locations}
+              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleLocation(name, allowed) : undefined}
+            />
           </PageTab>
           <PageTab
             label={
               t('VM Images') +
-              (allData.vm_images.length > 0 ? ` (${allData.vm_images.length})` : '')
+              (activeData.vm_images.length > 0 ? ` (${activeData.vm_images.length})` : '')
             }
           >
-            <VMImagesTab vmImages={allData.vm_images} />
+            <VMImagesTab
+              vmImages={activeData.vm_images}
+              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              onToggle={activeAwxUser?.is_superuser ? (urn, allowed) => void onToggleVMImage(urn, allowed) : undefined}
+            />
           </PageTab>
           <PageTab
             label={
               t('VM Sizes') +
-              (allData.vm_sizes.length > 0 ? ` (${allData.vm_sizes.length})` : '')
+              (activeData.vm_sizes.length > 0 ? ` (${activeData.vm_sizes.length})` : '')
             }
           >
-            <VMSizesTab vmSizes={allData.vm_sizes} />
+            <VMSizesTab
+              vmSizes={activeData.vm_sizes}
+              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleVMSize(name, allowed) : undefined}
+            />
           </PageTab>
         </PageTabs>
       )}
