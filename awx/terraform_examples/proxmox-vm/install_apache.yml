@@ -10,18 +10,18 @@
 #
 # Survey / extra_vars used:
 #   host_ip_proxmox_vm  - IP address of the VM (from Terraform artifact)
-#   ansible_user        - SSH user (default: ansible)
-#   ansible_password    - SSH password (default: ansible)
-#   ansible_port        - SSH port (default: 22)
+#   vm_ssh_user         - SSH user (default: ansible)
+#   vm_ssh_password     - SSH password (default: ansible)
+#   vm_ssh_port         - SSH port (default: 22)
 #
 - name: Provision Apache web server
   hosts: "{{ host_ip_proxmox_vm }}"
   gather_facts: true
   become: true
   vars:
-    ansible_user: "{{ ansible_user | default('ansible') }}"
-    ansible_password: "{{ ansible_password | default('ansible') }}"
-    ansible_port: "{{ ansible_port | default(22) }}"
+    ansible_user: "{{ vm_ssh_user | default('ansible') }}"
+    ansible_password: "{{ vm_ssh_password | default('ansible') }}"
+    ansible_port: "{{ vm_ssh_port | default(22) }}"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
   tasks:
