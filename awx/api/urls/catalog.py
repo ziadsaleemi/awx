@@ -13,6 +13,7 @@ from awx.api.views import (
     CatalogDeploymentDetail,
     CatalogDeploymentDeprovision,
     CatalogDeploymentRetry,
+    CatalogDeploymentCancel,
     CatalogDigitalOceanConnectorValidate,
     CatalogDigitalOceanPullImages,
     CatalogProxmoxPullResources,
@@ -36,6 +37,7 @@ catalog_deployment_urls = [
     re_path(r'^(?P<pk>[0-9]+)/$', CatalogDeploymentDetail.as_view(), name='catalog_deployment_detail'),
     re_path(r'^(?P<pk>[0-9]+)/deprovision/$', CatalogDeploymentDeprovision.as_view(), name='catalog_deployment_deprovision'),
     re_path(r'^(?P<pk>[0-9]+)/retry/$', CatalogDeploymentRetry.as_view(), name='catalog_deployment_retry'),
+    re_path(r'^(?P<pk>[0-9]+)/cancel/$', CatalogDeploymentCancel.as_view(), name='catalog_deployment_cancel'),
 ]
 
 catalog_cloud_urls = [

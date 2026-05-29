@@ -5565,7 +5565,8 @@ class CatalogItemDeploy(GenericAPIView):
                         {'target_provider': ['Configured Terraform job template not found.']},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-            else:
+            elif not target_provider:
+                # Only use global terraform_job_template when no specific provider was requested
                 resolved_tft = item.terraform_job_template
 
         workflow_job = None
@@ -5582,7 +5583,8 @@ class CatalogItemDeploy(GenericAPIView):
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
             terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
-        elif item.provision_workflow:
+        elif item.provision_workflow and not target_provider:
+            # Only use global provision_workflow fallback when no specific provider was requested
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
@@ -5767,6 +5769,54 @@ class CatalogDeploymentRetry(GenericAPIView):
 
 
 # ── Cloud provider connection + state API views ──────────────────────────────
+
+
+class CatalogDeploymentCancel(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/cancel/
+
+    Cancels an in-progress provisioning or deprovisioning by killing the
+    associated job and marking the deployment as 'failed' / 'active'.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'cancel an in-progress catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status not in ('provisioning', 'deprovisioning'):
+            return Response(
+                {'detail': 'Only deployments in provisioning or deprovisioning state can be cancelled.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Determine which active job to cancel
+        active_job = None
+        if deployment.status == 'provisioning':
+            active_job = deployment.terraform_provision_job or deployment.provision_job
+        else:  # deprovisioning
+            active_job = deployment.deprovision_job
+
+        if active_job and active_job.status in ('pending', 'waiting', 'running'):
+            active_job.cancel()
+
+        # Set deployment to an appropriate terminal / recoverable state
+        new_status = 'failed' if deployment.status == 'provisioning' else 'active'
+        deployment.status = new_status
+        deployment.append_history_entry(
+            'cancel',
+            job=active_job,
+            status='canceled',
+            details={'canceled_by': request.user.username},
+        )
+        deployment.save(update_fields=['status', 'provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)
 
 
 class CloudProviderConnectionList(ListCreateAPIView):

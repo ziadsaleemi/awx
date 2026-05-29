@@ -78,6 +78,27 @@ export function CatalogDeployments() {
     [alertToaster, postRequest, t, view]
   );
 
+  const handleCancel = useCallback(
+    async (deployment: CatalogDeployment) => {
+      try {
+        await postRequest(awxAPI`/catalog_deployments/${String(deployment.id)}/cancel/`, {});
+        alertToaster.addAlert({
+          variant: 'success',
+          title: t('Cancelled "{{name}}"', { name: deployment.name }),
+          timeout: 4000,
+        });
+        void view.refresh();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to cancel deployment'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, postRequest, t, view]
+  );
+
   const rowActions = useMemo<IPageAction<CatalogDeployment>[]>(
     () => [
       {
@@ -86,6 +107,17 @@ export function CatalogDeployments() {
         label: t('View details'),
         onClick: (deployment: CatalogDeployment) =>
           pageNavigate(AwxRoute.CatalogDeploymentPage, { params: { id: String(deployment.id) } }),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        label: t('Cancel'),
+        isDanger: true,
+        isDisabled: (deployment: CatalogDeployment) =>
+          !['provisioning', 'deprovisioning'].includes(deployment.status)
+            ? t('Only deployments that are provisioning or deprovisioning can be cancelled.')
+            : undefined,
+        onClick: handleCancel,
       },
       {
         type: PageActionType.Button,
@@ -109,7 +141,7 @@ export function CatalogDeployments() {
         onClick: handleDeprovision,
       },
     ],
-    [handleDeprovision, handleRetry, pageNavigate, t]
+    [handleCancel, handleDeprovision, handleRetry, pageNavigate, t]
   );
 
   return (
