@@ -129,8 +129,7 @@ function renderDynamicTemplate(template: string, context: Record<string, string>
   });
 }
 
-function resolveSequenceSuffix(value: string, existingValues: string[]) {
-  const trimmed = value.trim();
+function resolveSequenceSuffix(value: string, existingValues: string[]) {  const trimmed = value.trim();
   if (!trimmed.endsWith('+1')) {
     return value;
   }
@@ -150,6 +149,35 @@ function resolveSequenceSuffix(value: string, existingValues: string[]) {
   }
 
   return matched ? `${base}${highestSequence + 1}` : `${base}1`;
+}
+
+/**
+ * Resolve a dynamic source path (e.g. "templates.name") against pulled provider data.
+ * Returns a deduplicated list of string option values.
+ */
+function resolveDynamicOptions(data: Record<string, unknown> | null, sourcePath: string): string[] {
+  if (!data || !sourcePath) return [];
+  const dotIdx = sourcePath.indexOf('.');
+  if (dotIdx === -1) return [];
+  const arrayKey = sourcePath.slice(0, dotIdx);
+  const valueField = sourcePath.slice(dotIdx + 1);
+  const arr = data[arrayKey];
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of arr) {
+    if (item && typeof item === 'object') {
+      const v = (item as Record<string, unknown>)[valueField];
+      if (v !== undefined && v !== null) {
+        const s = String(v);
+        if (s && !seen.has(s)) {
+          seen.add(s);
+          result.push(s);
+        }
+      }
+    }
+  }
+  return result;
 }
 
 export function CatalogDeployWizard() {
@@ -315,6 +343,10 @@ export function CatalogDeployContent({
   const [doImage, setDoImage] = useState('');
   const [doVpc, setDoVpc] = useState('');
 
+  // Generic provider state for dynamic field sources
+  const [providerStateData, setProviderStateData] = useState<Record<string, unknown> | null>(null);
+  const [providerAdminSettings, setProviderAdminSettings] = useState<unknown>(null);
+
   useEffect(() => {
     if (selectedProvider === 'digitalocean') {
       void fetchProviderState('digitalocean').then((state) => {
@@ -325,6 +357,40 @@ export function CatalogDeployContent({
           setDoAdminSettings(state.admin_settings as DigitalOceanAdminSettings);
         }
       });
+    }
+  }, [selectedProvider]);
+
+  // Fetch generic provider state for dynamic field source resolution.
+  // provider_data is now keyed by connection ID; aggregate all connections into a flat structure.
+  useEffect(() => {
+    if (selectedProvider && selectedProvider !== 'digitalocean') {
+      void fetchProviderState(selectedProvider).then((state) => {
+        const rawData = state?.provider_data as Record<string, unknown> | null | undefined;
+        if (rawData && typeof rawData === 'object') {
+          // Merge arrays from all connection entries into a single flat dict
+          const aggregated: Record<string, unknown[]> = {};
+          for (const connData of Object.values(rawData)) {
+            if (connData && typeof connData === 'object') {
+              for (const [key, val] of Object.entries(connData as Record<string, unknown>)) {
+                if (Array.isArray(val)) {
+                  if (aggregated[key]) {
+                    (aggregated[key] as unknown[]).push(...val);
+                  } else {
+                    aggregated[key] = [...val];
+                  }
+                }
+              }
+            }
+          }
+          setProviderStateData(aggregated);
+        } else {
+          setProviderStateData(null);
+        }
+        setProviderAdminSettings(state?.admin_settings ?? null);
+      });
+    } else {
+      setProviderStateData(null);
+      setProviderAdminSettings(null);
     }
   }, [selectedProvider]);
 
@@ -627,6 +693,58 @@ export function CatalogDeployContent({
                           const fieldLabel = prop.title ?? key;
                           const fieldId = `deploy-field-${key}`;
                           const isAdminDisabledField = disabledFieldSet.has(key);
+
+                          // Check for a dynamic source configured for this field
+                          const dynamicSourcePath = providerFieldCfg?.dynamic_field_sources?.[key];
+                          let dynamicOptions = dynamicSourcePath
+                            ? resolveDynamicOptions(providerStateData, dynamicSourcePath)
+                            : [];
+
+                          // Apply admin allow-list for Proxmox templates
+                          if (
+                            dynamicOptions.length > 0 &&
+                            selectedProvider === 'proxmox' &&
+                            dynamicSourcePath?.startsWith('templates.')
+                          ) {
+                            const proxmoxAdmin = providerAdminSettings as {
+                              allowedTemplateNames?: string[] | null;
+                            } | null;
+                            if (proxmoxAdmin?.allowedTemplateNames != null) {
+                              dynamicOptions = dynamicOptions.filter((opt) =>
+                                proxmoxAdmin.allowedTemplateNames!.includes(opt)
+                              );
+                            }
+                          }
+
+                          if (dynamicOptions.length > 0) {
+                            return (
+                              <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
+                                {prop.description && (
+                                  <HelperText style={{ marginBottom: '0.25rem' }}>
+                                    <HelperTextItem>{prop.description}</HelperTextItem>
+                                  </HelperText>
+                                )}
+                                <FormSelect
+                                  id={fieldId}
+                                  value={formValues[key] ?? ''}
+                                  onChange={(_event, val) => setValue(key, val)}
+                                  validated={fieldError ? 'error' : 'default'}
+                                  isDisabled={isAdminDisabledField || isSubmitting}
+                                >
+                                  <FormSelectOption value="" label={t('— Select —')} />
+                                  {dynamicOptions.map((opt) => (
+                                    <FormSelectOption key={opt} value={opt} label={opt} />
+                                  ))}
+                                </FormSelect>
+                                {fieldError && (
+                                  <HelperText>
+                                    <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                                  </HelperText>
+                                )}
+                              </FormGroup>
+                            );
+                          }
+
                           if (prop.enum && prop.enum.length > 0) {
                             return (
                               <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>

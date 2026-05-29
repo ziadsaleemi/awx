@@ -146,12 +146,19 @@ export interface ProxmoxNetwork {
 
 export interface ProxmoxProviderData {
   pulledAt: string;
-  connectionId: string;
+  connectionId?: string;
   nodes: ProxmoxNode[];
   vms: ProxmoxVM[];
+  templates: ProxmoxVM[];
   containers: ProxmoxContainer[];
   storage: ProxmoxStorage[];
   networks: ProxmoxNetwork[];
+}
+
+/** Admin-configurable allow-list for Proxmox templates shown to end users. */
+export interface ProxmoxAdminSettings {
+  /** null = all templates allowed; array = explicit allowlist by template name */
+  allowedTemplateNames: string[] | null;
 }
 
 // ── VMware vSphere data types ─────────────────────────────────────────────────
@@ -337,7 +344,7 @@ export interface ApiCloudProviderState {
   provider_id: string;
   pulled_at: string | null;
   provider_data: unknown;
-  admin_settings: DigitalOceanAdminSettings | null;
+  admin_settings: DigitalOceanAdminSettings | ProxmoxAdminSettings | null;
   provider_settings: CloudProviderSettingsState | null;
 }
 

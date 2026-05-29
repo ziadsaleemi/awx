@@ -17,7 +17,10 @@ import {
   PageSection,
   Progress,
   ProgressMeasureLocation,
+  Switch,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core';
 import {
   CubesIcon,
@@ -45,6 +48,7 @@ import { EmptyStateUnauthorized } from '../../../../framework/components/EmptySt
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   CloudConnectionEntry,
+  ProxmoxAdminSettings,
   ProxmoxContainer,
   ProxmoxNetwork,
   ProxmoxNode,
@@ -53,6 +57,7 @@ import {
   ProxmoxVM,
   fetchCloudConnections,
   fetchProviderState,
+  patchProviderState,
 } from './cloudConnectionStore';
 import ProxmoxLogo from '../../../assets/proxmox.svg';
 import { ConnectionModal } from './CloudConnections';
@@ -452,6 +457,108 @@ function NetworksTab(props: { networks: ProxmoxNetwork[] }) {
   );
 }
 
+function TemplatesTab(props: {
+  templates: ProxmoxVM[];
+  adminSettings: ProxmoxAdminSettings | null;
+  onToggle: (name: string, allowed: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const { templates, adminSettings, onToggle } = props;
+
+  const tableColumns = useMemo<ITableColumn<ProxmoxVM>[]>(
+    () => [
+      {
+        header: t('VMID'),
+        cell: (vm) => <TextCell text={String(vm.vmid)} />,
+        sort: 'vmid',
+      },
+      {
+        header: t('Name'),
+        cell: (vm) => <TextCell text={vm.name || '-'} />,
+        sort: 'name',
+      },
+      {
+        header: t('Node'),
+        cell: (vm) => <TextCell text={vm.node} />,
+        sort: 'node',
+      },
+      {
+        header: t('vCPUs'),
+        cell: (vm) => <TextCell text={String(vm.cpus)} />,
+      },
+      {
+        header: t('Memory'),
+        cell: (vm) => <TextCell text={fmtBytes(vm.maxmem)} />,
+      },
+      {
+        header: t('Disk'),
+        cell: (vm) => <TextCell text={fmtBytes(vm.maxdisk)} />,
+      },
+      {
+        header: t('Allow in Catalog'),
+        cell: (vm) => {
+          const isAllowed =
+            adminSettings?.allowedTemplateNames == null ||
+            adminSettings.allowedTemplateNames.includes(vm.name);
+          return (
+            <Switch
+              isChecked={isAllowed}
+              onChange={(_event, checked) => onToggle(vm.name, checked)}
+              aria-label={t('Allow template in catalog')}
+              label={t('Allowed')}
+              labelOff={t('Denied')}
+            />
+          );
+        },
+      },
+    ],
+    [t, adminSettings, onToggle]
+  );
+
+  const view = useInMemoryView<ProxmoxVM>({
+    keyFn: (vm) => String(vm.vmid),
+    items: templates,
+    tableColumns,
+  });
+
+  return (
+    <>
+      <div
+        style={{
+          padding: '0.75rem 1rem',
+          background: 'var(--pf-v5-global--BackgroundColor--200)',
+          borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
+          fontSize: '0.8rem',
+          color: 'var(--pf-v5-global--Color--200)',
+        }}
+      >
+        {t(
+          'Templates are VM images available for provisioning. Toggle to allow or deny each template from appearing in the catalog deploy wizard.'
+        )}
+        {adminSettings?.allowedTemplateNames != null && (
+          <span style={{ marginLeft: 12, color: '#f0ab00', fontWeight: 600 }}>
+            {t('{{n}} template(s) allowed', {
+              n: adminSettings.allowedTemplateNames.length,
+            })}
+          </span>
+        )}
+      </div>
+      <PageTable<ProxmoxVM>
+        id="proxmox-templates-table"
+        tableColumns={tableColumns}
+        errorStateTitle={t('Error loading templates')}
+        emptyStateTitle={t('No templates found')}
+        emptyStateDescription={t(
+          'Sync this connection to discover VM templates. Templates must have the "template" flag set in Proxmox.'
+        )}
+        disableListView
+        disableCardView
+        {...view}
+      />
+    </>
+  );
+}
+
 // ─── connection summary card ──────────────────────────────────────────────────
 
 function ConnectionCard(props: { entry: CloudConnectionEntry; data: ProxmoxProviderData | null }) {
@@ -615,37 +722,17 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: ProxmoxProvi
   );
 }
 
-// Helper to resolve connection data safely
+// Helper to resolve connection data safely.
+// provider_data is now stored as { "<connectionId>": { pulled_at, nodes, vms, ... } }
 function getConnectionData(
   entry: CloudConnectionEntry,
   rawProviderData: unknown
 ): ProxmoxProviderData | null {
-  if (!rawProviderData) return null;
-
-  if (typeof rawProviderData === 'object') {
-    const dataObj = rawProviderData as Record<string, unknown>;
-
-    if (entry.id in dataObj) {
-      return dataObj[entry.id] as ProxmoxProviderData;
-    }
-
-    if (Array.isArray(rawProviderData)) {
-      const arr = rawProviderData as Record<string, unknown>[];
-      const found = arr.find(
-        (d) =>
-          d &&
-          typeof d === 'object' &&
-          (d.connectionId === entry.id || d.connection_id === entry.id)
-      );
-      if (found) return found as unknown as ProxmoxProviderData;
-    }
-
-    if (dataObj.connectionId === entry.id || dataObj.connection_id === entry.id) {
-      return rawProviderData as ProxmoxProviderData;
-    }
-  }
-
-  return null;
+  if (!rawProviderData || typeof rawProviderData !== 'object') return null;
+  const dataMap = rawProviderData as Record<string, unknown>;
+  const connData = dataMap[entry.id];
+  if (!connData || typeof connData !== 'object') return null;
+  return connData as ProxmoxProviderData;
 }
 
 // Overview tab component
@@ -805,11 +892,15 @@ export function ProxmoxProviderSettings() {
   const [showModal, setShowModal] = useState(false);
   const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
   const [rawProviderData, setRawProviderData] = useState<unknown>(null);
+  const [adminSettings, setAdminSettings] = useState<ProxmoxAdminSettings | null>(null);
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadData = useCallback(() => {
     void fetchCloudConnections('proxmox').then(setConnectionEntries);
     void fetchProviderState('proxmox').then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+      if (state?.admin_settings !== undefined)
+        setAdminSettings(state.admin_settings as ProxmoxAdminSettings | null);
     });
   }, []);
 
@@ -847,9 +938,9 @@ export function ProxmoxProviderSettings() {
   const allData = useMemo<ProxmoxProviderData>(() => {
     const aggregated: ProxmoxProviderData = {
       pulledAt: '',
-      connectionId: '',
       nodes: [],
       vms: [],
+      templates: [],
       containers: [],
       storage: [],
       networks: [],
@@ -871,6 +962,7 @@ export function ProxmoxProviderSettings() {
 
       if (Array.isArray(data.nodes)) aggregated.nodes.push(...data.nodes);
       if (Array.isArray(data.vms)) aggregated.vms.push(...data.vms);
+      if (Array.isArray(data.templates)) aggregated.templates.push(...data.templates);
       if (Array.isArray(data.containers)) aggregated.containers.push(...data.containers);
       if (Array.isArray(data.storage)) aggregated.storage.push(...data.storage);
       if (Array.isArray(data.networks)) aggregated.networks.push(...data.networks);
@@ -879,9 +971,57 @@ export function ProxmoxProviderSettings() {
     return aggregated;
   }, [connectedEntries, connectionDataMap]);
 
+  // Data for the currently selected connector (or aggregated "all")
+  const activeData = useMemo<ProxmoxProviderData>(() => {
+    if (selectedConnectorId === 'all') return allData;
+    return (
+      connectionDataMap[selectedConnectorId] ?? {
+        pulledAt: '',
+        nodes: [],
+        vms: [],
+        templates: [],
+        containers: [],
+        storage: [],
+        networks: [],
+      }
+    );
+  }, [selectedConnectorId, allData, connectionDataMap]);
+
+  // Toggle a template's allow/deny status and persist to DB
+  const onToggleTemplate = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedTemplateNames ?? null;
+      let next: string[] | null;
+
+      if (allowed) {
+        // Adding to allowlist
+        if (current === null) {
+          next = null; // already all allowed
+        } else {
+          const updated = current.includes(name) ? current : [...current, name];
+          // If all templates are now allowed, reset to null
+          next = updated.length >= allData.templates.length ? null : updated;
+        }
+      } else {
+        // Removing from allowlist (deny this template)
+        const allNames = allData.templates.map((t) => t.name);
+        if (current === null) {
+          next = allNames.filter((n) => n !== name);
+        } else {
+          next = current.filter((n) => n !== name);
+        }
+      }
+
+      const newSettings: ProxmoxAdminSettings = { allowedTemplateNames: next };
+      setAdminSettings(newSettings);
+      await patchProviderState('proxmox', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.templates]
+  );
+
   const onPull = async () => {
-    const firstConnected = connectedEntries[0];
-    if (!firstConnected?.credentialId) {
+    const toPull = connectedEntries.filter((e) => e.credentialId);
+    if (!toPull.length) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Connect a Proxmox VE credential first.'),
@@ -890,65 +1030,47 @@ export function ProxmoxProviderSettings() {
     }
 
     setIsPulling(true);
-    try {
-      const result = await postRequest<
-        {
-          pulled_at: string;
-          node_count: number;
-          vm_count: number;
-          container_count: number;
-          storage_count: number;
-          network_count: number;
-          nodes: ProxmoxNode[];
-          vms: ProxmoxVM[];
-          containers: ProxmoxContainer[];
-          storage: ProxmoxStorage[];
-          networks: ProxmoxNetwork[];
-        },
-        { credential_id: number }
-      >(awxAPI`/catalog_cloud/connectors/proxmox/pull_resources/`, {
-        credential_id: firstConnected.credentialId,
-      });
+    let successCount = 0;
+    const errors: string[] = [];
 
-      const newData: ProxmoxProviderData = {
-        pulledAt: result.pulled_at,
-        connectionId: firstConnected.id,
-        nodes: result.nodes ?? [],
-        vms: result.vms ?? [],
-        containers: result.containers ?? [],
-        storage: result.storage ?? [],
-        networks: result.networks ?? [],
-      };
-      // Update local state so UI refreshes immediately (backend already persisted it).
-      setRawProviderData(newData);
+    for (const conn of toPull) {
+      try {
+        await postRequest<Record<string, unknown>, { credential_id: number }>(
+          awxAPI`/catalog_cloud/connectors/proxmox/pull_resources/`,
+          { credential_id: conn.credentialId! }
+        );
+        successCount++;
+      } catch (err) {
+        const detail =
+          isRequestError(err) && err.details
+            ? err.details
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        errors.push(`${conn.name}: ${detail}`);
+      }
+    }
+
+    // Reload persisted data from DB so all connections' data is shown
+    const state = await fetchProviderState('proxmox');
+    if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+
+    if (successCount > 0) {
       alertToaster.addAlert({
-        variant: 'success',
-        title: t(
-          'Pulled {{nodes}} nodes, {{vms}} VMs, {{containers}} containers, {{storage}} storage pools, {{networks}} interfaces.',
-          {
-            nodes: result.node_count ?? 0,
-            vms: result.vm_count ?? 0,
-            containers: result.container_count ?? 0,
-            storage: result.storage_count ?? 0,
-            networks: result.network_count ?? 0,
-          }
-        ),
+        variant: errors.length ? 'warning' : 'success',
+        title: t('Pulled data for {{n}} connection(s).', { n: successCount }),
+        children: errors.length ? errors.join('\n') : undefined,
       });
-    } catch (err) {
-      const detail =
-        isRequestError(err) && err.details
-          ? err.details
-          : err instanceof Error
-            ? err.message
-            : String(err);
+    }
+    if (errors.length && successCount === 0) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Failed to pull Proxmox VE data'),
-        children: detail,
+        children: errors.join('\n'),
       });
-    } finally {
-      setIsPulling(false);
     }
+
+    setIsPulling(false);
   };
 
   if (!canManageCloud) {
@@ -981,7 +1103,30 @@ export function ProxmoxProviderSettings() {
               )
         }
         headerActions={
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Connector switcher — only shown when there are multiple connections */}
+            {connectedEntries.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)' }}>
+                  {t('View:')}
+                </span>
+                <ToggleGroup aria-label={t('Select connector to view')}>
+                  <ToggleGroupItem
+                    text={t('All')}
+                    isSelected={selectedConnectorId === 'all'}
+                    onChange={() => setSelectedConnectorId('all')}
+                  />
+                  {connectedEntries.map((entry) => (
+                    <ToggleGroupItem
+                      key={entry.id}
+                      text={entry.name}
+                      isSelected={selectedConnectorId === entry.id}
+                      onChange={() => setSelectedConnectorId(entry.id)}
+                    />
+                  ))}
+                </ToggleGroup>
+              </div>
+            )}
             {connectedEntries.length > 0 && (
               <Button
                 variant="primary"
@@ -1034,38 +1179,55 @@ export function ProxmoxProviderSettings() {
             />
           </PageTab>
           <PageTab
-            label={t('Nodes') + (allData.nodes.length > 0 ? ` (${allData.nodes.length})` : '')}
+            label={
+              t('Nodes') + (activeData.nodes.length > 0 ? ` (${activeData.nodes.length})` : '')
+            }
           >
-            <NodesTab nodes={allData.nodes} />
+            <NodesTab nodes={activeData.nodes} />
           </PageTab>
           <PageTab
             label={
-              t('Virtual Machines') + (allData.vms.length > 0 ? ` (${allData.vms.length})` : '')
+              t('Virtual Machines') +
+              (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab vms={allData.vms} />
+            <VMsTab vms={activeData.vms} />
           </PageTab>
           <PageTab
             label={
               t('Containers (LXC)') +
-              (allData.containers.length > 0 ? ` (${allData.containers.length})` : '')
+              (activeData.containers.length > 0 ? ` (${activeData.containers.length})` : '')
             }
           >
-            <ContainersTab containers={allData.containers} />
+            <ContainersTab containers={activeData.containers} />
           </PageTab>
           <PageTab
             label={
-              t('Storage') + (allData.storage.length > 0 ? ` (${allData.storage.length})` : '')
+              t('Storage') +
+              (activeData.storage.length > 0 ? ` (${activeData.storage.length})` : '')
             }
           >
-            <StorageTab storage={allData.storage} />
+            <StorageTab storage={activeData.storage} />
           </PageTab>
           <PageTab
             label={
-              t('Networks') + (allData.networks.length > 0 ? ` (${allData.networks.length})` : '')
+              t('Networks') +
+              (activeData.networks.length > 0 ? ` (${activeData.networks.length})` : '')
             }
           >
-            <NetworksTab networks={allData.networks} />
+            <NetworksTab networks={activeData.networks} />
+          </PageTab>
+          <PageTab
+            label={
+              t('Templates') +
+              (allData.templates.length > 0 ? ` (${allData.templates.length})` : '')
+            }
+          >
+            <TemplatesTab
+              templates={activeData.templates ?? []}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleTemplate(name, allowed)}
+            />
           </PageTab>
         </PageTabs>
       )}

@@ -6214,6 +6214,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
         node_results = []
         vm_results = []
         container_results = []
+        template_results = []
 
         node_names = []
         for item in raw_resources:
@@ -6230,7 +6231,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
                 })
                 node_names.append(item.get('node', ''))
             elif rtype == 'qemu':
-                vm_results.append({
+                entry = {
                     'vmid': item.get('vmid', 0),
                     'name': item.get('name', ''),
                     'status': item.get('status', 'stopped'),
@@ -6240,7 +6241,11 @@ class CatalogProxmoxPullResources(GenericAPIView):
                     'maxdisk': item.get('maxdisk', 0),
                     'uptime': item.get('uptime', 0),
                     'type': 'qemu',
-                })
+                }
+                if item.get('template', 0):
+                    template_results.append(entry)
+                else:
+                    vm_results.append(entry)
             elif rtype == 'lxc':
                 container_results.append({
                     'vmid': item.get('vmid', 0),
@@ -6290,21 +6295,50 @@ class CatalogProxmoxPullResources(GenericAPIView):
                     'comments': iface.get('comments', ''),
                 })
 
-        return Response({
+        pulled_at = now().isoformat()
+        response_data = {
             'provider': 'proxmox',
             'credential_id': credential_id,
-            'pulled_at': now().isoformat(),
+            'pulled_at': pulled_at,
             'node_count': len(node_results),
             'vm_count': len(vm_results),
             'container_count': len(container_results),
+            'template_count': len(template_results),
             'storage_count': len(storage_results),
             'network_count': len(network_results),
             'nodes': node_results,
             'vms': vm_results,
             'containers': container_results,
+            'templates': template_results,
             'storage': storage_results,
             'networks': network_results,
-        })
+        }
+
+        # Look up the connection record so we can key the data by connection ID.
+        # This allows multiple Proxmox connections to coexist in provider_data.
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='proxmox', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': pulled_at,
+            'nodes': node_results,
+            'vms': vm_results,
+            'containers': container_results,
+            'templates': template_results,
+            'storage': storage_results,
+            'networks': network_results,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='proxmox')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
 
 
 class CatalogVmwarePullResources(GenericAPIView):
@@ -6493,7 +6527,7 @@ class CatalogVmwarePullResources(GenericAPIView):
             except Exception:
                 pass
 
-        return Response({
+        response_data = {
             'provider': 'vmware',
             'credential_id': credential_id,
             'pulled_at': now().isoformat(),
@@ -6509,7 +6543,31 @@ class CatalogVmwarePullResources(GenericAPIView):
             'vms': vms,
             'networks': networks,
             'datastores': datastores,
-        })
+        }
+
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='vmware', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': now().isoformat(),
+            'datacenters': datacenters,
+            'clusters': clusters,
+            'hosts': hosts,
+            'vms': vms,
+            'networks': networks,
+            'datastores': datastores,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='vmware')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
 
 
 class CatalogAzurePullResources(GenericAPIView):
@@ -6990,7 +7048,7 @@ class CatalogAzurePullResources(GenericAPIView):
         for s in vm_sizes:
             s['price_per_hour'] = price_map.get(s['name'])
 
-        return Response({
+        response_data = {
             'provider': 'azure',
             'credential_id': credential_id,
             'subscription_id': subscription_id,
@@ -7011,4 +7069,29 @@ class CatalogAzurePullResources(GenericAPIView):
             'vm_sizes': vm_sizes,
             'subscription_accessible': subscription_accessible,
             'accessible_subscriptions': accessible_subscriptions,
-        })
+        }
+
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='azure', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': now().isoformat(),
+            'resource_groups': resource_groups,
+            'vms': vms,
+            'vnets': vnets,
+            'storage_accounts': storage_accounts,
+            'locations': locations,
+            'vm_images': vm_images,
+            'vm_sizes': vm_sizes,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='azure')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)

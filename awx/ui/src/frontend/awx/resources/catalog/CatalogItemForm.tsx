@@ -6,6 +6,8 @@ import {
   Button,
   Checkbox,
   DataList,
+  FormSelect,
+  FormSelectOption,
   DataListCell,
   DataListContent,
   DataListItem,
@@ -78,6 +80,7 @@ interface CatalogItemFormValues {
     disabled_fields: string[];
     hidden_fields: string[];
     field_templates: Record<string, string>;
+    dynamic_field_sources: Record<string, string>;
   }>;
 }
 
@@ -1281,6 +1284,26 @@ function CatalogDynamicFieldSelector() {
 
 // ─── Per-Provider Form Fields Tab ─────────────────────────────────────────────
 
+const PROVIDER_SOURCE_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  proxmox: [
+    { value: 'templates.name', label: 'Templates → name' },
+    { value: 'nodes.node', label: 'Nodes → node name' },
+    { value: 'storage.storage', label: 'Storage → pool name' },
+  ],
+  vmware: [
+    { value: 'clusters.name', label: 'Clusters → name' },
+    { value: 'hosts.name', label: 'Hosts → name' },
+    { value: 'datastores.name', label: 'Datastores → name' },
+    { value: 'networks.name', label: 'Networks → name' },
+    { value: 'datacenters.name', label: 'Datacenters → name' },
+  ],
+  azure: [
+    { value: 'locations.name', label: 'Locations → name' },
+    { value: 'resource_groups.name', label: 'Resource Groups → name' },
+    { value: 'vnets.name', label: 'VNets → name' },
+  ],
+};
+
 function ProviderFormFieldsTab({ provider }: { provider: string }) {
   const { t } = useTranslation();
   const { setValue, watch } = useFormContext<CatalogItemFormValues>();
@@ -1294,6 +1317,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     disabled_fields: [],
     hidden_fields: [],
     field_templates: {},
+    dynamic_field_sources: {},
   };
 
   // Use saved templates as the source of truth; derive local state lazily
@@ -1455,6 +1479,33 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                   saveConfig({ hidden_fields: [...next] });
                 }}
               />
+              {(PROVIDER_SOURCE_OPTIONS[provider]?.length ?? 0) > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 200 }}>
+                  <span style={{ fontSize: '0.8rem', whiteSpace: 'nowrap', color: 'var(--pf-v5-global--Color--200)' }}>
+                    {t('Source:')}
+                  </span>
+                  <FormSelect
+                    id={`${provider}_src_${variable}`}
+                    value={cfg.dynamic_field_sources?.[variable] ?? ''}
+                    onChange={(_e, val) => {
+                      const next = { ...(cfg.dynamic_field_sources ?? {}) };
+                      if (val) {
+                        next[variable] = val;
+                      } else {
+                        delete next[variable];
+                      }
+                      saveConfig({ dynamic_field_sources: next });
+                    }}
+                    style={{ minWidth: 180 }}
+                    aria-label={t('Dynamic source for {{variable}}', { variable })}
+                  >
+                    <FormSelectOption value="" label={t('— none —')} />
+                    {PROVIDER_SOURCE_OPTIONS[provider].map((opt) => (
+                      <FormSelectOption key={opt.value} value={opt.value} label={opt.label} />
+                    ))}
+                  </FormSelect>
+                </div>
+              )}
             </DynamicFieldRow>
           );
         })}
