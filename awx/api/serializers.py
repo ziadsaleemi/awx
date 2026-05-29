@@ -3980,6 +3980,7 @@ class CatalogItemSerializer(BaseSerializer):
             'extra_vars_schema',
             'cloud_backends',
             'provider_workflows',
+            'provider_deprovision_workflows',
             'available_providers',
             'provider_field_configs',
         )

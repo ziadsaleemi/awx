@@ -147,6 +147,15 @@ class CatalogItem(CommonModelNameNotUnique):
             'provider-specific deploy form fields. e.g. {"digitalocean": 25, "proxmox": 21}.'
         ),
     )
+    provider_deprovision_workflows = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        help_text=_(
+            'Mapping of cloud provider slug to WorkflowJobTemplate pk used to deprovision '
+            'resources for that provider. e.g. {"digitalocean": 26, "proxmox": 22}.'
+        ),
+    )
     available_providers = models.JSONField(
         blank=True,
         null=True,

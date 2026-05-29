@@ -501,7 +501,7 @@ function CatalogItemFormInputs() {
             key={config.provider}
             label={`${PROVIDER_LABELS[config.provider] ?? config.provider} Fields`}
           >
-            <ProviderFormFieldsTab provider={config.provider} wjtId={config.wjt_id ?? null} />
+            <ProviderFormFieldsTab provider={config.provider} />
           </PageTab>
         ))}
       </PageTabs>
@@ -1281,9 +1281,11 @@ function CatalogDynamicFieldSelector() {
 
 // ─── Per-Provider Form Fields Tab ─────────────────────────────────────────────
 
-function ProviderFormFieldsTab({ provider, wjtId }: { provider: string; wjtId: number | null }) {
+function ProviderFormFieldsTab({ provider }: { provider: string }) {
   const { t } = useTranslation();
   const { setValue, watch } = useFormContext<CatalogItemFormValues>();
+  const providerConfigs = watch('provider_configs');
+  const wjtId = providerConfigs.find((c) => c.provider === provider)?.wjt_id ?? null;
   const [cursorPositions, setCursorPositions] = useState<Record<string, number>>({});
   const fieldInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
