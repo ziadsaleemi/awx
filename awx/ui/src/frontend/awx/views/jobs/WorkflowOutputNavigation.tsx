@@ -123,14 +123,20 @@ export function WorkflowOutputNavigation(props: WorkflowOutputNavigationProps) {
           {filteredNodes.map((node: WorkflowJobNode) => (
             <SelectOption
               key={node.id}
-              to={getPageUrl(AwxRoute.JobOutput, {
-                params: {
-                  job_type: node.summary_fields.job?.type
-                    ? jobPaths[node.summary_fields.job?.type]
-                    : '',
-                  id: node.summary_fields.job?.id,
-                },
-              })}
+              to={
+                node.summary_fields.job?.type === 'terraform_job'
+                  ? getPageUrl(AwxRoute.TerraformJobOutput, {
+                      params: { job_id: node.summary_fields.job?.id },
+                    })
+                  : getPageUrl(AwxRoute.JobOutput, {
+                      params: {
+                        job_type: node.summary_fields.job?.type
+                          ? jobPaths[node.summary_fields.job?.type]
+                          : '',
+                        id: node.summary_fields.job?.id,
+                      },
+                    })
+              }
               component={Link}
               value={node.summary_fields?.job?.name}
             >

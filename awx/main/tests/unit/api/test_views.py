@@ -317,3 +317,12 @@ class TestSurveySpecValidation:
         spec = self.spec_from_element({'type': _type, 'default': ''})
         r = JobTemplateSurveySpec._validate_spec_data(spec, {})
         assert r is None
+
+    @pytest.mark.parametrize(
+        ('_type', 'default_value'),
+        [('integer', '2'), ('float', '2.5')],
+    )
+    def test_survey_spec_element_number_string_default_is_accepted(self, _type, default_value):
+        spec = self.spec_from_element({'type': _type, 'default': default_value})
+        r = JobTemplateSurveySpec._validate_spec_data(spec, {})
+        assert r is None

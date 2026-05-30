@@ -27,7 +27,7 @@ import { awxAPI } from '../../../common/api/awx-utils';
 import { Spec, Survey } from '../../../interfaces/Survey';
 import { AwxRoute } from '../../../main/AwxRoutes';
 
-type ResourceType = 'job_templates' | 'workflow_job_templates';
+type ResourceType = 'job_templates' | 'workflow_job_templates' | 'terraform_job_templates';
 
 const minDefault = 0;
 const maxDefault = 1024;
@@ -60,6 +60,25 @@ interface FormSpec extends Spec {
   formattedChoices?: ChoiceOption[];
 }
 
+function normalizeNumericDefault(spec: Spec): Spec {
+  if (spec.type !== 'integer' && spec.type !== 'float') {
+    return spec;
+  }
+  if (spec.default === '' || spec.default === null || spec.default === undefined) {
+    return spec;
+  }
+
+  const parsed = Number(spec.default);
+  if (!Number.isFinite(parsed)) {
+    return spec;
+  }
+
+  return {
+    ...spec,
+    default: spec.type === 'integer' ? Math.trunc(parsed) : parsed,
+  };
+}
+
 export function TemplateSurveyForm(props: IProps) {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -72,6 +91,8 @@ export function TemplateSurveyForm(props: IProps) {
     pageNavigate(
       resourceType === 'job_templates'
         ? AwxRoute.JobTemplateSurvey
+        : resourceType === 'terraform_job_templates'
+        ? AwxRoute.TerraformTemplateSurvey
         : AwxRoute.WorkflowJobTemplateSurvey,
       { params: { id } }
     );
@@ -224,7 +245,7 @@ export function TemplateSurveyForm(props: IProps) {
 
     const postBody: Survey = {
       ...updatedSurvey,
-      spec: questions,
+      spec: questions.map(normalizeNumericDefault),
     };
 
     try {

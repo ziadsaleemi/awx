@@ -183,6 +183,11 @@ async function getSurveySpec(template?: NodeResource) {
       awxAPI`/workflow_job_templates/${template.id.toString()}/survey_spec/`
     );
   }
+  if (template.unified_job_type === RESOURCE_TYPE.terraform_job) {
+    return await requestGet<Survey>(
+      awxAPI`/terraform_job_templates/${template.id.toString()}/survey_spec/`
+    );
+  }
 }
 
 export async function getLaunchData(node: GraphNode) {
@@ -197,6 +202,10 @@ export async function getLaunchData(node: GraphNode) {
     );
   } else if (unified_job_type === RESOURCE_TYPE.job) {
     return await requestGet<LaunchConfiguration>(awxAPI`/job_templates/${id.toString()}/launch/`);
+  } else if (unified_job_type === RESOURCE_TYPE.terraform_job) {
+    return await requestGet<LaunchConfiguration>(
+      awxAPI`/terraform_job_templates/${id.toString()}/launch/`
+    );
   }
 }
 

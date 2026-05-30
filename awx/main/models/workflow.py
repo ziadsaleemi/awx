@@ -4,6 +4,7 @@
 # Python
 import json
 import logging
+import re
 from uuid import uuid4
 from copy import copy
 from urllib.parse import urljoin
@@ -43,7 +44,7 @@ from awx.main.models.mixins import (
 from awx.main.models.jobs import LaunchTimeConfigBase, LaunchTimeConfig, JobTemplate
 from awx.main.models.credential import Credential
 from awx.main.redact import REPLACE_STR
-from awx.main.utils import ScheduleWorkflowManager
+from awx.main.utils import ScheduleWorkflowManager, NullablePromptPseudoField
 
 __all__ = [
     'WorkflowJobTemplate',
@@ -59,6 +60,7 @@ __all__ = [
 logger = logging.getLogger('awx.main.models.workflow')
 
 WORKFLOW_BASE_URL = "{}/jobs/workflow/{}"
+_HOST_IP_ARTIFACT_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
 
 
 class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
@@ -299,6 +301,23 @@ class WorkflowJobNode(WorkflowNodeBase):
         ]
         ordering = ('pk',)
 
+    # Compatibility descriptors for TerraformJobTemplate-specific prompt fields.
+    # WorkflowJobNode stores inventory in the standard 'inventory' FK from
+    # LaunchTimeConfig; TerraformJobTemplate names the same concept
+    # 'target_inventory', so provide an alias to avoid AttributeError in
+    # prompts_dict(for_cls=TerraformJobTemplate).
+    @property
+    def target_inventory(self):
+        return self.inventory
+
+    @target_inventory.setter
+    def target_inventory(self, value):
+        self.inventory = value
+
+    # terraform_operation is a char_prompts-backed pseudo-field specific to
+    # TerraformJobTemplate; store it transparently so prompts_dict works.
+    terraform_operation = NullablePromptPseudoField('terraform_operation')
+
     @property
     def event_processing_finished(self):
         return True
@@ -380,13 +399,42 @@ class WorkflowJobNode(WorkflowNodeBase):
             data['survey_passwords'] = password_dict
         # process extra_vars
         extra_vars = data.get('extra_vars', {})
+        override_limit_raw = wj_special_vars.pop('terraform_override_limit', True)
+        if isinstance(override_limit_raw, str):
+            override_limit = override_limit_raw.strip().lower() not in ('0', 'false', 'no', 'off', '')
+        else:
+            override_limit = bool(override_limit_raw)
         if ujt_obj and isinstance(ujt_obj, JobTemplate):
             if aa_dict:
                 functional_aa_dict = copy(aa_dict)
                 functional_aa_dict.pop('_ansible_no_log', None)
                 extra_vars.update(functional_aa_dict)
+
+                if override_limit:
+                    host_limits = []
+                    for key, value in functional_aa_dict.items():
+                        if not _HOST_IP_ARTIFACT_KEY_RE.search(key):
+                            continue
+                        if isinstance(value, list):
+                            host_limits.extend(str(item).strip() for item in value if item)
+                        elif value:
+                            host_limits.append(str(value).strip())
+                    host_limits = sorted(set(h for h in host_limits if h))
+                    if host_limits:
+                        data['limit'] = ','.join(host_limits)
         elif ujt_obj and isinstance(ujt_obj, WorkflowJobTemplate):
             pass  # artifacts are applied via seed_root_ancestor_artifacts in the task manager
+        else:
+            # Generic fallback for other UnifiedJobTemplate subclasses that
+            # accept extra_vars (e.g. TerraformJobTemplate).  Propagate
+            # ancestor artifacts as extra_vars the same way JobTemplate does.
+            from awx.main.models.terraform import TerraformJobTemplate  # local import avoids circular dependency
+
+            if ujt_obj and isinstance(ujt_obj, TerraformJobTemplate):
+                if aa_dict:
+                    functional_aa_dict = copy(aa_dict)
+                    functional_aa_dict.pop('_ansible_no_log', None)
+                    extra_vars.update(functional_aa_dict)
 
         # Workflow Job extra_vars higher precedence than ancestor artifacts
         extra_vars.update(wj_special_vars)
@@ -490,7 +538,8 @@ class WorkflowJobOptions(LaunchTimeConfigBase):
                 # the previously accumulated artifacts unchanged.
                 if old_node.job:
                     combined_artifacts = dict(old_node.ancestor_artifacts or {})
-                    combined_artifacts.update(old_node.job.get_effective_artifacts(parents_set=set([self.pk])))
+                    source_job = old_node.job.get_real_instance()
+                    combined_artifacts.update(source_job.get_effective_artifacts(parents_set=set([self.pk])))
                 else:
                     combined_artifacts = dict(old_node.ancestor_artifacts or {})
                 new_node.bypassed_job_status = 'successful'
@@ -735,6 +784,17 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
     is_sliced_job = models.BooleanField(default=False)
     is_bulk_job = models.BooleanField(default=False)
 
+    # Compatibility descriptors for TerraformJobTemplate-specific prompt fields.
+    @property
+    def target_inventory(self):
+        return self.inventory
+
+    @target_inventory.setter
+    def target_inventory(self, value):
+        self.inventory = value
+
+    terraform_operation = NullablePromptPseudoField('terraform_operation')
+
     def _set_default_dependencies_processed(self):
         self.dependencies_processed = True
 
@@ -790,6 +850,29 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
 
     def _get_task_impact(self):
         return 0
+
+    def _combined_artifacts(self):
+        combined = {}
+        for node in self.workflow_job_nodes.all().select_related('job').order_by('id'):
+            if not node.job:
+                continue
+            job_artifacts = node.job.get_effective_artifacts()
+            if not isinstance(job_artifacts, dict) or not job_artifacts:
+                continue
+            combined.update(job_artifacts)
+        return combined
+
+    def display_artifacts(self):
+        artifacts = self._combined_artifacts()
+        if artifacts.get('_ansible_no_log', False):
+            return "$hidden due to Ansible no_log flag$"
+        return artifacts
+
+    def get_effective_artifacts(self, **kwargs):
+        artifacts = self._combined_artifacts()
+        if isinstance(artifacts, dict):
+            return artifacts
+        return {}
 
     def get_ancestor_workflows(self):
         """Returns a list of WFJTs that are indirect parents of this workflow job

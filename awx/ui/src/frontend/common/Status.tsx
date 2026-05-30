@@ -56,11 +56,13 @@ export function StatusLabel(props: { status?: string; dataCy?: string }) {
 function useLabel(status: string | undefined, t: (str: string) => string) {
   if (status === undefined) return t('Unknown');
   const labels: { [key: string]: string } = {
+    active: t('Active'),
     approved: t('Approved'),
     completed: t('Completed'),
     canceled: t('Canceled'),
     changed: t('Changed'),
     deleting: t('Deleting'),
+    destroyed: t('Destroyed'),
     denied: t('Denied'),
     'deprovision-fail': t('Deprovisioning fail'),
     deprovisioning: t('Deprovisioning'),
@@ -97,6 +99,7 @@ function useLabel(status: string | undefined, t: (str: string) => string) {
 
 function getColor(status: string | undefined) {
   switch (status) {
+    case 'active':
     case 'approved':
     case 'completed':
     case 'healthy':
@@ -121,16 +124,17 @@ function getColor(status: string | undefined) {
     case 'pending':
     case 'running':
     case 'skipped':
+    case 'provisioning':
+    case 'deprovisioning':
       return 'blue';
     case 'canceled':
     case 'changed':
+    case 'destroyed':
     case 'unknown':
       return 'orange';
     case 'stopped':
       return undefined;
-    case 'deprovisioning':
     case 'disabled':
-    case 'provisioning':
     case 'starting':
     case 'waiting':
     case 'workers offline':
@@ -141,6 +145,7 @@ function getColor(status: string | undefined) {
 
 function getIcon(status: string | undefined) {
   switch (status) {
+    case 'active':
     case 'approved':
     case 'completed':
     case 'healthy':
@@ -169,15 +174,16 @@ function getIcon(status: string | undefined) {
     case 'waiting':
       return ClockIcon;
     case 'running':
+    case 'provisioning':
+    case 'deprovisioning':
       return RunningIcon;
     case 'canceled':
     case 'changed':
+    case 'destroyed':
     case 'unknown':
       return ExclamationTriangleIcon;
     case 'disabled':
       return BanIcon;
-    case 'deprovisioning':
-    case 'provisioning':
     case 'skipped':
       return MinusCircleIcon;
     case 'starting':

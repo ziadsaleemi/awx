@@ -41,6 +41,9 @@ import { useAwxNotificationsRoutes } from './routes/useAwxNotificationsRoutes';
 import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
+import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
+import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
+import { useAwxCloudRoutes } from './routes/useAwxCloudRoutes';
 import { useAwxTeamsRoutes } from './routes/useAwxTeamsRoutes';
 import { useAwxTemplateRoutes } from './routes/useAwxTemplateRoutes';
 import { useAwxUsersRoutes } from './routes/useAwxUsersRoutes';
@@ -51,6 +54,9 @@ export function useAwxNavigation() {
   const awxInventoryRoutes = useAwxInventoryRoutes();
   const awxHostRoutes = useAwxHostRoutes();
   const awxProjectRoutes = useAwxProjectRoutes();
+  const awxTerraformRoutes = useAwxTerraformRoutes();
+  const awxCatalogRoutes = useAwxCatalogRoutes();
+  const awxCloudRoutes = useAwxCloudRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
   const awxWorkflowApprovalRoutes = useAwxWorkflowApprovalRoutes();
@@ -347,6 +353,11 @@ export function useAwxNavigation() {
     awxTemplateRoutes,
     awxSchedulesRoutes,
     awxProjectRoutes,
+    awxTerraformRoutes,
+    awxCatalogRoutes,
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
+      ? [awxCloudRoutes]
+      : []),
     ...infrastructureItems,
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? analyticsItems : []),
     ...administrationItems,
@@ -354,7 +365,16 @@ export function useAwxNavigation() {
     ...settingsItems,
     {
       path: '',
-      element: <Navigate to={'./overview'} replace />,
+      element: (
+        <Navigate
+          to={
+            activeAwxUser && !activeAwxUser.is_superuser && !activeAwxUser.is_system_auditor
+              ? './catalog/browse'
+              : './overview'
+          }
+          replace
+        />
+      ),
     },
   ];
 

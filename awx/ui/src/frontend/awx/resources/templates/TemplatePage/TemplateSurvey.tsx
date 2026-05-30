@@ -17,6 +17,7 @@ import { requestPatch } from '../../../../common/crud/Data';
 import type { Spec } from '../../../interfaces/Survey';
 import type { JobTemplate } from '../../../interfaces/JobTemplate';
 import type { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
+import type { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 
 import { useDeleteSurveyDialog } from '../hooks/useDeleteSurveyDialog';
 import { useSurveyView } from '../hooks/useSurveyView';
@@ -32,7 +33,7 @@ const SurveySwitch = styled(Switch)`
 
 export function TemplateSurvey({ resourceType }: { resourceType: string }) {
   const params = useParams<{ id: string }>();
-  const { data: template, refresh } = useGetItem<JobTemplate | WorkflowJobTemplate>(
+  const { data: template, refresh } = useGetItem<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>(
     awxAPI`/${resourceType}/`,
     params.id
   );
@@ -44,6 +45,8 @@ export function TemplateSurvey({ resourceType }: { resourceType: string }) {
       const url =
         template.type === 'job_template'
           ? awxAPI`/job_templates/${template.id.toString()}/`
+          : template.type === 'terraform_job_template'
+          ? awxAPI`/terraform_job_templates/${template.id.toString()}/`
           : awxAPI`/workflow_job_templates/${template.id.toString()}/`;
 
       await requestPatch(url, {
@@ -66,7 +69,7 @@ export function TemplateSurveyInternal({
   template,
   onToggleSurvey,
 }: {
-  template: JobTemplate | WorkflowJobTemplate;
+  template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate;
   onToggleSurvey: (enabled: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -76,6 +79,8 @@ export function TemplateSurveyInternal({
     url:
       template.type === 'job_template'
         ? awxAPI`/job_templates/${template.id.toString()}/survey_spec/`
+        : template.type === 'terraform_job_template'
+        ? awxAPI`/terraform_job_templates/${template.id.toString()}/survey_spec/`
         : awxAPI`/workflow_job_templates/${template.id.toString()}/survey_spec/`,
   });
 
@@ -103,6 +108,8 @@ export function TemplateSurveyInternal({
           pageNavigate(
             template.type === 'job_template'
               ? AwxRoute.EditJobTemplateSurvey
+              : template.type === 'terraform_job_template'
+              ? AwxRoute.EditTerraformTemplateSurvey
               : AwxRoute.EditWorkflowJobTemplateSurvey,
             {
               params: { id: template.id.toString() },
@@ -153,6 +160,8 @@ export function TemplateSurveyInternal({
               pageNavigate(
                 template.type === 'job_template'
                   ? AwxRoute.AddJobTemplateSurvey
+                  : template.type === 'terraform_job_template'
+                  ? AwxRoute.AddTerraformTemplateSurvey
                   : AwxRoute.AddWorkflowJobTemplateSurvey,
                 {
                   params: { id: template.id.toString() },

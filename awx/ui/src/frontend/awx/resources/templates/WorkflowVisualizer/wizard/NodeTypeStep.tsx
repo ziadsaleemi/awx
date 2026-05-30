@@ -26,6 +26,7 @@ import { PageFormInventorySourceSelect } from '../../../inventories/components/P
 import { PageFormProjectSelect } from '../../../projects/components/PageFormProjectSelect';
 import { parseStringToTagArray } from '../../JobTemplateFormHelpers';
 import { PageFormJobTemplateSelect } from '../../components/PageFormJobTemplateSelect';
+import { PageFormTerraformJobTemplateSelect } from '../../components/PageFormTerraformJobTemplateSelect';
 import { RESOURCE_TYPE } from '../constants';
 import type { AllResources, PromptFormValues, UnifiedJobType, WizardFormValues } from '../types';
 import { shouldHideOtherStep } from './helpers';
@@ -121,6 +122,13 @@ export function NodeTypeStep(props: { hasSourceNode?: boolean }) {
         launchConfigResults = await requestGet<LaunchConfiguration>(
           awxAPI`/workflow_job_templates/${template.id.toString()}/launch/`
         );
+      } else if (
+        templateType === RESOURCE_TYPE.terraform_job ||
+        templateType === 'terraform_job_template'
+      ) {
+        launchConfigResults = await requestGet<LaunchConfiguration>(
+          awxAPI`/terraform_job_templates/${template.id.toString()}/launch/`
+        );
       }
       const { job_tags, skip_tags, inventory, ...defaults } = launchConfigResults?.defaults || {};
 
@@ -159,7 +167,7 @@ export function NodeTypeStep(props: { hasSourceNode?: boolean }) {
       }
     };
 
-    if (nodeType === RESOURCE_TYPE.job || nodeType === RESOURCE_TYPE.workflow_job) {
+    if (nodeType === RESOURCE_TYPE.job || nodeType === RESOURCE_TYPE.workflow_job || nodeType === RESOURCE_TYPE.terraform_job) {
       void setLaunchToWizardData();
     }
   }, [
@@ -228,6 +236,7 @@ function NodeTypeInput() {
         { label: t('Project Sync'), value: RESOURCE_TYPE.project_update },
         { label: t('Inventory Source Sync'), value: RESOURCE_TYPE.inventory_update },
         { label: t('Management Job'), value: RESOURCE_TYPE.system_job },
+        { label: t('Terraform Template'), value: RESOURCE_TYPE.terraform_job },
       ]}
     />
   );
@@ -282,6 +291,13 @@ function NodeResourceInput() {
                 <PageFormManagementJobsSelect<WizardFormValues> name="resource" isRequired />
                 <SystemJobInputs />
               </>
+            );
+          case RESOURCE_TYPE.terraform_job:
+            return (
+              <PageFormTerraformJobTemplateSelect<WizardFormValues>
+                name="resource"
+                isRequired
+              />
             );
           default:
             return;

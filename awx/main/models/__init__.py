@@ -94,6 +94,9 @@ from awx.main.models.workflow import (  # noqa
     WorkflowApproval,
     WorkflowApprovalTemplate,
 )
+from awx.main.models.terraform import TerraformJobTemplate, TerraformJob  # noqa
+from awx.main.models.events import TerraformJobEvent  # noqa
+from awx.main.models.catalog import CatalogItem, CatalogDeployment, CloudProviderConnection, CloudProviderState  # noqa
 
 # Add custom methods to User model for permissions checks.
 from django.contrib.auth.models import User  # noqa
@@ -253,9 +256,11 @@ activity_stream_registrar.connect(WorkflowJobTemplateNode)
 activity_stream_registrar.connect(WorkflowJob)
 activity_stream_registrar.connect(WorkflowApproval)
 activity_stream_registrar.connect(WorkflowApprovalTemplate)
+activity_stream_registrar.connect(CloudProviderConnection)
+activity_stream_registrar.connect(CloudProviderState)
 
 # Register models
-permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
+permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, TerraformJobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
 permission_registry.register(InstanceGroup, parent_field_name=None)  # Not part of an organization
 
 # prevent API filtering on certain Django-supplied sensitive fields

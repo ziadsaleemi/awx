@@ -1,7 +1,7 @@
 {
   "name": "@ansible/ansible-ui",
   "description": "Ansible UI",
-  "version": "2.4.313",
+  "version": "25.1.0",
   "author": "Red Hat",
   "license": "Apache-2.0",
   "repository": {
@@ -11,7 +11,7 @@
   "homepage": "https://github.com/ansible/ansible-ui#readme",
   "scripts": {
     "start": "echo Usage: npm run [awx:hub:eda]",
-    "awx": "UI_MODE=AWX webpack serve --mode development --config ./webpack/webpack.awx.cjs --port 4101 --open https://localhost:4101",
+    "awx": "UI_MODE=AWX webpack serve --mode development --config ./webpack/webpack.awx.cjs --port 4012 --no-open",
     "hub": "UI_MODE=HUB webpack serve --mode development --config ./webpack/webpack.hub.cjs --port 4102 --open https://localhost:4102",
     "eda": "UI_MODE=EDA webpack serve --mode development --config ./webpack/webpack.eda.cjs --port 4103 --open https://localhost:4103",
     "build": "concurrently npm:build:awx npm:build:hub npm:build:eda -c cyan,green,blue",
@@ -110,6 +110,7 @@
     "d3": "7.9.0",
     "dagre": "0.8.5",
     "debounce": "2.1.0",
+    "favicons": "^7.2.0",
     "favicons-webpack-plugin": "^6.0.1",
     "get-value": "3.0.1",
     "html-webpack-plugin": "5.6.0",
@@ -152,7 +153,6 @@
   },
   "devDependencies": {
     "@4tw/cypress-drag-drop": "2.2.5",
-    "swagger-typescript-api": "^13.0.3",
     "@cypress/code-coverage": "3.12.41",
     "@types/webpack-dev-server": "4.7.1",
     "@typescript-eslint/eslint-plugin": "7.16.0",
@@ -171,6 +171,7 @@
     "husky": "9.0.11",
     "lint-staged": "15.2.7",
     "prettier": "3.3.2",
+    "swagger-typescript-api": "^13.0.3",
     "webpack-dev-server": "4.15.2"
   },
   "nyc": {

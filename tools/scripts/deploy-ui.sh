@@ -24,15 +24,59 @@ for arg in "$@"; do
   [[ "$arg" == "--no-build" ]] && NO_BUILD=1
 done
 
-echo "=== AWX UI Deploy ==="
+# ── Timing helpers ─────────────────────────────────────────────────────────────
+DEPLOY_START=$SECONDS
+STEP_TIME_BUILD=0
+STEP_TIME_SYNC=0
+STEP_TIME_DEPLOY=0
+
+step_start() { _STEP_T=$SECONDS; }
+step_end() {
+  local elapsed=$(( SECONDS - _STEP_T ))
+  case "$1" in
+    build)  STEP_TIME_BUILD=$elapsed  ;;
+    sync)   STEP_TIME_SYNC=$elapsed   ;;
+    deploy) STEP_TIME_DEPLOY=$elapsed ;;
+  esac
+}
+
+# ── Retry helper ───────────────────────────────────────────────────────────────
+# retry <max_attempts> <delay_sec> <description> <command...>
+retry() {
+  local max=$1 delay=$2 desc=$3; shift 3
+  local attempt=1 ret=0 elapsed
+  while (( attempt <= max )); do
+    local t_start=$SECONDS
+    if "$@"; then
+      elapsed=$(( SECONDS - t_start ))
+      echo "    [retry] attempt $attempt/$max — OK (${elapsed}s)"
+      return 0
+    fi
+    ret=$?
+    elapsed=$(( SECONDS - t_start ))
+    echo "    [retry] attempt $attempt/$max — FAILED (exit $ret, ${elapsed}s): $desc" >&2
+    (( attempt++ ))
+    if (( attempt <= max )); then
+      echo "    [retry] waiting ${delay}s before attempt $attempt..." >&2
+      sleep "$delay"
+    fi
+  done
+  echo "    [retry] all $max attempts failed for: $desc" >&2
+  return $ret
+}
+
+echo "=== AWX UI Deploy  (started $(date '+%H:%M:%S')) ==="
 
 # ── Step 1: Build ──────────────────────────────────────────────────────────────
+step_start
 if [[ $NO_BUILD -eq 0 ]]; then
   echo "[1/4] Building frontend..."
   cd "$UI_SRC"
   PUBLIC_PATH=/static/awx/ npm run build:awx
-  echo "  Build complete."
+  step_end "build"
+  echo "  Build complete. (${STEP_TIME_BUILD}s)"
 else
+  step_end "build"
   echo "[1/4] Skipping build (--no-build)."
 fi
 
@@ -41,7 +85,6 @@ echo "[2/4] Preparing index_awx.html..."
 if [[ -f "$BUILD_SRC/index.html" && ! -f "$BUILD_SRC/index_awx.html" ]]; then
   mv "$BUILD_SRC/index.html" "$BUILD_SRC/index_awx.html"
 elif [[ -f "$BUILD_SRC/index.html" ]]; then
-  # Both exist — overwrite
   mv -f "$BUILD_SRC/index.html" "$BUILD_SRC/index_awx.html"
 fi
 
@@ -55,47 +98,76 @@ fi
 # issue where docker cp writes back stale container state to the macOS host.
 # The symlink /var/lib/awx/public/static/awx must NOT exist inside the container
 # (collectstatic --clear follows it and deletes build/ contents).
+step_start
 echo "[3/4] Syncing build files to $BUILD_DEST ..."
 mkdir -p "$BUILD_DEST"
 rsync -a --delete "$BUILD_SRC/" "$BUILD_DEST/"
 
-# Verify container can see the files via bind mount
-if ! docker exec "$CONTAINER" test -f "/awx_devel/awx/ui/build/awx/index_awx.html" 2>/dev/null; then
-  echo "  Bind mount not reflecting files yet — waiting 3s..."
-  sleep 3
-  if ! docker exec "$CONTAINER" test -f "/awx_devel/awx/ui/build/awx/index_awx.html" 2>/dev/null; then
-    echo "  Bind mount still stale. Falling back to docker cp..."
-    # Remove any broken symlink that would cause collectstatic to delete build/ files
-    docker exec "$CONTAINER" bash -c \
-      "if [ -L /var/lib/awx/public/static/awx ]; then rm /var/lib/awx/public/static/awx; fi" 2>/dev/null || true
-    # Copy files directly — skip the bind-mounted path to avoid feedback loops
-    docker exec "$CONTAINER" bash -c "mkdir -p /var/lib/awx/ui_build"
-    docker cp "$BUILD_SRC/." "$CONTAINER:/var/lib/awx/ui_build/"
-    docker exec "$CONTAINER" bash -c "cp /var/lib/awx/ui_build/index_awx.html /awx_devel/awx/ui/build/awx/index_awx.html" 2>/dev/null || true
-    echo "  Files copied via docker cp fallback."
+# Verify container can see the files via bind mount — up to 5 retries, 3s apart
+echo "  Verifying bind-mount visibility in container..."
+MOUNT_OK=0
+for _attempt in 1 2 3 4 5; do
+  t_a=$SECONDS
+  if docker exec "$CONTAINER" test -f "/awx_devel/awx/ui/build/awx/index_awx.html" 2>/dev/null; then
+    elapsed=$(( SECONDS - t_a ))
+    echo "    [bind-mount] attempt $_attempt/5 — visible (${elapsed}s)"
+    MOUNT_OK=1
+    break
   fi
+  elapsed=$(( SECONDS - t_a ))
+  echo "    [bind-mount] attempt $_attempt/5 — not yet visible (${elapsed}s), waiting 3s..." >&2
+  sleep 3
+done
+
+if [[ $MOUNT_OK -eq 0 ]]; then
+  echo "  Bind mount still stale after 5 attempts. Falling back to docker cp..." >&2
+  # Remove any broken symlink that would cause collectstatic to delete build/ files
+  docker exec "$CONTAINER" bash -c \
+    "if [ -L /var/lib/awx/public/static/awx ]; then rm /var/lib/awx/public/static/awx; fi" 2>/dev/null || true
+  docker exec "$CONTAINER" bash -c "mkdir -p /var/lib/awx/ui_build"
+  echo "    [docker cp] copying build artifacts..."
+  t_cp=$SECONDS
+  docker cp "$BUILD_SRC/." "$CONTAINER:/var/lib/awx/ui_build/"
+  docker exec "$CONTAINER" bash -c \
+    "cp /var/lib/awx/ui_build/index_awx.html /awx_devel/awx/ui/build/awx/index_awx.html" 2>/dev/null || true
+  echo "    [docker cp] done ($(( SECONDS - t_cp ))s)"
 fi
 
 # Ensure the symlink that causes the collectstatic circular delete is gone
 docker exec "$CONTAINER" bash -c \
   "if [ -L /var/lib/awx/public/static/awx ]; then echo '  Removing stale symlink...'; rm /var/lib/awx/public/static/awx; fi" 2>/dev/null || true
 
-echo "  Sync complete."
+step_end "sync"
+echo "  Sync complete. (${STEP_TIME_SYNC}s)"
 
 # ── Step 4: Restart uwsgi ──────────────────────────────────────────────────────
-# make uwsgi → collectstatic --clear → copies build/ → STATIC_ROOT, then starts uwsgi
+step_start
 echo "[4/4] Restarting uwsgi in container..."
 docker exec "$CONTAINER" supervisorctl restart tower-processes:awx-uwsgi
 echo "  Waiting for uwsgi to come up..."
 sleep 8
+step_end "deploy"
+echo "  uwsgi restarted. (${STEP_TIME_DEPLOY}s)"
 
 # ── Step 5: Verify ─────────────────────────────────────────────────────────────
 HTTP_CODE=$(curl -sk https://localhost:8043/ -o /dev/null -w "%{http_code}")
+set +o pipefail
 JS_SRC=$(curl -sk https://localhost:8043/ | grep -o 'src="/static/awx/[^"]*\.js"' | head -1)
+set -o pipefail
+
+TOTAL=$(( SECONDS - DEPLOY_START ))
+[[ $NO_BUILD -eq 0 ]] && BUILD_DISPLAY="${STEP_TIME_BUILD}s" || BUILD_DISPLAY="skipped"
 
 if [[ "$HTTP_CODE" == "200" ]]; then
   echo ""
-  echo "=== Deploy successful ==="
+  echo "=== Deploy successful  (finished $(date '+%H:%M:%S')) ==="
+  echo ""
+  echo "  Timings:"
+  echo "    build ........... $BUILD_DISPLAY"
+  echo "    sync ............ ${STEP_TIME_SYNC}s"
+  echo "    deploy (uwsgi) .. ${STEP_TIME_DEPLOY}s"
+  echo "    total ........... ${TOTAL}s"
+  echo ""
   echo "  HTTP: $HTTP_CODE"
   echo "  JS:   $JS_SRC"
   echo ""
@@ -103,6 +175,13 @@ if [[ "$HTTP_CODE" == "200" ]]; then
 else
   echo ""
   echo "ERROR: Server returned HTTP $HTTP_CODE after restart." >&2
+  echo ""
+  echo "  Timings at failure:"
+  echo "    build ........... $BUILD_DISPLAY"
+  echo "    sync ............ ${STEP_TIME_SYNC}s"
+  echo "    deploy (uwsgi) .. ${STEP_TIME_DEPLOY}s"
+  echo "    total ........... ${TOTAL}s"
+  echo ""
   echo "  Check container logs: docker exec $CONTAINER supervisorctl tail -10000 tower-processes:awx-uwsgi" >&2
   exit 1
 fi

@@ -7,6 +7,11 @@ export function useGetJobOutputUrl() {
   const getPageUrl = useGetPageUrl();
   const getJobOutputUrl = useCallback(
     (job: UnifiedJob) => {
+      if (job.type === 'terraform_job') {
+        return getPageUrl(AwxRoute.TerraformJobOutput, {
+          params: { job_id: job.id },
+        });
+      }
       return getPageUrl(AwxRoute.JobOutput, {
         params: {
           job_type: jobPaths[job.type],

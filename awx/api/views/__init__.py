@@ -6,8 +6,9 @@ import dateutil
 import functools
 import html
 import itertools
-import logging
+import json
 import re
+import logging
 import requests
 import socket
 import sys
@@ -104,7 +105,7 @@ from awx.main.utils import (
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
 from awx.main.utils.plugins import compute_cloud_inventory_sources
-from awx.main.utils.common import memoize
+from awx.main.utils.common import memoize, parse_yaml_or_json
 from awx.main.redact import UriCleaner
 from awx.api.permissions import (
     JobTemplateCallbackPermission,
@@ -1148,6 +1149,26 @@ class SystemJobEventsList(SubListAPIView):
     def finalize_response(self, request, response, *args, **kwargs):
         response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
         return super(SystemJobEventsList, self).finalize_response(request, response, *args, **kwargs)
+
+    def get_queryset(self):
+        job = self.get_parent_object()
+        self.check_parent_access(job)
+        return job.get_event_queryset()
+
+
+class TerraformJobEventsList(SubListAPIView):
+    model = models.TerraformJobEvent
+    serializer_class = serializers.TerraformJobEventSerializer
+    parent_model = models.TerraformJob
+    relationship = 'terraform_job_events'
+    name = _('Terraform Job Events List')
+    search_fields = ('stdout',)
+    pagination_class = UnifiedJobEventPagination
+    resource_purpose = 'events of a terraform job'
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response['X-UI-Max-Events'] = settings.MAX_UI_JOB_EVENTS
+        return super(TerraformJobEventsList, self).finalize_response(request, response, *args, **kwargs)
 
     def get_queryset(self):
         job = self.get_parent_object()
@@ -2881,6 +2902,17 @@ class JobTemplateSurveySpec(GenericAPIView):
                     ),
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'] != '':
+                if qtype == 'integer':
+                    try:
+                        survey_item['default'] = int(survey_item['default'])
+                    except ValueError:
+                        pass
+                elif qtype == 'float':
+                    try:
+                        survey_item['default'] = float(survey_item['default'])
+                    except ValueError:
+                        pass
             if 'default' in survey_item and survey_item['default'] != '':
                 if not isinstance(survey_item['default'], SURVEY_TYPE_MAPPING[qtype]):
                     type_label = 'string'
@@ -5036,3 +5068,2128 @@ class WorkflowApprovalDeny(RetrieveAPIView):
             return Response({"error": _("This workflow step has already been approved or denied.")}, status=status.HTTP_400_BAD_REQUEST)
         obj.deny(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Terraform Job Template + Terraform Job views
+# ---------------------------------------------------------------------------
+
+class TerraformJobTemplateList(ListCreateAPIView):
+    model = models.TerraformJobTemplate
+    serializer_class = serializers.TerraformJobTemplateSerializer
+    resource_purpose = 'terraform job templates'
+
+
+class TerraformJobTemplateDetail(RetrieveUpdateDestroyAPIView):
+    model = models.TerraformJobTemplate
+    serializer_class = serializers.TerraformJobTemplateSerializer
+    resource_purpose = 'terraform job template detail'
+
+
+class TerraformJobTemplateLaunch(GenericAPIView):
+    model = models.TerraformJobTemplate
+    obj_permission_type = 'start'
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'launch a terraform job from a terraform job template'
+
+    def get(self, request, *args, **kwargs):
+        obj = self.get_object()
+        data = {
+            'ask_variables_on_launch': obj.ask_variables_on_launch,
+            'ask_inventory_on_launch': obj.ask_inventory_on_launch,
+            'ask_terraform_operation_on_launch': obj.ask_terraform_operation_on_launch,
+            'variables_needed_to_start': obj.variables_needed_to_start,
+            'defaults': {
+                'terraform_operation': obj.terraform_operation,
+                'extra_vars': obj.extra_vars,
+            },
+        }
+        return Response(data)
+
+    def post(self, request, *args, **kwargs):
+        obj = self.get_object()
+        launch_kwargs = {}
+
+        # Parse and validate extra_vars, including survey answers.
+        # accept_or_ignore_variables validates survey fields and respects
+        # ask_variables_on_launch when deciding what to accept.
+        raw_extra_vars = request.data.get('extra_vars', {})
+        if isinstance(raw_extra_vars, str):
+            try:
+                raw_extra_vars = parse_yaml_or_json(raw_extra_vars, silent_failure=False)
+            except Exception:
+                return Response(
+                    {'extra_vars': ['Invalid JSON/YAML format.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if raw_extra_vars:
+            accepted_vars, _rejected_vars, errors = obj.accept_or_ignore_variables(raw_extra_vars)
+            if errors.get('variables_needed_to_start') or errors.get('extra_vars'):
+                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+            if accepted_vars:
+                launch_kwargs['extra_vars'] = accepted_vars
+        elif obj.survey_enabled:
+            # No launch-time vars provided; still validate that required survey
+            # fields have defaults or were already set on the template.
+            survey_errors = obj.survey_variable_validation({})
+            if survey_errors:
+                return Response(
+                    {'variables_needed_to_start': survey_errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if obj.ask_inventory_on_launch and 'target_inventory' in request.data:
+            launch_kwargs['target_inventory_id'] = request.data['target_inventory']
+        if obj.ask_terraform_operation_on_launch and 'terraform_operation' in request.data:
+            launch_kwargs['terraform_operation'] = request.data['terraform_operation']
+
+        new_job = obj.create_unified_job(**launch_kwargs)
+        new_job.signal_start()
+        data = OrderedDict()
+        data['terraform_job'] = new_job.id
+        data.update(serializers.TerraformJobSerializer(new_job, context=self.get_serializer_context()).to_representation(new_job))
+        headers = {'Location': new_job.get_absolute_url(request)}
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class TerraformJobTemplateCredentialsList(SubListCreateAttachDetachAPIView):
+    model = models.Credential
+    serializer_class = serializers.CredentialSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'credentials'
+    filter_read_permission = False
+    resource_purpose = 'credentials of a terraform job template'
+
+    def is_valid_relation(self, parent, sub, created=False):
+        if sub.unique_hash() in [cred.unique_hash() for cred in parent.credentials.all()]:
+            return {"error": _("Cannot assign multiple {credential_type} credentials.").format(credential_type=sub.unique_hash(display=True))}
+        kind = sub.credential_type.kind
+        if kind not in ('ssh', 'vault', 'cloud', 'net', 'kubernetes'):
+            return {'error': _('Cannot assign a Credential of kind `{}`.').format(kind)}
+        return super().is_valid_relation(parent, sub, created)
+
+
+class TerraformJobTemplateJobsList(SubListAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'jobs'
+    parent_key = 'terraform_job_template'
+    resource_purpose = 'terraform jobs of a terraform job template'
+
+
+class TerraformJobTemplateSchedulesList(SubListCreateAPIView):
+    name = _("Terraform Job Template Schedules")
+    model = models.Schedule
+    serializer_class = serializers.ScheduleSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'schedules'
+    parent_key = 'unified_job_template'
+    resource_purpose = 'schedules of a terraform job template'
+
+
+class TerraformJobTemplateSurveySpec(JobTemplateSurveySpec):
+    model = models.TerraformJobTemplate
+    resource_purpose = 'terraform job template survey specification'
+
+
+class TerraformJobTemplateNotificationTemplatesAnyList(SubListCreateAttachDetachAPIView):
+    model = models.NotificationTemplate
+    serializer_class = serializers.NotificationTemplateSerializer
+    parent_model = models.TerraformJobTemplate
+    resource_purpose = 'base view for notification templates of a terraform job template'
+
+
+class TerraformJobTemplateNotificationTemplatesStartedList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_started'
+    resource_purpose = 'notification templates triggered on terraform job start'
+
+
+class TerraformJobTemplateNotificationTemplatesErrorList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_error'
+    resource_purpose = 'notification templates triggered on terraform job error'
+
+
+class TerraformJobTemplateNotificationTemplatesSuccessList(TerraformJobTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_success'
+    resource_purpose = 'notification templates triggered on terraform job success'
+
+
+class TerraformJobTemplateObjectRolesList(SubListAPIView):
+    deprecated = True
+    model = models.Role
+    serializer_class = serializers.RoleSerializer
+    parent_model = models.TerraformJobTemplate
+    search_fields = ('role_field', 'content_type__model')
+    resource_purpose = 'roles of a terraform job template'
+
+    def get_queryset(self):
+        po = self.get_parent_object()
+        content_type = ContentType.objects.get_for_model(self.parent_model)
+        return models.Role.objects.filter(content_type=content_type, object_id=po.pk)
+
+
+class TerraformJobList(ListAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    resource_purpose = 'terraform jobs'
+
+
+class TerraformJobDetail(UnifiedJobDeletionMixin, RetrieveDestroyAPIView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobSerializer
+    resource_purpose = 'terraform job detail'
+
+
+class TerraformJobCancel(GenericCancelView):
+    model = models.TerraformJob
+    serializer_class = serializers.TerraformJobCancelSerializer
+    resource_purpose = 'cancel a terraform job'
+
+
+# ---------------------------------------------------------------------------
+# Catalog views (Phase D)
+# ---------------------------------------------------------------------------
+
+
+class CatalogItemList(ListCreateAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.CatalogItemSerializer
+    resource_purpose = 'catalog items'
+
+
+class CatalogItemDetail(RetrieveUpdateDestroyAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.CatalogItemSerializer
+    resource_purpose = 'catalog item detail'
+
+
+class CatalogItemDeploymentsList(SubListCreateAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    parent_model = models.CatalogItem
+    relationship = 'deployments'
+    parent_key = 'catalog_item'
+    resource_purpose = 'deployments of a catalog item'
+
+
+def _survey_question_to_schema_property(question):
+    survey_type = question.get('type', 'text')
+    field_type = 'string'
+    if survey_type == 'integer':
+        field_type = 'integer'
+    elif survey_type == 'float':
+        field_type = 'number'
+
+    prop = {
+        'type': field_type,
+        'title': question.get('question_name') or question.get('variable', ''),
+        'description': question.get('question_description', ''),
+    }
+
+    if 'default' in question:
+        prop['default'] = question.get('default')
+
+    if survey_type in ('multiplechoice', 'multiselect'):
+        choices = question.get('choices') or []
+        if isinstance(choices, str):
+            choices = [c for c in choices.split('\n') if c]
+        if choices:
+            prop['enum'] = choices
+
+    if survey_type in ('integer', 'float'):
+        if question.get('min') is not None:
+            prop['minimum'] = question.get('min')
+        if question.get('max') is not None:
+            prop['maximum'] = question.get('max')
+
+    return prop
+
+
+def _build_catalog_item_live_schema(item):
+    schema = {'type': 'object', 'properties': {}, 'required': []}
+    if isinstance(item.extra_vars_schema, dict):
+        schema.update(item.extra_vars_schema)
+        schema.setdefault('type', 'object')
+        schema.setdefault('properties', {})
+        schema.setdefault('required', [])
+
+    required_fields = set(schema.get('required') or [])
+
+    if item.provision_workflow_id and item.provision_workflow and item.provision_workflow.survey_enabled:
+        survey_spec = item.provision_workflow.survey_spec or {}
+        for question in survey_spec.get('spec', []):
+            variable = question.get('variable')
+            if not variable:
+                continue
+            schema['properties'][variable] = _survey_question_to_schema_property(question)
+            if question.get('required'):
+                required_fields.add(variable)
+
+    dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
+    dynamic_field_templates = _parse_catalog_dynamic_field_templates(
+        item.dynamic_field_templates, dynamic_fields
+    )
+
+    for dynamic_field in dynamic_fields:
+        prop = schema['properties'].setdefault(
+            dynamic_field,
+            {
+                'type': 'string',
+                'title': dynamic_field,
+                'description': _('Dynamic field used as input for deployment naming.'),
+            },
+        )
+        template_default = dynamic_field_templates.get(dynamic_field, '').strip()
+        if template_default:
+            prop['default'] = template_default
+
+    # Ensure template-driven variables are editable in the deploy form, even when
+    # they are not declared in survey_spec or extra_vars_schema.
+    template = item.name_template or ''
+    for variable in set(re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', template)):
+        if variable == 'user_org_name':
+            continue
+        schema['properties'].setdefault(
+            variable,
+            {
+                'type': 'string',
+                'title': variable,
+                'description': _('Used by deployment name template.'),
+            },
+        )
+
+    schema['required'] = sorted(required_fields)
+    return schema
+
+
+def _collect_deployment_saved_vars(deployment):
+    saved_vars = {}
+    if isinstance(deployment.extra_vars, dict):
+        saved_vars.update(deployment.extra_vars)
+
+    if deployment.provision_job_id and deployment.provision_job:
+        try:
+            saved_vars.update(deployment.provision_job.get_real_instance().get_effective_artifacts(parents_set=set()))
+        except Exception:
+            logger.exception('Failed to collect workflow artifacts for CatalogDeployment %s', deployment.pk)
+
+    if deployment.terraform_provision_job_id and deployment.terraform_provision_job:
+        artifacts = deployment.terraform_provision_job.artifacts
+        if isinstance(artifacts, dict):
+            saved_vars.update(artifacts)
+
+    return saved_vars
+
+
+def _parse_catalog_launch_extra_vars(raw_extra_vars):
+    if isinstance(raw_extra_vars, dict):
+        return raw_extra_vars.copy()
+    if not isinstance(raw_extra_vars, str) or not raw_extra_vars.strip():
+        return None
+
+    try:
+        parsed = parse_yaml_or_json(raw_extra_vars, silent_failure=False)
+    except Exception:
+        return None
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    return None
+
+
+def _resolve_catalog_deployment_extra_vars(launch_extra_vars, workflow_job=None, terraform_job=None):
+    for job in (workflow_job, terraform_job):
+        if not job:
+            continue
+        effective_extra_vars = _parse_catalog_launch_extra_vars(getattr(job, 'extra_vars', None))
+        if effective_extra_vars is not None:
+            return effective_extra_vars
+
+    return launch_extra_vars.copy()
+
+
+def _normalize_catalog_name_component(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value).lower().strip())
+
+
+def _render_catalog_name_template(template, context):
+    def replace(match):
+        key = match.group(1)
+        return _normalize_catalog_name_component(context.get(key, ''))
+
+    rendered = re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', replace, template or '')
+    return rendered.strip()
+
+
+def _generate_catalog_name(template, context, existing_names, fallback_prefix):
+    rendered_base = _render_catalog_name_template(template, context) if template else ''
+    rendered_base = rendered_base or str(fallback_prefix).strip() or 'deployment'
+    if not rendered_base.endswith('+1'):
+        return rendered_base
+
+    base = rendered_base[:-2]
+    escaped_base = re.escape(base)
+    pattern = re.compile(rf'^{escaped_base}(?P<sequence>\d+)?$', re.IGNORECASE)
+
+    highest_sequence = 0
+    matched = False
+    for existing_name in existing_names:
+        if not existing_name:
+            continue
+        match = pattern.match(str(existing_name).strip())
+        if not match:
+            continue
+        matched = True
+        sequence = match.group('sequence')
+        highest_sequence = max(highest_sequence, int(sequence) if sequence else 1)
+
+    if not matched:
+        return f'{base}1'
+
+    return f'{base}{highest_sequence + 1}'
+
+
+def _parse_catalog_dynamic_name_fields(raw_value):
+    names = []
+    seen = set()
+    for token in (raw_value or '').split(','):
+        normalized = token.strip()
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', normalized):
+            continue
+        if normalized in seen:
+            continue
+        names.append(normalized)
+        seen.add(normalized)
+    return names
+
+
+def _parse_catalog_dynamic_field_templates(raw_value, dynamic_fields):
+    if not isinstance(raw_value, dict):
+        return {}
+
+    allowed_fields = set(dynamic_fields)
+    templates = {}
+    for key, value in raw_value.items():
+        if key not in allowed_fields:
+            continue
+        if not isinstance(value, str):
+            continue
+        templates[key] = value
+
+    return templates
+
+
+class CatalogItemDeploySurvey(GenericAPIView):
+    model = models.CatalogItem
+    serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'use'
+    resource_purpose = 'catalog item deploy survey schema'
+
+    def get(self, request, *args, **kwargs):
+        item = self.get_object()
+        schema = _build_catalog_item_live_schema(item)
+        return Response({'schema': schema})
+
+
+class CatalogItemDeploy(GenericAPIView):
+    """
+    POST /api/v2/catalog_items/{id}/deploy/
+
+    Creates a CatalogDeployment and launches the provision workflow.
+    Required body field: ``name`` (label for the deployment).
+    Optional body field: ``extra_vars`` (dict, merged with the template).
+    """
+
+    model = models.CatalogItem
+    obj_permission_type = 'use'
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'deploy a catalog item'
+
+    def post(self, request, *args, **kwargs):
+        item = self.get_object()
+
+        extra_vars = request.data.get('extra_vars', None)
+        if extra_vars is None:
+            launch_extra_vars = {}
+        elif isinstance(extra_vars, dict):
+            launch_extra_vars = extra_vars.copy()
+        else:
+            return Response({'extra_vars': ['This field must be a dictionary.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = request.data.get('name', '')
+        if isinstance(name, str) and name.strip():
+            name_template = name.strip()
+        else:
+            dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
+            if not item.name_template and dynamic_fields:
+                name_template = f'{{{dynamic_fields[0]}}} deployment'
+            else:
+                name_template = item.name_template or item.name
+
+        existing_names = item.deployments.values_list('name', flat=True)
+        organization_name = item.organization.name if item.organization_id else ''
+        name = _generate_catalog_name(
+            name_template,
+            {'user_org_name': organization_name, **launch_extra_vars},
+            existing_names,
+            item.name,
+        )
+
+        launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
+
+        # Resolve which TFT to use — support multi-cloud via target_provider
+        target_provider = request.data.get('target_provider', None)
+
+        # Inject per-provider inventory/group config into extra_vars so workflow
+        # nodes (e.g. Configure VM) can target the correct AWX inventory and group.
+        if target_provider and item.provider_field_configs:
+            pfc = item.provider_field_configs.get(target_provider, {})
+            catalog_target_inventory = pfc.get('target_inventory', '')
+            catalog_target_group = pfc.get('target_group', '')
+            if catalog_target_inventory:
+                launch_extra_vars['catalog_target_inventory'] = catalog_target_inventory
+            if catalog_target_group:
+                launch_extra_vars['catalog_target_group'] = catalog_target_group
+        resolved_workflow = None
+        # provider_workflows takes highest priority — a configured WFT overrides any TFT
+        resolved_workflow = None
+        resolved_tft = None
+        if target_provider and item.provider_workflows and target_provider in item.provider_workflows:
+            wf_id = item.provider_workflows[target_provider]
+            try:
+                from awx.main.models import WorkflowJobTemplate
+                resolved_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
+            except WorkflowJobTemplate.DoesNotExist:
+                pass
+
+        # Only look up a TFT when no per-provider workflow is configured
+        if resolved_workflow is None:
+            if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
+                tft_id = item.cloud_backends[target_provider]
+                from awx.main.models.terraform import TerraformJobTemplate
+                try:
+                    resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
+                except TerraformJobTemplate.DoesNotExist:
+                    return Response(
+                        {'target_provider': ['Configured Terraform job template not found.']},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif not target_provider:
+                # Only use global terraform_job_template when no specific provider was requested
+                resolved_tft = item.terraform_job_template
+
+        workflow_job = None
+        terraform_job = None
+        if resolved_workflow:
+            launch_kwargs = {}
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = launch_extra_vars
+            workflow_job = resolved_workflow.create_unified_job(**launch_kwargs)
+            workflow_job.signal_start()
+        elif resolved_tft:
+            launch_kwargs = {}
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
+            terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
+            terraform_job.signal_start()
+        elif item.provision_workflow and not target_provider:
+            # Only use global provision_workflow fallback when no specific provider was requested
+            launch_kwargs = {}
+            if launch_extra_vars:
+                launch_kwargs['extra_vars'] = launch_extra_vars
+            workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
+            workflow_job.signal_start()
+
+        deployment_extra_vars = _resolve_catalog_deployment_extra_vars(
+            launch_extra_vars,
+            workflow_job=workflow_job,
+            terraform_job=terraform_job,
+        )
+
+        deployment = models.CatalogDeployment.objects.create(
+            catalog_item=item,
+            name=name,
+            owner=request.user,
+            status='provisioning' if (workflow_job or terraform_job) else 'active',
+            provision_job=workflow_job,
+            terraform_provision_job=terraform_job,
+            extra_vars=deployment_extra_vars,
+            last_failed_workflow_job=None,
+            target_provider=target_provider or '',
+        )
+        if workflow_job:
+            deployment.append_history_entry('provision', job=workflow_job, status='running')
+            deployment.save(update_fields=['provisioning_history'])
+        elif terraform_job:
+            deployment.append_history_entry('provision', job=terraform_job, status='running')
+            deployment.save(update_fields=['provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        headers = {'Location': deployment.get_absolute_url(request)}
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class CatalogDeploymentList(ListAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    resource_purpose = 'catalog deployments'
+
+
+class CatalogDeploymentDetail(RetrieveDestroyAPIView):
+    model = models.CatalogDeployment
+    serializer_class = serializers.CatalogDeploymentSerializer
+    resource_purpose = 'catalog deployment detail'
+
+
+class CatalogDeploymentDeprovision(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/deprovision/
+
+    Launches the deprovision workflow and sets status to 'deprovisioning'.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'deprovision a catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status in ('deprovisioning', 'destroyed'):
+            return Response(
+                {'detail': 'Deployment is already being deprovisioned or has been destroyed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        workflow_job = None
+        saved_vars = _collect_deployment_saved_vars(deployment)
+
+        # Resolve per-provider deprovision workflow when available
+        resolved_deprovision_workflow = None
+        item = deployment.catalog_item
+        if item:
+            stored_provider = deployment.target_provider
+            if stored_provider and item.provider_deprovision_workflows and stored_provider in item.provider_deprovision_workflows:
+                wf_id = item.provider_deprovision_workflows[stored_provider]
+                try:
+                    from awx.main.models import WorkflowJobTemplate
+                    resolved_deprovision_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
+                except WorkflowJobTemplate.DoesNotExist:
+                    pass
+            if resolved_deprovision_workflow is None:
+                resolved_deprovision_workflow = item.deprovision_workflow
+
+        if resolved_deprovision_workflow:
+            launch_kwargs = {}
+            if saved_vars:
+                launch_kwargs['extra_vars'] = saved_vars
+            workflow_job = resolved_deprovision_workflow.create_unified_job(**launch_kwargs)
+            workflow_job.signal_start()
+
+        deployment.status = 'deprovisioning'
+        deployment.deprovision_job = workflow_job
+        deployment.last_deprovision_vars = saved_vars
+        if workflow_job:
+            deployment.append_history_entry(
+                'deprovision',
+                job=workflow_job,
+                status='running',
+                details={'saved_var_keys': sorted(saved_vars.keys())},
+            )
+        deployment.save(update_fields=['status', 'deprovision_job', 'last_deprovision_vars', 'provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)
+
+
+class CatalogDeploymentRetry(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/retry/
+
+    Relaunches provisioning for failed deployments with the originally
+    supplied deploy parameters.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'retry'
+    resource_purpose = 'retry a failed catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status != 'failed':
+            return Response(
+                {'detail': _('Only failed deployments can be retried.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item = deployment.catalog_item
+        if item is None:
+            return Response(
+                {'detail': _('Cannot retry deployment because the catalog item is missing.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        launch_extra_vars = deployment.extra_vars if isinstance(deployment.extra_vars, dict) else {}
+        launch_extra_vars = launch_extra_vars.copy()
+        launch_extra_vars['terraform_override_limit'] = bool(item.override_workflow_limit)
+
+        workflow_job = None
+        terraform_job = None
+        retry_from_workflow = deployment.last_failed_workflow_job or deployment.provision_job
+        if retry_from_workflow and retry_from_workflow.status in ['failed', 'canceled', 'error'] and not retry_from_workflow.is_sliced_job:
+            workflow_job = retry_from_workflow.create_resume_workflow_job()
+            workflow_job.signal_start()
+        elif item.terraform_job_template:
+            terraform_job = item.terraform_job_template.create_unified_job(extra_vars=json.dumps(launch_extra_vars))
+            terraform_job.signal_start()
+        elif item.provision_workflow:
+            workflow_job = item.provision_workflow.create_unified_job(extra_vars=launch_extra_vars)
+            workflow_job.signal_start()
+
+        if workflow_job is None and terraform_job is None:
+            return Response(
+                {'detail': _('Cannot retry deployment because no provision template is configured.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deployment.status = 'provisioning'
+        if workflow_job is not None:
+            deployment.provision_job = workflow_job
+        if terraform_job is not None:
+            deployment.terraform_provision_job = terraform_job
+        deployment.extra_vars = launch_extra_vars
+        deployment.last_failed_workflow_job = None
+        if workflow_job is not None:
+            deployment.append_history_entry('retry', job=workflow_job, status='running', details={'mode': 'resume'})
+        elif terraform_job is not None:
+            deployment.append_history_entry('retry', job=terraform_job, status='running', details={'mode': 'relaunch'})
+        deployment.save(update_fields=['status', 'provision_job', 'terraform_provision_job', 'extra_vars', 'last_failed_workflow_job', 'provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)
+
+
+# ── Cloud provider connection + state API views ──────────────────────────────
+
+
+class CatalogDeploymentCancel(GenericAPIView):
+    """
+    POST /api/v2/catalog_deployments/{id}/cancel/
+
+    Cancels an in-progress provisioning or deprovisioning by killing the
+    associated job and marking the deployment as 'failed' / 'active'.
+    """
+
+    model = models.CatalogDeployment
+    serializer_class = serializers.EmptySerializer
+    resource_purpose = 'cancel an in-progress catalog deployment'
+
+    def post(self, request, *args, **kwargs):
+        deployment = self.get_object()
+
+        if deployment.status not in ('provisioning', 'deprovisioning'):
+            return Response(
+                {'detail': 'Only deployments in provisioning or deprovisioning state can be cancelled.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Determine which active job to cancel
+        active_job = None
+        if deployment.status == 'provisioning':
+            active_job = deployment.terraform_provision_job or deployment.provision_job
+        else:  # deprovisioning
+            active_job = deployment.deprovision_job
+
+        if active_job and active_job.status in ('pending', 'waiting', 'running'):
+            active_job.cancel()
+
+        # Set deployment to an appropriate terminal / recoverable state
+        new_status = 'failed' if deployment.status == 'provisioning' else 'active'
+        deployment.status = new_status
+        deployment.append_history_entry(
+            'cancel',
+            job=active_job,
+            status='canceled',
+            details={'canceled_by': request.user.username},
+        )
+        deployment.save(update_fields=['status', 'provisioning_history'])
+
+        serializer = serializers.CatalogDeploymentSerializer(
+            deployment, context=self.get_serializer_context()
+        )
+        return Response(serializer.data)
+
+
+class CloudProviderConnectionList(ListCreateAPIView):
+    """
+    GET  /api/v2/catalog_cloud/connections/
+    POST /api/v2/catalog_cloud/connections/
+    """
+
+    model = models.CloudProviderConnection
+    serializer_class = serializers.CloudProviderConnectionSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def get_queryset(self):
+        qs = models.CloudProviderConnection.objects.all()
+        provider_id = self.request.query_params.get('provider_id')
+        if provider_id:
+            qs = qs.filter(provider_id=provider_id)
+        return qs
+
+    def post(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can manage cloud connections.'))
+        return super().post(request, *args, **kwargs)
+
+
+class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/v2/catalog_cloud/connections/<pk>/
+    PATCH  /api/v2/catalog_cloud/connections/<pk>/
+    DELETE /api/v2/catalog_cloud/connections/<pk>/
+    """
+
+    model = models.CloudProviderConnection
+    serializer_class = serializers.CloudProviderConnectionSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can delete cloud connections.'))
+        return super().destroy(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can update cloud connections.'))
+        return super().update(request, *args, **kwargs)
+
+
+class CloudProviderStateDetail(GenericAPIView):
+    """
+    GET   /api/v2/catalog_cloud/provider_state/<provider_id>/
+    PATCH /api/v2/catalog_cloud/provider_state/<provider_id>/
+
+    Retrieves or updates per-provider state (pulled data, admin settings,
+    provider settings).  Creates the record on first PATCH.
+    """
+
+    serializer_class = serializers.CloudProviderStateSerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+
+    def _get_or_create(self, provider_id):
+        obj, _ = models.CloudProviderState.objects.get_or_create(provider_id=provider_id)
+        return obj
+
+    def get(self, request, provider_id, *args, **kwargs):
+        obj = self._get_or_create(provider_id)
+        serializer = self.get_serializer(obj)
+        return Response(serializer.data)
+
+    def patch(self, request, provider_id, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied(_('Only system administrators can update provider state.'))
+        obj = self._get_or_create(provider_id)
+        serializer = self.get_serializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class CatalogDigitalOceanConnectorValidate(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/digitalocean/validate/
+
+    Verifies that the selected DigitalOcean credential is usable and can
+    authenticate against the DigitalOcean API.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'validate DigitalOcean cloud connector'
+
+    @staticmethod
+    def _normalize_do_token(raw_token):
+        token = raw_token or ''
+        if not isinstance(token, str):
+            token = str(token)
+        token = token.strip().strip('"').strip("'")
+        token = ''.join(ch for ch in token if ch.isprintable() and ch not in ('\n', '\r', '\t'))
+        if token.lower().startswith('bearer '):
+            token = token.split(' ', 1)[1].strip()
+        return token
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response({'credential_id': [_('A valid integer is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'digitalocean_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type DigitalOcean (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
+        if not do_token:
+            return Response(
+                {'credential_id': [_('Credential is missing the DigitalOcean API token (do_token).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                'Authorization': f'Bearer {do_token}',
+                'Accept': 'application/json',
+            }
+        )
+
+        try:
+            response = session.get('https://api.digitalocean.com/v2/account', timeout=20)
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': _('Could not reach DigitalOcean API. Check network connectivity.'),
+                }
+            )
+        except requests.exceptions.Timeout:
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': _('DigitalOcean API request timed out.'),
+                }
+            )
+
+        if not response.ok:
+            message = response.text
+            try:
+                message = response.json().get('message', message)
+            except Exception:
+                pass
+            if response.status_code == 401:
+                detail = _(
+                    'Unable to authenticate with DigitalOcean. '
+                    'Make sure do_token contains a valid Personal Access Token '
+                    '(not a Spaces key or other credential). '
+                    'Generate one at: https://cloud.digitalocean.com/account/api/tokens'
+                )
+            else:
+                detail = _('DigitalOcean API error (HTTP %(code)s): %(message)s') % {
+                    'code': response.status_code,
+                    'message': message,
+                }
+            return Response(
+                {
+                    'provider': 'digitalocean',
+                    'credential_id': credential_id,
+                    'validated': False,
+                    'status': 'misconfigured',
+                    'detail': detail,
+                }
+            )
+
+        payload = response.json() or {}
+        account = payload.get('account') or {}
+
+        return Response(
+            {
+                'provider': 'digitalocean',
+                'credential_id': credential_id,
+                'validated': True,
+                'status': 'connected',
+                'account_email': account.get('email'),
+                'account_uuid': account.get('uuid'),
+                'detail': _('Successfully validated DigitalOcean connector credentials.'),
+                'validated_at': now().isoformat(),
+            }
+        )
+
+
+class CatalogDigitalOceanPullImages(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/digitalocean/pull_images/
+
+    Fetches DigitalOcean images and droplet size pricing automatically using
+    the selected DigitalOcean credential. No source URL is required.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull DigitalOcean image catalog and pricing'
+
+    @staticmethod
+    def _normalize_do_token(raw_token):
+        token = raw_token or ''
+        if not isinstance(token, str):
+            token = str(token)
+        token = token.strip().strip('"').strip("'")
+        token = ''.join(ch for ch in token if ch.isprintable() and ch not in ('\n', '\r', '\t'))
+        if token.lower().startswith('bearer '):
+            token = token.split(' ', 1)[1].strip()
+        return token
+
+    def _fetch_do_paginated(self, session, url, key, extra_params=None):
+        items = []
+        next_url = url
+        params = {'per_page': 200}
+        if isinstance(extra_params, dict):
+            params.update(extra_params)
+
+        while next_url:
+            response = session.get(next_url, params=params, timeout=20)
+            if not response.ok:
+                message = response.text
+                try:
+                    message = response.json().get('message', message)
+                except Exception:
+                    pass
+                if response.status_code == 401:
+                    message = _(
+                        '%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)'
+                    ) % {'message': message}
+                raise ParseError(_('DigitalOcean API error: %(message)s') % {'message': message})
+
+            payload = response.json()
+            items.extend(payload.get(key, []))
+            next_url = payload.get('links', {}).get('pages', {}).get('next')
+            params = None
+
+        return items
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response({'credential_id': [_('A valid integer is required.')]}, status=status.HTTP_400_BAD_REQUEST)
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'digitalocean_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type DigitalOcean (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
+        if not do_token:
+            return Response(
+                {'credential_id': [_('Credential is missing the DigitalOcean API token (do_token).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                'Authorization': f'Bearer {do_token}',
+                'Accept': 'application/json',
+            }
+        )
+
+        private_images = self._fetch_do_paginated(
+            session,
+            'https://api.digitalocean.com/v2/images',
+            'images',
+            extra_params={'private': 'true'},
+        )
+        public_distribution_images = self._fetch_do_paginated(
+            session,
+            'https://api.digitalocean.com/v2/images',
+            'images',
+            extra_params={'type': 'distribution'},
+        )
+        sizes = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/sizes', 'sizes')
+        raw_regions = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/regions', 'regions')
+        raw_vpcs = self._fetch_do_paginated(session, 'https://api.digitalocean.com/v2/vpcs', 'vpcs')
+
+        # Private and public distribution images can overlap by id/slug; dedupe.
+        image_map = {}
+        for image in private_images + public_distribution_images:
+            image_key = image.get('id') or image.get('slug') or image.get('name')
+            if image_key is None:
+                continue
+            image_map[image_key] = image
+        images = list(image_map.values())
+
+        image_results = []
+        for image in images:
+            image_results.append(
+                {
+                    'id': image.get('id'),
+                    'slug': image.get('slug'),
+                    'name': image.get('name'),
+                    'distribution': image.get('distribution'),
+                    'type': image.get('type'),
+                    'status': image.get('status'),
+                    'public': bool(image.get('public', False)),
+                    'private': bool(not image.get('public', False)),
+                    'min_disk_size': image.get('min_disk_size'),
+                    'size_gigabytes': image.get('size_gigabytes'),
+                    'regions': image.get('regions', []),
+                }
+            )
+
+        pricing_results = []
+        for size in sizes:
+            pricing_results.append(
+                {
+                    'slug': size.get('slug'),
+                    'description': size.get('description'),
+                    'memory_mb': size.get('memory'),
+                    'vcpus': size.get('vcpus'),
+                    'disk_gb': size.get('disk'),
+                    'transfer_tb': size.get('transfer'),
+                    'price_monthly': size.get('price_monthly'),
+                    'price_hourly': size.get('price_hourly'),
+                    'available': size.get('available'),
+                    'regions': size.get('regions', []),
+                }
+            )
+
+        region_results = []
+        for region in raw_regions:
+            region_results.append(
+                {
+                    'slug': region.get('slug'),
+                    'name': region.get('name'),
+                    'available': bool(region.get('available', False)),
+                    'features': region.get('features', []),
+                }
+            )
+
+        vpc_results = []
+        for vpc in raw_vpcs:
+            vpc_results.append(
+                {
+                    'id': vpc.get('id'),
+                    'name': vpc.get('name'),
+                    'region': vpc.get('region'),
+                    'ip_range': vpc.get('ip_range'),
+                    'default': bool(vpc.get('default', False)),
+                    'created_at': vpc.get('created_at'),
+                }
+            )
+
+        pulled_at = now()
+        response_data = {
+            'provider': 'digitalocean',
+            'credential_id': credential_id,
+            'pulled_at': pulled_at.isoformat(),
+            'image_count': len(image_results),
+            'pricing_count': len(pricing_results),
+            'region_count': len(region_results),
+            'vpc_count': len(vpc_results),
+            'images': image_results,
+            'pricing': pricing_results,
+            'regions': region_results,
+            'vpcs': vpc_results,
+        }
+
+        # Persist pulled data to the database so it survives across sessions.
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='digitalocean')
+        state.pulled_at = pulled_at
+        state.provider_data = response_data
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
+
+
+class CatalogProxmoxPullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/proxmox/pull_resources/
+
+    Fetches live inventory from a Proxmox VE cluster using the selected
+    Proxmox VE credential. Returns nodes, VMs (QEMU), LXC containers,
+    storage pools, and network interfaces.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull Proxmox VE cluster inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'proxmox_ve':
+            return Response(
+                {'credential_id': [_('Credential must be of type Proxmox VE.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pm_api_url = (credential.get_input('pm_api_url', default='') or '').rstrip('/')
+        pm_api_token_id = credential.get_input('pm_api_token_id', default='') or ''
+        pm_api_token_secret = credential.get_input('pm_api_token_secret', default='') or ''
+        pm_tls_insecure = credential.get_input('pm_tls_insecure', default=False)
+
+        if not pm_api_url:
+            return Response(
+                {'credential_id': [_('Credential is missing pm_api_url.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not pm_api_token_id or not pm_api_token_secret:
+            return Response(
+                {'credential_id': [_('Credential is missing pm_api_token_id or pm_api_token_secret.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        session = requests.Session()
+        session.headers.update({
+            'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
+            'Accept': 'application/json',
+        })
+        session.verify = not bool(pm_tls_insecure)
+
+        def _get(path):
+            url = f'{pm_api_url}/{path.lstrip("/")}'
+            resp = session.get(url, timeout=20)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    detail = resp.json().get('errors') or resp.json().get('message') or detail
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('Proxmox API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            return resp.json().get('data', []) or []
+
+        # ── cluster/resources gives a flat list of every resource ───────────
+        raw_resources = _get('/cluster/resources')
+
+        node_results = []
+        vm_results = []
+        container_results = []
+        template_results = []
+
+        node_names = []
+        for item in raw_resources:
+            rtype = item.get('type')
+            if rtype == 'node':
+                node_results.append({
+                    'node': item.get('node', ''),
+                    'status': item.get('status', 'unknown'),
+                    'type': 'node',
+                    'maxcpu': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                })
+                node_names.append(item.get('node', ''))
+            elif rtype == 'qemu':
+                entry = {
+                    'vmid': item.get('vmid', 0),
+                    'name': item.get('name', ''),
+                    'status': item.get('status', 'stopped'),
+                    'node': item.get('node', ''),
+                    'cpus': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                    'type': 'qemu',
+                }
+                if item.get('template', 0):
+                    template_results.append(entry)
+                else:
+                    vm_results.append(entry)
+            elif rtype == 'lxc':
+                container_results.append({
+                    'vmid': item.get('vmid', 0),
+                    'name': item.get('name', ''),
+                    'status': item.get('status', 'stopped'),
+                    'node': item.get('node', ''),
+                    'cpus': item.get('maxcpu', 0),
+                    'maxmem': item.get('maxmem', 0),
+                    'maxdisk': item.get('maxdisk', 0),
+                    'uptime': item.get('uptime', 0),
+                    'type': 'lxc',
+                })
+
+        # ── storage ──────────────────────────────────────────────────────────
+        storage_raw = _get('/storage')
+        storage_results = []
+        for s in storage_raw:
+            storage_results.append({
+                'storage': s.get('storage', ''),
+                'type': s.get('type', ''),
+                'status': 'active' if s.get('active', 0) else 'inactive',
+                'nodes': s.get('nodes', ''),
+                'avail': s.get('avail', 0),
+                'total': s.get('total', 0),
+                'used': s.get('used', 0),
+                'shared': bool(s.get('shared', 0)),
+                'content': s.get('content', ''),
+            })
+
+        # ── networks (per-node) ───────────────────────────────────────────────
+        network_results = []
+        for node_name in node_names:
+            try:
+                ifaces = _get(f'/nodes/{node_name}/network')
+            except Exception:
+                continue
+            for iface in ifaces:
+                network_results.append({
+                    'iface': iface.get('iface', ''),
+                    'type': iface.get('type', 'eth'),
+                    'node': node_name,
+                    'active': bool(iface.get('active', 0)),
+                    'address': iface.get('address', ''),
+                    'netmask': iface.get('netmask', ''),
+                    'cidr': iface.get('cidr', ''),
+                    'bridge_ports': iface.get('bridge_ports', ''),
+                    'comments': iface.get('comments', ''),
+                })
+
+        pulled_at = now().isoformat()
+        response_data = {
+            'provider': 'proxmox',
+            'credential_id': credential_id,
+            'pulled_at': pulled_at,
+            'node_count': len(node_results),
+            'vm_count': len(vm_results),
+            'container_count': len(container_results),
+            'template_count': len(template_results),
+            'storage_count': len(storage_results),
+            'network_count': len(network_results),
+            'nodes': node_results,
+            'vms': vm_results,
+            'containers': container_results,
+            'templates': template_results,
+            'storage': storage_results,
+            'networks': network_results,
+        }
+
+        # Look up the connection record so we can key the data by connection ID.
+        # This allows multiple Proxmox connections to coexist in provider_data.
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='proxmox', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': pulled_at,
+            'nodes': node_results,
+            'vms': vm_results,
+            'containers': container_results,
+            'templates': template_results,
+            'storage': storage_results,
+            'networks': network_results,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='proxmox')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
+
+
+class CatalogVmwarePullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/vmware/pull_resources/
+
+    Fetches live inventory from a VMware vCenter server using the selected
+    VMware vSphere credential. Returns datacenters, clusters, hosts, VMs,
+    networks, and datastores via the vSphere REST API.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull VMware vSphere inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'vmware':
+            return Response(
+                {'credential_id': [_('Credential must be of type VMware vCenter.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
+        vcenter_user = credential.get_input('username', default='') or ''
+        vcenter_pass = credential.get_input('password', default='') or ''
+        validate_certs = credential.get_input('validate_certs', default=True)
+
+        if not vcenter_host:
+            return Response(
+                {'credential_id': [_('Credential is missing the host field.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not vcenter_user or not vcenter_pass:
+            return Response(
+                {'credential_id': [_('Credential is missing username or password.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Normalise the base URL — accept bare hostname or full URL
+        if not vcenter_host.startswith(('http://', 'https://')):
+            vcenter_host = f'https://{vcenter_host}'
+
+        session = requests.Session()
+        session.verify = bool(validate_certs)
+
+        # ── Authenticate: obtain a vSphere REST session token ────────────────
+        auth_url = f'{vcenter_host}/rest/com/vmware/cis/session'
+        try:
+            auth_resp = session.post(auth_url, auth=(vcenter_user, vcenter_pass), timeout=20)
+        except requests.RequestException as exc:
+            raise ParseError(
+                _('Could not connect to vCenter (%(host)s): %(exc)s')
+                % {'host': vcenter_host, 'exc': str(exc)}
+            )
+
+        if not auth_resp.ok:
+            raise ParseError(
+                _('vCenter authentication failed (%(status)s). Check credentials.')
+                % {'status': auth_resp.status_code}
+            )
+
+        session_token = auth_resp.json().get('value', '')
+        if not session_token:
+            raise ParseError(_('vCenter returned an empty session token.'))
+
+        session.headers.update({
+            'vmware-api-session-id': session_token,
+            'Accept': 'application/json',
+        })
+
+        def _get(path):
+            url = f'{vcenter_host}/rest{path}'
+            resp = session.get(url, timeout=20)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    detail = resp.json().get('value', {}).get('messages', [{}])[0].get('default_message', detail)
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('vCenter API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            return resp.json().get('value', []) or []
+
+        try:
+            # ── Datacenters ──────────────────────────────────────────────────
+            raw_dcs = _get('/vcenter/datacenter')
+            datacenters = [
+                {'id': dc.get('datacenter', ''), 'name': dc.get('name', '')}
+                for dc in raw_dcs
+            ]
+
+            # ── Clusters ────────────────────────────────────────────────────
+            raw_clusters = _get('/vcenter/cluster')
+            clusters = [
+                {
+                    'id': c.get('cluster', ''),
+                    'name': c.get('name', ''),
+                    'datacenter_id': c.get('datacenter', ''),
+                    'ha_enabled': bool(c.get('ha_enabled', False)),
+                    'drs_enabled': bool(c.get('drs_enabled', False)),
+                    'host_count': c.get('host_count', 0),
+                }
+                for c in raw_clusters
+            ]
+
+            # ── Hosts ────────────────────────────────────────────────────────
+            raw_hosts = _get('/vcenter/host')
+            hosts = [
+                {
+                    'id': h.get('host', ''),
+                    'name': h.get('name', ''),
+                    'cluster_id': h.get('cluster', ''),
+                    'power_state': h.get('power_state', ''),
+                    'connection_state': h.get('connection_state', ''),
+                    'cpu_count': h.get('cpu_count', 0),
+                    'memory_size_mib': h.get('memory_size_MiB', 0),
+                }
+                for h in raw_hosts
+            ]
+
+            # ── VMs ──────────────────────────────────────────────────────────
+            raw_vms = _get('/vcenter/vm')
+            vms = [
+                {
+                    'id': vm.get('vm', ''),
+                    'name': vm.get('name', ''),
+                    'power_state': vm.get('power_state', ''),
+                    'host_id': vm.get('host', ''),
+                    'memory_size_mib': vm.get('memory_size_MiB', 0),
+                    'cpu_count': vm.get('cpu_count', 0),
+                }
+                for vm in raw_vms
+            ]
+
+            # ── Networks ─────────────────────────────────────────────────────
+            raw_networks = _get('/vcenter/network')
+            networks = [
+                {
+                    'id': n.get('network', ''),
+                    'name': n.get('name', ''),
+                    'type': n.get('type', ''),
+                }
+                for n in raw_networks
+            ]
+
+            # ── Datastores ───────────────────────────────────────────────────
+            raw_datastores = _get('/vcenter/datastore')
+            datastores = [
+                {
+                    'id': ds.get('datastore', ''),
+                    'name': ds.get('name', ''),
+                    'type': ds.get('type', ''),
+                    'capacity_mb': ds.get('capacity', 0),
+                    'free_space_mb': ds.get('free_space', 0),
+                    'accessible': bool(ds.get('accessible', True)),
+                }
+                for ds in raw_datastores
+            ]
+
+        finally:
+            # Always log out the session to avoid orphaned sessions on vCenter
+            try:
+                session.delete(f'{vcenter_host}/rest/com/vmware/cis/session', timeout=10)
+            except Exception:
+                pass
+
+        response_data = {
+            'provider': 'vmware',
+            'credential_id': credential_id,
+            'pulled_at': now().isoformat(),
+            'datacenter_count': len(datacenters),
+            'cluster_count': len(clusters),
+            'host_count': len(hosts),
+            'vm_count': len(vms),
+            'network_count': len(networks),
+            'datastore_count': len(datastores),
+            'datacenters': datacenters,
+            'clusters': clusters,
+            'hosts': hosts,
+            'vms': vms,
+            'networks': networks,
+            'datastores': datastores,
+        }
+
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='vmware', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': now().isoformat(),
+            'datacenters': datacenters,
+            'clusters': clusters,
+            'hosts': hosts,
+            'vms': vms,
+            'networks': networks,
+            'datastores': datastores,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='vmware')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)
+
+
+class CatalogAzurePullResources(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/connectors/azure/pull_resources/
+
+    Fetches live inventory from an Azure subscription using the Azure Resource
+    Manager REST API and the selected Azure Resource Manager (Terraform)
+    credential. Returns resource groups, VMs, virtual networks, storage
+    accounts, and available locations.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsSystemAdminOrAuditor,)
+    resource_purpose = 'pull Azure subscription inventory'
+
+    def post(self, request, *args, **kwargs):
+        credential_id = request.data.get('credential_id')
+        if credential_id is None:
+            return Response(
+                {'credential_id': [_('This field is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            credential_id = int(credential_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'credential_id': [_('A valid integer is required.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        credential = get_object_or_400(models.Credential, pk=credential_id)
+        if not request.user.can_access(models.Credential, 'use', credential):
+            raise PermissionDenied(_('You do not have permission to use this credential.'))
+
+        namespace = getattr(credential.credential_type, 'namespace', '')
+        if namespace != 'azure_rm_terraform':
+            return Response(
+                {'credential_id': [_('Credential must be of type Azure Resource Manager (Terraform).')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        subscription_id = credential.get_input('arm_subscription_id', default='') or ''
+        client_id = credential.get_input('arm_client_id', default='') or ''
+        client_secret = credential.get_input('arm_client_secret', default='') or ''
+        tenant_id = credential.get_input('arm_tenant_id', default='') or ''
+        environment = credential.get_input('arm_environment', default='') or ''
+
+        for field, label in (
+            (subscription_id, 'arm_subscription_id'),
+            (client_id, 'arm_client_id'),
+            (client_secret, 'arm_client_secret'),
+            (tenant_id, 'arm_tenant_id'),
+        ):
+            if not field:
+                return Response(
+                    {'credential_id': [_('Credential is missing %(field)s.') % {'field': label}]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ── Select Azure cloud endpoints ─────────────────────────────────────
+        env_map = {
+            'AzureUSGovernment': {
+                'login': 'https://login.microsoftonline.us',
+                'arm': 'https://management.usgovcloudapi.net',
+                'scope': 'https://management.usgovcloudapi.net/.default',
+            },
+            'AzureChinaCloud': {
+                'login': 'https://login.chinacloudapi.cn',
+                'arm': 'https://management.chinacloudapi.cn',
+                'scope': 'https://management.chinacloudapi.cn/.default',
+            },
+            'AzureGermanCloud': {
+                'login': 'https://login.microsoftonline.de',
+                'arm': 'https://management.microsoftazure.de',
+                'scope': 'https://management.microsoftazure.de/.default',
+            },
+        }
+        endpoints = env_map.get(environment, {
+            'login': 'https://login.microsoftonline.com',
+            'arm': 'https://management.azure.com',
+            'scope': 'https://management.azure.com/.default',
+        })
+
+        arm_base = endpoints['arm'].rstrip('/')
+
+        # ── Obtain an OAuth2 access token via client credentials ─────────────
+        token_url = f"{endpoints['login']}/{tenant_id}/oauth2/v2.0/token"
+        try:
+            token_resp = requests.post(
+                token_url,
+                data={
+                    'grant_type': 'client_credentials',
+                    'client_id': client_id,
+                    'client_secret': client_secret,
+                    'scope': endpoints['scope'],
+                },
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            raise ParseError(
+                _('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)}
+            )
+
+        if not token_resp.ok:
+            try:
+                error_detail = token_resp.json().get('error_description', token_resp.text)
+            except Exception:
+                error_detail = token_resp.text
+            raise ParseError(
+                _('Azure authentication failed (%(status)s): %(detail)s')
+                % {'status': token_resp.status_code, 'detail': error_detail}
+            )
+
+        access_token = token_resp.json().get('access_token', '')
+        if not access_token:
+            raise ParseError(_('Azure returned an empty access token.'))
+
+        api_version_map = {
+            'resourcegroups': '2021-04-01',
+            'virtualmachines': '2023-07-01',
+            'virtualnetworks': '2023-09-01',
+            'storageaccounts': '2023-01-01',
+            'locations': '2022-12-01',
+        }
+
+        arm_session = requests.Session()
+        arm_session.headers.update({
+            'Authorization': f'Bearer {access_token}',
+            'Accept': 'application/json',
+        })
+
+        def _arm_get(path, api_version):
+            url = f'{arm_base}{path}'
+            params = {'api-version': api_version}
+            resp = arm_session.get(url, params=params, timeout=30)
+            if not resp.ok:
+                detail = resp.text
+                try:
+                    err = resp.json()
+                    detail = err.get('error', {}).get('message', detail)
+                except Exception:
+                    pass
+                raise ParseError(
+                    _('Azure API error (%(status)s): %(detail)s')
+                    % {'status': resp.status_code, 'detail': detail}
+                )
+            data = resp.json()
+            return data.get('value', []) or []
+
+        sub_prefix = f'/subscriptions/{subscription_id}'
+
+        # ── List all subscriptions the SP can access (for diagnostics) ────────
+        accessible_subscriptions = []
+        subscription_accessible = None
+        try:
+            subs_resp = arm_session.get(
+                f'{arm_base}/subscriptions',
+                params={'api-version': '2022-12-01'},
+                timeout=20,
+            )
+            if subs_resp.ok:
+                raw_subs = subs_resp.json().get('value', [])
+                accessible_subscriptions = [
+                    {
+                        'id': s.get('subscriptionId', ''),
+                        'name': s.get('displayName', ''),
+                        'state': s.get('state', ''),
+                    }
+                    for s in raw_subs
+                ]
+                accessible_ids = {s['id'] for s in accessible_subscriptions}
+                subscription_accessible = subscription_id in accessible_ids
+        except Exception:
+            pass
+
+        # ── Resource Groups ───────────────────────────────────────────────────
+        raw_rgs = _arm_get(f'{sub_prefix}/resourcegroups', api_version_map['resourcegroups'])
+        resource_groups = [
+            {
+                'id': rg.get('id', ''),
+                'name': rg.get('name', ''),
+                'location': rg.get('location', ''),
+                'provisioning_state': rg.get('properties', {}).get('provisioningState', ''),
+                'tags': rg.get('tags') or {},
+            }
+            for rg in raw_rgs
+        ]
+
+        # ── Virtual Machines ──────────────────────────────────────────────────
+        raw_vms = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Compute/virtualMachines',
+            api_version_map['virtualmachines'],
+        )
+        vms = []
+        for vm in raw_vms:
+            props = vm.get('properties', {})
+            os_profile = props.get('osProfile', {})
+            storage_profile = props.get('storageProfile', {})
+            os_disk = storage_profile.get('osDisk', {})
+            # Power state comes from instance view; omit to avoid per-VM calls
+            vms.append({
+                'id': vm.get('id', ''),
+                'name': vm.get('name', ''),
+                'location': vm.get('location', ''),
+                'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
+                'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
+                'os_type': os_disk.get('osType', ''),
+                'provisioning_state': props.get('provisioningState', ''),
+                'tags': vm.get('tags') or {},
+            })
+
+        # ── Virtual Networks ──────────────────────────────────────────────────
+        raw_vnets = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Network/virtualNetworks',
+            api_version_map['virtualnetworks'],
+        )
+        vnets = [
+            {
+                'id': vn.get('id', ''),
+                'name': vn.get('name', ''),
+                'location': vn.get('location', ''),
+                'resource_group': vn.get('id', '').split('/')[4] if vn.get('id') else '',
+                'address_space': vn.get('properties', {}).get('addressSpace', {}).get('addressPrefixes', []),
+                'provisioning_state': vn.get('properties', {}).get('provisioningState', ''),
+            }
+            for vn in raw_vnets
+        ]
+
+        # ── Storage Accounts ──────────────────────────────────────────────────
+        raw_storage = _arm_get(
+            f'{sub_prefix}/providers/Microsoft.Storage/storageAccounts',
+            api_version_map['storageaccounts'],
+        )
+        storage_accounts = [
+            {
+                'id': sa.get('id', ''),
+                'name': sa.get('name', ''),
+                'location': sa.get('location', ''),
+                'resource_group': sa.get('id', '').split('/')[4] if sa.get('id') else '',
+                'kind': sa.get('kind', ''),
+                'sku': sa.get('sku', {}).get('name', ''),
+                'provisioning_state': sa.get('properties', {}).get('provisioningState', ''),
+            }
+            for sa in raw_storage
+        ]
+
+        # ── Locations ─────────────────────────────────────────────────────────
+        raw_locations = _arm_get(
+            f'{sub_prefix}/locations',
+            api_version_map['locations'],
+        )
+        locations = [
+            {
+                'id': loc.get('id', ''),
+                'name': loc.get('name', ''),
+                'display_name': loc.get('displayName', ''),
+                'region_type': loc.get('metadata', {}).get('regionType', 'Physical'),
+            }
+            for loc in raw_locations
+        ]
+
+        # ── VM Images ─────────────────────────────────────────────────────────
+        # Primary location: prefer eastus, otherwise first physical location
+        physical_locs = [l for l in locations if l.get('region_type') == 'Physical']
+        primary_location = next(
+            (l['name'] for l in physical_locs if l['name'] == 'eastus'),
+            physical_locs[0]['name'] if physical_locs else 'eastus',
+        )
+
+        vm_images = []
+
+        # 1 — Custom managed images in the subscription
+        try:
+            raw_custom = _arm_get(
+                f'{sub_prefix}/providers/Microsoft.Compute/images',
+                '2023-07-01',
+            )
+            for img in raw_custom:
+                props = img.get('properties', {})
+                os_disk = props.get('storageProfile', {}).get('osDisk', {})
+                rg = img.get('id', '').split('/')[4] if img.get('id') else ''
+                vm_images.append({
+                    'id': img.get('id', ''),
+                    'name': img.get('name', ''),
+                    'publisher': '',
+                    'offer': '',
+                    'sku': '',
+                    'version': '',
+                    'os_type': os_disk.get('osType', ''),
+                    'image_type': 'custom',
+                    'location': img.get('location', ''),
+                    'urn': img.get('id', ''),
+                    'description': f'Custom image · resource group: {rg}',
+                })
+        except Exception:
+            pass
+
+        # 2 — Compute gallery images
+        try:
+            raw_galleries = _arm_get(
+                f'{sub_prefix}/providers/Microsoft.Compute/galleries',
+                '2023-07-01',
+            )
+            for gallery in raw_galleries:
+                gallery_name = gallery.get('name', '')
+                gallery_rg = gallery.get('id', '').split('/')[4] if gallery.get('id') else ''
+                try:
+                    gallery_images = _arm_get(
+                        f'{sub_prefix}/resourceGroups/{gallery_rg}'
+                        f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
+                        '2023-07-01',
+                    )
+                    for gimg in gallery_images:
+                        gprops = gimg.get('properties', {})
+                        ident = gprops.get('identifier', {})
+                        vm_images.append({
+                            'id': gimg.get('id', ''),
+                            'name': gimg.get('name', ''),
+                            'publisher': ident.get('publisher', ''),
+                            'offer': ident.get('offer', ''),
+                            'sku': ident.get('sku', ''),
+                            'version': '',
+                            'os_type': gprops.get('osType', ''),
+                            'image_type': 'gallery',
+                            'location': gimg.get('location', ''),
+                            'urn': gimg.get('id', ''),
+                            'description': f'Compute Gallery: {gallery_name}',
+                        })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 3 — Popular marketplace images: resolve latest version via ARM
+        _CURATED = [
+            # Ubuntu
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS Gen2'},
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS'},
+            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-focal', 'sku': '20_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 20.04 LTS Gen2'},
+            # Windows Server
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter-azure-edition', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter Azure Edition'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2019-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2019 Datacenter'},
+            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2016-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2016 Datacenter'},
+            # RHEL
+            {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '9-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 9 LVM Gen2'},
+            {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '8-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 8 LVM Gen2'},
+            # Debian
+            {'publisher': 'Debian', 'offer': 'debian-12', 'sku': '12', 'os_type': 'Linux', 'name': 'Debian 12'},
+            {'publisher': 'Debian', 'offer': 'debian-11', 'sku': '11', 'os_type': 'Linux', 'name': 'Debian 11'},
+            # SUSE
+            {'publisher': 'SUSE', 'offer': 'sles-15-sp5', 'sku': 'gen2', 'os_type': 'Linux', 'name': 'SUSE Linux Enterprise 15 SP5 Gen2'},
+            # CentOS (legacy but still deployed)
+            {'publisher': 'OpenLogic', 'offer': 'CentOS', 'sku': '8_5-gen2', 'os_type': 'Linux', 'name': 'CentOS 8.5 Gen2'},
+        ]
+
+        _img_api = '2023-07-01'
+        for curated in _CURATED:
+            pub, offer, sku = curated['publisher'], curated['offer'], curated['sku']
+            versions_url = (
+                f'{arm_base}{sub_prefix}/providers/Microsoft.Compute'
+                f'/locations/{primary_location}/publishers/{pub}'
+                f'/artifacttypes/vmimage/offers/{offer}/skus/{sku}/versions'
+            )
+            try:
+                vresp = arm_session.get(
+                    versions_url,
+                    params={'api-version': _img_api, '$top': '1', '$orderby': 'name desc'},
+                    timeout=10,
+                )
+                if vresp.ok:
+                    versions = vresp.json()
+                    latest = versions[0].get('name', 'latest') if versions else 'latest'
+                    vm_images.append({
+                        'id': f'marketplace/{pub}/{offer}/{sku}',
+                        'name': curated['name'],
+                        'publisher': pub,
+                        'offer': offer,
+                        'sku': sku,
+                        'version': latest,
+                        'os_type': curated['os_type'],
+                        'image_type': 'marketplace',
+                        'location': primary_location,
+                        'urn': f'{pub}:{offer}:{sku}:{latest}',
+                        'description': '',
+                    })
+            except Exception:
+                pass
+
+        # ── VM Sizes ──────────────────────────────────────────────────────────
+        vm_sizes = []
+        try:
+            _sku_api = '2021-07-01'
+            skus_resp = arm_session.get(
+                f'https://management.azure.com/subscriptions/{subscription_id}'
+                f'/providers/Microsoft.Compute/skus',
+                params={
+                    'api-version': _sku_api,
+                    '$filter': f"location eq '{primary_location}'",
+                },
+                timeout=30,
+            )
+            if skus_resp.ok:
+                for sku_item in skus_resp.json().get('value', []):
+                    if sku_item.get('resourceType') != 'virtualMachines':
+                        continue
+                    # Skip location-restricted SKUs
+                    if any(
+                        r.get('type') == 'Location'
+                        for r in sku_item.get('restrictions', [])
+                    ):
+                        continue
+                    caps = {
+                        c['name']: c['value']
+                        for c in sku_item.get('capabilities', [])
+                    }
+                    # Zones for this location
+                    zones = []
+                    for li in sku_item.get('locationInfo', []):
+                        if li.get('location', '').lower() == primary_location.lower():
+                            zones = sorted(li.get('zones', []))
+                    vm_sizes.append({
+                        'name': sku_item.get('name', ''),
+                        'tier': sku_item.get('tier', ''),
+                        'family': sku_item.get('family', ''),
+                        'vcpus': int(caps.get('vCPUs', 0) or 0),
+                        'memory_gb': float(caps.get('MemoryGB', 0) or 0),
+                        'gpus': int(caps.get('GPUs', 0) or 0),
+                        'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
+                        'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
+                        'premium_io': caps.get('PremiumIO', '').lower() == 'true',
+                        'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
+                        'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
+                        'zones': zones,
+                        'location': primary_location,
+                    })
+                vm_sizes.sort(key=lambda s: (s['family'], s['name']))
+        except Exception:
+            pass
+
+        # ── VM Pricing (Azure Retail Prices API — public, no auth) ───────────
+        price_map: dict = {}
+        try:
+            prices_url = 'https://prices.azure.com/api/retail/prices'
+            prices_params: dict = {
+                'api-version': '2023-01-01-preview',
+                '$filter': (
+                    f"serviceName eq 'Virtual Machines' and "
+                    f"armRegionName eq '{primary_location}' and "
+                    f"priceType eq 'Consumption'"
+                ),
+            }
+            while True:
+                pr = requests.get(prices_url, params=prices_params, timeout=20)
+                if not pr.ok:
+                    break
+                pr_data = pr.json()
+                for item in pr_data.get('Items', []):
+                    sku_name = item.get('armSkuName', '')
+                    meter_name = item.get('meterName', '')
+                    # Keep Linux on-demand only (skip Windows, Spot, Low Priority)
+                    if any(kw in meter_name for kw in ('Windows', 'Spot', 'Low Priority')):
+                        continue
+                    price = item.get('retailPrice', 0.0)
+                    if sku_name and price > 0 and sku_name not in price_map:
+                        price_map[sku_name] = price
+                next_link = pr_data.get('NextPageLink')
+                if not next_link:
+                    break
+                prices_url = next_link
+                prices_params = {}
+        except Exception:
+            pass
+
+        # Attach price to each vm_size entry
+        for s in vm_sizes:
+            s['price_per_hour'] = price_map.get(s['name'])
+
+        response_data = {
+            'provider': 'azure',
+            'credential_id': credential_id,
+            'subscription_id': subscription_id,
+            'pulled_at': now().isoformat(),
+            'resource_group_count': len(resource_groups),
+            'vm_count': len(vms),
+            'vnet_count': len(vnets),
+            'storage_account_count': len(storage_accounts),
+            'location_count': len(locations),
+            'vm_image_count': len(vm_images),
+            'vm_size_count': len(vm_sizes),
+            'resource_groups': resource_groups,
+            'vms': vms,
+            'vnets': vnets,
+            'storage_accounts': storage_accounts,
+            'locations': locations,
+            'vm_images': vm_images,
+            'vm_sizes': vm_sizes,
+            'subscription_accessible': subscription_accessible,
+            'accessible_subscriptions': accessible_subscriptions,
+        }
+
+        conn_obj = models.CloudProviderConnection.objects.filter(
+            provider_id='azure', credential_id=credential_id
+        ).first()
+        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+
+        conn_data = {
+            'pulled_at': now().isoformat(),
+            'resource_groups': resource_groups,
+            'vms': vms,
+            'vnets': vnets,
+            'storage_accounts': storage_accounts,
+            'locations': locations,
+            'vm_images': vm_images,
+            'vm_sizes': vm_sizes,
+        }
+
+        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='azure')
+        existing = state.provider_data if isinstance(state.provider_data, dict) else {}
+        existing[conn_key] = conn_data
+        state.provider_data = existing
+        state.pulled_at = now()
+        state.save(update_fields=['pulled_at', 'provider_data'])
+
+        return Response(response_data)

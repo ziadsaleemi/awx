@@ -72,6 +72,10 @@ from awx.main.models import (
     WorkflowJobTemplateNode,
     WorkflowApproval,
     WorkflowApprovalTemplate,
+    TerraformJobTemplate,
+    TerraformJob,
+    CatalogItem,
+    CatalogDeployment,
 )
 from awx.main.models.mixins import ResourceMixin
 
@@ -475,8 +479,9 @@ class BaseAccess(object):
                 user_capabilities['schedule'] = user_capabilities['start']
                 continue
             elif display_method == 'delete' and not isinstance(obj, (User, UnifiedJob, CredentialInputSource, ExecutionEnvironment, InstanceGroup)):
-                user_capabilities['delete'] = user_capabilities['edit']
-                continue
+                if 'edit' in user_capabilities:
+                    user_capabilities['delete'] = user_capabilities['edit']
+                    continue
             elif display_method == 'copy' and isinstance(obj, (Group, Host)):
                 user_capabilities['copy'] = user_capabilities['edit']
                 continue
@@ -1785,6 +1790,183 @@ class SystemJobAccess(BaseAccess):
 
     def can_start(self, obj, validate_license=True):
         return False  # no relaunching of system jobs
+
+
+class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
+    """
+    I can see Terraform Job Templates when I have read role on the template.
+    """
+
+    model = TerraformJobTemplate
+    select_related = (
+        'created_by',
+        'modified_by',
+        'project',
+        'organization',
+        'target_inventory',
+    )
+    prefetch_related = ('credentials__credential_type',)
+
+    def filtered_queryset(self):
+        if self.user.is_superuser or self.user.is_system_auditor:
+            return TerraformJobTemplate.objects.all()
+        return TerraformJobTemplate.objects.filter(
+            pk__in=TerraformJobTemplate.accessible_pk_qs(self.user, 'read_role')
+        )
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'job_template_admin_role').exists()
+        return self.check_related('organization', Organization, data, role_field='job_template_admin_role')
+
+    def can_start(self, obj, validate_license=True):
+        if validate_license:
+            self.check_license()
+        if self.user.is_superuser:
+            return True
+        return self.user in obj.execute_role
+
+    def can_change(self, obj, data):
+        if self.user not in obj.admin_role and not self.user.is_superuser:
+            return False
+        if data is None:
+            return True
+        return self.check_related('project', Project, data, obj=obj, role_field='use_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or self.user in obj.admin_role
+
+
+class TerraformJobAccess(BaseAccess):
+    """
+    I can see a Terraform Job if I can see its parent template.
+    """
+
+    model = TerraformJob
+    select_related = (
+        'created_by',
+        'modified_by',
+        'terraform_job_template',
+        'project',
+        'target_inventory',
+    )
+
+    def filtered_queryset(self):
+        return TerraformJob.objects.filter(
+            terraform_job_template__in=TerraformJobTemplate.accessible_pk_qs(self.user, 'read_role')
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return False
+        return self.check_related('terraform_job_template', TerraformJobTemplate, data, role_field='execute_role')
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_start(self, obj, validate_license=True):
+        return self.can_add({'terraform_job_template': obj.terraform_job_template_id})
+
+    def can_delete(self, obj):
+        return self.user.is_superuser
+
+
+class CatalogItemAccess(BaseAccess):
+    """
+    I can see CatalogItems I have read_role on.
+    catalog_admin users (org.admin_role) have full CRUD.
+    catalog_user (org.member_role) can read and deploy items they have use_role on.
+    """
+
+    model = CatalogItem
+    select_related = ('organization', 'provision_workflow', 'deprovision_workflow', 'created_by', 'modified_by')
+
+    def filtered_queryset(self):
+        if self.user.is_superuser:
+            return CatalogItem.objects.all()
+        return CatalogItem.objects.filter(
+            Q(admin_role__members=self.user)
+            | Q(use_role__members=self.user)
+            | Q(read_role__members=self.user)
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'admin_role').exists()
+        return self.check_related('organization', Organization, data, role_field='admin_role')
+
+    def can_change(self, obj, data):
+        if self.user not in obj.admin_role and not self.user.is_superuser:
+            return False
+        if data is None:
+            return True
+        return self.check_related('organization', Organization, data, obj=obj, role_field='admin_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or self.user in obj.admin_role
+
+    def can_use(self, obj):
+        return self.user.is_superuser or self.user in obj.use_role
+
+    def get_user_capabilities(self, obj, **kwargs):
+        user_capabilities = super().get_user_capabilities(obj, **kwargs)
+        user_capabilities['use'] = self.can_use(obj)
+        return user_capabilities
+
+
+class CatalogDeploymentAccess(BaseAccess):
+    """
+    I can see CatalogDeployments I own, or all deployments if I have catalog admin.
+    """
+
+    model = CatalogDeployment
+    select_related = ('catalog_item', 'catalog_item__organization', 'owner', 'provision_job', 'deprovision_job', 'last_failed_workflow_job')
+
+    def filtered_queryset(self):
+        if self.user.is_superuser:
+            return CatalogDeployment.objects.all()
+        admin_items = CatalogItem.objects.filter(admin_role__members=self.user).values_list('pk', flat=True)
+        return CatalogDeployment.objects.filter(
+            Q(owner=self.user) | Q(catalog_item__in=admin_items)
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return False
+        item_id = data.get('catalog_item')
+        if not item_id:
+            return False
+        try:
+            item = CatalogItem.objects.get(pk=item_id)
+        except CatalogItem.DoesNotExist:
+            return False
+        return self.user in item.use_role
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or (
+            obj.owner == self.user and obj.status in ('destroyed', 'failed')
+        )
+
+    def can_retry(self, obj):
+        if obj.status != 'failed' or obj.catalog_item_id is None:
+            return False
+        if self.user.is_superuser:
+            return True
+        if obj.owner_id == self.user.id:
+            return True
+        return self.user in obj.catalog_item.admin_role
+
+    def get_user_capabilities(self, obj, **kwargs):
+        user_capabilities = super().get_user_capabilities(obj, **kwargs)
+        user_capabilities['retry'] = self.can_retry(obj)
+        return user_capabilities
 
 
 class JobLaunchConfigAccess(UnifiedCredentialsMixin, BaseAccess):

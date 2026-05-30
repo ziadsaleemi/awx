@@ -87,6 +87,7 @@ export function AwxSelectRolesStep(props: {
       toolbarFilters,
       tableColumns,
       queryParams,
+      disableQueryString: true,
     },
     'awxRoles'
   );

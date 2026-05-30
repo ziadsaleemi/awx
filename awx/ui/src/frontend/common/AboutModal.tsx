@@ -26,7 +26,13 @@ function AnsibleAboutModal(props: AnsibleAboutModalProps) {
       <TextContent>
         <TextList component="dl">
           <TextListItem component="dt">{t('Version')}</TextListItem>
-          <TextListItem component="dd">{process.env.VERSION}</TextListItem>
+          <TextListItem component="dd">25.0.0</TextListItem>
+          <TextListItem component="dt">{t('Enhanced by')}</TextListItem>
+          <TextListItem component="dd">
+            <a href="https://ziadsaleemi.com" target="_blank" rel="noopener noreferrer">
+              Ziad Saleemi
+            </a>
+          </TextListItem>
         </TextList>
       </TextContent>
     </AboutModal>

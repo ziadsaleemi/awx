@@ -1,0 +1,407 @@
+import pytest
+
+from awx.api.versioning import reverse
+from awx.main.models import CatalogDeployment, CatalogItem, Organization, WorkflowJob, WorkflowJobTemplate
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_merges_live_workflow_survey(get, admin_user, workflow_job_template, organization):
+    workflow_job_template.survey_enabled = True
+    workflow_job_template.survey_spec = {
+        'name': 'Catalog Provision Survey',
+        'description': 'Provision options',
+        'spec': [
+            {
+                'question_name': 'Hostname',
+                'question_description': 'Desired hostname',
+                'required': True,
+                'type': 'text',
+                'variable': 'vm_hostname',
+                'default': 'catalog-vm',
+            }
+        ],
+    }
+    workflow_job_template.save(update_fields=['survey_enabled', 'survey_spec'])
+
+    item = CatalogItem.objects.create(
+        name='RHEL VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        extra_vars_schema={
+            'type': 'object',
+            'properties': {
+                'environment': {'type': 'string', 'enum': ['dev', 'test', 'prod']},
+            },
+        },
+    )
+
+    response = get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), admin_user, expect=200)
+    schema = response.data['schema']
+
+    assert 'environment' in schema['properties']
+    assert 'vm_hostname' in schema['properties']
+    assert schema['properties']['vm_hostname']['default'] == 'catalog-vm'
+    assert 'vm_hostname' in schema['required']
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_includes_name_template_variables(get, admin_user, workflow_job_template, organization):
+    item = CatalogItem.objects.create(
+        name='Template vars VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        name_template='{vmnam} deployment',
+        extra_vars_schema={'type': 'object', 'properties': {}},
+    )
+
+    response = get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), admin_user, expect=200)
+    schema = response.data['schema']
+
+    assert 'vmnam' in schema['properties']
+    assert schema['properties']['vmnam']['type'] == 'string'
+    assert 'user_org_name' not in schema['properties']
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_includes_dynamic_field(get, admin_user, workflow_job_template, organization):
+    item = CatalogItem.objects.create(
+        name='Dynamic field VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        dynamic_name_field='vmnam',
+        extra_vars_schema={'type': 'object', 'properties': {}},
+    )
+
+    response = get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), admin_user, expect=200)
+    schema = response.data['schema']
+
+    assert 'vmnam' in schema['properties']
+    assert schema['properties']['vmnam']['type'] == 'string'
+    assert 'default' not in schema['properties']['vmnam']
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_includes_multiple_dynamic_fields(get, admin_user, workflow_job_template, organization):
+    item = CatalogItem.objects.create(
+        name='Dynamic fields VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        dynamic_name_field='vmnam, environment, vmnam',
+        extra_vars_schema={'type': 'object', 'properties': {}},
+    )
+
+    response = get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), admin_user, expect=200)
+    schema = response.data['schema']
+
+    assert 'vmnam' in schema['properties']
+    assert 'environment' in schema['properties']
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_applies_dynamic_field_template_defaults(get, admin_user, workflow_job_template, organization):
+    item = CatalogItem.objects.create(
+        name='Dynamic field defaults VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        dynamic_name_field='vmnam, environment',
+        dynamic_field_templates={'vmnam': '{vm_name}-{env}', 'environment': 'prod'},
+        extra_vars_schema={'type': 'object', 'properties': {}},
+    )
+
+    response = get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), admin_user, expect=200)
+    schema = response.data['schema']
+
+    assert schema['properties']['vmnam']['default'] == '{vm_name}-{env}'
+    assert schema['properties']['environment']['default'] == 'prod'
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_survey_requires_use_permission(get, workflow_job_template, organization, rando):
+    item = CatalogItem.objects.create(
+        name='Ubuntu VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_catalog_item_edit_persists_organization(patch, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Org VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        name_template='a{user_org_name}bac+1',
+    )
+    new_organization = Organization.objects.create(name='Updated Org')
+
+    patch(
+        reverse('api:catalog_item_detail', kwargs={'pk': item.pk}),
+        {
+            'organization': new_organization.id,
+            'name_template': 'a{user_org_name}bac+1',
+            'dynamic_name_field': 'vmnam',
+            'dynamic_field_templates': {'vmnam': '{vm_name}-{env}'},
+            'deploy_disabled_fields': ['vmnam'],
+            'deploy_hidden_fields': ['vmnam'],
+        },
+        admin_user,
+        expect=200,
+    )
+
+    item.refresh_from_db()
+    assert item.organization_id == new_organization.id
+    assert item.name_template == 'a{user_org_name}bac+1'
+    assert item.dynamic_name_field == 'vmnam'
+    assert item.dynamic_field_templates == {'vmnam': '{vm_name}-{env}'}
+    assert item.deploy_disabled_fields == ['vmnam']
+    assert item.deploy_hidden_fields == ['vmnam']
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_retry_relaunches_failed_deployment(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Oracle VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        override_workflow_limit=True,
+    )
+    owner = admin_user
+
+    deployment = CatalogDeployment.objects.create(
+        name='oracle-dev-01',
+        catalog_item=item,
+        owner=owner,
+        status='failed',
+        extra_vars={'region': 'us-east-1'},
+    )
+
+    response = post(reverse('api:catalog_deployment_retry', kwargs={'pk': deployment.pk}), {}, owner, expect=200)
+
+    deployment.refresh_from_db()
+    assert response.data['status'] == 'provisioning'
+    assert deployment.status == 'provisioning'
+    assert deployment.provision_job_id is not None
+    assert deployment.extra_vars['terraform_override_limit'] is True
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_auto_generates_name(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Auto Name VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        name_template='a{user_org_name}bac+1',
+    )
+    item.organization.name = 'MNS'
+    item.organization.save(update_fields=['name'])
+    CatalogDeployment.objects.create(
+        name='amnsbac1',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        extra_vars={},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': '', 'extra_vars': {}},
+        admin_user,
+        expect=201,
+    )
+
+    assert response.data['name'] == 'amnsbac2'
+    assert CatalogDeployment.objects.filter(catalog_item=item, name='amnsbac2').exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_expands_variables_in_submitted_name(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Dynamic Name VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': '{vmnam} deployment', 'extra_vars': {'vmnam': 'web-01'}},
+        admin_user,
+        expect=201,
+    )
+
+    assert response.data['name'] == 'web01 deployment'
+    assert CatalogDeployment.objects.filter(catalog_item=item, name='web01 deployment').exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_uses_dynamic_source_field_when_template_empty(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Dynamic field deploy',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        dynamic_name_field='vmnam',
+        name_template='',
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': '', 'extra_vars': {'vmnam': 'web-01'}},
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.get(pk=response.data['id'])
+    assert response.data['name'] == 'web01 deployment'
+    assert deployment.extra_vars.get('vmnam') == 'web-01'
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_uses_first_dynamic_field_when_template_empty(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Dynamic fields deploy',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+        dynamic_name_field='vmnam,environment',
+        name_template='',
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': '', 'extra_vars': {'vmnam': 'web-02', 'environment': 'prod'}},
+        admin_user,
+        expect=201,
+    )
+
+    assert response.data['name'] == 'web02 deployment'
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_persists_effective_workflow_extra_vars(post, mocker, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Persist Effective Vars',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    launched_job = workflow_job_template.create_unified_job()
+    launched_job.extra_vars = (
+        '{"vm_name": "awx-apache-vm-01", '
+        '"proxmox_template_name": "ubuntu-24-04-cloud-template-qga", '
+        '"cpu": 2, "ram": 2048}'
+    )
+
+    def fake_create_unified_job(**kwargs):
+        return launched_job
+
+    mocker.patch.object(WorkflowJobTemplate, 'create_unified_job', side_effect=fake_create_unified_job)
+    mocker.patch.object(launched_job, 'signal_start', return_value=None)
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': '', 'extra_vars': {'cpu': 2, 'ram': 2048}},
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.get(pk=response.data['id'])
+    assert deployment.extra_vars['cpu'] == 2
+    assert deployment.extra_vars['ram'] == 2048
+    assert deployment.extra_vars['vm_name'] == 'awx-apache-vm-01'
+    assert deployment.extra_vars['proxmox_template_name'] == 'ubuntu-24-04-cloud-template-qga'
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_retry_rejects_non_failed_deployments(post, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='CentOS VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    deployment = CatalogDeployment.objects.create(
+        name='centos-dev-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        extra_vars={},
+    )
+
+    post(reverse('api:catalog_deployment_retry', kwargs={'pk': deployment.pk}), {}, admin_user, expect=400)
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_retry_resumes_from_last_failed_workflow(post, mocker, admin_user, organization, workflow_job_template):
+    item = CatalogItem.objects.create(
+        name='Resume VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    failed_workflow_job = workflow_job_template.create_unified_job()
+    failed_workflow_job.status = 'failed'
+    failed_workflow_job.save(update_fields=['status'])
+
+    resumed_workflow_job = workflow_job_template.create_unified_job()
+    resume_mock = mocker.patch.object(WorkflowJob, 'create_resume_workflow_job', return_value=resumed_workflow_job)
+    signal_start_mock = mocker.patch.object(resumed_workflow_job, 'signal_start', return_value=None)
+
+    deployment = CatalogDeployment.objects.create(
+        name='resume-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='failed',
+        provision_job=failed_workflow_job,
+        last_failed_workflow_job=failed_workflow_job,
+        extra_vars={'region': 'us-east-1'},
+    )
+
+    post(reverse('api:catalog_deployment_retry', kwargs={'pk': deployment.pk}), {}, admin_user, expect=200)
+
+    deployment.refresh_from_db()
+    resume_mock.assert_called_once()
+    signal_start_mock.assert_called_once_with()
+    assert deployment.provision_job_id == resumed_workflow_job.id
+    assert deployment.last_failed_workflow_job_id is None
+    assert deployment.provisioning_history
+    assert deployment.provisioning_history[-1]['details']['mode'] == 'resume'
+
+
+@pytest.mark.django_db
+def test_catalog_deprovision_passes_saved_vars(post, mocker, admin_user, organization, workflow_job_template):
+    deprovision_workflow = workflow_job_template
+    deprovision_workflow.name = 'Deprovision WF'
+    deprovision_workflow.save(update_fields=['name'])
+
+    item = CatalogItem.objects.create(
+        name='Destroy VM',
+        organization=organization,
+        deprovision_workflow=deprovision_workflow,
+    )
+
+    deployment = CatalogDeployment.objects.create(
+        name='destroy-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        extra_vars={'vm_name': 'test-vm', 'vm_id': '1234'},
+    )
+
+    launched_job = deprovision_workflow.create_unified_job()
+    captured_kwargs = {}
+
+    def fake_create_unified_job(**kwargs):
+        captured_kwargs.update(kwargs)
+        return launched_job
+
+    mocker.patch.object(WorkflowJobTemplate, 'create_unified_job', side_effect=fake_create_unified_job)
+    mocker.patch.object(launched_job, 'signal_start', return_value=None)
+
+    post(reverse('api:catalog_deployment_deprovision', kwargs={'pk': deployment.pk}), {}, admin_user, expect=200)
+
+    deployment.refresh_from_db()
+    assert captured_kwargs.get('extra_vars', {}).get('vm_name') == 'test-vm'
+    assert captured_kwargs.get('extra_vars', {}).get('vm_id') == '1234'
+    assert deployment.last_deprovision_vars.get('vm_name') == 'test-vm'
+    assert deployment.provisioning_history
+    assert deployment.provisioning_history[-1]['action'] == 'deprovision'

@@ -83,6 +83,7 @@ export function useJobsColumns(options?: { disableSort?: boolean; disableLinks?:
             ad_hoc_command: t`Command`,
             system_job: t`Management job`,
             workflow_job: t`Workflow job`,
+            terraform_job: t`Terraform run`,
           };
           return <TextCell text={jobTypes[job.type]} />;
         },

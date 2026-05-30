@@ -19,6 +19,7 @@ interface ResourceTypeMapper {
   workflow_job_templates?: string;
   organizations?: string;
   system_job_templates?: string;
+  terraform_job_templates?: string;
 }
 
 export function ResourceNotifications({ resourceType, id }: { resourceType: string; id?: string }) {
@@ -32,6 +33,7 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
     workflow_job_templates: 'id',
     organizations: 'id',
     system_job_templates: 'id',
+    terraform_job_templates: 'id',
   };
 
   const resourceToErrorMsg: ResourceTypeMapper = {
@@ -41,6 +43,7 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
     workflow_job_templates: 'workflow job template',
     organizations: 'organization',
     system_job_templates: 'system job templates',
+    terraform_job_templates: 'terraform job template',
   };
 
   const params = useParams();
@@ -63,7 +66,8 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
   const approvalUrl =
     resourceType === 'system_job_templates' ||
     resourceType === 'job_templates' ||
-    resourceType === 'projects'
+    resourceType === 'projects' ||
+    resourceType === 'terraform_job_templates'
       ? ''
       : awxAPI`/${resourceType}/${resourceId ?? ''}/notification_templates_approvals/`;
 

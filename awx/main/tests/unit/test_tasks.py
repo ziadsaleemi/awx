@@ -556,6 +556,38 @@ class TestGenericRun:
                 env = task.build_env(job, private_data_dir)
         assert env['FOO'] == 'BAR'
 
+    @pytest.mark.django_db
+    def test_build_env_control_path_falls_back_when_runner_unavailable(self, patch_Job, private_data_dir, execution_environment, mock_me):
+        job = Job(project=Project(), inventory=Inventory())
+        job.execution_environment = execution_environment
+
+        task = jobs.RunJob()
+        task.instance = job
+
+        real_isdir = os.path.isdir
+        with mock.patch.object(task, 'build_credentials_list', return_value=[], autospec=True):
+            with mock.patch('awx.main.tasks.jobs.os.path.isdir', side_effect=lambda p: False if p == '/runner' else real_isdir(p)):
+                env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_SSH_CONTROL_PATH_DIR'] == os.path.join(private_data_dir, 'cp')
+
+    @pytest.mark.django_db
+    def test_build_env_control_path_uses_runner_when_available(self, patch_Job, private_data_dir, execution_environment, mock_me):
+        job = Job(project=Project(), inventory=Inventory())
+        job.execution_environment = execution_environment
+
+        task = jobs.RunJob()
+        task.instance = job
+
+        real_isdir = os.path.isdir
+        real_access = os.access
+        with mock.patch.object(task, 'build_credentials_list', return_value=[], autospec=True):
+            with mock.patch('awx.main.tasks.jobs.os.path.isdir', side_effect=lambda p: True if p == '/runner' else real_isdir(p)):
+                with mock.patch('awx.main.tasks.jobs.os.access', side_effect=lambda p, m: True if p == '/runner' else real_access(p, m)):
+                    env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_SSH_CONTROL_PATH_DIR'] == '/runner/cp'
+
 
 @pytest.mark.django_db
 class TestAdhocRun(TestJobExecution):
@@ -1589,6 +1621,37 @@ def test_os_open_oserror():
 def test_fcntl_ioerror():
     with pytest.raises(OSError):
         fcntl.lockf(99999, fcntl.LOCK_EX)
+
+
+def test_get_sync_needs_treats_non_directory_project_path_as_missing(mocker):
+    task = jobs.RunJob()
+    task.instance = mock.Mock(id=101, scm_revision='abc123')
+
+    project = mock.Mock()
+    project.id = 22
+    project.scm_type = 'git'
+    project.scm_revision = 'abc123'
+    project.scm_branch = 'main'
+    project.get_project_path.return_value = '/tmp/project_path'
+    project.get_cache_path.return_value = '/tmp/project_cache'
+    project.cache_id = 'cache_id'
+
+    mocker.patch('awx.main.tasks.jobs.os.path.isdir', return_value=False)
+    mocker.patch('awx.main.tasks.jobs.os.path.exists', return_value=False)
+
+    sync_needs = task.get_sync_needs(project)
+
+    assert 'update_git' in sync_needs
+
+
+def test_make_local_copy_raises_clear_error_when_project_tree_missing(mocker, private_data_dir):
+    project = mock.Mock()
+    project.get_project_path.return_value = '/tmp/missing_project_path'
+
+    mocker.patch('awx.main.tasks.jobs.os.path.isdir', return_value=False)
+
+    with pytest.raises(RuntimeError, match='Project source path missing or invalid'):
+        jobs.RunProjectUpdate.make_local_copy(project, private_data_dir)
 
 
 @mock.patch('os.open')

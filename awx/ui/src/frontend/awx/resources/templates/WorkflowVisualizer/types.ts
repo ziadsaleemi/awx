@@ -15,6 +15,7 @@ import type { JobTemplate } from '../../../interfaces/JobTemplate';
 import type { LaunchConfiguration } from '../../../interfaces/LaunchConfiguration';
 import type { Project } from '../../../interfaces/Project';
 import type { SystemJobTemplate } from '../../../interfaces/SystemJobTemplate';
+import type { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import type { WorkflowApproval } from '../../../interfaces/WorkflowApproval';
 import type { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import type { WorkflowNode } from '../../../interfaces/WorkflowNode';
@@ -81,6 +82,7 @@ export enum JobType {
   inventory_update = 'inventory_update',
   system_job = 'system_job',
   job_template = 'job_template',
+  terraform_job = 'terraform_job',
 }
 
 export enum EdgeStatus {
@@ -161,6 +163,7 @@ export type AllResources =
   | JobTemplate
   | Project
   | SystemJobTemplate
+  | TerraformJobTemplate
   | WorkflowApproval
   | WorkflowJobTemplate;
 
@@ -187,4 +190,5 @@ export type UnifiedJobType =
   | 'project_update'
   | 'workflow_approval'
   | 'inventory_update'
-  | 'system_job';
+  | 'system_job'
+  | 'terraform_job';

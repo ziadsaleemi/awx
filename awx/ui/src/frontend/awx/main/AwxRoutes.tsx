@@ -148,6 +148,53 @@ export enum AwxRoute {
   HostGroups = 'awx-host-groups',
   HostJobs = 'awx-host-jobs',
 
+  // Terraform Templates
+  TerraformTemplates = 'awx-terraform-templates',
+  CreateTerraformTemplate = 'awx-create-terraform-template',
+  EditTerraformTemplate = 'awx-edit-terraform-template',
+  TerraformTemplatePage = 'awx-terraform-template-page',
+  TerraformTemplateDetails = 'awx-terraform-template-details',
+  TerraformTemplateJobs = 'awx-terraform-template-jobs',
+  TerraformTemplateLaunch = 'awx-terraform-template-launch',
+  TerraformTemplateTeamAccess = 'awx-terraform-template-team-access',
+  TerraformTemplateUserAccess = 'awx-terraform-template-user-access',
+  TerraformTemplateAddTeams = 'awx-terraform-template-add-teams',
+  TerraformTemplateAddUsers = 'awx-terraform-template-add-users',
+  TerraformTemplateNotifications = 'awx-terraform-template-notifications',
+  TerraformTemplateSurvey = 'awx-terraform-template-survey',
+  AddTerraformTemplateSurvey = 'awx-add-terraform-template-survey',
+  EditTerraformTemplateSurvey = 'awx-edit-terraform-template-survey',
+  TerraformTemplateSchedules = 'awx-terraform-template-schedules',
+  TerraformTemplateScheduleCreate = 'awx-terraform-template-schedule-create',
+  TerraformTemplateScheduleEdit = 'awx-terraform-template-schedule-edit',
+  TerraformTemplateSchedulePage = 'awx-terraform-template-schedule-page',
+  TerraformTemplateScheduleDetails = 'awx-terraform-template-schedule-details',
+  TerraformJobPage = 'awx-terraform-job-page',
+  TerraformJobOutput = 'awx-terraform-job-output',
+  TerraformJobDetails = 'awx-terraform-job-details',
+
+  // Catalog
+  Catalog = 'awx-catalog',
+  CatalogItems = 'awx-catalog-items',
+  CatalogItemPage = 'awx-catalog-item-page',
+  CatalogItemDetails = 'awx-catalog-item-details',
+  CatalogItemCloudProviders = 'awx-catalog-item-cloud-providers',
+  CreateCatalogItem = 'awx-create-catalog-item',
+  EditCatalogItem = 'awx-edit-catalog-item',
+  CatalogDeploy = 'awx-catalog-deploy',
+  CatalogDeployments = 'awx-catalog-deployments',
+  CatalogDeploymentPage = 'awx-catalog-deployment-page',
+  CatalogDeploymentDetails = 'awx-catalog-deployment-details',
+  CatalogDeploymentHistory = 'awx-catalog-deployment-history',
+  CatalogAdminItems = 'awx-catalog-admin-items',
+  CatalogAdminVmSizes = 'awx-catalog-admin-vm-sizes',
+  CatalogAdminDeployments = 'awx-catalog-admin-deployments',
+
+  // Cloud
+  Cloud = 'awx-cloud',
+  CloudConnections = 'awx-cloud-connections',
+  CloudProviderSettings = 'awx-cloud-provider-settings',
+
   // Access
   Access = 'awx-access',
 

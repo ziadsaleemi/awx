@@ -1,0 +1,295 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e39]:
+    - banner [ref=e40]:
+      - button "Global navigation" [expanded] [ref=e42] [cursor=pointer]:
+        - img [ref=e43]
+      - link "Custom logo" [ref=e46] [cursor=pointer]:
+        - /url: /
+        - img "Custom logo" [ref=e47]
+      - generic [ref=e52]:
+        - button [ref=e55] [cursor=pointer]:
+          - img [ref=e56]
+        - button "Search" [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+        - button [ref=e63] [cursor=pointer]:
+          - img [ref=e64]
+        - button [ref=e67] [cursor=pointer]:
+          - img [ref=e69]
+        - button "Activity Stream" [ref=e72] [cursor=pointer]:
+          - img [ref=e73]
+        - generic [ref=e77] [cursor=pointer]:
+          - generic [ref=e78]: 0 jobs
+          - generic [ref=e81]: 0%
+        - button [ref=e84] [cursor=pointer]:
+          - img [ref=e88]
+        - button "admin" [ref=e92] [cursor=pointer]:
+          - generic [ref=e94]:
+            - img [ref=e98]
+            - generic [ref=e100]: admin
+    - link [ref=e101] [cursor=pointer]:
+      - /url: /overview
+      - img [ref=e102]
+    - link [ref=e104] [cursor=pointer]:
+      - /url: /jobs
+    - link [ref=e105] [cursor=pointer]:
+      - /url: /templates
+    - link [ref=e106] [cursor=pointer]:
+      - /url: /schedules
+    - link [ref=e107] [cursor=pointer]:
+      - /url: /projects
+    - link [ref=e108] [cursor=pointer]:
+      - /url: /terraform-templates
+    - button [ref=e109] [cursor=pointer]:
+      - generic [ref=e112]: Catalog
+      - img [ref=e115]
+    - button [ref=e117] [cursor=pointer]:
+      - generic [ref=e120]: Infrastructure
+      - img [ref=e123]
+    - button [ref=e125] [cursor=pointer]:
+      - generic [ref=e128]: Analytics
+      - img [ref=e131]
+    - button [ref=e133] [cursor=pointer]:
+      - generic [ref=e136]: Administration
+      - img [ref=e139]
+    - button [ref=e141] [cursor=pointer]:
+      - generic [ref=e144]: Access Management
+      - img [ref=e147]
+    - button [ref=e149] [cursor=pointer]:
+      - generic [ref=e152]: Settings
+      - img [ref=e155]
+    - main [ref=e157]:
+      - generic [ref=e164]:
+        - generic [ref=e167]:
+          - generic [ref=e168]:
+            - heading "Welcome to AWX" [level=1] [ref=e169]
+            - generic [ref=e170]: Define, operate, scale, and delegate automation across your enterprise.
+          - button "Manage view" [ref=e173] [cursor=pointer]:
+            - img [ref=e175]
+            - text: Manage view
+        - generic [ref=e180]:
+          - generic [ref=e183]:
+            - generic [ref=e184]:
+              - link "1 Hosts" [ref=e185] [cursor=pointer]:
+                - /url: /infrastructure/hosts
+                - heading "1 Hosts" [level=3] [ref=e186]
+              - generic [ref=e187]:
+                - generic:
+                  - img [ref=e188]
+                  - generic:
+                    - img
+              - generic [ref=e190]:
+                - generic [ref=e192]: "1"
+                - generic [ref=e193]: Ready
+            - generic [ref=e194]:
+              - link "4 Projects" [ref=e195] [cursor=pointer]:
+                - /url: /projects
+                - heading "4 Projects" [level=3] [ref=e196]
+              - generic [ref=e197]:
+                - generic:
+                  - img [ref=e198]
+                  - generic:
+                    - img
+              - generic [ref=e200]:
+                - generic [ref=e202]: "4"
+                - link "Ready" [ref=e204] [cursor=pointer]:
+                  - /url: /projects?status=successful
+            - generic [ref=e205]:
+              - link "2 Inventories" [ref=e206] [cursor=pointer]:
+                - /url: /infrastructure/inventories
+                - heading "2 Inventories" [level=3] [ref=e207]
+              - generic [ref=e208]:
+                - generic:
+                  - img [ref=e209]
+                  - generic:
+                    - img
+              - generic [ref=e211]:
+                - generic [ref=e213]: "2"
+                - generic [ref=e214]: Synced
+          - generic [ref=e215]:
+            - generic [ref=e218]:
+              - heading "Job Activity" [level=3] [ref=e221]
+              - generic [ref=e223]:
+                - button "Past month" [ref=e227] [cursor=pointer]:
+                  - generic [ref=e228]: Past month
+                  - img [ref=e231]
+                - button "All job types" [ref=e236] [cursor=pointer]:
+                  - generic [ref=e237]: All job types
+                  - img [ref=e240]
+              - link "View all Jobs" [ref=e244] [cursor=pointer]:
+                - /url: /jobs
+            - generic [ref=e246]:
+              - generic [ref=e248]: Job count
+              - generic [ref=e249]:
+                - generic [ref=e252]:
+                  - generic:
+                    - img [ref=e253]:
+                      - generic [ref=e254]: 4/25
+                      - generic [ref=e255]: 4/27
+                      - generic [ref=e256]: 4/29
+                      - generic [ref=e257]: 5/1
+                      - generic [ref=e258]: 5/3
+                      - generic [ref=e259]: 5/5
+                      - generic [ref=e260]: 5/7
+                      - generic [ref=e261]: 5/9
+                      - generic [ref=e262]: 5/11
+                      - generic [ref=e263]: 5/13
+                      - generic [ref=e264]: 5/15
+                      - generic [ref=e265]: 5/17
+                      - generic [ref=e266]: 5/19
+                      - generic [ref=e267]: 5/21
+                      - generic [ref=e268]: 5/23
+                      - generic [ref=e269]: 5/25
+                      - generic [ref=e270]: "20"
+                      - generic [ref=e271]: "40"
+                      - generic [ref=e272]: "60"
+                    - generic:
+                      - img
+                - generic [ref=e279]:
+                  - generic [ref=e280]:
+                    - generic [ref=e282]: "14"
+                    - link "Success" [ref=e284] [cursor=pointer]:
+                      - /url: /jobs?status=successful
+                  - generic [ref=e285]:
+                    - generic [ref=e287]: "64"
+                    - link "Failed" [ref=e289] [cursor=pointer]:
+                      - /url: /jobs?status=failed
+          - generic [ref=e290]:
+            - generic [ref=e293]:
+              - generic [ref=e294]:
+                - heading "Jobs" [level=3] [ref=e296]
+                - text: Recently finished jobs
+              - link "View all Jobs" [ref=e299] [cursor=pointer]:
+                - /url: /jobs
+            - grid "Simple table" [ref=e301]:
+              - rowgroup [ref=e302]:
+                - row "Name Status" [ref=e303]:
+                  - columnheader "Name" [ref=e304]
+                  - columnheader "Status" [ref=e305]
+              - rowgroup [ref=e306]:
+                - row "Demo - 01 Gather Info Success" [ref=e307]:
+                  - gridcell "Demo - 01 Gather Info" [ref=e308]:
+                    - link "Demo - 01 Gather Info" [ref=e312] [cursor=pointer]:
+                      - /url: /jobs/playbook/78/output
+                  - gridcell "Success" [ref=e313]:
+                    - generic [ref=e314]:
+                      - img [ref=e317]
+                      - generic [ref=e320]: Success
+                - row "Demo Workflow - Resume Test Failed" [ref=e321]:
+                  - gridcell "Demo Workflow - Resume Test" [ref=e322]:
+                    - link "Demo Workflow - Resume Test" [ref=e326] [cursor=pointer]:
+                      - /url: /jobs/workflow/76/output
+                  - gridcell "Failed" [ref=e327]:
+                    - generic [ref=e328]:
+                      - img [ref=e331]
+                      - generic [ref=e334]: Failed
+                - row "Demo - 02 Deploy App Failed" [ref=e335]:
+                  - gridcell "Demo - 02 Deploy App" [ref=e336]:
+                    - link "Demo - 02 Deploy App" [ref=e340] [cursor=pointer]:
+                      - /url: /jobs/playbook/77/output
+                  - gridcell "Failed" [ref=e341]:
+                    - generic [ref=e342]:
+                      - img [ref=e345]
+                      - generic [ref=e348]: Failed
+                - row "Demo Workflow - Resume Test Failed" [ref=e349]:
+                  - gridcell "Demo Workflow - Resume Test" [ref=e350]:
+                    - link "Demo Workflow - Resume Test" [ref=e354] [cursor=pointer]:
+                      - /url: /jobs/workflow/74/output
+                  - gridcell "Failed" [ref=e355]:
+                    - generic [ref=e356]:
+                      - img [ref=e359]
+                      - generic [ref=e362]: Failed
+                - row "Demo - 02 Deploy App Failed" [ref=e363]:
+                  - gridcell "Demo - 02 Deploy App" [ref=e364]:
+                    - link "Demo - 02 Deploy App" [ref=e368] [cursor=pointer]:
+                      - /url: /jobs/playbook/75/output
+                  - gridcell "Failed" [ref=e369]:
+                    - generic [ref=e370]:
+                      - img [ref=e373]
+                      - generic [ref=e376]: Failed
+                - row "Demo Workflow - Resume Test Failed" [ref=e377]:
+                  - gridcell "Demo Workflow - Resume Test" [ref=e378]:
+                    - link "Demo Workflow - Resume Test" [ref=e382] [cursor=pointer]:
+                      - /url: /jobs/workflow/71/output
+                  - gridcell "Failed" [ref=e383]:
+                    - generic [ref=e384]:
+                      - img [ref=e387]
+                      - generic [ref=e390]: Failed
+                - row "Demo - 02 Deploy App Failed" [ref=e391]:
+                  - gridcell "Demo - 02 Deploy App" [ref=e392]:
+                    - link "Demo - 02 Deploy App" [ref=e396] [cursor=pointer]:
+                      - /url: /jobs/playbook/73/output
+                  - gridcell "Failed" [ref=e397]:
+                    - generic [ref=e398]:
+                      - img [ref=e401]
+                      - generic [ref=e404]: Failed
+          - generic [ref=e405]:
+            - generic [ref=e408]:
+              - generic [ref=e409]:
+                - heading "Projects" [level=3] [ref=e411]
+                - text: Recently updated projects
+              - link "View all Projects" [ref=e414] [cursor=pointer]:
+                - /url: /projects
+            - grid "Simple table" [ref=e416]:
+              - rowgroup [ref=e417]:
+                - row "Name Status" [ref=e418]:
+                  - columnheader "Name" [ref=e419]
+                  - columnheader "Status" [ref=e420]
+              - rowgroup [ref=e421]:
+                - row "AWX Built-in Playbooks missing" [ref=e422]:
+                  - gridcell "AWX Built-in Playbooks" [ref=e423]:
+                    - link "AWX Built-in Playbooks" [ref=e425] [cursor=pointer]:
+                      - /url: /projects/17/details
+                  - gridcell "missing" [ref=e426]:
+                    - generic [ref=e430]: missing
+                - row "Proxmox Terraform Examples missing" [ref=e431]:
+                  - gridcell "Proxmox Terraform Examples" [ref=e432]:
+                    - link "Proxmox Terraform Examples" [ref=e434] [cursor=pointer]:
+                      - /url: /projects/16/details
+                  - gridcell "missing" [ref=e435]:
+                    - generic [ref=e439]: missing
+                - row "Demo Workflow Project OK" [ref=e440]:
+                  - gridcell "Demo Workflow Project" [ref=e441]:
+                    - link "Demo Workflow Project" [ref=e443] [cursor=pointer]:
+                      - /url: /projects/7/details
+                  - gridcell "OK" [ref=e444]:
+                    - generic [ref=e446]:
+                      - img [ref=e449]
+                      - generic [ref=e452]: OK
+                - row "Demo Project Success" [ref=e453]:
+                  - gridcell "Demo Project" [ref=e454]:
+                    - link "Demo Project" [ref=e456] [cursor=pointer]:
+                      - /url: /projects/5/details
+                  - gridcell "Success" [ref=e457]:
+                    - generic [ref=e459]:
+                      - img [ref=e462]
+                      - generic [ref=e465]: Success
+          - generic [ref=e466]:
+            - generic [ref=e469]:
+              - generic [ref=e470]:
+                - heading "Inventories" [level=3] [ref=e472]
+                - text: Recently updated inventories
+              - link "View all Inventories" [ref=e475] [cursor=pointer]:
+                - /url: /infrastructure/inventories
+            - grid "Simple table" [ref=e477]:
+              - rowgroup [ref=e478]:
+                - row "Name Status" [ref=e479]:
+                  - columnheader "Name" [ref=e480]
+                  - columnheader "Status" [ref=e481]
+              - rowgroup [ref=e482]:
+                - row "Proxmox VMs Disabled" [ref=e483]:
+                  - gridcell "Proxmox VMs" [ref=e484]:
+                    - generic [ref=e487]: Proxmox VMs
+                  - gridcell "Disabled" [ref=e488]:
+                    - generic [ref=e490]:
+                      - img [ref=e493]
+                      - generic [ref=e496]: Disabled
+                - row "Demo Inventory Disabled" [ref=e497]:
+                  - gridcell "Demo Inventory" [ref=e498]:
+                    - generic [ref=e501]: Demo Inventory
+                  - gridcell "Disabled" [ref=e502]:
+                    - generic [ref=e504]:
+                      - img [ref=e507]
+                      - generic [ref=e510]: Disabled
+  - generic:
+    - list
+  - img [ref=e511]

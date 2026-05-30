@@ -27,6 +27,16 @@ export function JobDetails() {
 
   const verbosity = useVerbosityString(job.verbosity || 0);
   const timeoutDefaultText = t`No timeout specified`;
+  const artifactsValue = (() => {
+    const artifacts = (job as Job & { artifacts?: unknown }).artifacts;
+    if (typeof artifacts === 'string') {
+      return artifacts;
+    }
+    if (artifacts && typeof artifacts === 'object') {
+      return JSON.stringify(artifacts, null, 2);
+    }
+    return '{}';
+  })();
 
   return (
     <PageDetails>
@@ -156,6 +166,12 @@ export function JobDetails() {
         showCopyToClipboard
         data-cy="inventory-source-detail-variables"
         value={job.extra_vars ?? ''}
+      />
+      <PageDetailCodeEditor
+        label={t('Artifacts')}
+        helpText={t('Artifacts produced by this job. Workflow jobs combine artifacts from child jobs that emitted them.')}
+        showCopyToClipboard
+        value={artifactsValue}
       />
     </PageDetails>
   );

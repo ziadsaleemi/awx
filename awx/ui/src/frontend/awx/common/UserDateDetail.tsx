@@ -9,14 +9,18 @@ interface User {
   last_name: string;
 }
 
-export function UserDateDetail(props: { label: string; date: string; user: User }) {
+export function UserDateDetail(props: { label: string; date: string; user?: User }) {
   const pageNavigate = usePageNavigate();
   return (
     <PageDetail label={props.label}>
       <DateTimeCell
         value={props.date}
-        author={props?.user.username}
-        onClick={() => pageNavigate(AwxRoute.UserDetails, { params: { id: props.user.id } })}
+        author={props?.user?.username}
+        onClick={
+          props.user
+            ? () => pageNavigate(AwxRoute.UserDetails, { params: { id: props.user!.id } })
+            : undefined
+        }
       />
     </PageDetail>
   );

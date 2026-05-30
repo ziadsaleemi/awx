@@ -655,6 +655,30 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
         return JobEvent
 
     def copy_unified_job(self, **new_prompts):
+        if self.spawned_by_workflow:
+            workflow_relaunch_prompts = self._get_workflow_relaunch_prompts()
+
+            workflow_extra_vars = workflow_relaunch_prompts.get('extra_vars')
+            if isinstance(workflow_extra_vars, dict) and workflow_extra_vars:
+                requested_extra_vars = new_prompts.get('extra_vars') or {}
+                if not isinstance(requested_extra_vars, dict):
+                    requested_extra_vars = {}
+                merged_extra_vars = dict(workflow_extra_vars)
+                merged_extra_vars.update(requested_extra_vars)
+                new_prompts['extra_vars'] = merged_extra_vars
+
+            workflow_passwords = workflow_relaunch_prompts.get('survey_passwords')
+            if isinstance(workflow_passwords, dict) and workflow_passwords:
+                requested_passwords = new_prompts.get('survey_passwords') or {}
+                if not isinstance(requested_passwords, dict):
+                    requested_passwords = {}
+                merged_passwords = dict(workflow_passwords)
+                merged_passwords.update(requested_passwords)
+                new_prompts['survey_passwords'] = merged_passwords
+
+            if 'limit' not in new_prompts and workflow_relaunch_prompts.get('limit'):
+                new_prompts['limit'] = workflow_relaunch_prompts['limit']
+
         # Needed for job slice relaunch consistency, do no re-spawn workflow job
         # target same slice as original job
         new_prompts['_prevent_slicing'] = True
@@ -662,6 +686,30 @@ class Job(UnifiedJob, JobOptions, SurveyJobMixin, JobNotificationMixin, TaskMana
         new_prompts['_eager_fields']['job_slice_number'] = self.job_slice_number
         new_prompts['_eager_fields']['job_slice_count'] = self.job_slice_count
         return super(Job, self).copy_unified_job(**new_prompts)
+
+    def _get_workflow_relaunch_prompts(self):
+        """
+        For jobs launched by a workflow node, reconstruct launch prompts from
+        the node context so relaunch preserves ancestor artifacts and derived
+        limits (for example host_ip_* from a previous Terraform node).
+        """
+        if not self.spawned_by_workflow:
+            return {}
+
+        try:
+            workflow_node = self.unified_job_node
+        except UnifiedJob.unified_job_node.RelatedObjectDoesNotExist:
+            return {}
+
+        workflow_prompts = workflow_node.get_job_kwargs()
+        relaunch_prompts = {}
+
+        for key in ('extra_vars', 'survey_passwords', 'limit'):
+            value = workflow_prompts.get(key)
+            if value:
+                relaunch_prompts[key] = value
+
+        return relaunch_prompts
 
     def get_passwords_needed_to_start(self):
         return self.passwords_needed_to_start

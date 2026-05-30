@@ -1,0 +1,74 @@
+---
+# configure_cloud_vm.yml
+#
+# General-purpose playbook for configuring a freshly provisioned cloud VM.
+# Intended for use in AWX workflow jobs where the target host is supplied
+# via inventory + limit (set on the workflow node), NOT via a direct IP variable.
+#
+# The upstream Terraform job registers the host in the target inventory.
+# The workflow node sets limit="{{ artifacts.host_ip_* }}" so this playbook
+# runs only against the newly-provisioned host.
+#
+# Authentication uses the machine credential attached to the job template
+# (typically an SSH key pair).  Password auth is disabled.
+#
+- name: Configure cloud VM
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+  tasks:
+    - name: Wait for SSH to become available
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 180
+
+    - name: Gather facts after SSH is ready
+      ansible.builtin.setup:
+
+    - name: Wait for dpkg/apt lock to be released (Debian/Ubuntu)
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+      timeout: 300
+
+    - name: Install Apache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: apache2
+        state: present
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Install Apache (RedHat/CentOS)
+      ansible.builtin.dnf:
+        name: httpd
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start and enable Apache (Debian)
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Start and enable Apache (RedHat)
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Verify Apache is responding
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(inventory_hostname) }}"
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: apache_check
+      failed_when: false
