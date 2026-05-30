@@ -74,6 +74,7 @@ interface CatalogItemFormValues {
   terraform_job_template: number | null;
   deprovision_workflow: number | null;
   override_workflow_limit: boolean;
+  browse_enabled: boolean;
   extra_vars_schema: string;
   provider_configs: ProviderConfig[];
   provider_field_configs: Record<string, {
@@ -81,7 +82,7 @@ interface CatalogItemFormValues {
     hidden_fields: string[];
     field_templates: Record<string, string>;
     dynamic_field_sources: Record<string, string>;
-    target_inventory?: number | null;
+    target_inventory?: string | null;
     target_group?: string;
     vm_size_settings?: {
       enabled: boolean;
@@ -232,6 +233,7 @@ function makeDefaultValues(item?: CatalogItem): CatalogItemFormValues {
     deprovision_workflow:
       item?.deprovision_workflow ?? item?.summary_fields?.deprovision_workflow?.id ?? null,
     override_workflow_limit: item?.override_workflow_limit ?? true,
+    browse_enabled: item?.browse_enabled ?? true,
     extra_vars_schema: item?.extra_vars_schema
       ? JSON.stringify(item.extra_vars_schema, null, 2)
       : '',
@@ -287,6 +289,7 @@ export function CreateCatalogItem() {
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
       override_workflow_limit: values.override_workflow_limit,
+      browse_enabled: values.browse_enabled,
       extra_vars_schema,
       cloud_backends:
         values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
@@ -377,6 +380,7 @@ export function EditCatalogItem() {
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
       override_workflow_limit: values.override_workflow_limit,
+      browse_enabled: values.browse_enabled,
       extra_vars_schema,
       cloud_backends:
         values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
@@ -493,6 +497,14 @@ function CatalogItemFormInputs() {
                 labelHelpTitle={t('Override downstream workflow limit')}
                 labelHelp={t(
                   'When enabled, deployments force terraform_override_limit=true so workflow-launched job templates can use Terraform-provided host limits.'
+                )}
+              />
+              <PageFormCheckbox<CatalogItemFormValues>
+                name="browse_enabled"
+                label={t('Visible in service catalog')}
+                labelHelpTitle={t('Visible in service catalog')}
+                labelHelp={t(
+                  'When enabled, this catalog item is shown in the service catalog browse view. Disable to hide it from users without removing it.'
                 )}
               />
               <PageFormTextArea<CatalogItemFormValues>
@@ -1377,55 +1389,17 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surveyVariables]);
 
-  // --- Inventory & group targeting via WJT's TFT node ---
-  const { data: wjtNodesData } = useGet<{
-    count: number;
-    results: Array<{
-      id: number;
-      unified_job_template: number | null;
-      summary_fields: { unified_job_template?: { unified_job_type: string } };
-    }>;
-  }>(wjtId ? awxAPI`/workflow_job_templates/${String(wjtId)}/workflow_nodes/` : undefined);
+  // --- Provisioning target — dynamic template mapping ---
+  const [invCursor, setInvCursor] = useState(0);
+  const [grpCursor, setGrpCursor] = useState(0);
+  const invInputRef = useRef<HTMLInputElement | null>(null);
+  const grpInputRef = useRef<HTMLInputElement | null>(null);
+  const [lastFocusedTarget, setLastFocusedTarget] = useState<'target_inventory' | 'target_group'>('target_inventory');
 
-  const tftNodeId = useMemo(
-    () =>
-      wjtNodesData?.results?.find(
-        (n) => n.summary_fields?.unified_job_template?.unified_job_type === 'terraform_job'
-      )?.unified_job_template ?? null,
-    [wjtNodesData]
+  const allTemplateVars = useMemo(
+    () => ['user_org_name', ...surveyVariables],
+    [surveyVariables]
   );
-
-  const { data: tftData } = useGet<{ id: number; target_inventory: number | null; target_group: string }>(
-    tftNodeId ? awxAPI`/terraform_job_templates/${String(tftNodeId)}/` : undefined
-  );
-
-  const { data: invListData } = useGet<{ count: number; results: Array<{ id: number; name: string }> }>(
-    awxAPI`/inventories/`,
-    { page_size: '200' }
-  );
-  const inventoryList = invListData?.results ?? [];
-
-  const selectedInventoryId = cfg.target_inventory ?? null;
-  const { data: groupListData } = useGet<{ count: number; results: Array<{ id: number; name: string }> }>(
-    selectedInventoryId ? awxAPI`/inventories/${String(selectedInventoryId)}/groups/` : undefined,
-    selectedInventoryId ? { page_size: '200' } : undefined
-  );
-  const groupList = groupListData?.results ?? [];
-
-  const tftInitRef = useRef<string | null>(null);
-  useEffect(() => {
-    const key = tftNodeId ? String(tftNodeId) : null;
-    if (!tftData || !key || tftInitRef.current === key) return;
-    tftInitRef.current = key;
-    const current = providerFieldConfigs[provider] ?? {};
-    if (!('target_inventory' in current) && !('target_group' in current)) {
-      const next = { ...providerFieldConfigs };
-      const defaults = { disabled_fields: [] as string[], hidden_fields: [] as string[], field_templates: {} as Record<string, string>, dynamic_field_sources: {} as Record<string, string> };
-      next[provider] = { ...defaults, ...current, target_inventory: tftData.target_inventory ?? null, target_group: tftData.target_group ?? '' };
-      setValue('provider_field_configs', next, { shouldDirty: false });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tftData, tftNodeId]);
 
   const disabledSet = useMemo(() => new Set(cfg.disabled_fields), [cfg.disabled_fields]);
   const hiddenSet = useMemo(() => new Set(cfg.hidden_fields), [cfg.hidden_fields]);
@@ -1436,16 +1410,32 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
     setValue('provider_field_configs', next, { shouldDirty: true });
   };
 
-  const handleInventoryGroupChange = async (
-    field: 'target_inventory' | 'target_group',
-    value: number | null | string
-  ) => {
-    saveConfig({ [field]: value });
-    if (tftNodeId) {
-      await requestPatch(awxAPI`/terraform_job_templates/${String(tftNodeId)}/`, {
-        [field]: value,
-      });
+  const insertTargetVar = (variable: string, field: 'target_inventory' | 'target_group') => {
+    const currentTemplate = String(cfg[field] ?? '');
+    const cursor = field === 'target_inventory' ? invCursor : grpCursor;
+    const setCursor = field === 'target_inventory' ? setInvCursor : setGrpCursor;
+    const inputRef = field === 'target_inventory' ? invInputRef : grpInputRef;
+    const tokenCtx = getTemplateTokenContext(currentTemplate, cursor);
+    const token = `{${variable}}`;
+    let updated: string;
+    let nextCursor: number;
+    if (tokenCtx) {
+      const before = currentTemplate.slice(0, tokenCtx.openBraceIndex);
+      const after = currentTemplate.slice(tokenCtx.cursorPosition);
+      updated = `${before}${token}${after}`;
+      nextCursor = before.length + token.length;
+    } else {
+      const needsSpacer = currentTemplate.length > 0 && !currentTemplate.endsWith(' ');
+      updated = `${currentTemplate}${needsSpacer ? ' ' : ''}${token}`;
+      nextCursor = updated.length;
     }
+    setCursor(nextCursor);
+    saveConfig({ [field]: updated });
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      input?.focus();
+      input?.setSelectionRange(nextCursor, nextCursor);
+    });
   };
 
   const insertVariable = (variable: string, field: string) => {
@@ -1486,72 +1476,163 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
 
   return (
     <div style={{ marginTop: 16 }}>
-      {tftNodeId && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: '12px 16px',
-            background: '#1b1d21',
-            border: '1px solid var(--pf-v5-global--BorderColor--100)',
-            borderRadius: 6,
-          }}
-        >
-          <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 10 }}>
-            {t('Provisioning target')}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
-            <div>
-              <label
-                htmlFor={`pft_inv_${provider}`}
-                style={{
-                  color: 'var(--pf-v5-global--Color--200)',
-                  display: 'block',
-                  marginBottom: 4,
-                  fontSize: '0.8rem',
-                }}
-              >
-                {t('Target inventory')}
-              </label>
-              <FormSelect
+      <div
+        style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          background: '#1b1d21',
+          border: '1px solid var(--pf-v5-global--BorderColor--100)',
+          borderRadius: 6,
+        }}
+      >
+        <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 4 }}>
+          {t('Provisioning target')}
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 10 }}>
+          {t('Use {variable} syntax to dynamically resolve the target inventory and group from survey variable values.')}
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+          {/* Target inventory template input */}
+          <div>
+            <label
+              htmlFor={`pft_inv_${provider}`}
+              style={{
+                color: 'var(--pf-v5-global--Color--200)',
+                display: 'block',
+                marginBottom: 4,
+                fontSize: '0.8rem',
+              }}
+            >
+              {t('Target inventory')}
+            </label>
+            <div style={{ position: 'relative' }}>
+              <TextInput
                 id={`pft_inv_${provider}`}
+                ref={invInputRef}
                 value={String(cfg.target_inventory ?? '')}
-                onChange={(_e, val) => void handleInventoryGroupChange('target_inventory', val ? Number(val) : null)}
-                aria-label={t('Target inventory')}
-              >
-                <FormSelectOption value="" label={t('— not configured —')} />
-                {inventoryList.map((inv) => (
-                  <FormSelectOption key={inv.id} value={String(inv.id)} label={inv.name} />
-                ))}
-              </FormSelect>
-            </div>
-            <div>
-              <label
-                htmlFor={`pft_grp_${provider}`}
-                style={{
-                  color: 'var(--pf-v5-global--Color--200)',
-                  display: 'block',
-                  marginBottom: 4,
-                  fontSize: '0.8rem',
+                placeholder="{org_name}_inventory"
+                autoComplete="off"
+                aria-label={t('Target inventory template')}
+                onFocus={() => setLastFocusedTarget('target_inventory')}
+                onChange={(_e, val) => {
+                  setInvCursor(invInputRef.current?.selectionStart ?? val.length);
+                  saveConfig({ target_inventory: val });
                 }}
-              >
-                {t('Target group')}
-              </label>
-              <FormSelect
+                onClick={(e) => setInvCursor(e.currentTarget.selectionStart ?? 0)}
+                onKeyUp={(e) => setInvCursor(e.currentTarget.selectionStart ?? 0)}
+                onSelect={(e) => setInvCursor((e.target as HTMLInputElement).selectionStart ?? 0)}
+              />
+              {(() => {
+                const tmpl = String(cfg.target_inventory ?? '');
+                const tokenCtx = getTemplateTokenContext(tmpl, invCursor);
+                if (!tokenCtx) return null;
+                const fragment = tokenCtx.typedFragment.toLowerCase();
+                const suggestions = allTemplateVars.filter((v) => v.toLowerCase().startsWith(fragment));
+                if (suggestions.length === 0) return null;
+                return (
+                  <SuggestionDropdown>
+                    {suggestions.map((v) => (
+                      <SuggestionItem
+                        key={v}
+                        variant="plain"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertTargetVar(v, 'target_inventory');
+                        }}
+                      >
+                        {`{${v}}`}
+                      </SuggestionItem>
+                    ))}
+                  </SuggestionDropdown>
+                );
+              })()}
+            </div>
+          </div>
+          {/* Target group template input */}
+          <div>
+            <label
+              htmlFor={`pft_grp_${provider}`}
+              style={{
+                color: 'var(--pf-v5-global--Color--200)',
+                display: 'block',
+                marginBottom: 4,
+                fontSize: '0.8rem',
+              }}
+            >
+              {t('Target group')}
+            </label>
+            <div style={{ position: 'relative' }}>
+              <TextInput
                 id={`pft_grp_${provider}`}
+                ref={grpInputRef}
                 value={cfg.target_group ?? ''}
-                onChange={(_e, val) => void handleInventoryGroupChange('target_group', val)}
-                aria-label={t('Target group')}
-                isDisabled={!selectedInventoryId}
-              >
-                <FormSelectOption value="" label={selectedInventoryId ? t('— select a group —') : t('— select an inventory first —')} />
-                {groupList.map((grp) => (
-                  <FormSelectOption key={grp.id} value={grp.name} label={grp.name} />
-                ))}
-              </FormSelect>
+                placeholder="{env}_servers"
+                autoComplete="off"
+                aria-label={t('Target group template')}
+                onFocus={() => setLastFocusedTarget('target_group')}
+                onChange={(_e, val) => {
+                  setGrpCursor(grpInputRef.current?.selectionStart ?? val.length);
+                  saveConfig({ target_group: val });
+                }}
+                onClick={(e) => setGrpCursor(e.currentTarget.selectionStart ?? 0)}
+                onKeyUp={(e) => setGrpCursor(e.currentTarget.selectionStart ?? 0)}
+                onSelect={(e) => setGrpCursor((e.target as HTMLInputElement).selectionStart ?? 0)}
+              />
+              {(() => {
+                const tmpl = cfg.target_group ?? '';
+                const tokenCtx = getTemplateTokenContext(tmpl, grpCursor);
+                if (!tokenCtx) return null;
+                const fragment = tokenCtx.typedFragment.toLowerCase();
+                const suggestions = allTemplateVars.filter((v) => v.toLowerCase().startsWith(fragment));
+                if (suggestions.length === 0) return null;
+                return (
+                  <SuggestionDropdown>
+                    {suggestions.map((v) => (
+                      <SuggestionItem
+                        key={v}
+                        variant="plain"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertTargetVar(v, 'target_group');
+                        }}
+                      >
+                        {`{${v}}`}
+                      </SuggestionItem>
+                    ))}
+                  </SuggestionDropdown>
+                );
+              })()}
             </div>
           </div>
         </div>
-      )}
+        {allTemplateVars.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 6 }}>
+              {t('Available variables (click to insert into focused field):')}
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {allTemplateVars.map((v) => (
+                <Button
+                  key={v}
+                  variant="plain"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '2px 8px',
+                    background: 'var(--pf-v5-global--BackgroundColor--200)',
+                    border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => insertTargetVar(v, lastFocusedTarget)}
+                >
+                  {`{${v}}`}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       {surveyVariables.length === 0 && survey && (
         <div style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
           {t('The linked workflow has no survey fields to configure.')}

@@ -3977,6 +3977,7 @@ class CatalogItemSerializer(BaseSerializer):
             'terraform_job_template',
             'deprovision_workflow',
             'override_workflow_limit',
+            'browse_enabled',
             'extra_vars_schema',
             'cloud_backends',
             'provider_workflows',

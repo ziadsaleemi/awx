@@ -16,6 +16,7 @@ export interface CatalogItem {
   terraform_job_template: number | null;
   deprovision_workflow: number | null;
   override_workflow_limit: boolean;
+  browse_enabled: boolean;
   extra_vars_schema: Record<string, unknown> | null;
   cloud_backends: Record<string, number> | null;
   provider_workflows: Record<string, number> | null;
@@ -28,7 +29,7 @@ export interface CatalogItem {
       hidden_fields: string[];
       field_templates: Record<string, string>;
       dynamic_field_sources: Record<string, string>;
-      target_inventory?: number | null;
+      target_inventory?: string | null;
       target_group?: string;
       vm_size_settings?: {
         /** Show the VM size preset selector in the deploy form */

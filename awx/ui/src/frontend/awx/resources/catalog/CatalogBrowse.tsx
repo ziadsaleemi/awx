@@ -132,7 +132,7 @@ export function CatalogBrowse() {
   const [deployTarget, setDeployTarget] = useState<DeployTarget | null>(null);
 
   const { data, isLoading } = useGet<CatalogItemListResponse>(awxAPI`/catalog_items/`);
-  const items = data?.results ?? [];
+  const items = (data?.results ?? []).filter((item) => item.browse_enabled !== false);
 
   return (
     <PageLayout>

@@ -120,6 +120,10 @@ class CatalogItem(CommonModelNameNotUnique):
         default=True,
         help_text=_('When enabled, deployment launches include terraform_override_limit=true.'),
     )
+    browse_enabled = models.BooleanField(
+        default=True,
+        help_text=_('When enabled, this catalog item is shown in the service catalog browse view.'),
+    )
     extra_vars_schema = models.JSONField(
         blank=True,
         null=True,

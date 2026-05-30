@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IPageAction,
@@ -14,8 +14,9 @@ import {
   usePageNavigate,
 } from '../../../../framework';
 import { ButtonVariant } from '@patternfly/react-core';
-import { PlusCircleIcon } from '@patternfly/react-icons';
+import { PencilAltIcon, PlusCircleIcon } from '@patternfly/react-icons';
 import { awxAPI } from '../../common/api/awx-utils';
+import { requestPatch } from '../../../common/crud/Data';
 import { useAwxView } from '../../common/useAwxView';
 import { useOptions } from '../../../common/crud/useOptions';
 import { OptionsResponse, ActionsResponse } from '../../interfaces/OptionsResponse';
@@ -37,6 +38,14 @@ export function CatalogItems() {
   });
 
   const deleteCatalogItems = useDeleteCatalogItems(view.unselectItemsAndRefresh);
+
+  const onToggleBrowse = useCallback(
+    async (item: CatalogItem, enabled: boolean) => {
+      await requestPatch(awxAPI`/catalog_items/${String(item.id)}/`, { browse_enabled: enabled });
+      view.unselectItemsAndRefresh([item]);
+    },
+    [view]
+  );
 
   const { data } = useOptions<OptionsResponse<ActionsResponse>>(awxAPI`/catalog_items/`);
   const canCreate = Boolean(data?.actions?.['POST']);
@@ -70,8 +79,22 @@ export function CatalogItems() {
   const rowActions = useMemo<IPageAction<CatalogItem>[]>(
     () => [
       {
+        type: PageActionType.Switch,
+        selection: PageActionSelection.Single,
+        ariaLabel: (isOn) =>
+          isOn ? t('Click to hide from catalog') : t('Click to show in catalog'),
+        onToggle: onToggleBrowse,
+        isSwitchOn: (item: CatalogItem) => item.browse_enabled !== false,
+        label: t('Visible'),
+        labelOff: t('Hidden'),
+        showPinnedLabel: false,
+        isPinned: true,
+      },
+      {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
+        isPinned: true,
+        icon: PencilAltIcon,
         label: t('Edit'),
         onClick: (item: CatalogItem) =>
           pageNavigate(AwxRoute.EditCatalogItem, { params: { id: String(item.id) } }),
@@ -88,7 +111,7 @@ export function CatalogItems() {
           item.summary_fields?.user_capabilities?.delete ? undefined : t('No permission'),
       },
     ],
-    [deleteCatalogItems, pageNavigate, t]
+    [deleteCatalogItems, onToggleBrowse, pageNavigate, t]
   );
 
   return (
@@ -166,6 +189,14 @@ function useCatalogItemColumns(): ITableColumn<CatalogItem>[] {
                 ? `${item.summary_fields.terraform_job_template.name} (Terraform)`
                 : (item.summary_fields?.provision_workflow?.name ?? '-')
             }
+          />
+        ),
+      },
+      {
+        header: t('Browse'),
+        cell: (item) => (
+          <TextCell
+            text={item.browse_enabled !== false ? t('Visible') : t('Hidden')}
           />
         ),
       },
