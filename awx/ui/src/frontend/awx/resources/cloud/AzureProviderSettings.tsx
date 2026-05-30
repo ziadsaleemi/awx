@@ -37,13 +37,16 @@ import {
   TrashIcon,
 } from '@patternfly/react-icons';
 import {
+  IFilterState,
   ITableColumn,
+  IToolbarFilter,
   PageHeader,
   PageLayout,
   PageTable,
   PageTab,
   PageTabs,
   TextCell,
+  ToolbarFilterType,
   useInMemoryView,
   usePageAlertToaster,
 } from '../../../../framework';
@@ -72,8 +75,6 @@ import {
   removeCloudConnectionApi,
   updateCloudConnectionApi,
 } from './cloudConnectionStore';
-import AzureLogo from '../../../assets/azure.svg';
-
 // ─── styled ──────────────────────────────────────────────────────────────────
 
 const DarkCard = styled(Card)`
@@ -148,9 +149,30 @@ function ResourceGroupsTab(props: {
     [t, allowedNames, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      { key: 'provisioning_state', label: t('Provisioning State'), type: ToolbarFilterType.SingleText, query: 'provisioning_state', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return resourceGroups;
+    return resourceGroups.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [resourceGroups, filterState]);
+
   const view = useInMemoryView<AzureResourceGroup>({
     keyFn: (rg) => rg.id,
-    items: resourceGroups,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -165,6 +187,10 @@ function ResourceGroupsTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -251,9 +277,33 @@ function VMImagesTab(props: {
     [t, allowedUrns, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'publisher', label: t('Publisher'), type: ToolbarFilterType.SingleText, query: 'publisher', comparison: 'contains' },
+      { key: 'offer', label: t('Offer'), type: ToolbarFilterType.SingleText, query: 'offer', comparison: 'contains' },
+      { key: 'sku', label: t('SKU'), type: ToolbarFilterType.SingleText, query: 'sku', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      { key: 'os_type', label: t('OS Type'), type: ToolbarFilterType.SingleText, query: 'os_type', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return vmImages;
+    return vmImages.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [vmImages, filterState]);
+
   const view = useInMemoryView<AzureVMImage>({
     keyFn: (img) => img.id,
-    items: vmImages,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -268,6 +318,10 @@ function VMImagesTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -378,9 +432,31 @@ function VMSizesTab(props: {
     [t, allowedNames, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'tier', label: t('Tier'), type: ToolbarFilterType.SingleText, query: 'tier', comparison: 'contains' },
+      { key: 'family', label: t('Family'), type: ToolbarFilterType.SingleText, query: 'family', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return vmSizes;
+    return vmSizes.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [vmSizes, filterState]);
+
   const view = useInMemoryView<AzureVMSize>({
     keyFn: (s) => `${s.location}:${s.name}`,
-    items: vmSizes,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -397,6 +473,10 @@ function VMSizesTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -495,9 +575,32 @@ function VMsTab(props: {
     [t, allowedIds, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
+      { key: 'vm_size', label: t('VM Size'), type: ToolbarFilterType.SingleText, query: 'vm_size', comparison: 'contains' },
+      { key: 'os_type', label: t('OS Type'), type: ToolbarFilterType.SingleText, query: 'os_type', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return vms;
+    return vms.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [vms, filterState]);
+
   const view = useInMemoryView<AzureVM>({
     keyFn: (vm) => vm.id,
-    items: vms,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -512,6 +615,10 @@ function VMsTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -583,9 +690,30 @@ function VNetsTab(props: {
     [t, allowedNames, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return vnets;
+    return vnets.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [vnets, filterState]);
+
   const view = useInMemoryView<AzureVNet>({
     keyFn: (vn) => vn.id,
-    items: vnets,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -600,6 +728,10 @@ function VNetsTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -677,9 +809,32 @@ function StorageTab(props: {
     [t, allowedNames, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
+      { key: 'kind', label: t('Kind'), type: ToolbarFilterType.SingleText, query: 'kind', comparison: 'contains' },
+      { key: 'sku', label: t('SKU'), type: ToolbarFilterType.SingleText, query: 'sku', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return storageAccounts;
+    return storageAccounts.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [storageAccounts, filterState]);
+
   const view = useInMemoryView<AzureStorageAccount>({
     keyFn: (sa) => sa.id,
-    items: storageAccounts,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -694,6 +849,10 @@ function StorageTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -753,9 +912,30 @@ function LocationsTab(props: {
     [t, allowedNames, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'display_name', label: t('Display Name'), type: ToolbarFilterType.SingleText, query: 'display_name', comparison: 'contains' },
+      { key: 'region_type', label: t('Region Type'), type: ToolbarFilterType.SingleText, query: 'region_type', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return locations;
+    return locations.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [locations, filterState]);
+
   const view = useInMemoryView<AzureLocation>({
     keyFn: (loc) => loc.id,
-    items: locations,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -770,6 +950,10 @@ function LocationsTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -1731,7 +1915,6 @@ export function AzureProviderSettings() {
             )}
           </div>
         }
-        titleAdornment={<AzureLogo style={{ height: 36, width: 'auto' }} />}
       />
 
       {connectionEntries.length === 0 ? (

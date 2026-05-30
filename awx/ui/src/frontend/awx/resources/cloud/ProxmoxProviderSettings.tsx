@@ -31,13 +31,16 @@ import {
   StorageDomainIcon,
 } from '@patternfly/react-icons';
 import {
+  IFilterState,
   ITableColumn,
+  IToolbarFilter,
   PageHeader,
   PageLayout,
   PageTable,
   PageTab,
   PageTabs,
   TextCell,
+  ToolbarFilterType,
   useInMemoryView,
   usePageAlertToaster,
 } from '../../../../framework';
@@ -172,9 +175,29 @@ function NodesTab(props: {
     [t, adminSettings, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return nodes;
+    return nodes.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [nodes, filterState]);
+
   const view = useInMemoryView<ProxmoxNode>({
     keyFn: (n) => n.node,
-    items: nodes,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -189,6 +212,10 @@ function NodesTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -249,9 +276,30 @@ function VMsTab(props: { vms: ProxmoxVM[] }) {
     [t]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return props.vms;
+    return props.vms.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [props.vms, filterState]);
+
   const view = useInMemoryView<ProxmoxVM>({
     keyFn: (vm) => String(vm.vmid),
-    items: props.vms,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -266,6 +314,10 @@ function VMsTab(props: { vms: ProxmoxVM[] }) {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -323,9 +375,30 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
     [t]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return props.containers;
+    return props.containers.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [props.containers, filterState]);
+
   const view = useInMemoryView<ProxmoxContainer>({
     keyFn: (ct) => String(ct.vmid),
-    items: props.containers,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -340,6 +413,10 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -442,9 +519,31 @@ function StorageTab(props: {
     [t, adminSettings, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'storage', label: t('Storage'), type: ToolbarFilterType.SingleText, query: 'storage', comparison: 'contains' },
+      { key: 'type', label: t('Type'), type: ToolbarFilterType.SingleText, query: 'type', comparison: 'contains' },
+      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+      { key: 'content', label: t('Content'), type: ToolbarFilterType.SingleText, query: 'content', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return storage;
+    return storage.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [storage, filterState]);
+
   const view = useInMemoryView<ProxmoxStorage>({
     keyFn: (s) => s.storage,
-    items: storage,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -459,6 +558,10 @@ function StorageTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -547,9 +650,30 @@ function NetworksTab(props: {
     [t, adminSettings, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'iface', label: t('Interface'), type: ToolbarFilterType.SingleText, query: 'iface', comparison: 'contains' },
+      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+      { key: 'type', label: t('Type'), type: ToolbarFilterType.SingleText, query: 'type', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return networks;
+    return networks.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [networks, filterState]);
+
   const view = useInMemoryView<ProxmoxNetwork>({
     keyFn: (n) => `${n.node}:${n.iface}`,
-    items: networks,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -564,6 +688,10 @@ function NetworksTab(props: {
       disableListView
       disableCardView
       {...view}
+      toolbarFilters={toolbarFilters}
+      filterState={filterState}
+      setFilterState={setFilterState}
+      clearAllFilters={clearAllFilters}
     />
   );
 }
@@ -639,9 +767,30 @@ function TemplatesTab(props: {
     [t, adminSettings, onToggle]
   );
 
+  const [filterState, setFilterState] = useState<IFilterState>({});
+  const clearAllFilters = useCallback(() => setFilterState({}), []);
+  const toolbarFilters = useMemo<IToolbarFilter[]>(
+    () => [
+      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
+      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+    ],
+    [t]
+  );
+  const filteredItems = useMemo(() => {
+    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    if (!searches.length) return templates;
+    return templates.filter((item) =>
+      searches.every(({ k, v }) => {
+        const field = String((item as unknown as Record<string, unknown>)[k] ?? '').toLowerCase();
+        return v.some((s) => field.includes(s.toLowerCase()));
+      })
+    );
+  }, [templates, filterState]);
+
   const view = useInMemoryView<ProxmoxVM>({
     keyFn: (vm) => String(vm.vmid),
-    items: templates,
+    items: filteredItems,
     tableColumns,
   });
 
@@ -680,6 +829,10 @@ function TemplatesTab(props: {
         disableListView
         disableCardView
         {...view}
+        toolbarFilters={toolbarFilters}
+        filterState={filterState}
+        setFilterState={setFilterState}
+        clearAllFilters={clearAllFilters}
       />
     </>
   );
