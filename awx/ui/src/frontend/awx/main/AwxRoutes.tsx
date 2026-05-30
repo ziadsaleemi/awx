@@ -189,6 +189,7 @@ export enum AwxRoute {
   CatalogAdminItems = 'awx-catalog-admin-items',
   CatalogAdminVmSizes = 'awx-catalog-admin-vm-sizes',
   CatalogAdminDeployments = 'awx-catalog-admin-deployments',
+  CatalogMarketplace = 'awx-catalog-marketplace',
 
   // Cloud
   Cloud = 'awx-cloud',

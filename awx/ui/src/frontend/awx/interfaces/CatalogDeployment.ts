@@ -21,6 +21,12 @@ export interface CatalogDeployment {
   last_failed_workflow_job: number | null;
   extra_vars: Record<string, unknown> | null;
   last_deprovision_vars: Record<string, unknown> | null;
+  /** ISO-8601 timestamp when the lease expires (null = no expiry). */
+  expires_at?: string | null;
+  /** When true the expiry task will automatically run the deprovision workflow. */
+  auto_deprovision?: boolean;
+  /** Seconds until expiry, computed server-side; 0 when already expired, null when no lease. */
+  time_remaining_seconds?: number | null;
   provisioning_history: Array<{
     action: string;
     status: string;

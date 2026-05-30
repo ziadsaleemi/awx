@@ -73,9 +73,13 @@ interface CatalogItemFormValues {
   provision_workflow: number | null;
   terraform_job_template: number | null;
   deprovision_workflow: number | null;
+  configure_workflow: number | null;
+  validate_workflow: number | null;
   override_workflow_limit: boolean;
   browse_enabled: boolean;
   extra_vars_schema: string;
+  default_lease_minutes: number | null;
+  require_lease: boolean;
   provider_configs: ProviderConfig[];
   provider_field_configs: Record<string, {
     disabled_fields: string[];
@@ -232,11 +236,17 @@ function makeDefaultValues(item?: CatalogItem): CatalogItemFormValues {
       item?.terraform_job_template ?? item?.summary_fields?.terraform_job_template?.id ?? null,
     deprovision_workflow:
       item?.deprovision_workflow ?? item?.summary_fields?.deprovision_workflow?.id ?? null,
+    configure_workflow:
+      item?.configure_workflow ?? item?.summary_fields?.configure_workflow?.id ?? null,
+    validate_workflow:
+      item?.validate_workflow ?? item?.summary_fields?.validate_workflow?.id ?? null,
     override_workflow_limit: item?.override_workflow_limit ?? true,
     browse_enabled: item?.browse_enabled ?? true,
     extra_vars_schema: item?.extra_vars_schema
       ? JSON.stringify(item.extra_vars_schema, null, 2)
       : '',
+    default_lease_minutes: item?.default_lease_minutes ?? null,
+    require_lease: item?.require_lease ?? false,
     provider_configs: buildProviderConfigs(item),
     provider_field_configs: item?.provider_field_configs ?? {},
   };
@@ -288,9 +298,13 @@ export function CreateCatalogItem() {
       provision_workflow: values.provision_workflow,
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
+      configure_workflow: values.configure_workflow,
+      validate_workflow: values.validate_workflow,
       override_workflow_limit: values.override_workflow_limit,
       browse_enabled: values.browse_enabled,
       extra_vars_schema,
+      default_lease_minutes: values.default_lease_minutes ?? null,
+      require_lease: values.require_lease,
       cloud_backends:
         values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
           ? Object.fromEntries(
@@ -379,6 +393,8 @@ export function EditCatalogItem() {
       provision_workflow: values.provision_workflow,
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
+      configure_workflow: values.configure_workflow,
+      validate_workflow: values.validate_workflow,
       override_workflow_limit: values.override_workflow_limit,
       browse_enabled: values.browse_enabled,
       extra_vars_schema,
@@ -414,6 +430,8 @@ export function EditCatalogItem() {
         Object.keys(values.provider_field_configs).length > 0
           ? values.provider_field_configs
           : null,
+      default_lease_minutes: values.default_lease_minutes ?? null,
+      require_lease: values.require_lease,
     };
     await requestPatch<typeof payload>(awxAPI`/catalog_items/${id}/`, payload);
     pageNavigate(AwxRoute.CatalogItemPage, { params: { id } });
@@ -517,6 +535,59 @@ function CatalogItemFormInputs() {
                 placeholder={extraVarsSchemaPlaceholder}
               />
             </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 16,
+                alignItems: 'start',
+              }}
+            >
+              <GlobalWorkflowPicker
+                name="configure_workflow"
+                label={t('Configure workflow')}
+                labelHelp={t(
+                  'Optional workflow to run automatically after a successful provision to configure the new resource. Runs before validate workflow if set.'
+                )}
+              />
+              <GlobalWorkflowPicker
+                name="validate_workflow"
+                label={t('Validate workflow')}
+                labelHelp={t(
+                  'Optional workflow to run after configure workflow (or after provision if no configure workflow is set) to validate the resource is healthy.'
+                )}
+              />
+            </div>
+
+            {/* ---- Lease / TTL settings ---- */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 16,
+                alignItems: 'start',
+              }}
+            >
+              <PageFormTextInput<CatalogItemFormValues>
+                name="default_lease_minutes"
+                label={t('Default lease (minutes)')}
+                labelHelpTitle={t('Default lease')}
+                labelHelp={t(
+                  'Pre-fills the lease duration picker in the deploy form. Leave blank for no default. Example: 480 for 8 hours.'
+                )}
+                placeholder={t('e.g. 480')}
+                type="number"
+              />
+              <PageFormCheckbox<CatalogItemFormValues>
+                name="require_lease"
+                label={t('Require lease on every deployment')}
+                labelHelpTitle={t('Require lease')}
+                labelHelp={t(
+                  'When enabled, deployers must choose a lease duration before submitting. Deployments without a TTL will be rejected.'
+                )}
+              />
+            </div>
           </div>
         </PageTab>
         <PageTab label={t('Cloud providers')}>
@@ -542,6 +613,107 @@ const PROVIDER_LABELS: Record<string, string> = {
   azure: 'Microsoft Azure',
   aws: 'Amazon AWS',
 };
+
+// ── Global top-level workflow picker ─────────────────────────────────────────
+
+function GlobalWorkflowPicker({
+  name,
+  label,
+  labelHelp,
+}: {
+  name: 'configure_workflow' | 'validate_workflow';
+  label: string;
+  labelHelp?: string;
+}) {
+  const { t } = useTranslation();
+  const { control, watch } = useFormContext<CatalogItemFormValues>();
+  const openSelect = useSelectWorkflowJobTemplate();
+  const [localName, setLocalName] = useState<string | null>(null);
+  const idValue = watch(name);
+
+  const { data: wjtInfo } = useGet<{ id: number; name: string }>(
+    idValue != null && localName === null
+      ? awxAPI`/workflow_job_templates/${String(idValue)}/`
+      : undefined
+  );
+  useEffect(() => {
+    if (wjtInfo?.name) setLocalName(wjtInfo.name);
+  }, [wjtInfo?.name]);
+
+  const queryOptions = async (options: {
+    next?: string | number;
+    search?: string;
+    signal?: AbortSignal;
+  }) => {
+    const params = new URLSearchParams();
+    params.set('page_size', '20');
+    params.set('order_by', 'name');
+    if (options.next) params.set('name__gt', String(options.next));
+    if (options.search) params.set('name__icontains', options.search);
+    try {
+      const url = awxAPI`/workflow_job_templates/` + '?' + params.toString();
+      const response = await requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+        url,
+        options.signal
+      );
+      const results = response.results ?? [];
+      return {
+        remaining: response.count - results.length,
+        options: results.map((r) => ({ label: r.name, value: r.id })),
+        next: results[results.length - 1]?.name,
+      };
+    } catch {
+      return { remaining: 0, options: [], next: 0 };
+    }
+  };
+
+  return (
+    <FormGroup label={label} labelHelp={labelHelp}>
+      <Controller
+        control={control}
+        name={name}
+        shouldUnregister={false}
+        render={({ field }) => (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PageAsyncSingleSelect<number>
+                id={`global-wjt-${name}`}
+                placeholder={t('Select workflow job template')}
+                queryPlaceholder={t('Loading workflows…')}
+                queryErrorText={t('Error loading workflows')}
+                value={(idValue as number) ?? undefined}
+                onSelect={(v) => {
+                  field.onChange(v ?? null);
+                  setLocalName(null);
+                }}
+                queryOptions={queryOptions}
+                queryLabel={(v) => <>{localName ?? `#${String(v)}`}</>}
+                onBrowse={() =>
+                  openSelect((wjt) => {
+                    field.onChange(wjt.id);
+                    setLocalName(wjt.name);
+                  })
+                }
+              />
+            </div>
+            {idValue != null && (
+              <Button
+                variant="plain"
+                onClick={() => {
+                  field.onChange(null);
+                  setLocalName(null);
+                }}
+                aria-label={t('Clear')}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+        )}
+      />
+    </FormGroup>
+  );
+}
 
 interface CloudConnectionApiResult {
   count: number;

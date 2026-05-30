@@ -1221,3 +1221,121 @@ def policy_as_code_validate(serializer, attrs):
 
 
 register_validate('policyascode', policy_as_code_validate)
+
+
+###############################################################################
+# AI ASSISTANT SETTINGS
+###############################################################################
+
+register(
+    'AI_ENABLED',
+    field_class=fields.BooleanField,
+    default=False,
+    label=_('Enable AI Assistant'),
+    help_text=_(
+        'Enable the embedded AI chat assistant. When enabled, users will see a '
+        'chat panel in the navigation bar powered by the configured AI provider.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_PROVIDER',
+    field_class=fields.ChoiceField,
+    choices=[
+        ('openai', _('OpenAI')),
+        ('azure_openai', _('Azure OpenAI')),
+        ('redhat_ai', _('Red Hat AI')),
+        ('watsonx', _('IBM watsonx')),
+        ('gemini', _('Google Gemini')),
+    ],
+    default='openai',
+    label=_('AI Provider'),
+    help_text=_('The AI provider to use for the assistant. Each provider requires its own API key and endpoint URL.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_API_URL',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI API Endpoint URL'),
+    help_text=_(
+        'The base URL for the AI provider API. Leave blank to use the provider default. '
+        'Required for Azure OpenAI (e.g. https://<resource>.openai.azure.com/), '
+        'Red Hat AI, and IBM watsonx deployments.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    placeholder='https://api.openai.com/v1',
+)
+
+register(
+    'AI_API_KEY',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI API Key'),
+    help_text=_('Secret API key for authenticating with the AI provider. This value is encrypted at rest.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+)
+
+register(
+    'AI_MODEL_NAME',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI Model Name'),
+    help_text=_(
+        'The model to use for completions (e.g. gpt-4o, gpt-4-turbo, gemini-1.5-pro). '
+        'Leave blank to use the provider default. For Azure OpenAI this is the deployment name.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    placeholder='gpt-4o',
+)
+
+register(
+    'AI_SYSTEM_PROMPT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default=(
+        'You are an AWX automation assistant. Help users understand and manage their '
+        'Ansible Automation Platform resources, including job templates, inventories, '
+        'credentials, workflows, Terraform templates, and catalog items. '
+        'Be concise and provide actionable guidance.'
+    ),
+    label=_('AI System Prompt'),
+    help_text=_('The system prompt sent to the AI model on every conversation. Customize to reflect your organisation context.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_MAX_TOKENS',
+    field_class=fields.IntegerField,
+    min_value=256,
+    max_value=32768,
+    default=2048,
+    label=_('AI Max Tokens'),
+    help_text=_('Maximum number of tokens the AI model may generate in a single response.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_RATE_LIMIT_PER_MINUTE',
+    field_class=fields.IntegerField,
+    min_value=1,
+    max_value=600,
+    default=20,
+    label=_('AI Rate Limit (requests per minute per user)'),
+    help_text=_('Maximum number of AI chat requests a single user may make per minute. Prevents runaway API usage.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)

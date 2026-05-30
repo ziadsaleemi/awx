@@ -1019,7 +1019,7 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
             elif isinstance(obj, WorkflowApproval):
                 serializer_class = WorkflowApprovalListSerializer
             elif isinstance(obj, TerraformJob):
-                serializer_class = TerraformJobSerializer
+                serializer_class = TerraformJobListSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -3951,6 +3951,10 @@ class TerraformJobSerializer(UnifiedJobSerializer):
             ).format(text_size=e.total, supported_size=e.supported)
 
 
+class TerraformJobListSerializer(TerraformJobSerializer, UnifiedJobListSerializer):
+    pass
+
+
 class TerraformJobCancelSerializer(TerraformJobSerializer):
     can_cancel = serializers.BooleanField(read_only=True)
 
@@ -3984,6 +3988,10 @@ class CatalogItemSerializer(BaseSerializer):
             'provider_deprovision_workflows',
             'available_providers',
             'provider_field_configs',
+            'configure_workflow',
+            'validate_workflow',
+            'default_lease_minutes',
+            'require_lease',
         )
 
     def get_related(self, obj):
@@ -4002,6 +4010,14 @@ class CatalogItemSerializer(BaseSerializer):
         if obj.deprovision_workflow_id:
             res['deprovision_workflow'] = self.reverse(
                 'api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id}
+            )
+        if obj.configure_workflow_id:
+            res['configure_workflow'] = self.reverse(
+                'api:workflow_job_template_detail', kwargs={'pk': obj.configure_workflow_id}
+            )
+        if obj.validate_workflow_id:
+            res['validate_workflow'] = self.reverse(
+                'api:workflow_job_template_detail', kwargs={'pk': obj.validate_workflow_id}
             )
         # Per-provider WJT survey links
         if obj.provider_workflows and isinstance(obj.provider_workflows, dict):
@@ -4032,11 +4048,22 @@ class CatalogItemSerializer(BaseSerializer):
                 'id': obj.deprovision_workflow_id,
                 'name': obj.deprovision_workflow.name,
             }
+        if obj.configure_workflow_id:
+            d['configure_workflow'] = {
+                'id': obj.configure_workflow_id,
+                'name': obj.configure_workflow.name,
+            }
+        if obj.validate_workflow_id:
+            d['validate_workflow'] = {
+                'id': obj.validate_workflow_id,
+                'name': obj.validate_workflow.name,
+            }
         return d
 
 
 class CatalogDeploymentSerializer(BaseSerializer):
     show_capabilities = ['delete', 'retry']
+    time_remaining_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = CatalogDeployment
@@ -4052,6 +4079,9 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'extra_vars',
             'last_deprovision_vars',
             'provisioning_history',
+            'expires_at',
+            'auto_deprovision',
+            'time_remaining_seconds',
         )
         read_only_fields = (
             'status',
@@ -4062,7 +4092,15 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'owner',
             'last_deprovision_vars',
             'provisioning_history',
+            'time_remaining_seconds',
         )
+
+    def get_time_remaining_seconds(self, obj):
+        if obj.expires_at is None:
+            return None
+        from django.utils.timezone import now as utcnow
+        delta = obj.expires_at - utcnow()
+        return max(0, int(delta.total_seconds()))
 
     def get_related(self, obj):
         res = super().get_related(obj)

@@ -62,6 +62,14 @@ export function CatalogItemDetails() {
           </pre>
         </PageDetail>
       )}
+      <PageDetail label={t('Default lease')}>
+        {item.default_lease_minutes
+          ? t('{{n}} minutes', { n: item.default_lease_minutes })
+          : t('None')}
+      </PageDetail>
+      <PageDetail label={t('Require lease')}>
+        {item.require_lease ? t('Yes') : t('No')}
+      </PageDetail>
       <PageDetail label={t('Created')}>
         {new Date(item.created).toLocaleString()}
       </PageDetail>

@@ -545,6 +545,11 @@ DISPATCHER_SCHEDULE = {
         'task': 'awx.main.tasks.host_indirect.cleanup_and_save_indirect_host_entries_fallback',
         'schedule': 3600,
     },
+    'awx.main.tasks.system.expire_catalog_deployments': {
+        'task': 'awx.main.tasks.system.expire_catalog_deployments',
+        'schedule': 300,
+        'options': {'expires': 290},
+    },
 }
 
 # Django Caching Configuration
@@ -1239,6 +1244,26 @@ OPA_AUTH_CA_CERT = ''  # The content of the CA certificate for mTLS authenticati
 OPA_AUTH_CUSTOM_HEADERS = {}  # Optional custom headers included in requests to the OPA server. Defaults to empty dictionary ({}).
 OPA_REQUEST_TIMEOUT = 1.5  # The number of seconds after which the connection to the OPA server will time out. Defaults to 1.5 seconds.
 OPA_REQUEST_RETRIES = 2  # The number of retry attempts for connecting to the OPA server. Default is 2.
+
+# AI Assistant settings
+AI_ENABLED = False
+AI_PROVIDER = 'openai'
+AI_API_URL = ''
+AI_API_KEY = ''
+AI_MODEL_NAME = ''
+AI_SYSTEM_PROMPT = (
+    'You are an AWX automation assistant. Help users understand and manage their '
+    'Ansible Automation Platform resources, including job templates, inventories, '
+    'credentials, workflows, Terraform templates, and catalog items. '
+    'Be concise and provide actionable guidance.'
+)
+AI_MAX_TOKENS = 2048
+AI_RATE_LIMIT_PER_MINUTE = 20
+
+# OPA (Open Policy Agent) guardrails
+OPA_ENABLED = False
+OPA_SERVER_URL = ''
+OPA_TIMEOUT = 5  # seconds
 
 # feature flags
 FEATURE_INDIRECT_NODE_COUNTING_ENABLED = False

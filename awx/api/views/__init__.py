@@ -5171,7 +5171,7 @@ class TerraformJobTemplateCredentialsList(SubListCreateAttachDetachAPIView):
 
 class TerraformJobTemplateJobsList(SubListAPIView):
     model = models.TerraformJob
-    serializer_class = serializers.TerraformJobSerializer
+    serializer_class = serializers.TerraformJobListSerializer
     parent_model = models.TerraformJobTemplate
     relationship = 'jobs'
     parent_key = 'terraform_job_template'
@@ -5231,7 +5231,7 @@ class TerraformJobTemplateObjectRolesList(SubListAPIView):
 
 class TerraformJobList(ListAPIView):
     model = models.TerraformJob
-    serializer_class = serializers.TerraformJobSerializer
+    serializer_class = serializers.TerraformJobListSerializer
     resource_purpose = 'terraform jobs'
 
 

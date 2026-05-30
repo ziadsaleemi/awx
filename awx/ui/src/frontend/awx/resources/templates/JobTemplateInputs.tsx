@@ -2,6 +2,7 @@ import { FormSection } from '@patternfly/react-core';
 
 import { useEffect, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { AICodeAssistant } from '../../common/AICodeAssistant';
 import { useTranslation } from 'react-i18next';
 import { PageFormDataEditor, PageFormSelect } from '../../../../framework';
 import { PageFormCheckbox } from '../../../../framework/PageForm/Inputs/PageFormCheckbox';
@@ -275,7 +276,14 @@ export function JobTemplateInputs(props: { jobtemplate?: JobTemplateForm }) {
       <PageFormSection singleColumn>
         <PageFormDataEditor<JobTemplateForm>
           additionalControls={
-            <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+            <>
+              <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+              <AICodeAssistant<JobTemplateForm>
+                fieldName="extra_vars"
+                format="yaml"
+                context="Ansible extra-vars YAML"
+              />
+            </>
           }
           labelHelpTitle={t('Extra Variables')}
           labelHelp={t(`Optional extra variables to be applied to job template.`)}

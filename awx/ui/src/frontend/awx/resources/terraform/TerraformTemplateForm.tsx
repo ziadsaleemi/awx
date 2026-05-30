@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import { AICodeAssistant } from '../../common/AICodeAssistant';
 import {
   LoadingPage,
   PageFormSubmitHandler,
@@ -345,7 +346,14 @@ function TerraformTemplateFormInputs() {
           'Key/value pairs to pass to Terraform as a tfvars file. Accepts JSON or YAML format. Survey variables and launch-time overrides are merged in automatically.'
         )}
         additionalControls={
-          <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+          <>
+            <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+            <AICodeAssistant<TerraformTemplateFormValues>
+              fieldName="extra_vars"
+              format="tfvars"
+              context="Terraform tfvars variables"
+            />
+          </>
         }
       />
     </>

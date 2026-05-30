@@ -15,6 +15,7 @@ import { CatalogItemCloudProviders } from '../../resources/catalog/CatalogItemCl
 import { CreateCatalogItem, EditCatalogItem } from '../../resources/catalog/CatalogItemForm';
 import { CatalogAdminDeployments } from '../../resources/catalog/CatalogAdminDeployments';
 import { CatalogVmSizes } from '../../resources/catalog/CatalogVmSizes';
+import { MarketplaceIngestion } from '../../resources/catalog/MarketplaceIngestion';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCatalogRoutes() {
@@ -114,6 +115,13 @@ export function useAwxCatalogRoutes() {
           label: t('All Deployments'),
           path: 'admin/deployments',
           element: <CatalogAdminDeployments />,
+        },
+        // Marketplace ingestion
+        {
+          id: AwxRoute.CatalogMarketplace,
+          label: t('Marketplace'),
+          path: 'admin/marketplace',
+          element: <MarketplaceIngestion />,
         },
         // Default redirect
         { path: '', element: <Navigate to="browse" replace /> },

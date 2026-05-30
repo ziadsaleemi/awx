@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Button,
+  Checkbox,
   Form,
   FormGroup,
   FormSelect,
@@ -241,6 +242,19 @@ export function CatalogDeployContent({
   const { data: deploymentList } = useGet<CatalogDeploymentListResponse>(item.related.deployments);
 
   const postRequest = usePostRequest<Record<string, unknown>, CatalogDeployment>();
+
+  // TTL / lease state
+  const defaultLeaseMinutes = item.default_lease_minutes ?? null;
+  const requireLease = item.require_lease ?? false;
+  const [leaseDurationMinutes, setLeaseDurationMinutes] = useState<number | null>(defaultLeaseMinutes);
+  const [autoDeprovision, setAutoDeprovision] = useState<boolean>(Boolean(defaultLeaseMinutes));
+
+  const TTL_PRESETS = useMemo(() => [
+    { label: t('2 h'), minutes: 120 },
+    { label: t('8 h'), minutes: 480 },
+    { label: t('24 h'), minutes: 1440 },
+    { label: t('7 d'), minutes: 10080 },
+  ], [t]);
 
   // Multi-cloud state — pre-select from initialProvider prop
   const allProviders = useMemo(() => {
@@ -566,6 +580,11 @@ export function CatalogDeployContent({
       }
       if (isLimitExceeded && vmSizeSettings?.require_approval) {
         body['requires_approval'] = true;
+      }
+      if (leaseDurationMinutes !== null && leaseDurationMinutes > 0) {
+        const expiresAt = new Date(Date.now() + leaseDurationMinutes * 60 * 1000);
+        body['expires_at'] = expiresAt.toISOString();
+        body['auto_deprovision'] = autoDeprovision;
       }
 
       await postRequest(awxAPI`/catalog_items/${id}/deploy/`, body);
@@ -1009,6 +1028,50 @@ export function CatalogDeployContent({
             {t('Auto-generated from your template and deploy form values.')}
           </HelperTextItem>
         </HelperText>
+      </FormGroup>
+
+      {/* ---- TTL / Lease section ---- */}
+      <FormGroup
+        label={requireLease ? t('Lease duration (required)') : t('Lease duration (optional)')}
+        fieldId="deploy-ttl"
+        labelHelp={t('Set a time limit on this deployment. After the lease expires the deployment will be marked expired.')}
+      >
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {TTL_PRESETS.map((preset) => (
+            <Button
+              key={preset.minutes}
+              variant={leaseDurationMinutes === preset.minutes ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => setLeaseDurationMinutes(preset.minutes)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+          <Button
+            variant={leaseDurationMinutes === null ? 'secondary' : 'plain'}
+            size="sm"
+            onClick={() => { setLeaseDurationMinutes(null); setAutoDeprovision(false); }}
+          >
+            {t('No limit')}
+          </Button>
+        </div>
+        {leaseDurationMinutes !== null && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <Checkbox
+              id="deploy-auto-deprovision"
+              label={t('Auto-deprovision when lease expires')}
+              isChecked={autoDeprovision}
+              onChange={(_evt, checked) => setAutoDeprovision(checked)}
+            />
+            <HelperText>
+              <HelperTextItem>
+                {autoDeprovision
+                  ? t('The deprovision workflow will run automatically when the lease expires.')
+                  : t('The deployment will be flagged as expired but resources will not be removed automatically.')}
+              </HelperTextItem>
+            </HelperText>
+          </div>
+        )}
       </FormGroup>
 
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>

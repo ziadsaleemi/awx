@@ -37,6 +37,7 @@ import { AwxError } from '../../common/AwxError';
 import { ConstructedInventoryHint } from './components/ConstructedInventoryHint';
 import { LabelHelp } from './components/LabelHelp';
 import { valueToObject } from '../../../../framework';
+import { AIInventoryBuilder } from './AIInventoryBuilder';
 
 export type InventoryCreate = Inventory & {
   instanceGroups: InstanceGroup[];
@@ -433,6 +434,11 @@ function InventoryInputs(props: { inventoryKind: string }) {
           format="yaml"
           isRequired={inventoryKind === 'constructed' ? true : false}
           labelHelp={<LabelHelp inventoryKind={inventoryKind} />}
+          additionalControls={
+            inventoryKind === '' ? (
+              <AIInventoryBuilder fieldName="variables" />
+            ) : undefined
+          }
           validate={(item) => {
             if (inventoryKind !== 'constructed') {
               return undefined;

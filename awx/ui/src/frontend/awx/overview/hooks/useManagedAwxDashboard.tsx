@@ -30,6 +30,12 @@ export function useManagedAwxDashboard() {
       { id: 'recent_jobs', name: t('Recent jobs') },
       { id: 'recent_projects', name: t('Recent projects') },
       { id: 'recent_inventories', name: t('Recent inventories') },
+      { id: 'automation_roi', name: t('Automation ROI') },
+      { id: 'automation_insights', name: t('Automation Insights') },
+      { id: 'performance_metrics', name: t('Performance Metrics') },
+      { id: 'mcp_server', name: t('MCP Server') },
+      { id: 'eda_integration', name: t('Event-Driven Ansible') },
+      { id: 'opa_guardrails', name: t('OPA Guardrails') },
     ],
     [t]
   );

@@ -22,6 +22,10 @@ export interface CatalogItem {
   provider_workflows: Record<string, number> | null;
   provider_deprovision_workflows: Record<string, number> | null;
   available_providers: string[] | null;
+  /** Default lease duration in minutes for new deployments (null = no default). */
+  default_lease_minutes?: number | null;
+  /** When true, deployers must supply a TTL; deployments without one are rejected. */
+  require_lease?: boolean;
   provider_field_configs: Record<
     string,
     {

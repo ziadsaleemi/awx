@@ -1,5 +1,6 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Label } from '@patternfly/react-core';
 import {
   IPageAction,
   ITableColumn,
@@ -18,6 +19,40 @@ import { useAwxView } from '../../common/useAwxView';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { StatusCell } from '../../../common/Status';
+
+/** Format seconds into a human-readable duration like "3 h 22 m" or "45 m". */
+function formatSeconds(totalSeconds: number): string {
+  if (totalSeconds <= 0) return '0 m';
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  if (days > 0) return `${days} d ${hours} h`;
+  if (hours > 0) return `${hours} h ${mins} m`;
+  return `${mins} m`;
+}
+
+/** Live countdown badge; colour shifts as expiry approaches. */
+function LeaseCountdown({ expiresAt }: { expiresAt: string | null | undefined }) {
+  const { t } = useTranslation();
+  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
+    if (!expiresAt) return -1;
+    return Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+  });
+
+  useEffect(() => {
+    if (!expiresAt) return;
+    const id = setInterval(() => {
+      setSecondsLeft(Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)));
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
+  if (!expiresAt) return <span style={{ color: 'var(--pf-v5-global--Color--200)' }}>{t('No limit')}</span>;
+  if (secondsLeft <= 0) return <Label color="red" isCompact>{t('Expired')}</Label>;
+
+  const color = secondsLeft <= 3600 ? 'red' : secondsLeft <= 14400 ? 'orange' : 'green';
+  return <Label color={color} isCompact>{formatSeconds(secondsLeft)}</Label>;
+}
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { usePageAlertToaster } from '../../../../framework';
 
@@ -231,6 +266,10 @@ function useCatalogDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
         header: t('Status'),
         cell: (deployment) => <StatusCell status={deployment.status} />,
         sort: 'status',
+      },
+      {
+        header: t('Lease'),
+        cell: (deployment) => <LeaseCountdown expiresAt={deployment.expires_at} />,
       },
       {
         header: t('Deployed'),

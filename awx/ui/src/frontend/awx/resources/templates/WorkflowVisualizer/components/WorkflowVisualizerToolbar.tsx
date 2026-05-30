@@ -34,6 +34,7 @@ import { useGetDocsUrl } from '../../../../common/util/useGetDocsUrl';
 import { useAwxConfig } from '../../../../common/useAwxConfig';
 import { useViewOptions } from '../ViewOptionsProvider';
 import { AddNodeButton } from './AddNodeButton';
+import { AIWorkflowSuggester } from './AIWorkflowSuggester';
 import { useRemoveGraphElements, useSaveVisualizer } from '../hooks';
 import type { ControllerState, GraphNode } from '../types';
 import { START_NODE_ID } from '../constants';
@@ -228,6 +229,9 @@ export const WorkflowVisualizerToolbar = observer(() => {
           </ToolbarItem>
           <ToolbarItem>
             <AddNodeButton />
+          </ToolbarItem>
+          <ToolbarItem>
+            <AIWorkflowSuggester />
           </ToolbarItem>
         </>
       )}

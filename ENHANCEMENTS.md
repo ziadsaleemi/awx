@@ -177,8 +177,8 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E11 | **Catalog sidebar VM size discoverability** — updated Catalog admin nav label to "Catalog Items / VM Sizes" so VM size preset management is visible from the sidebar | Medium | ✅ |
 | E12 | **Dedicated VM Sizes admin home** — new Catalog sidebar item `VM Sizes` with hypervisor/public-cloud tabs, per-item VM size add/edit/remove controls, and provider metadata fields (`cluster`, `node`) for future placement mapping | High | ✅ |
 | E13 | **Public cloud provider strategy tabs** — added provider tabs under VM Sizes planning view; DigitalOcean enabled as first test provider tab while preserving hypervisor-only custom size enforcement | High | ✅ |
-| E14 | **Marketplace template ingestion plan** — design phase for importing cloud marketplace images/templates and provider-native plans into a provider-mapping layer consumable by Catalog deploy flows | High | ⬜ |
-| E15 | **Workflow-driven post-provision configuration mapping** — design phase for chaining template deploy + AWX workflows (configure, validate, lifecycle actions) across hypervisors and public clouds | High | ⬜ |
+| E14 | **Marketplace template ingestion plan** — design phase for importing cloud marketplace images/templates and provider-native plans into a provider-mapping layer consumable by Catalog deploy flows | High | ✅ |
+| E15 | **Workflow-driven post-provision configuration mapping** — design phase for chaining template deploy + AWX workflows (configure, validate, lifecycle actions) across hypervisors and public clouds | High | ✅ |
 | E16 | **Cloud section with connection health** — new top-level `Cloud` sidebar area with provider tabs on `Connections`, credential selection, connect/disconnect actions, and status indicators (green connected, warning/error states for misconfigured/disconnected) | High | ✅ |
 | E17 | **Dynamic cloud provider sub-navigation** — when a provider is connected, a provider-specific child item appears under `Cloud` and opens dedicated configuration controls for template pull policy, allowed templates, and network allow-lists | High | ✅ |
 | E18 | **Cloud RBAC hardening** — Cloud sidebar visibility and cloud management pages now require admin-level access (superuser/system auditor); credential `use` capability is enforced before provider connection attempts | High | ✅ |
@@ -193,6 +193,7 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E27 | **Provisioning history workflow topology view** — expanded row in the provisioning history table now renders a full PatternFly `@patternfly/react-topology` Dagre graph matching the AWX workflow visualizer: same node styles/icons/status colors, "Run on success / failure / always" edge labels, zoom-in/out/fit control bar, and clickable nodes that navigate to the job output page | High | ✅ |
 | E28 | **Azure + DigitalOcean workflow surveys and deprovision workflows** — added surveys (survey_enabled=True) to TFT 29 (Provision Azure VM: vm_name, resource_group_name, vnet_name, subnet_name, vm_size, admin_username) and WJT 33 (Azure VM Provision Workflow); created TFT 35 (Deprovision Azure VM, op=destroy) + WJT 36 (Azure VM Deprovision Workflow) with 4-field survey; added surveys to TFT 30 (Provision DigitalOcean Droplet: droplet_name, do_region, do_droplet_size, do_image, do_ssh_key_name) and WJT 34 (DigitalOcean VM Provision Workflow); created TFT 37 (Deprovision DigitalOcean Droplet, op=destroy) + WJT 38 (DigitalOcean VM Deprovision Workflow) with droplet_name survey | High | ✅ |
 | E29 | **Cloud provider table UX improvements** — verbose/wide columns moved to expandable rows across all three provider pages (Azure: URN/ID on VMImages, GPU/MaxDisks/MaxNICs/Premium SSD/Accel.Net/Zones/Ultra SSD on VMSizes, SKU on Storage, Size on VMs; Proxmox: Type/Uptime on Templates; VMware: ID on VMs/Hosts/Networks/Datacenters, DatastoreID on Datastores); per-row Switch toggles replaced with compact `Allowed`/`Denied` Label badges; toolbar bulk-action buttons ("Allow selected" / "Deny selected") added to catalog-control tabs (Azure: Locations/VMImages/VMSizes; Proxmox: Templates; VMware: Datastores/Networks) using `PageActionSelection.Multiple` to enable row checkboxes | High | ✅ |
+| E30 | **Deployment TTL / Auto-expiry** — `CatalogItem.default_lease_minutes` sets a default lease on every new deployment; `CatalogItem.require_lease` forces deployers to supply a TTL; `CatalogDeployment.expires_at` + `auto_deprovision` track the lease; a periodic system task scans for expired active deployments and fires the deprovision workflow; deploy form Step 2 gains an optional TTL picker (preset buttons: 2 h / 8 h / 24 h / 7 d + custom date); My Deployments table shows a colour-coded countdown badge (green > 4 h, yellow ≤ 4 h, red ≤ 1 h) | High | ✅ |
 
 
 ---
@@ -241,49 +242,49 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language | High | ⬜ |
-| G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | ⬜ |
-| G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ⬜ |
-| G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ⬜ |
+| G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language | High | ✅ |
+| G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | ✅ |
+| G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ✅ |
+| G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ✅ |
 
 ### G2 — Automation Insights Dashboard
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G2a | **ROI / value measurement dashboards** — compute and display automation ROI (hours saved, cost avoidance) based on job runtimes and configurable host/hour values | Medium | ⬜ |
-| G2b | **Real-time actionable insights** — AI-driven anomaly detection on job failure rates, execution times, and inventory drift; surface recommendations in the dashboard | Medium | ⬜ |
-| G2c | **Performance metrics panels** — expanded dashboard cards for capacity utilisation trends, slowest templates, and most-failed hosts over configurable time windows | Medium | ⬜ |
+| G2a | **ROI / value measurement dashboards** — compute and display automation ROI (hours saved, cost avoidance) based on job runtimes and configurable host/hour values | Medium | ✅ |
+| G2b | **Real-time actionable insights** — AI-driven anomaly detection on job failure rates, execution times, and inventory drift; surface recommendations in the dashboard | Medium | ✅ |
+| G2c | **Performance metrics panels** — expanded dashboard cards for capacity utilisation trends, slowest templates, and most-failed hosts over configurable time windows | Medium | ✅ |
 
 ### G3 — MCP Server (Model Context Protocol)
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G3a | **MCP server endpoint** — expose AWX resources (job templates, inventories, credentials, deployments) via the Model Context Protocol so external AI agents can discover and invoke automation without custom integrations | High | ⬜ |
-| G3b | **RAG policy injection** — pipeline to embed organisation policies and best-practice docs into a vector store; MCP server retrieves relevant context and injects it into AI agent prompts before execution | Medium | ⬜ |
-| G3c | **MCP auth + audit** — OAuth2 token scoping for MCP clients; every MCP-initiated action logged to the Activity Stream with `triggered_by: mcp_agent` | High | ⬜ |
+| G3a | **MCP server endpoint** — expose AWX resources (job templates, inventories, credentials, deployments) via the Model Context Protocol so external AI agents can discover and invoke automation without custom integrations | High | ✅ |
+| G3b | **RAG policy injection** — pipeline to embed organisation policies and best-practice docs into a vector store; MCP server retrieves relevant context and injects it into AI agent prompts before execution | Medium | ✅ |
+| G3c | **MCP auth + audit** — OAuth2 token scoping for MCP clients; every MCP-initiated action logged to the Activity Stream with `triggered_by: mcp_agent` | High | ✅ |
 
 ### G4 — AI-Assisted Inventory Generation
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G4a | **Natural-language inventory builder** — UI wizard where users describe their infrastructure in plain text; AI generates a structured AWX inventory (groups, hosts, variables) as a preview before saving | Medium | ⬜ |
-| G4b | **Cloud resource → inventory AI mapping** — extend the existing cloud provider pull to use an AI step that suggests inventory group structure and variable mappings from pulled resource metadata | Medium | ⬜ |
+| G4a | **Natural-language inventory builder** — UI wizard where users describe their infrastructure in plain text; AI generates a structured AWX inventory (groups, hosts, variables) as a preview before saving | Medium | ✅ |
+| G4b | **Cloud resource → inventory AI mapping** — extend the existing cloud provider pull to use an AI step that suggests inventory group structure and variable mappings from pulled resource metadata | Medium | ✅ |
 
 ### G5 — Automation Orchestrator (Multi-Mode Canvas)
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G5a | **Multi-mode workflow canvas** — extend the workflow visualiser to support three node types side-by-side: deterministic (existing Ansible/Terraform), event-driven (EDA rulebook activations), and AI-driven (Lightspeed-generated tasks) | High | ⬜ |
-| G5b | **Event-Driven Ansible (EDA) integration** — connect AWX to an EDA Controller instance; surface rulebook activations as workflow nodes; show event source status in the sidebar | High | ⬜ |
-| G5c | **AI-driven node type** — workflow node that delegates execution plan generation to the configured AI model at runtime; human-approval gate before execution | Medium | ⬜ |
+| G5a | **Multi-mode workflow canvas** — extend the workflow visualiser to support three node types side-by-side: deterministic (existing Ansible/Terraform), event-driven (EDA rulebook activations), and AI-driven (Lightspeed-generated tasks) | High | ✅ |
+| G5b | **Event-Driven Ansible (EDA) integration** — connect AWX to an EDA Controller instance; surface rulebook activations as workflow nodes; show event source status in the sidebar | High | ✅ |
+| G5c | **AI-driven node type** — workflow node that delegates execution plan generation to the configured AI model at runtime; human-approval gate before execution | Medium | ✅ |
 
 ### G6 — OPA (Open Policy Agent) Guardrails
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | ⬜ |
-| G6b | **Policy management UI** — Settings section to upload/edit Rego policy bundles; test panel to evaluate a sample launch request against current policies | Medium | ⬜ |
-| G6c | **AI-action guardrails** — OPA policies specifically scoped to MCP/AI-initiated actions; e.g. block AI agents from launching destructive jobs without a human-approval workflow node | High | ⬜ |
+| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | ✅ |
+| G6b | **Policy management UI** — Settings section to upload/edit Rego policy bundles; test panel to evaluate a sample launch request against current policies | Medium | ✅ |
+| G6c | **AI-action guardrails** — OPA policies specifically scoped to MCP/AI-initiated actions; e.g. block AI agents from launching destructive jobs without a human-approval workflow node | High | ✅ |
 
 ---
 

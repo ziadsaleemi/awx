@@ -170,6 +170,24 @@ class CatalogItem(CommonModelNameNotUnique):
             'If null, only providers in cloud_backends/provider_workflows are shown.'
         ),
     )
+    configure_workflow = models.ForeignKey(
+        'WorkflowJobTemplate',
+        related_name='catalog_items_as_configure',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Workflow to run automatically after a successful provision to configure the new resource.'),
+    )
+    validate_workflow = models.ForeignKey(
+        'WorkflowJobTemplate',
+        related_name='catalog_items_as_validate',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Workflow to run after configure_workflow to validate the resource is healthy.'),
+    )
     provider_field_configs = models.JSONField(
         blank=True,
         null=True,
@@ -177,6 +195,22 @@ class CatalogItem(CommonModelNameNotUnique):
         help_text=_(
             'Per-provider deploy-form field configuration. '
             'Maps provider slug to {disabled_fields: [], hidden_fields: [], field_templates: {}}.'
+        ),
+    )
+    default_lease_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_(
+            'Default lease duration in minutes applied to every new deployment of this item. '
+            'Leave blank for no default lease.'
+        ),
+    )
+    require_lease = models.BooleanField(
+        default=False,
+        help_text=_(
+            'When enabled, deployers must supply a TTL before the deployment is created. '
+            'Deployments will not be created without an expiry time.'
         ),
     )
 
@@ -200,6 +234,8 @@ class CatalogItem(CommonModelNameNotUnique):
 DEPLOYMENT_STATUS_CHOICES = [
     ('pending', _('Pending')),
     ('provisioning', _('Provisioning')),
+    ('configuring', _('Configuring')),
+    ('validating', _('Validating')),
     ('active', _('Active')),
     ('deprovisioning', _('Deprovisioning')),
     ('failed', _('Failed')),
@@ -261,6 +297,24 @@ class CatalogDeployment(CommonModelNameNotUnique):
         default=None,
         on_delete=models.SET_NULL,
     )
+    configure_job = models.ForeignKey(
+        'WorkflowJob',
+        related_name='catalog_deployments_as_configure',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Most recent configure_workflow job for this deployment.'),
+    )
+    validate_job = models.ForeignKey(
+        'WorkflowJob',
+        related_name='catalog_deployments_as_validate',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Most recent validate_workflow job for this deployment.'),
+    )
     last_failed_workflow_job = models.ForeignKey(
         'WorkflowJob',
         related_name='catalog_deployments_as_last_failed',
@@ -286,6 +340,22 @@ class CatalogDeployment(CommonModelNameNotUnique):
         null=True,
         default=None,
         help_text=_('Resolved variables passed to the most recent deprovision workflow launch.'),
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_(
+            'When set, the deployment will be considered expired after this UTC datetime. '
+            'If auto_deprovision is also True the deprovision workflow will be triggered automatically.'
+        ),
+    )
+    auto_deprovision = models.BooleanField(
+        default=False,
+        help_text=_(
+            'When True and expires_at is set, the deprovision workflow is launched automatically '
+            'once the lease expires.'
+        ),
     )
     provisioning_history = models.JSONField(
         blank=True,

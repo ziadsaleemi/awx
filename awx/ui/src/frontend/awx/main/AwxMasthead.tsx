@@ -2,6 +2,7 @@ import { Brand, Button } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
 import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
+import { AIAssistantButton, AIAssistantPanel, useAIAssistantEnabled } from '../common/AIAssistant';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageMasthead, useGetPageUrl, usePageNavigate } from '../../../framework';
@@ -33,6 +34,8 @@ export function AwxMasthead() {
   const pageNavigate = usePageNavigate();
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
   useAwxNotifications();
+  const { enabled: aiEnabled } = useAIAssistantEnabled();
+  const [aiOpen, setAiOpen] = useState(false);
 
   const [logoHeight] = useState<number>(() => {
     const stored = localStorage.getItem(LOGO_SIZE_KEY);
@@ -55,6 +58,8 @@ export function AwxMasthead() {
   );
 
   return (
+    <>
+    {aiEnabled && <AIAssistantPanel isOpen={aiOpen} onClose={() => setAiOpen(false)} />}
     <PageMasthead brand={brandElement}>
       <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
         <ToolbarItem style={{ marginLeft: 'auto' }}>
@@ -63,6 +68,11 @@ export function AwxMasthead() {
         <ToolbarItem>
           <AwxGlobalSearch />
         </ToolbarItem>
+        {aiEnabled && (
+          <ToolbarItem>
+            <AIAssistantButton onClick={() => setAiOpen((o) => !o)} isActive={aiOpen} />
+          </ToolbarItem>
+        )}
         <ToolbarItem>
           <PageThemeSwitcher />
         </ToolbarItem>
@@ -130,6 +140,7 @@ export function AwxMasthead() {
         </ToolbarItem>
       </ToolbarGroup>
     </PageMasthead>
+    </>
   );
 }
 

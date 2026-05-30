@@ -1118,6 +1118,86 @@ def deep_copy_model_obj(model_module, model_name, obj_pk, new_obj_pk, user_pk, p
         update_inventory_computed_fields.delay(new_obj.id)
 
 
+@task(queue=get_task_queuename, timeout=600, on_duplicate='discard')
+def expire_catalog_deployments():
+    """
+    Scan for CatalogDeployments whose lease has expired (expires_at <= now,
+    status == 'active', auto_deprovision == True) and fire the deprovision
+    workflow for each one.  Runs every 5 minutes via DISPATCHER_SCHEDULE.
+    """
+    from awx.main.models.catalog import CatalogDeployment
+
+    expired = CatalogDeployment.objects.filter(
+        status='active',
+        auto_deprovision=True,
+        expires_at__lte=now(),
+    ).select_related('catalog_item', 'owner')
+
+    if not expired.exists():
+        return
+
+    logger.info('expire_catalog_deployments: found %d expired deployment(s)', expired.count())
+
+    for deployment in expired:
+        item = deployment.catalog_item
+        if item is None:
+            deployment.status = 'failed'
+            deployment.save(update_fields=['status', 'modified'])
+            continue
+
+        # Resolve the deprovision workflow for the active provider
+        wjt = None
+        target_provider = deployment.target_provider or ''
+        if target_provider and item.provider_deprovision_workflows:
+            wf_pk = item.provider_deprovision_workflows.get(target_provider)
+            if wf_pk:
+                try:
+                    from awx.main.models import WorkflowJobTemplate
+                    wjt = WorkflowJobTemplate.objects.get(pk=wf_pk)
+                except WorkflowJobTemplate.DoesNotExist:
+                    pass
+        if wjt is None and item.deprovision_workflow_id:
+            try:
+                from awx.main.models import WorkflowJobTemplate
+                wjt = WorkflowJobTemplate.objects.get(pk=item.deprovision_workflow_id)
+            except WorkflowJobTemplate.DoesNotExist:
+                pass
+
+        if wjt is None:
+            logger.warning(
+                'expire_catalog_deployments: deployment %s has no deprovision workflow; marking failed',
+                deployment.pk,
+            )
+            deployment.status = 'failed'
+            deployment.save(update_fields=['status', 'modified'])
+            continue
+
+        try:
+            extra_vars = dict(deployment.extra_vars or {})
+            extra_vars['catalog_deployment_id'] = deployment.pk
+            with impersonate(deployment.owner):
+                wj = wjt.create_unified_job(extra_vars=extra_vars)
+            wj.signal_start()
+            deployment.status = 'deprovisioning'
+            deployment.deprovision_job = wj
+            deployment.save(update_fields=['status', 'deprovision_job', 'modified'])
+            deployment.append_history_entry('auto_expire_deprovision', job=wj, status='pending')
+            deployment.save(update_fields=['provisioning_history'])
+            logger.info(
+                'expire_catalog_deployments: launched deprovision job %s for deployment %s',
+                wj.pk,
+                deployment.pk,
+            )
+        except Exception as exc:
+            logger.exception(
+                'expire_catalog_deployments: failed to launch deprovision for deployment %s: %s',
+                deployment.pk,
+                exc,
+            )
+            deployment.status = 'failed'
+            deployment.save(update_fields=['status', 'modified'])
+
+
 @task(queue=get_task_queuename, timeout=3600, on_duplicate='discard')
 def periodic_resource_sync():
     if not getattr(settings, 'RESOURCE_SERVER', None):

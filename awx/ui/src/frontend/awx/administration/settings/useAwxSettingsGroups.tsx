@@ -86,6 +86,20 @@ export function useAwxSettingsGroupsBase() {
         categories: [],
       },
       {
+        id: 'policyascode',
+        name: t('Policy as Code'),
+        description: t('OPA policy engine integration settings.'),
+        defaultSlugs: ['policyascode'],
+        categories: [],
+      },
+      {
+        id: 'ai-assistant',
+        name: t('AI Assistant'),
+        description: t('Configure the embedded AI chat assistant and model provider.'),
+        defaultSlugs: ['ai-assistant'],
+        categories: [],
+      },
+      {
         id: 'other',
         name: t('Other'),
         categories: [],

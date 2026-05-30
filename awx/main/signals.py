@@ -612,11 +612,70 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
     terminal_status = workflow_job.status  # 'successful', 'failed', 'error', 'canceled'
 
     # --- provision job completed ---
-    for deployment in CatalogDeployment.objects.filter(provision_job_id=workflow_job_id):
+    for deployment in CatalogDeployment.objects.filter(provision_job_id=workflow_job_id).select_related(
+        'catalog_item__configure_workflow',
+        'catalog_item__validate_workflow',
+    ):
         if terminal_status == 'successful':
-            new_status = 'active'
             # Populate deployed_hosts from inventory populated by the workflow.
             _populate_deployed_hosts(deployment, workflow_job)
+            deployment.last_failed_workflow_job = None
+            # Trigger configure_workflow if defined
+            configure_wf = deployment.catalog_item.configure_workflow if deployment.catalog_item_id else None
+            if configure_wf:
+                try:
+                    configure_job = configure_wf.create_unified_job()
+                    configure_job.signal_start()
+                    deployment.configure_job = configure_job
+                    new_status = 'configuring'
+                    deployment.append_history_entry('configure', job=configure_job, status='running')
+                except Exception:
+                    logger.exception(
+                        'Failed to launch configure_workflow for CatalogDeployment %s', deployment.pk
+                    )
+                    new_status = 'active'
+            else:
+                new_status = 'active'
+        else:
+            new_status = 'failed'
+            deployment.last_failed_workflow_job = workflow_job
+        deployment.status = new_status
+        deployment.update_history_for_job(workflow_job_id, terminal_status)
+        deployment.save(update_fields=['status', 'last_failed_workflow_job', 'provisioning_history'])
+
+    # --- configure job completed ---
+    for deployment in CatalogDeployment.objects.filter(configure_job_id=workflow_job_id).select_related(
+        'catalog_item__validate_workflow',
+    ):
+        if terminal_status == 'successful':
+            deployment.last_failed_workflow_job = None
+            # Trigger validate_workflow if defined
+            validate_wf = deployment.catalog_item.validate_workflow if deployment.catalog_item_id else None
+            if validate_wf:
+                try:
+                    validate_job = validate_wf.create_unified_job()
+                    validate_job.signal_start()
+                    deployment.validate_job = validate_job
+                    new_status = 'validating'
+                    deployment.append_history_entry('validate', job=validate_job, status='running')
+                except Exception:
+                    logger.exception(
+                        'Failed to launch validate_workflow for CatalogDeployment %s', deployment.pk
+                    )
+                    new_status = 'active'
+            else:
+                new_status = 'active'
+        else:
+            new_status = 'failed'
+            deployment.last_failed_workflow_job = workflow_job
+        deployment.status = new_status
+        deployment.update_history_for_job(workflow_job_id, terminal_status)
+        deployment.save(update_fields=['status', 'last_failed_workflow_job', 'provisioning_history'])
+
+    # --- validate job completed ---
+    for deployment in CatalogDeployment.objects.filter(validate_job_id=workflow_job_id):
+        if terminal_status == 'successful':
+            new_status = 'active'
             deployment.last_failed_workflow_job = None
         else:
             new_status = 'failed'

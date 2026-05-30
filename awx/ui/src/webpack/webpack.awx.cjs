@@ -23,6 +23,8 @@ module.exports = function (env, argv) {
     '/api': {
       target: AWX_SERVER,
       secure: false,
+      changeOrigin: true,
+      autoRewrite: true,
       bypass: (req) => {
         req.headers.host = proxyUrl.host;
         req.headers.origin = proxyUrl.origin;
@@ -32,6 +34,8 @@ module.exports = function (env, argv) {
     '/sso': {
       target: AWX_SERVER,
       secure: false,
+      changeOrigin: true,
+      autoRewrite: true,
       bypass: (req, res, options) => {
         req.headers.origin = proxyUrl.origin;
         req.headers.host = getRawHeader(req.rawHeaders, 'Host') || proxyUrl.host;
