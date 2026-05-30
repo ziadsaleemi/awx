@@ -34,6 +34,13 @@ import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { generateCatalogName, parseCatalogDynamicFieldNames } from './catalogNaming';
 import { fetchProviderState } from '../cloud/cloudConnectionStore';
 
+interface VmSizePreset {
+  name: string;
+  cpu: string;
+  ram: string;
+  enabled?: boolean;
+}
+
 interface SchemaProperty {
   type?: 'string' | 'integer' | 'number' | 'boolean';
   title?: string;
@@ -339,6 +346,10 @@ export function CatalogDeployContent({
   const [providerStateData, setProviderStateData] = useState<Record<string, unknown> | null>(null);
   const [providerAdminSettings, setProviderAdminSettings] = useState<unknown>(null);
 
+  // Global VM size presets (enabled only)
+  const [globalVmSizes, setGlobalVmSizes] = useState<VmSizePreset[]>([]);
+  const [selectedVmSize, setSelectedVmSize] = useState<string>('');
+
   // Fetch provider state for dynamic field source resolution.
   // For DigitalOcean, provider_data is a flat object { regions, pricing, images, vpcs }.
   // For other providers, provider_data is keyed by connection ID; aggregate arrays into a flat dict.
@@ -390,6 +401,15 @@ export function CatalogDeployContent({
     });
   }, [selectedProvider]);
 
+  // Fetch global VM size presets once on mount
+  useEffect(() => {
+    void fetchProviderState('global').then((state) => {
+      const settings = state?.provider_settings as { vm_sizes?: VmSizePreset[] } | null | undefined;
+      const sizes = settings?.vm_sizes ?? [];
+      setGlobalVmSizes(sizes.filter((s) => s.enabled !== false));
+    });
+  }, []);
+
   // When provider changes, reset form values so stale fields from a previous survey don't persist
   useEffect(() => {
     setFormValues({});
@@ -421,6 +441,44 @@ export function CatalogDeployContent({
     }
     return names;
   }, [providerFieldCfg, item.deploy_hidden_fields]);
+
+  // VM size settings for the active provider
+  const vmSizeSettings = providerFieldCfg?.vm_size_settings;
+  const showVmSizePicker = vmSizeSettings?.enabled !== false && globalVmSizes.length > 0;
+
+  const onVmSizeSelect = useCallback((sizeName: string) => {
+    setSelectedVmSize(sizeName);
+    if (!sizeName) return;
+    const size = globalVmSizes.find((s) => s.name === sizeName);
+    if (size) {
+      if (vmSizeSettings?.cpu_variable) {
+        setFormValues((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: size.cpu }));
+        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: '' }));
+      }
+      if (vmSizeSettings?.ram_variable) {
+        setFormValues((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: size.ram }));
+        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: '' }));
+      }
+    }
+  }, [globalVmSizes, vmSizeSettings]);
+
+  // Determine whether the current CPU / RAM values exceed the configured limits
+  const isLimitExceeded = useMemo(() => {
+    if (!vmSizeSettings) return false;
+    const cpuVar = vmSizeSettings.cpu_variable;
+    const ramVar = vmSizeSettings.ram_variable;
+    const cpuVal = cpuVar ? Number(formValues[cpuVar]) : NaN;
+    const ramVal = ramVar ? Number(formValues[ramVar]) : NaN;
+    const cpuOver =
+      vmSizeSettings.cpu_limit !== null &&
+      !Number.isNaN(cpuVal) &&
+      cpuVal > (vmSizeSettings.cpu_limit ?? Infinity);
+    const ramOver =
+      vmSizeSettings.ram_limit !== null &&
+      !Number.isNaN(ramVal) &&
+      ramVal > (vmSizeSettings.ram_limit ?? Infinity);
+    return cpuOver || ramOver;
+  }, [formValues, vmSizeSettings]);
 
   useEffect(() => {
     setFormValues(initialFormValues);
@@ -506,6 +564,9 @@ export function CatalogDeployContent({
       if (selectedProvider) {
         body['target_provider'] = selectedProvider;
       }
+      if (isLimitExceeded && vmSizeSettings?.require_approval) {
+        body['requires_approval'] = true;
+      }
 
       await postRequest(awxAPI`/catalog_items/${id}/deploy/`, body);
       alertToaster.addAlert({
@@ -563,6 +624,38 @@ export function CatalogDeployContent({
                 {/* Only render content for the active tab so hooks/schema stay in sync */}
                 {selectedProvider === p && (
                   <div style={{ paddingTop: '1.25rem' }}>
+                    {/* VM size preset selector */}
+                    {showVmSizePicker && (
+                      <FormGroup
+                        label={t('VM Size')}
+                        fieldId="deploy-vm-size"
+                        style={{ marginBottom: '1rem' }}
+                      >
+                        <FormSelect
+                          id="deploy-vm-size"
+                          value={selectedVmSize}
+                          onChange={(_event, val) => onVmSizeSelect(val)}
+                          isDisabled={isSubmitting}
+                        >
+                          <FormSelectOption value="" label={t('— Select a VM size preset —')} />
+                          {globalVmSizes.map((size) => (
+                            <FormSelectOption
+                              key={size.name}
+                              value={size.name}
+                              label={`${size.name} (${size.cpu} CPU · ${size.ram} GB RAM)`}
+                            />
+                          ))}
+                        </FormSelect>
+                        <HelperText>
+                          <HelperTextItem>
+                            {vmSizeSettings?.allow_manual
+                              ? t('Selecting a preset pre-fills CPU and RAM. You can still edit them.')
+                              : t('Selecting a preset fills in CPU and RAM automatically.')}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormGroup>
+                    )}
+
                     {/* Dynamic fields from the provider's WJT survey (or catalog deploy_survey fallback) */}
                     {sortedEntries.map(([key, prop]) => {
                       const fieldError = fieldErrors[key];
@@ -570,6 +663,13 @@ export function CatalogDeployContent({
                       const fieldLabel = prop.title ?? key;
                       const fieldId = `deploy-field-${key}`;
                       const isAdminDisabledField = disabledFieldSet.has(key);
+                      // Lock CPU/RAM inputs when a size is selected and manual override is not allowed
+                      const isVmSizeLocked =
+                        showVmSizePicker &&
+                        !vmSizeSettings?.allow_manual &&
+                        selectedVmSize !== '' &&
+                        (key === vmSizeSettings?.cpu_variable || key === vmSizeSettings?.ram_variable);
+                      const isEffectivelyDisabled = isAdminDisabledField || isVmSizeLocked;
 
                       // Check for a dynamic source configured for this field
                       const dynamicSourcePath = providerFieldCfg?.dynamic_field_sources?.[key];
@@ -712,7 +812,7 @@ export function CatalogDeployContent({
                               value={formValues[key] ?? ''}
                               onChange={(_event, val) => setValue(key, val)}
                               validated={fieldError ? 'error' : 'default'}
-                              isDisabled={isAdminDisabledField || isSubmitting}
+                              isDisabled={isEffectivelyDisabled || isSubmitting}
                             >
                               <FormSelectOption value="" label={t('— Select —')} />
                               {dynamicOptions.map((opt) => (
@@ -746,7 +846,7 @@ export function CatalogDeployContent({
                               value={formValues[key] ?? ''}
                               onChange={(_event, val) => setValue(key, val)}
                               validated={fieldError ? 'error' : 'default'}
-                              isDisabled={isAdminDisabledField || isSubmitting}
+                              isDisabled={isEffectivelyDisabled || isSubmitting}
                             >
                               {!isReq && <FormSelectOption value="" label={t('Select...')} />}
                               {prop.enum.map((opt) => (
@@ -782,7 +882,7 @@ export function CatalogDeployContent({
                             onChange={(_event, val) => setValue(key, val)}
                             validated={fieldError ? 'error' : 'default'}
                             isRequired={isReq}
-                            isDisabled={isAdminDisabledField || isSubmitting}
+                            isDisabled={isEffectivelyDisabled || isSubmitting}
                             {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
                             {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
                           />
@@ -864,6 +964,36 @@ export function CatalogDeployContent({
             );
           })}
         </>
+      )}
+
+      {/* Approval warning — shown when CPU/RAM exceeds the configured limit */}
+      {isLimitExceeded && vmSizeSettings && (
+        <Alert
+          variant={vmSizeSettings.require_approval ? 'warning' : 'info'}
+          isInline
+          title={
+            vmSizeSettings.require_approval
+              ? t('Resource limits exceeded — admin approval required')
+              : t('Resource limits exceeded')
+          }
+          style={{ marginBottom: '1rem' }}
+        >
+          {vmSizeSettings.require_approval
+            ? t(
+                'The requested CPU or RAM exceeds the configured limits (CPU: {{cpuLimit}} cores, RAM: {{ramLimit}} GB). This deployment will be submitted for admin approval before it runs.',
+                {
+                  cpuLimit: vmSizeSettings.cpu_limit ?? t('unlimited'),
+                  ramLimit: vmSizeSettings.ram_limit ?? t('unlimited'),
+                }
+              )
+            : t(
+                'The requested CPU or RAM exceeds the configured limits (CPU: {{cpuLimit}} cores, RAM: {{ramLimit}} GB).',
+                {
+                  cpuLimit: vmSizeSettings.cpu_limit ?? t('unlimited'),
+                  ramLimit: vmSizeSettings.ram_limit ?? t('unlimited'),
+                }
+              )}
+        </Alert>
       )}
 
       <FormGroup label={t('Deployment name')} isRequired fieldId="deploy-name">

@@ -30,6 +30,22 @@ export interface CatalogItem {
       dynamic_field_sources: Record<string, string>;
       target_inventory?: number | null;
       target_group?: string;
+      vm_size_settings?: {
+        /** Show the VM size preset selector in the deploy form */
+        enabled: boolean;
+        /** Allow users to manually override the CPU/RAM values */
+        allow_manual: boolean;
+        /** Survey variable name that holds the number of CPUs */
+        cpu_variable: string;
+        /** Survey variable name that holds the RAM in GB */
+        ram_variable: string;
+        /** Max CPU cores before approval is required (null = no limit) */
+        cpu_limit: number | null;
+        /** Max RAM in GB before approval is required (null = no limit) */
+        ram_limit: number | null;
+        /** When true, deployments exceeding the limit are flagged for approval */
+        require_approval: boolean;
+      };
     }
   > | null;
   created: string;

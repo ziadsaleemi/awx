@@ -83,6 +83,15 @@ interface CatalogItemFormValues {
     dynamic_field_sources: Record<string, string>;
     target_inventory?: number | null;
     target_group?: string;
+    vm_size_settings?: {
+      enabled: boolean;
+      allow_manual: boolean;
+      cpu_variable: string;
+      ram_variable: string;
+      cpu_limit: number | null;
+      ram_limit: number | null;
+      require_approval: boolean;
+    };
   }>;
 }
 
@@ -1651,8 +1660,131 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
           );
         })}
       </div>
+
+      {/* ── VM Size Settings ─────────────────────────────────────────────── */}
+      <div
+        style={{
+          marginTop: 24,
+          padding: '16px',
+          background: '#1b1d21',
+          border: '1px solid var(--pf-v5-global--BorderColor--100)',
+          borderRadius: 6,
+        }}
+      >
+        <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 12 }}>
+          {t('VM Size Settings')}
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 14 }}>
+          {t('Control how VM size presets are shown in the deploy form and set limits that trigger admin approval.')}
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Switch
+            id={`${provider}_vms_enabled`}
+            label={t('Show VM size selector')}
+            labelOff={t('Show VM size selector')}
+            isChecked={cfg.vm_size_settings?.enabled !== false}
+            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), enabled: checked } })}
+          />
+          <Switch
+            id={`${provider}_vms_allow_manual`}
+            label={t('Allow users to manually enter CPU / RAM')}
+            labelOff={t('Allow users to manually enter CPU / RAM')}
+            isChecked={cfg.vm_size_settings?.allow_manual === true}
+            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), allow_manual: checked } })}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+            <div>
+              <label
+                htmlFor={`${provider}_vms_cpu_var`}
+                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+              >
+                {t('CPU survey variable name')}
+              </label>
+              <TextInput
+                id={`${provider}_vms_cpu_var`}
+                value={cfg.vm_size_settings?.cpu_variable ?? ''}
+                placeholder="num_cpus"
+                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), cpu_variable: val } })}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${provider}_vms_ram_var`}
+                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+              >
+                {t('RAM survey variable name')}
+              </label>
+              <TextInput
+                id={`${provider}_vms_ram_var`}
+                value={cfg.vm_size_settings?.ram_variable ?? ''}
+                placeholder="ram_gb"
+                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), ram_variable: val } })}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${provider}_vms_cpu_limit`}
+                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+              >
+                {t('CPU limit (cores, blank = unlimited)')}
+              </label>
+              <TextInput
+                id={`${provider}_vms_cpu_limit`}
+                type="number"
+                value={cfg.vm_size_settings?.cpu_limit !== null && cfg.vm_size_settings?.cpu_limit !== undefined ? String(cfg.vm_size_settings.cpu_limit) : ''}
+                placeholder={t('e.g. 8')}
+                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), cpu_limit: val === '' ? null : Number(val) } })}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor={`${provider}_vms_ram_limit`}
+                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+              >
+                {t('RAM limit (GB, blank = unlimited)')}
+              </label>
+              <TextInput
+                id={`${provider}_vms_ram_limit`}
+                type="number"
+                value={cfg.vm_size_settings?.ram_limit !== null && cfg.vm_size_settings?.ram_limit !== undefined ? String(cfg.vm_size_settings.ram_limit) : ''}
+                placeholder={t('e.g. 32')}
+                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), ram_limit: val === '' ? null : Number(val) } })}
+              />
+            </div>
+          </div>
+          <Switch
+            id={`${provider}_vms_require_approval`}
+            label={t('Require admin approval when limits are exceeded')}
+            labelOff={t('Require admin approval when limits are exceeded')}
+            isChecked={cfg.vm_size_settings?.require_approval === true}
+            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), require_approval: checked } })}
+          />
+        </div>
+      </div>
     </div>
   );
+}
+
+function defaultVmSizeSettings(cfg: {
+  vm_size_settings?: {
+    enabled: boolean;
+    allow_manual: boolean;
+    cpu_variable: string;
+    ram_variable: string;
+    cpu_limit: number | null;
+    ram_limit: number | null;
+    require_approval: boolean;
+  };
+}) {
+  return {
+    enabled: cfg.vm_size_settings?.enabled !== false,
+    allow_manual: cfg.vm_size_settings?.allow_manual ?? false,
+    cpu_variable: cfg.vm_size_settings?.cpu_variable ?? '',
+    ram_variable: cfg.vm_size_settings?.ram_variable ?? '',
+    cpu_limit: cfg.vm_size_settings?.cpu_limit ?? null,
+    ram_limit: cfg.vm_size_settings?.ram_limit ?? null,
+    require_approval: cfg.vm_size_settings?.require_approval ?? false,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
