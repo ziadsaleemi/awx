@@ -84,8 +84,15 @@ const DarkCard = styled(Card)`
 
 // ─── sub-tabs ────────────────────────────────────────────────────────────────
 
-function ResourceGroupsTab(props: { resourceGroups: AzureResourceGroup[] }) {
+function ResourceGroupsTab(props: {
+  resourceGroups: AzureResourceGroup[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { resourceGroups, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedResourceGroupNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<AzureResourceGroup>[]>(
     () => [
       {
@@ -106,27 +113,44 @@ function ResourceGroupsTab(props: { resourceGroups: AzureResourceGroup[] }) {
         },
       },
       {
+        header: t('Allowed'),
+        cell: (rg) => {
+          const isAllowed = allowedNames === null || allowedNames.includes(rg.name);
+          return (
+            <Switch
+              id={`azure-rg-allowed-${rg.id}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(rg.name, checked)}
+              aria-label={rg.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
         header: t('Tags'),
-        cell: (rg) => (
-          <TextCell
-            text={
-              rg.tags && Object.keys(rg.tags).length > 0
-                ? Object.entries(rg.tags)
-                    .slice(0, 3)
-                    .map(([k, v]) => `${k}=${v}`)
-                    .join(', ')
-                : '-'
-            }
-          />
-        ),
+        type: 'text',
+        value: (rg) =>
+          rg.tags && Object.keys(rg.tags).length > 0
+            ? Object.entries(rg.tags)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(', ')
+            : undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Resource Group ID'),
+        type: 'text',
+        value: (rg) => rg.id,
+        table: 'expanded',
       },
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<AzureResourceGroup>({
     keyFn: (rg) => rg.id,
-    items: props.resourceGroups,
+    items: resourceGroups,
     tableColumns,
   });
 
@@ -137,6 +161,7 @@ function ResourceGroupsTab(props: { resourceGroups: AzureResourceGroup[] }) {
       errorStateTitle={t('Error loading resource groups')}
       emptyStateTitle={t('No resource groups found')}
       emptyStateDescription={t('Pull data from Azure to discover resource groups.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -164,20 +189,14 @@ function VMImagesTab(props: {
         header: t('Type'),
         cell: (img) => {
           const color =
-            img.image_type === 'custom'
-              ? 'blue'
-              : img.image_type === 'gallery'
-                ? 'purple'
-                : 'cyan';
+            img.image_type === 'custom' ? 'blue' : img.image_type === 'gallery' ? 'purple' : 'cyan';
           return <Label color={color}>{img.image_type}</Label>;
         },
       },
       {
         header: t('OS'),
         cell: (img) => (
-          <Label color={img.os_type === 'Windows' ? 'blue' : 'green'}>
-            {img.os_type || '-'}
-          </Label>
+          <Label color={img.os_type === 'Windows' ? 'blue' : 'green'}>{img.os_type || '-'}</Label>
         ),
         sort: 'os_type',
       },
@@ -189,40 +208,45 @@ function VMImagesTab(props: {
       {
         header: t('Offer / SKU'),
         cell: (img) =>
-          img.offer ? (
-            <TextCell text={`${img.offer} / ${img.sku}`} />
-          ) : (
-            <TextCell text='-' />
-          ),
+          img.offer ? <TextCell text={`${img.offer} / ${img.sku}`} /> : <TextCell text="-" />,
       },
       {
         header: t('Version'),
         cell: (img) => <TextCell text={img.version || '-'} />,
       },
       {
-        header: t('URN / ID'),
-        cell: (img) => (
-          <code style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>{img.urn}</code>
-        ),
+        header: t('Allowed'),
+        cell: (img) => {
+          const isAllowed = allowedUrns === null || allowedUrns.includes(img.urn);
+          return (
+            <Switch
+              id={`azure-img-allowed-${img.id}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(img.urn, checked)}
+              aria-label={img.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
       },
-      ...(onToggle
-        ? [
-            {
-              header: t('Available in Catalog'),
-              cell: (img: AzureVMImage) => {
-                const isAllowed = allowedUrns === null || allowedUrns.includes(img.urn);
-                return (
-                  <Switch
-                    isChecked={isAllowed}
-                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(img.urn, checked)}
-                    label={t('Allowed')}
-                    labelOff={t('Denied')}
-                  />
-                );
-              },
-            },
-          ]
-        : []),
+      {
+        header: t('URN / ID'),
+        type: 'text',
+        value: (img) => img.urn,
+        table: 'expanded',
+      },
+      {
+        header: t('Description'),
+        type: 'text',
+        value: (img) => img.description || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Location'),
+        type: 'text',
+        value: (img) => img.location,
+        table: 'expanded',
+      },
     ],
     [t, allowedUrns, onToggle]
   );
@@ -234,26 +258,17 @@ function VMImagesTab(props: {
   });
 
   return (
-    <>
-      {onToggle && allowedUrns !== null && (
-        <Alert isInline variant="info" title={t('VM Image allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
-          {t('{{count}} of {{total}} VM images are available to catalog deployments.', {
-            count: allowedUrns.length,
-            total: vmImages.length,
-          })}
-        </Alert>
-      )}
-      <PageTable<AzureVMImage>
-        id="azure-vm-images-table"
-        tableColumns={tableColumns}
-        errorStateTitle={t('Error loading VM images')}
-        emptyStateTitle={t('No VM images found')}
-        emptyStateDescription={t('Pull data from Azure to discover available VM images.')}
-        disableListView
-        disableCardView
-        {...view}
-      />
-    </>
+    <PageTable<AzureVMImage>
+      id="azure-vm-images-table"
+      tableColumns={tableColumns}
+      errorStateTitle={t('Error loading VM images')}
+      emptyStateTitle={t('No VM images found')}
+      emptyStateDescription={t('Pull data from Azure to discover available VM images.')}
+      isSelectMultiple
+      disableListView
+      disableCardView
+      {...view}
+    />
   );
 }
 
@@ -295,7 +310,7 @@ function VMSizesTab(props: {
       {
         header: t('Price/hr'),
         cell: (s) =>
-          s.price_per_hour != null ? (
+          s.price_per_hour !== null && s.price_per_hour !== undefined ? (
             <TextCell text={`$${s.price_per_hour.toFixed(4)}`} />
           ) : (
             <TextCell text="-" />
@@ -303,54 +318,62 @@ function VMSizesTab(props: {
         sort: 'price_per_hour',
       },
       {
+        header: t('Allowed'),
+        cell: (s) => {
+          const isAllowed = allowedNames === null || allowedNames.includes(s.name);
+          return (
+            <Switch
+              id={`azure-size-allowed-${s.location}-${s.name}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(s.name, checked)}
+              aria-label={s.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
         header: t('GPUs'),
-        cell: (s) => <TextCell text={s.gpus > 0 ? String(s.gpus) : '-'} />,
-        sort: 'gpus',
+        type: 'text',
+        value: (s) => (s.gpus > 0 ? String(s.gpus) : '0'),
+        table: 'expanded',
       },
       {
         header: t('Max Disks'),
-        cell: (s) => <TextCell text={String(s.max_data_disks)} />,
+        type: 'text',
+        value: (s) => String(s.max_data_disks),
+        table: 'expanded',
       },
       {
         header: t('Max NICs'),
-        cell: (s) => <TextCell text={String(s.max_nics)} />,
+        type: 'text',
+        value: (s) => String(s.max_nics),
+        table: 'expanded',
       },
       {
         header: t('Premium SSD'),
-        cell: (s) => (
-          <Label color={s.premium_io ? 'green' : 'grey'}>{s.premium_io ? 'Yes' : 'No'}</Label>
-        ),
+        type: 'text',
+        value: (s) => (s.premium_io ? 'Yes' : 'No'),
+        table: 'expanded',
       },
       {
         header: t('Accel. Networking'),
-        cell: (s) => (
-          <Label color={s.accelerated_networking ? 'green' : 'grey'}>
-            {s.accelerated_networking ? 'Yes' : 'No'}
-          </Label>
-        ),
+        type: 'text',
+        value: (s) => (s.accelerated_networking ? 'Yes' : 'No'),
+        table: 'expanded',
       },
       {
         header: t('Zones'),
-        cell: (s) => <TextCell text={s.zones.length > 0 ? s.zones.join(', ') : '-'} />,
+        type: 'text',
+        value: (s) => (s.zones.length > 0 ? s.zones.join(', ') : '-'),
+        table: 'expanded',
       },
-      ...(onToggle
-        ? [
-            {
-              header: t('Available in Catalog'),
-              cell: (s: AzureVMSize) => {
-                const isAllowed = allowedNames === null || allowedNames.includes(s.name);
-                return (
-                  <Switch
-                    isChecked={isAllowed}
-                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(s.name, checked)}
-                    label={t('Allowed')}
-                    labelOff={t('Denied')}
-                  />
-                );
-              },
-            },
-          ]
-        : []),
+      {
+        header: t('Ultra SSD'),
+        type: 'text',
+        value: (s) => (s.ultra_ssd ? 'Yes' : 'No'),
+        table: 'expanded',
+      },
     ],
     [t, allowedNames, onToggle]
   );
@@ -362,31 +385,31 @@ function VMSizesTab(props: {
   });
 
   return (
-    <>
-      {onToggle && allowedNames !== null && (
-        <Alert isInline variant="info" title={t('VM Size allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
-          {t('{{count}} of {{total}} VM sizes are available to catalog deployments.', {
-            count: allowedNames.length,
-            total: vmSizes.length,
-          })}
-        </Alert>
+    <PageTable<AzureVMSize>
+      id="azure-vm-sizes-table"
+      tableColumns={tableColumns}
+      errorStateTitle={t('Error loading VM sizes')}
+      emptyStateTitle={t('No VM sizes found')}
+      emptyStateDescription={t(
+        'Pull data from Azure to discover available VM sizes for your region.'
       )}
-      <PageTable<AzureVMSize>
-        id="azure-vm-sizes-table"
-        tableColumns={tableColumns}
-        errorStateTitle={t('Error loading VM sizes')}
-        emptyStateTitle={t('No VM sizes found')}
-        emptyStateDescription={t('Pull data from Azure to discover available VM sizes for your region.')}
-        disableListView
-        disableCardView
-        {...view}
-      />
-    </>
+      isSelectMultiple
+      disableListView
+      disableCardView
+      {...view}
+    />
   );
 }
 
-function VMsTab(props: { vms: AzureVM[] }) {
+function VMsTab(props: {
+  vms: AzureVM[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (id: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { vms, adminSettings, onToggle } = props;
+  const allowedIds = adminSettings?.allowedVMIds ?? null;
+
   const tableColumns = useMemo<ITableColumn<AzureVM>[]>(
     () => [
       {
@@ -410,10 +433,6 @@ function VMsTab(props: { vms: AzureVM[] }) {
         sort: 'location',
       },
       {
-        header: t('Size'),
-        cell: (vm) => <TextCell text={vm.vm_size} />,
-      },
-      {
         header: t('OS'),
         cell: (vm) => (
           <Label color={vm.os_type === 'Windows' ? 'blue' : 'green'}>{vm.os_type || '-'}</Label>
@@ -434,13 +453,51 @@ function VMsTab(props: { vms: AzureVM[] }) {
           return <Label color={color}>{vm.provisioning_state}</Label>;
         },
       },
+      {
+        header: t('Allowed'),
+        cell: (vm) => {
+          const isAllowed = allowedIds === null || allowedIds.includes(vm.id);
+          return (
+            <Switch
+              id={`azure-vm-allowed-${vm.id.replace(/[^a-z0-9]/gi, '-')}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(vm.id, checked)}
+              aria-label={vm.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
+        header: t('Size'),
+        type: 'text',
+        value: (vm) => vm.vm_size,
+        table: 'expanded',
+      },
+      {
+        header: t('VM ID'),
+        type: 'text',
+        value: (vm) => vm.id,
+        table: 'expanded',
+      },
+      {
+        header: t('Tags'),
+        type: 'text',
+        value: (vm) =>
+          vm.tags
+            ? Object.entries(vm.tags)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(', ')
+            : undefined,
+        table: 'expanded',
+      },
     ],
-    [t]
+    [t, allowedIds, onToggle]
   );
 
   const view = useInMemoryView<AzureVM>({
     keyFn: (vm) => vm.id,
-    items: props.vms,
+    items: vms,
     tableColumns,
   });
 
@@ -451,6 +508,7 @@ function VMsTab(props: { vms: AzureVM[] }) {
       errorStateTitle={t('Error loading virtual machines')}
       emptyStateTitle={t('No virtual machines found')}
       emptyStateDescription={t('Pull data from Azure to discover virtual machines.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -458,8 +516,15 @@ function VMsTab(props: { vms: AzureVM[] }) {
   );
 }
 
-function VNetsTab(props: { vnets: AzureVNet[] }) {
+function VNetsTab(props: {
+  vnets: AzureVNet[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { vnets, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedVNetNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<AzureVNet>[]>(
     () => [
       {
@@ -493,13 +558,34 @@ function VNetsTab(props: { vnets: AzureVNet[] }) {
           return <Label color={color}>{vn.provisioning_state}</Label>;
         },
       },
+      {
+        header: t('Allowed'),
+        cell: (vn) => {
+          const isAllowed = allowedNames === null || allowedNames.includes(vn.name);
+          return (
+            <Switch
+              id={`azure-vnet-allowed-${vn.id.replace(/[^a-z0-9]/gi, '-')}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(vn.name, checked)}
+              aria-label={vn.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
+        header: t('VNet ID'),
+        type: 'text',
+        value: (vn) => vn.id,
+        table: 'expanded',
+      },
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<AzureVNet>({
     keyFn: (vn) => vn.id,
-    items: props.vnets,
+    items: vnets,
     tableColumns,
   });
 
@@ -510,6 +596,7 @@ function VNetsTab(props: { vnets: AzureVNet[] }) {
       errorStateTitle={t('Error loading virtual networks')}
       emptyStateTitle={t('No virtual networks found')}
       emptyStateDescription={t('Pull data from Azure to discover virtual networks.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -517,8 +604,15 @@ function VNetsTab(props: { vnets: AzureVNet[] }) {
   );
 }
 
-function StorageTab(props: { storageAccounts: AzureStorageAccount[] }) {
+function StorageTab(props: {
+  storageAccounts: AzureStorageAccount[];
+  adminSettings?: AzureAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { storageAccounts, adminSettings, onToggle } = props;
+  const allowedNames = adminSettings?.allowedStorageAccountNames ?? null;
+
   const tableColumns = useMemo<ITableColumn<AzureStorageAccount>[]>(
     () => [
       {
@@ -546,23 +640,46 @@ function StorageTab(props: { storageAccounts: AzureStorageAccount[] }) {
         cell: (sa) => <Label color="blue">{sa.kind}</Label>,
       },
       {
-        header: t('SKU'),
-        cell: (sa) => <TextCell text={sa.sku} />,
-      },
-      {
         header: t('State'),
         cell: (sa) => {
           const color = sa.provisioning_state === 'Succeeded' ? 'green' : 'orange';
           return <Label color={color}>{sa.provisioning_state}</Label>;
         },
       },
+      {
+        header: t('Allowed'),
+        cell: (sa) => {
+          const isAllowed = allowedNames === null || allowedNames.includes(sa.name);
+          return (
+            <Switch
+              id={`azure-sa-allowed-${sa.id.replace(/[^a-z0-9]/gi, '-')}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(sa.name, checked)}
+              aria-label={sa.name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
+        header: t('SKU'),
+        type: 'text',
+        value: (sa) => sa.sku,
+        table: 'expanded',
+      },
+      {
+        header: t('Storage Account ID'),
+        type: 'text',
+        value: (sa) => sa.id,
+        table: 'expanded',
+      },
     ],
-    [t]
+    [t, allowedNames, onToggle]
   );
 
   const view = useInMemoryView<AzureStorageAccount>({
     keyFn: (sa) => sa.id,
-    items: props.storageAccounts,
+    items: storageAccounts,
     tableColumns,
   });
 
@@ -573,6 +690,7 @@ function StorageTab(props: { storageAccounts: AzureStorageAccount[] }) {
       errorStateTitle={t('Error loading storage accounts')}
       emptyStateTitle={t('No storage accounts found')}
       emptyStateDescription={t('Pull data from Azure to discover storage accounts.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -610,24 +728,27 @@ function LocationsTab(props: {
         header: t('Type'),
         cell: (loc) => <Label color="blue">{loc.region_type || 'Physical'}</Label>,
       },
-      ...(onToggle
-        ? [
-            {
-              header: t('Available in Catalog'),
-              cell: (loc: AzureLocation) => {
-                const isAllowed = allowedNames === null || allowedNames.includes(loc.name);
-                return (
-                  <Switch
-                    isChecked={isAllowed}
-                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(loc.name, checked)}
-                    label={t('Allowed')}
-                    labelOff={t('Denied')}
-                  />
-                );
-              },
-            },
-          ]
-        : []),
+      {
+        header: t('Allowed'),
+        cell: (loc) => {
+          const isAllowed = allowedNames === null || allowedNames.includes(loc.name);
+          return (
+            <Switch
+              id={`azure-loc-allowed-${loc.id.replace(/[^a-z0-9]/gi, '-')}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(loc.name, checked)}
+              aria-label={loc.display_name}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
+      {
+        header: t('Location ID'),
+        type: 'text',
+        value: (loc) => loc.id,
+        table: 'expanded',
+      },
     ],
     [t, allowedNames, onToggle]
   );
@@ -639,26 +760,17 @@ function LocationsTab(props: {
   });
 
   return (
-    <>
-      {onToggle && allowedNames !== null && (
-        <Alert isInline variant="info" title={t('Location allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
-          {t('{{count}} of {{total}} locations are available to catalog deployments.', {
-            count: allowedNames.length,
-            total: locations.length,
-          })}
-        </Alert>
-      )}
-      <PageTable<AzureLocation>
-        id="azure-locations-table"
-        tableColumns={tableColumns}
-        errorStateTitle={t('Error loading locations')}
-        emptyStateTitle={t('No locations found')}
-        emptyStateDescription={t('Pull data from Azure to discover available regions.')}
-        disableListView
-        disableCardView
-        {...view}
-      />
-    </>
+    <PageTable<AzureLocation>
+      id="azure-locations-table"
+      tableColumns={tableColumns}
+      errorStateTitle={t('Error loading locations')}
+      emptyStateTitle={t('No locations found')}
+      emptyStateDescription={t('Pull data from Azure to discover available regions.')}
+      isSelectMultiple
+      disableListView
+      disableCardView
+      {...view}
+    />
   );
 }
 
@@ -716,15 +828,22 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: AzureProvide
           </div>
           {data?.subscription_id && (
             <div
-              style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)', marginTop: 4 }}
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--pf-v5-global--Color--200)',
+                marginTop: 4,
+              }}
             >
-              {t('Subscription')}:{' '}
-              <strong style={{ color: '#fff' }}>{data.subscription_id}</strong>
+              {t('Subscription')}: <strong style={{ color: '#fff' }}>{data.subscription_id}</strong>
             </div>
           )}
           {data?.pulledAt && (
             <div
-              style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)', marginTop: 4 }}
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--pf-v5-global--Color--200)',
+                marginTop: 4,
+              }}
             >
               {t('Last pull')}:{' '}
               <strong style={{ color: '#fff' }}>{new Date(data.pulledAt).toLocaleString()}</strong>
@@ -747,10 +866,26 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: AzureProvide
             </div>
             <Grid hasGutter>
               {[
-                { icon: <CubesIcon style={{ color: '#2b9af3' }} />, label: t('Resource Groups'), value: rgCount },
-                { icon: <ServerIcon style={{ color: '#39a5dc' }} />, label: t('VMs'), value: vmCount },
-                { icon: <NetworkIcon style={{ color: '#4cb140' }} />, label: t('VNets'), value: vnetCount },
-                { icon: <StorageDomainIcon style={{ color: '#f0ab00' }} />, label: t('Storage'), value: saCount },
+                {
+                  icon: <CubesIcon style={{ color: '#2b9af3' }} />,
+                  label: t('Resource Groups'),
+                  value: rgCount,
+                },
+                {
+                  icon: <ServerIcon style={{ color: '#39a5dc' }} />,
+                  label: t('VMs'),
+                  value: vmCount,
+                },
+                {
+                  icon: <NetworkIcon style={{ color: '#4cb140' }} />,
+                  label: t('VNets'),
+                  value: vnetCount,
+                },
+                {
+                  icon: <StorageDomainIcon style={{ color: '#f0ab00' }} />,
+                  label: t('Storage'),
+                  value: saCount,
+                },
               ].map(({ icon, label, value }) => (
                 <GridItem key={label} span={6}>
                   <div
@@ -767,7 +902,12 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: AzureProvide
                     {icon}
                     <div>
                       <div
-                        style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', lineHeight: 1.1 }}
+                        style={{
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          color: '#fff',
+                          lineHeight: 1.1,
+                        }}
                       >
                         {value}
                       </div>
@@ -876,7 +1016,10 @@ function OverviewTab(props: {
                     {[
                       { variable: 'ARM_SUBSCRIPTION_ID', description: t('Azure subscription ID') },
                       { variable: 'ARM_CLIENT_ID', description: t('Service principal client ID') },
-                      { variable: 'ARM_CLIENT_SECRET', description: t('Service principal client secret') },
+                      {
+                        variable: 'ARM_CLIENT_SECRET',
+                        description: t('Service principal client secret'),
+                      },
                       { variable: 'ARM_TENANT_ID', description: t('Azure AD tenant ID') },
                     ].map(({ variable, description }) => (
                       <div
@@ -992,7 +1135,12 @@ function ManageConnectionsModal(props: {
         {entries.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--pf-v5-global--BorderColor--100)' }}>
+              <tr
+                style={{
+                  textAlign: 'left',
+                  borderBottom: '2px solid var(--pf-v5-global--BorderColor--100)',
+                }}
+              >
                 <th style={{ padding: '6px 8px' }}>{t('Name')}</th>
                 <th style={{ padding: '6px 8px' }}>{t('Status')}</th>
                 <th style={{ padding: '6px 8px' }}>{t('Credential')}</th>
@@ -1001,7 +1149,10 @@ function ManageConnectionsModal(props: {
             </thead>
             <tbody>
               {entries.map((entry) => (
-                <tr key={entry.id} style={{ borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)' }}>
+                <tr
+                  key={entry.id}
+                  style={{ borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)' }}
+                >
                   <td style={{ padding: '8px' }}>{entry.name}</td>
                   <td style={{ padding: '8px' }}>
                     {entry.status === 'connected' ? (
@@ -1019,7 +1170,8 @@ function ManageConnectionsModal(props: {
                         {t('Disconnect')}
                       </Button>
                     ) : (
-                      entry.credentialId != null && (
+                      entry.credentialId !== null &&
+                      entry.credentialId !== undefined && (
                         <Button
                           variant="primary"
                           size="sm"
@@ -1030,8 +1182,7 @@ function ManageConnectionsModal(props: {
                           {t('Connect')}
                         </Button>
                       )
-                    )}
-                    {' '}
+                    )}{' '}
                     <Button
                       variant="plain"
                       size="sm"
@@ -1048,11 +1199,7 @@ function ManageConnectionsModal(props: {
         )}
 
         {!showAddForm ? (
-          <Button
-            variant="link"
-            icon={<PlusCircleIcon />}
-            onClick={() => setShowAddForm(true)}
-          >
+          <Button variant="link" icon={<PlusCircleIcon />} onClick={() => setShowAddForm(true)}>
             {t('Add connection')}
           </Button>
         ) : (
@@ -1235,24 +1382,21 @@ export function AzureProviderSettings() {
     );
   }, [selectedConnectorId, allData, connectionDataMap]);
 
-  // Admin toggle handlers
+  // Admin per-item toggle handlers
   const onToggleVMImage = useCallback(
     async (urn: string, allowed: boolean) => {
       const current = adminSettings?.allowedVMImageUrns ?? null;
-      let next: string[] | null;
-      if (allowed) {
-        if (current === null) return;
-        next = [...current, urn];
-      } else {
-        next =
-          current === null
-            ? allData.vm_images.map((i) => i.urn).filter((u) => u !== urn)
-            : current.filter((u) => u !== urn);
-      }
+      const allKeys = allData.vm_images.map((i) => i.urn);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(urn); else next.delete(urn);
       const newSettings: AzureAdminSettings = {
-        allowedVMImageUrns: next,
+        allowedVMImageUrns: [...next],
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
         allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
       await patchProviderState('azure', { admin_settings: newSettings });
@@ -1263,20 +1407,17 @@ export function AzureProviderSettings() {
   const onToggleLocation = useCallback(
     async (name: string, allowed: boolean) => {
       const current = adminSettings?.allowedLocationNames ?? null;
-      let next: string[] | null;
-      if (allowed) {
-        if (current === null) return;
-        next = [...current, name];
-      } else {
-        next =
-          current === null
-            ? allData.locations.map((l) => l.name).filter((n) => n !== name)
-            : current.filter((n) => n !== name);
-      }
+      const allKeys = allData.locations.map((l) => l.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
-        allowedLocationNames: next,
+        allowedLocationNames: [...next],
         allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
       await patchProviderState('azure', { admin_settings: newSettings });
@@ -1287,25 +1428,106 @@ export function AzureProviderSettings() {
   const onToggleVMSize = useCallback(
     async (name: string, allowed: boolean) => {
       const current = adminSettings?.allowedVMSizeNames ?? null;
-      let next: string[] | null;
-      if (allowed) {
-        if (current === null) return;
-        next = [...current, name];
-      } else {
-        next =
-          current === null
-            ? allData.vm_sizes.map((s) => s.name).filter((n) => n !== name)
-            : current.filter((n) => n !== name);
-      }
+      const allKeys = allData.vm_sizes.map((s) => s.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
-        allowedVMSizeNames: next,
+        allowedVMSizeNames: [...next],
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
       await patchProviderState('azure', { admin_settings: newSettings });
     },
     [adminSettings, allData.vm_sizes]
+  );
+
+  const onToggleResourceGroup = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedResourceGroupNames ?? null;
+      const allKeys = allData.resource_groups.map((rg) => rg.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: [...next],
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.resource_groups]
+  );
+
+  const onToggleVM = useCallback(
+    async (id: string, allowed: boolean) => {
+      const current = adminSettings?.allowedVMIds ?? null;
+      const allKeys = allData.vms.map((vm) => vm.id);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(id); else next.delete(id);
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: [...next],
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.vms]
+  );
+
+  const onToggleVNet = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedVNetNames ?? null;
+      const allKeys = allData.vnets.map((vn) => vn.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: [...next],
+        allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.vnets]
+  );
+
+  const onToggleStorage = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedStorageAccountNames ?? null;
+      const allKeys = allData.storage_accounts.map((sa) => sa.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
+      const newSettings: AzureAdminSettings = {
+        allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
+        allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
+        allowedVMSizeNames: adminSettings?.allowedVMSizeNames ?? null,
+        allowedResourceGroupNames: adminSettings?.allowedResourceGroupNames ?? null,
+        allowedVMIds: adminSettings?.allowedVMIds ?? null,
+        allowedVNetNames: adminSettings?.allowedVNetNames ?? null,
+        allowedStorageAccountNames: [...next],
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('azure', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.storage_accounts]
   );
 
   const onConnect = useCallback(
@@ -1509,7 +1731,7 @@ export function AzureProviderSettings() {
             )}
           </div>
         }
-        logo={<AzureLogo style={{ height: 36, width: 'auto' }} />}
+        titleAdornment={<AzureLogo style={{ height: 36, width: 'auto' }} />}
       />
 
       {connectionEntries.length === 0 ? (
@@ -1545,10 +1767,16 @@ export function AzureProviderSettings() {
           <PageTab
             label={
               t('Resource Groups') +
-              (activeData.resource_groups.length > 0 ? ` (${activeData.resource_groups.length})` : '')
+              (activeData.resource_groups.length > 0
+                ? ` (${activeData.resource_groups.length})`
+                : '')
             }
           >
-            <ResourceGroupsTab resourceGroups={activeData.resource_groups} />
+            <ResourceGroupsTab
+              resourceGroups={activeData.resource_groups}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleResourceGroup(name, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1556,7 +1784,11 @@ export function AzureProviderSettings() {
               (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab vms={activeData.vms} />
+            <VMsTab
+              vms={activeData.vms}
+              adminSettings={adminSettings}
+              onToggle={(id, allowed) => void onToggleVM(id, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1564,15 +1796,25 @@ export function AzureProviderSettings() {
               (activeData.vnets.length > 0 ? ` (${activeData.vnets.length})` : '')
             }
           >
-            <VNetsTab vnets={activeData.vnets} />
+            <VNetsTab
+              vnets={activeData.vnets}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleVNet(name, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
               t('Storage') +
-              (activeData.storage_accounts.length > 0 ? ` (${activeData.storage_accounts.length})` : '')
+              (activeData.storage_accounts.length > 0
+                ? ` (${activeData.storage_accounts.length})`
+                : '')
             }
           >
-            <StorageTab storageAccounts={activeData.storage_accounts} />
+            <StorageTab
+              storageAccounts={activeData.storage_accounts}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleStorage(name, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1582,8 +1824,8 @@ export function AzureProviderSettings() {
           >
             <LocationsTab
               locations={activeData.locations}
-              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
-              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleLocation(name, allowed) : undefined}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleLocation(name, allowed)}
             />
           </PageTab>
           <PageTab
@@ -1594,8 +1836,8 @@ export function AzureProviderSettings() {
           >
             <VMImagesTab
               vmImages={activeData.vm_images}
-              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
-              onToggle={activeAwxUser?.is_superuser ? (urn, allowed) => void onToggleVMImage(urn, allowed) : undefined}
+              adminSettings={adminSettings}
+              onToggle={(urn, allowed) => void onToggleVMImage(urn, allowed)}
             />
           </PageTab>
           <PageTab
@@ -1606,8 +1848,8 @@ export function AzureProviderSettings() {
           >
             <VMSizesTab
               vmSizes={activeData.vm_sizes}
-              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
-              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleVMSize(name, allowed) : undefined}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleVMSize(name, allowed)}
             />
           </PageTab>
         </PageTabs>
@@ -1620,8 +1862,8 @@ export function AzureProviderSettings() {
         azureCredentials={azureCredentials}
         allCredentials={credData?.results ?? []}
         onConnect={onConnect}
-        onDisconnect={onDisconnect}
-        onRemove={onRemove}
+        onDisconnect={(id) => void onDisconnect(id)}
+        onRemove={(id) => void onRemove(id)}
         onAddAndConnect={onAddAndConnect}
         connectingId={connectingId}
       />

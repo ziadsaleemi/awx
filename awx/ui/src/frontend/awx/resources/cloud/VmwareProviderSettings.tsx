@@ -15,7 +15,6 @@ import {
   GridItem,
   Label,
   PageSection,
-  Switch,
   Title,
   ToggleGroup,
   ToggleGroupItem,
@@ -29,7 +28,10 @@ import {
   StorageDomainIcon,
 } from '@patternfly/react-icons';
 import {
+  IPageAction,
   ITableColumn,
+  PageActionSelection,
+  PageActionType,
   PageHeader,
   PageLayout,
   PageTable,
@@ -116,7 +118,15 @@ function VMsTab(props: { vms: VmwareVM[] }) {
       },
       {
         header: t('ID'),
-        cell: (vm) => <TextCell text={vm.id} />,
+        type: 'text',
+        value: (vm) => vm.id,
+        table: 'expanded',
+      },
+      {
+        header: t('Host ID'),
+        type: 'text',
+        value: (vm) => vm.host_id || undefined,
+        table: 'expanded',
       },
     ],
     [t]
@@ -172,15 +182,35 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
       },
       {
         header: t('CPUs'),
-        cell: (h) => <TextCell text={h.cpu_count != null ? String(h.cpu_count) : '-'} />,
+        cell: (h) => (
+          <TextCell
+            text={h.cpu_count !== null && h.cpu_count !== undefined ? String(h.cpu_count) : '-'}
+          />
+        ),
       },
       {
         header: t('Memory'),
-        cell: (h) => <TextCell text={h.memory_size_mib != null ? fmtMiB(h.memory_size_mib) : '-'} />,
+        cell: (h) => (
+          <TextCell
+            text={
+              h.memory_size_mib !== null && h.memory_size_mib !== undefined
+                ? fmtMiB(h.memory_size_mib)
+                : '-'
+            }
+          />
+        ),
       },
       {
         header: t('ID'),
-        cell: (h) => <TextCell text={h.id} />,
+        type: 'text',
+        value: (h) => h.id,
+        table: 'expanded',
+      },
+      {
+        header: t('Cluster ID'),
+        type: 'text',
+        value: (h) => h.cluster_id || undefined,
+        table: 'expanded',
       },
     ],
     [t]
@@ -209,11 +239,29 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
 function DatastoresTab(props: {
   datastores: VmwareDatastore[];
   adminSettings?: VmwareAdminSettings | null;
-  onToggle?: (name: string, allowed: boolean) => void;
+  onBulkToggle?: (names: string[], allowed: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { datastores, adminSettings, onToggle } = props;
+  const { datastores, adminSettings, onBulkToggle } = props;
   const allowedNames = adminSettings?.allowedDatastoreNames ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareDatastore>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareDatastore[]) => onBulkToggle(items.map((d) => d.name), true),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareDatastore[]) => onBulkToggle(items.map((d) => d.name), false),
+      },
+    ];
+  }, [onBulkToggle, t]);
 
   const tableColumns = useMemo<ITableColumn<VmwareDatastore>[]>(
     () => [
@@ -248,26 +296,29 @@ function DatastoresTab(props: {
         header: t('Free Space'),
         cell: (ds) => <TextCell text={fmtMiB(ds.free_space_mb)} />,
       },
-      ...(onToggle
+      ...(onBulkToggle
         ? [
             {
-              header: t('Available in Catalog'),
+              header: t('Catalog'),
               cell: (ds: VmwareDatastore) => {
                 const isAllowed = allowedNames === null || allowedNames.includes(ds.name);
                 return (
-                  <Switch
-                    isChecked={isAllowed}
-                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(ds.name, checked)}
-                    label={t('Allowed')}
-                    labelOff={t('Denied')}
-                  />
+                  <Label color={isAllowed ? 'green' : 'red'}>
+                    {isAllowed ? t('Allowed') : t('Denied')}
+                  </Label>
                 );
               },
             },
           ]
         : []),
+      {
+        header: t('Datastore ID'),
+        type: 'text',
+        value: (ds) => ds.id,
+        table: 'expanded',
+      },
     ],
-    [t, allowedNames, onToggle]
+    [t, allowedNames, onBulkToggle]
   );
 
   const view = useInMemoryView<VmwareDatastore>({
@@ -278,8 +329,13 @@ function DatastoresTab(props: {
 
   return (
     <>
-      {onToggle && allowedNames !== null && (
-        <Alert isInline variant="info" title={t('Datastore allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+      {onBulkToggle && allowedNames !== null && (
+        <Alert
+          isInline
+          variant="info"
+          title={t('Datastore allow-list active')}
+          style={{ margin: '0.75rem 1rem 0' }}
+        >
           {t('{{count}} of {{total}} datastores are available to catalog deployments.', {
             count: allowedNames.length,
             total: datastores.length,
@@ -289,6 +345,7 @@ function DatastoresTab(props: {
       <PageTable<VmwareDatastore>
         id="vmware-datastores-table"
         tableColumns={tableColumns}
+        toolbarActions={toolbarActions}
         errorStateTitle={t('Error loading datastores')}
         emptyStateTitle={t('No datastores found')}
         emptyStateDescription={t('Pull data from vCenter to discover datastores.')}
@@ -303,11 +360,29 @@ function DatastoresTab(props: {
 function NetworksTab(props: {
   networks: VmwareNetwork[];
   adminSettings?: VmwareAdminSettings | null;
-  onToggle?: (name: string, allowed: boolean) => void;
+  onBulkToggle?: (names: string[], allowed: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { networks, adminSettings, onToggle } = props;
+  const { networks, adminSettings, onBulkToggle } = props;
   const allowedNames = adminSettings?.allowedNetworkNames ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareNetwork>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareNetwork[]) => onBulkToggle(items.map((n) => n.name), true),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareNetwork[]) => onBulkToggle(items.map((n) => n.name), false),
+      },
+    ];
+  }, [onBulkToggle, t]);
 
   const tableColumns = useMemo<ITableColumn<VmwareNetwork>[]>(
     () => [
@@ -325,30 +400,29 @@ function NetworksTab(props: {
         header: t('Type'),
         cell: (n) => <Label color="purple">{n.type}</Label>,
       },
-      {
-        header: t('ID'),
-        cell: (n) => <TextCell text={n.id} />,
-      },
-      ...(onToggle
+      ...(onBulkToggle
         ? [
             {
-              header: t('Available in Catalog'),
+              header: t('Catalog'),
               cell: (n: VmwareNetwork) => {
                 const isAllowed = allowedNames === null || allowedNames.includes(n.name);
                 return (
-                  <Switch
-                    isChecked={isAllowed}
-                    onChange={(_e: React.FormEvent, checked: boolean) => onToggle(n.name, checked)}
-                    label={t('Allowed')}
-                    labelOff={t('Denied')}
-                  />
+                  <Label color={isAllowed ? 'green' : 'red'}>
+                    {isAllowed ? t('Allowed') : t('Denied')}
+                  </Label>
                 );
               },
             },
           ]
         : []),
+      {
+        header: t('ID'),
+        type: 'text',
+        value: (n) => n.id,
+        table: 'expanded',
+      },
     ],
-    [t, allowedNames, onToggle]
+    [t, allowedNames, onBulkToggle]
   );
 
   const view = useInMemoryView<VmwareNetwork>({
@@ -359,8 +433,13 @@ function NetworksTab(props: {
 
   return (
     <>
-      {onToggle && allowedNames !== null && (
-        <Alert isInline variant="info" title={t('Network allow-list active')} style={{ margin: '0.75rem 1rem 0' }}>
+      {onBulkToggle && allowedNames !== null && (
+        <Alert
+          isInline
+          variant="info"
+          title={t('Network allow-list active')}
+          style={{ margin: '0.75rem 1rem 0' }}
+        >
           {t('{{count}} of {{total}} networks are available to catalog deployments.', {
             count: allowedNames.length,
             total: networks.length,
@@ -370,6 +449,7 @@ function NetworksTab(props: {
       <PageTable<VmwareNetwork>
         id="vmware-networks-table"
         tableColumns={tableColumns}
+        toolbarActions={toolbarActions}
         errorStateTitle={t('Error loading networks')}
         emptyStateTitle={t('No networks found')}
         emptyStateDescription={t('Pull data from vCenter to discover networks and port groups.')}
@@ -399,7 +479,9 @@ function DatacentersTab(props: { datacenters: VmwareDatacenter[]; clusters: Vmwa
       },
       {
         header: t('ID'),
-        cell: (dc) => <TextCell text={dc.id} />,
+        type: 'text',
+        value: (dc) => dc.id,
+        table: 'expanded',
       },
     ],
     [t, props.clusters]
@@ -476,11 +558,19 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: VmwareProvid
           }}
         >
           <div style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)' }}>
-            {t('Credential ID')}: <strong style={{ color: '#fff' }}>{entry.credentialId ?? '-'}</strong>
+            {t('Credential ID')}:{' '}
+            <strong style={{ color: '#fff' }}>{entry.credentialId ?? '-'}</strong>
           </div>
           {data?.pulledAt && (
-            <div style={{ fontSize: '0.78rem', color: 'var(--pf-v5-global--Color--200)', marginTop: 4 }}>
-              {t('Last pull')}: <strong style={{ color: '#fff' }}>{new Date(data.pulledAt).toLocaleString()}</strong>
+            <div
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--pf-v5-global--Color--200)',
+                marginTop: 4,
+              }}
+            >
+              {t('Last pull')}:{' '}
+              <strong style={{ color: '#fff' }}>{new Date(data.pulledAt).toLocaleString()}</strong>
             </div>
           )}
         </div>
@@ -488,15 +578,39 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: VmwareProvid
         {/* Resource counts */}
         {data && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--pf-v5-global--Color--200)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <div
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--pf-v5-global--Color--200)',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              }}
+            >
               {t('Discovered Resources')}
             </div>
             <Grid hasGutter>
               {[
-                { icon: <CubesIcon style={{ color: '#2b9af3' }} />, label: t('VMs'), value: vmCount },
-                { icon: <ServerIcon style={{ color: '#39a5dc' }} />, label: t('Hosts'), value: hostCount },
-                { icon: <StorageDomainIcon style={{ color: '#f0ab00' }} />, label: t('Datastores'), value: dsCount },
-                { icon: <NetworkIcon style={{ color: '#4cb140' }} />, label: t('Networks'), value: netCount },
+                {
+                  icon: <CubesIcon style={{ color: '#2b9af3' }} />,
+                  label: t('VMs'),
+                  value: vmCount,
+                },
+                {
+                  icon: <ServerIcon style={{ color: '#39a5dc' }} />,
+                  label: t('Hosts'),
+                  value: hostCount,
+                },
+                {
+                  icon: <StorageDomainIcon style={{ color: '#f0ab00' }} />,
+                  label: t('Datastores'),
+                  value: dsCount,
+                },
+                {
+                  icon: <NetworkIcon style={{ color: '#4cb140' }} />,
+                  label: t('Networks'),
+                  value: netCount,
+                },
               ].map(({ icon, label, value }) => (
                 <GridItem key={label} span={6}>
                   <div
@@ -512,10 +626,19 @@ function ConnectionCard(props: { entry: CloudConnectionEntry; data: VmwareProvid
                   >
                     {icon}
                     <div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', lineHeight: 1.1 }}>
+                      <div
+                        style={{
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          color: '#fff',
+                          lineHeight: 1.1,
+                        }}
+                      >
                         {value}
                       </div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--pf-v5-global--Color--200)' }}>
+                      <div
+                        style={{ fontSize: '0.68rem', color: 'var(--pf-v5-global--Color--200)' }}
+                      >
                         {label}
                       </div>
                     </div>
@@ -604,17 +727,28 @@ function OverviewTab(props: {
                   style={{ color: '#1D6FA5', fontSize: '1.2rem', marginTop: 2, flexShrink: 0 }}
                 />
                 <div>
-                  <h4 style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', marginBottom: 6 }}>
+                  <h4
+                    style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', marginBottom: 6 }}
+                  >
                     {t('VMware vSphere credentials')}
                   </h4>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', lineHeight: 1.5 }}>
+                  <p
+                    style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--pf-v5-global--Color--200)',
+                      lineHeight: 1.5,
+                    }}
+                  >
                     {t(
                       'Connect a VMware vSphere credential (host, username, password) on the Cloud Connections page. Pull data to inventory VMs, hosts, datastores, and networks from vCenter.'
                     )}
                   </p>
                   <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {[
-                      { variable: 'TF_VAR_vsphere_server', description: t('vCenter server hostname / IP') },
+                      {
+                        variable: 'TF_VAR_vsphere_server',
+                        description: t('vCenter server hostname / IP'),
+                      },
                       { variable: 'TF_VAR_vsphere_user', description: t('vCenter username') },
                       { variable: 'TF_VAR_vsphere_password', description: t('vCenter password') },
                     ].map(({ variable, description }) => (
@@ -627,10 +761,25 @@ function OverviewTab(props: {
                           padding: '0.6rem 0.75rem',
                         }}
                       >
-                        <code style={{ color: '#1D6FA5', fontSize: '0.75rem', fontFamily: 'monospace', display: 'block', marginBottom: '0.15rem' }}>
+                        <code
+                          style={{
+                            color: '#1D6FA5',
+                            fontSize: '0.75rem',
+                            fontFamily: 'monospace',
+                            display: 'block',
+                            marginBottom: '0.15rem',
+                          }}
+                        >
                           {variable}
                         </code>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--pf-v5-global--Color--200)', lineHeight: 1.3, display: 'block' }}>
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            color: 'var(--pf-v5-global--Color--200)',
+                            lineHeight: 1.3,
+                            display: 'block',
+                          }}
+                        >
                           {description}
                         </span>
                       </div>
@@ -746,19 +895,21 @@ export function VmwareProviderSettings() {
     );
   }, [selectedConnectorId, allData, connectionDataMap]);
 
-  // Admin toggle handlers
-  const onToggleNetwork = useCallback(
-    async (name: string, allowed: boolean) => {
+  // Admin bulk toggle handlers
+  const onBulkToggleNetwork = useCallback(
+    async (names: string[], allowed: boolean) => {
       const current = adminSettings?.allowedNetworkNames ?? null;
       let next: string[] | null;
       if (allowed) {
         if (current === null) return; // already all-allowed
-        next = [...current, name];
+        const set = new Set([...current, ...names]);
+        next = [...set];
       } else {
+        const deny = new Set(names);
         next =
           current === null
-            ? allData.networks.map((n) => n.name).filter((n) => n !== name)
-            : current.filter((n) => n !== name);
+            ? allData.networks.map((n) => n.name).filter((n) => !deny.has(n))
+            : current.filter((n) => !deny.has(n));
       }
       const newSettings: VmwareAdminSettings = {
         allowedNetworkNames: next,
@@ -770,18 +921,20 @@ export function VmwareProviderSettings() {
     [adminSettings, allData.networks]
   );
 
-  const onToggleDatastore = useCallback(
-    async (name: string, allowed: boolean) => {
+  const onBulkToggleDatastore = useCallback(
+    async (names: string[], allowed: boolean) => {
       const current = adminSettings?.allowedDatastoreNames ?? null;
       let next: string[] | null;
       if (allowed) {
         if (current === null) return;
-        next = [...current, name];
+        const set = new Set([...current, ...names]);
+        next = [...set];
       } else {
+        const deny = new Set(names);
         next =
           current === null
-            ? allData.datastores.map((d) => d.name).filter((n) => n !== name)
-            : current.filter((n) => n !== name);
+            ? allData.datastores.map((d) => d.name).filter((n) => !deny.has(n))
+            : current.filter((n) => !deny.has(n));
       }
       const newSettings: VmwareAdminSettings = {
         allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
@@ -810,7 +963,13 @@ export function VmwareProviderSettings() {
     for (const conn of toPull) {
       try {
         await postRequest<
-          { pulled_at: string; vm_count: number; host_count: number; datastore_count: number; network_count: number },
+          {
+            pulled_at: string;
+            vm_count: number;
+            host_count: number;
+            datastore_count: number;
+            network_count: number;
+          },
           { credential_id: number }
         >(awxAPI`/catalog_cloud/connectors/vmware/pull_resources/`, {
           credential_id: conn.credentialId!,
@@ -920,7 +1079,7 @@ export function VmwareProviderSettings() {
             </Button>
           </div>
         }
-        logo={<VmwareLogo style={{ height: 36, width: 'auto' }} />}
+        titleAdornment={<VmwareLogo style={{ height: 36, width: 'auto' }} />}
       />
 
       {connectionEntries.length === 0 ? (
@@ -955,36 +1114,49 @@ export function VmwareProviderSettings() {
           </PageTab>
           <PageTab
             label={
-              t('Virtual Machines') + (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
+              t('Virtual Machines') +
+              (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
             <VMsTab vms={activeData.vms} />
           </PageTab>
           <PageTab
-            label={t('Hosts') + (activeData.hosts.length > 0 ? ` (${activeData.hosts.length})` : '')}
+            label={
+              t('Hosts') + (activeData.hosts.length > 0 ? ` (${activeData.hosts.length})` : '')
+            }
           >
             <HostsTab hosts={activeData.hosts} />
           </PageTab>
           <PageTab
             label={
-              t('Datastores') + (activeData.datastores.length > 0 ? ` (${activeData.datastores.length})` : '')
+              t('Datastores') +
+              (activeData.datastores.length > 0 ? ` (${activeData.datastores.length})` : '')
             }
           >
             <DatastoresTab
               datastores={activeData.datastores}
               adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
-              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleDatastore(name, allowed) : undefined}
+              onBulkToggle={
+                activeAwxUser?.is_superuser
+                  ? (names, allowed) => void onBulkToggleDatastore(names, allowed)
+                  : undefined
+              }
             />
           </PageTab>
           <PageTab
             label={
-              t('Networks') + (activeData.networks.length > 0 ? ` (${activeData.networks.length})` : '')
+              t('Networks') +
+              (activeData.networks.length > 0 ? ` (${activeData.networks.length})` : '')
             }
           >
             <NetworksTab
               networks={activeData.networks}
               adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
-              onToggle={activeAwxUser?.is_superuser ? (name, allowed) => void onToggleNetwork(name, allowed) : undefined}
+              onBulkToggle={
+                activeAwxUser?.is_superuser
+                  ? (names, allowed) => void onBulkToggleNetwork(names, allowed)
+                  : undefined
+              }
             />
           </PageTab>
           <PageTab
@@ -998,12 +1170,7 @@ export function VmwareProviderSettings() {
         </PageTabs>
       )}
 
-      {showModal && (
-        <ConnectionModal
-          providerId="vmware"
-          onClose={handleModalClose}
-        />
-      )}
+      {showModal && <ConnectionModal providerId="vmware" onClose={handleModalClose} />}
     </PageLayout>
   );
 }

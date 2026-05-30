@@ -100,8 +100,13 @@ const DarkCard = styled(Card)`
 
 // ─── sub-tabs ────────────────────────────────────────────────────────────────
 
-function NodesTab(props: { nodes: ProxmoxNode[] }) {
+function NodesTab(props: {
+  nodes: ProxmoxNode[];
+  adminSettings: ProxmoxAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { nodes, adminSettings, onToggle } = props;
   const tableColumns = useMemo<ITableColumn<ProxmoxNode>[]>(
     () => [
       {
@@ -139,13 +144,37 @@ function NodesTab(props: { nodes: ProxmoxNode[] }) {
         header: t('Uptime'),
         cell: (n) => <TextCell text={fmtUptime(n.uptime)} />,
       },
+      {
+        header: t('Type'),
+        type: 'text',
+        value: (n) => n.type,
+        table: 'expanded',
+      },
+      {
+        header: t('Catalog'),
+        cell: (n) => {
+          const isAllowed =
+            adminSettings?.allowedNodeNames === null ||
+            adminSettings?.allowedNodeNames === undefined ||
+            adminSettings.allowedNodeNames.includes(n.node);
+          return (
+            <Switch
+              id={`proxmox-node-allowed-${n.node}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(n.node, checked)}
+              aria-label={n.node}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
     ],
-    [t]
+    [t, adminSettings, onToggle]
   );
 
   const view = useInMemoryView<ProxmoxNode>({
     keyFn: (n) => n.node,
-    items: props.nodes,
+    items: nodes,
     tableColumns,
   });
 
@@ -156,6 +185,7 @@ function NodesTab(props: { nodes: ProxmoxNode[] }) {
       errorStateTitle={t('Error loading nodes')}
       emptyStateTitle={t('No nodes discovered')}
       emptyStateDescription={t('Sync this connection to discover cluster nodes.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -209,6 +239,12 @@ function VMsTab(props: { vms: ProxmoxVM[] }) {
         header: t('Uptime'),
         cell: (vm) => <TextCell text={fmtUptime(vm.uptime)} />,
       },
+      {
+        header: t('Type'),
+        type: 'text',
+        value: (vm) => vm.type,
+        table: 'expanded',
+      },
     ],
     [t]
   );
@@ -226,6 +262,7 @@ function VMsTab(props: { vms: ProxmoxVM[] }) {
       errorStateTitle={t('Error loading VMs')}
       emptyStateTitle={t('No virtual machines found')}
       emptyStateDescription={t('Sync this connection to discover KVM virtual machines.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -276,6 +313,12 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
         header: t('Uptime'),
         cell: (ct) => <TextCell text={fmtUptime(ct.uptime)} />,
       },
+      {
+        header: t('Type'),
+        type: 'text',
+        value: (ct) => ct.type,
+        table: 'expanded',
+      },
     ],
     [t]
   );
@@ -293,6 +336,7 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
       errorStateTitle={t('Error loading containers')}
       emptyStateTitle={t('No LXC containers found')}
       emptyStateDescription={t('Sync this connection to discover LXC containers.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -300,8 +344,13 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
   );
 }
 
-function StorageTab(props: { storage: ProxmoxStorage[] }) {
+function StorageTab(props: {
+  storage: ProxmoxStorage[];
+  adminSettings: ProxmoxAdminSettings | null;
+  onToggle?: (name: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { storage, adminSettings, onToggle } = props;
   const tableColumns = useMemo<ITableColumn<ProxmoxStorage>[]>(
     () => [
       {
@@ -365,13 +414,37 @@ function StorageTab(props: { storage: ProxmoxStorage[] }) {
             <Label color="grey">{t('Local')}</Label>
           ),
       },
+      {
+        header: t('Nodes'),
+        type: 'text',
+        value: (s) => s.nodes || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Catalog'),
+        cell: (s) => {
+          const isAllowed =
+            adminSettings?.allowedStorageNames === null ||
+            adminSettings?.allowedStorageNames === undefined ||
+            adminSettings.allowedStorageNames.includes(s.storage);
+          return (
+            <Switch
+              id={`proxmox-storage-allowed-${s.storage}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(s.storage, checked)}
+              aria-label={s.storage}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
     ],
-    [t]
+    [t, adminSettings, onToggle]
   );
 
   const view = useInMemoryView<ProxmoxStorage>({
     keyFn: (s) => s.storage,
-    items: props.storage,
+    items: storage,
     tableColumns,
   });
 
@@ -382,6 +455,7 @@ function StorageTab(props: { storage: ProxmoxStorage[] }) {
       errorStateTitle={t('Error loading storage')}
       emptyStateTitle={t('No storage pools found')}
       emptyStateDescription={t('Sync this connection to discover storage pools.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -389,8 +463,13 @@ function StorageTab(props: { storage: ProxmoxStorage[] }) {
   );
 }
 
-function NetworksTab(props: { networks: ProxmoxNetwork[] }) {
+function NetworksTab(props: {
+  networks: ProxmoxNetwork[];
+  adminSettings: ProxmoxAdminSettings | null;
+  onToggle?: (key: string, allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { networks, adminSettings, onToggle } = props;
   const tableColumns = useMemo<ITableColumn<ProxmoxNetwork>[]>(
     () => [
       {
@@ -433,13 +512,44 @@ function NetworksTab(props: { networks: ProxmoxNetwork[] }) {
         header: t('Comment'),
         cell: (n) => <TextCell text={n.comments || '-'} />,
       },
+      {
+        header: t('Address'),
+        type: 'text',
+        value: (n) => n.address || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Netmask'),
+        type: 'text',
+        value: (n) => n.netmask || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Catalog'),
+        cell: (n) => {
+          const key = `${n.node}:${n.iface}`;
+          const isAllowed =
+            adminSettings?.allowedNetworkNames === null ||
+            adminSettings?.allowedNetworkNames === undefined ||
+            adminSettings.allowedNetworkNames.includes(key);
+          return (
+            <Switch
+              id={`proxmox-network-allowed-${key}`}
+              isChecked={isAllowed}
+              onChange={(_evt, checked) => onToggle?.(key, checked)}
+              aria-label={key}
+              isDisabled={!onToggle}
+            />
+          );
+        },
+      },
     ],
-    [t]
+    [t, adminSettings, onToggle]
   );
 
   const view = useInMemoryView<ProxmoxNetwork>({
     keyFn: (n) => `${n.node}:${n.iface}`,
-    items: props.networks,
+    items: networks,
     tableColumns,
   });
 
@@ -450,6 +560,7 @@ function NetworksTab(props: { networks: ProxmoxNetwork[] }) {
       errorStateTitle={t('Error loading networks')}
       emptyStateTitle={t('No network interfaces found')}
       emptyStateDescription={t('Sync this connection to discover bridges and network interfaces.')}
+      isSelectMultiple
       disableListView
       disableCardView
       {...view}
@@ -460,7 +571,7 @@ function NetworksTab(props: { networks: ProxmoxNetwork[] }) {
 function TemplatesTab(props: {
   templates: ProxmoxVM[];
   adminSettings: ProxmoxAdminSettings | null;
-  onToggle: (name: string, allowed: boolean) => void;
+  onToggle?: (name: string, allowed: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { templates, adminSettings, onToggle } = props;
@@ -495,21 +606,34 @@ function TemplatesTab(props: {
         cell: (vm) => <TextCell text={fmtBytes(vm.maxdisk)} />,
       },
       {
-        header: t('Allow in Catalog'),
+        header: t('Catalog'),
         cell: (vm) => {
           const isAllowed =
-            adminSettings?.allowedTemplateNames == null ||
+            adminSettings?.allowedTemplateNames === null ||
+            adminSettings?.allowedTemplateNames === undefined ||
             adminSettings.allowedTemplateNames.includes(vm.name);
           return (
             <Switch
+              id={`proxmox-template-allowed-${vm.name}`}
               isChecked={isAllowed}
-              onChange={(_event, checked) => onToggle(vm.name, checked)}
-              aria-label={t('Allow template in catalog')}
-              label={t('Allowed')}
-              labelOff={t('Denied')}
+              onChange={(_evt, checked) => onToggle?.(vm.name, checked)}
+              aria-label={vm.name}
+              isDisabled={!onToggle}
             />
           );
         },
+      },
+      {
+        header: t('Type'),
+        type: 'text',
+        value: (vm) => vm.type,
+        table: 'expanded',
+      },
+      {
+        header: t('Uptime'),
+        type: 'text',
+        value: (vm) => (vm.uptime ? String(vm.uptime) + 's' : undefined),
+        table: 'expanded',
       },
     ],
     [t, adminSettings, onToggle]
@@ -533,15 +657,16 @@ function TemplatesTab(props: {
         }}
       >
         {t(
-          'Templates are VM images available for provisioning. Toggle to allow or deny each template from appearing in the catalog deploy wizard.'
+          'Templates are VM images available for provisioning. Use the toggle in each row to allow or deny templates from appearing in the catalog deploy wizard.'
         )}
-        {adminSettings?.allowedTemplateNames != null && (
-          <span style={{ marginLeft: 12, color: '#f0ab00', fontWeight: 600 }}>
-            {t('{{n}} template(s) allowed', {
-              n: adminSettings.allowedTemplateNames.length,
-            })}
-          </span>
-        )}
+        {adminSettings?.allowedTemplateNames !== null &&
+          adminSettings?.allowedTemplateNames !== undefined && (
+            <span style={{ marginLeft: 12, color: '#f0ab00', fontWeight: 600 }}>
+              {t('{{n}} template(s) allowed', {
+                n: adminSettings.allowedTemplateNames.length,
+              })}
+            </span>
+          )}
       </div>
       <PageTable<ProxmoxVM>
         id="proxmox-templates-table"
@@ -551,6 +676,7 @@ function TemplatesTab(props: {
         emptyStateDescription={t(
           'Sync this connection to discover VM templates. Templates must have the "template" flag set in Proxmox.'
         )}
+        isSelectMultiple
         disableListView
         disableCardView
         {...view}
@@ -987,36 +1113,77 @@ export function ProxmoxProviderSettings() {
     );
   }, [selectedConnectorId, allData, connectionDataMap]);
 
-  // Toggle a template's allow/deny status and persist to DB
+  // Toggle a single template's allow/deny status and persist to DB
   const onToggleTemplate = useCallback(
     async (name: string, allowed: boolean) => {
       const current = adminSettings?.allowedTemplateNames ?? null;
-      let next: string[] | null;
-
-      if (allowed) {
-        // Adding to allowlist
-        if (current === null) {
-          next = null; // already all allowed
-        } else {
-          const updated = current.includes(name) ? current : [...current, name];
-          // If all templates are now allowed, reset to null
-          next = updated.length >= allData.templates.length ? null : updated;
-        }
-      } else {
-        // Removing from allowlist (deny this template)
-        const allNames = allData.templates.map((t) => t.name);
-        if (current === null) {
-          next = allNames.filter((n) => n !== name);
-        } else {
-          next = current.filter((n) => n !== name);
-        }
-      }
-
-      const newSettings: ProxmoxAdminSettings = { allowedTemplateNames: next };
+      const allKeys = allData.templates.map((t) => t.name);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
+      const newSettings: ProxmoxAdminSettings = {
+        allowedTemplateNames: [...next],
+        allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
+        allowedStorageNames: adminSettings?.allowedStorageNames ?? null,
+        allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
+      };
       setAdminSettings(newSettings);
       await patchProviderState('proxmox', { admin_settings: newSettings });
     },
     [adminSettings, allData.templates]
+  );
+
+  const onToggleNode = useCallback(
+    async (name: string, allowed: boolean) => {
+      const current = adminSettings?.allowedNodeNames ?? null;
+      const allKeys = allData.nodes.map((n) => n.node);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(name); else next.delete(name);
+      const newSettings: ProxmoxAdminSettings = {
+        allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
+        allowedNodeNames: [...next],
+        allowedStorageNames: adminSettings?.allowedStorageNames ?? null,
+        allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('proxmox', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.nodes]
+  );
+
+  const onToggleStorage = useCallback(
+    async (id: string, allowed: boolean) => {
+      const current = adminSettings?.allowedStorageNames ?? null;
+      const allKeys = allData.storage.map((s) => s.storage);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(id); else next.delete(id);
+      const newSettings: ProxmoxAdminSettings = {
+        allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
+        allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
+        allowedStorageNames: [...next],
+        allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('proxmox', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.storage]
+  );
+
+  const onToggleNetwork = useCallback(
+    async (key: string, allowed: boolean) => {
+      const current = adminSettings?.allowedNetworkNames ?? null;
+      const allKeys = allData.networks.map((n) => `${n.node}:${n.iface}`);
+      const next = new Set(current === null ? allKeys : current);
+      if (allowed) next.add(key); else next.delete(key);
+      const newSettings: ProxmoxAdminSettings = {
+        allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
+        allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
+        allowedStorageNames: adminSettings?.allowedStorageNames ?? null,
+        allowedNetworkNames: [...next],
+      };
+      setAdminSettings(newSettings);
+      await patchProviderState('proxmox', { admin_settings: newSettings });
+    },
+    [adminSettings, allData.networks]
   );
 
   const onPull = async () => {
@@ -1183,7 +1350,11 @@ export function ProxmoxProviderSettings() {
               t('Nodes') + (activeData.nodes.length > 0 ? ` (${activeData.nodes.length})` : '')
             }
           >
-            <NodesTab nodes={activeData.nodes} />
+            <NodesTab
+              nodes={activeData.nodes}
+              adminSettings={adminSettings}
+              onToggle={(name, allowed) => void onToggleNode(name, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1207,7 +1378,11 @@ export function ProxmoxProviderSettings() {
               (activeData.storage.length > 0 ? ` (${activeData.storage.length})` : '')
             }
           >
-            <StorageTab storage={activeData.storage} />
+            <StorageTab
+              storage={activeData.storage}
+              adminSettings={adminSettings}
+              onToggle={(id, allowed) => void onToggleStorage(id, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1215,7 +1390,11 @@ export function ProxmoxProviderSettings() {
               (activeData.networks.length > 0 ? ` (${activeData.networks.length})` : '')
             }
           >
-            <NetworksTab networks={activeData.networks} />
+            <NetworksTab
+              networks={activeData.networks}
+              adminSettings={adminSettings}
+              onToggle={(key, allowed) => void onToggleNetwork(key, allowed)}
+            />
           </PageTab>
           <PageTab
             label={
@@ -1232,12 +1411,7 @@ export function ProxmoxProviderSettings() {
         </PageTabs>
       )}
 
-      {showModal && (
-        <ConnectionModal
-          providerId="proxmox"
-          onClose={handleModalClose}
-        />
-      )}
+      {showModal && <ConnectionModal providerId="proxmox" onClose={handleModalClose} />}
     </PageLayout>
   );
 }

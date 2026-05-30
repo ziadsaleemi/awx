@@ -159,6 +159,12 @@ export interface ProxmoxProviderData {
 export interface ProxmoxAdminSettings {
   /** null = all templates allowed; array = explicit allowlist by template name */
   allowedTemplateNames: string[] | null;
+  /** null = all nodes allowed; array = explicit allowlist by node name */
+  allowedNodeNames: string[] | null;
+  /** null = all storage pools allowed; array = explicit allowlist by storage name */
+  allowedStorageNames: string[] | null;
+  /** null = all network interfaces allowed; array = explicit allowlist by node:iface key */
+  allowedNetworkNames: string[] | null;
 }
 
 /** Admin-configurable allow-list for VMware vSphere resources shown to end users. */
@@ -177,6 +183,14 @@ export interface AzureAdminSettings {
   allowedLocationNames: string[] | null;
   /** null = all VM sizes allowed; array = explicit allowlist by size name */
   allowedVMSizeNames: string[] | null;
+  /** null = all resource groups allowed; array = explicit allowlist by name */
+  allowedResourceGroupNames: string[] | null;
+  /** null = all VMs allowed; array = explicit allowlist by Azure resource ID */
+  allowedVMIds: string[] | null;
+  /** null = all virtual networks allowed; array = explicit allowlist by name */
+  allowedVNetNames: string[] | null;
+  /** null = all storage accounts allowed; array = explicit allowlist by name */
+  allowedStorageAccountNames: string[] | null;
 }
 
 // ── VMware vSphere data types ─────────────────────────────────────────────────

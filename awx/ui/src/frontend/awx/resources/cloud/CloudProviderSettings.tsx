@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
-  Badge,
   Button,
   Card,
   CardBody,
@@ -14,7 +13,12 @@ import {
   Switch,
   Title,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, ExclamationCircleIcon, InfoCircleIcon, PlusCircleIcon } from '@patternfly/react-icons';
+import {
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  InfoCircleIcon,
+  PlusCircleIcon,
+} from '@patternfly/react-icons';
 import { postRequest } from '../../../common/crud/Data';
 import { isRequestError } from '../../../common/crud/RequestError';
 import {
@@ -86,7 +90,6 @@ function DigitalOceanOverviewTab(props: {
         {/* ── left: connection + stats ── */}
         <GridItem sm={12} lg={8} xl={9}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
             {/* connection card */}
             <Card
               style={{
@@ -216,9 +219,7 @@ function DigitalOceanOverviewTab(props: {
                       'Connect a DigitalOcean personal access token. Pull data to inventory available images, droplet sizes, regions, and VPCs for use in Terraform deployments.'
                     )}
                   </p>
-                  <div
-                    style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
-                  >
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {[
                       {
                         variable: 'DIGITALOCEAN_TOKEN',
@@ -287,7 +288,9 @@ function DigitalOceanOverviewTab(props: {
                           color: 'var(--pf-v5-global--Color--200)',
                         }}
                       >
-                        <CheckCircleIcon style={{ color: '#38a169', fontSize: '0.75rem', flexShrink: 0 }} />
+                        <CheckCircleIcon
+                          style={{ color: '#38a169', fontSize: '0.75rem', flexShrink: 0 }}
+                        />
                         {item}
                       </div>
                     ))}
@@ -697,7 +700,7 @@ function DefaultProviderSettings(props: { provider: string }) {
         setData(state.provider_data as DigitalOceanProviderData);
       }
       if (state?.admin_settings) {
-        setAdminSettings(state.admin_settings);
+        setAdminSettings(state.admin_settings as DigitalOceanAdminSettings);
       }
     });
   }, [props.provider]);
@@ -826,7 +829,7 @@ function DefaultProviderSettings(props: { provider: string }) {
     try {
       const result = await postRequest<PullApiResponse, { credential_id: number }>(
         awxAPI`/catalog_cloud/connectors/digitalocean/pull_images/`,
-        { credential_id: connectedEntry!.credentialId! }
+        { credential_id: connectedEntry.credentialId }
       );
       const newData: DigitalOceanProviderData = {
         pulledAt: result.pulled_at,
@@ -947,25 +950,36 @@ function DefaultProviderSettings(props: { provider: string }) {
           />
         </PageTab>
         <PageTab label={t('Images') + (data ? count(data.images.length) : '')}>
-          <ImagesTab images={data?.images ?? []} enabledImages={enabledImages} onToggleImage={onToggleImage} />
+          <ImagesTab
+            images={data?.images ?? []}
+            enabledImages={enabledImages}
+            onToggleImage={onToggleImage}
+          />
         </PageTab>
         <PageTab label={t('Droplet sizes') + (data ? count(data.pricing.length) : '')}>
-          <SizesTab pricing={data?.pricing ?? []} enabledSizes={enabledSizes} onToggleSize={onToggleSize} />
+          <SizesTab
+            pricing={data?.pricing ?? []}
+            enabledSizes={enabledSizes}
+            onToggleSize={onToggleSize}
+          />
         </PageTab>
         <PageTab label={t('Regions') + (data ? count(data.regions.length) : '')}>
-          <RegionsTab regions={data?.regions ?? []} enabledRegions={enabledRegions} onToggleRegion={onToggleRegion} />
+          <RegionsTab
+            regions={data?.regions ?? []}
+            enabledRegions={enabledRegions}
+            onToggleRegion={onToggleRegion}
+          />
         </PageTab>
         <PageTab label={t('Networks') + (data ? count(data.vpcs.length) : '')}>
-          <NetworksTab vpcs={data?.vpcs ?? []} enabledVpcs={enabledVpcs} onToggleVpc={onToggleVpc} />
+          <NetworksTab
+            vpcs={data?.vpcs ?? []}
+            enabledVpcs={enabledVpcs}
+            onToggleVpc={onToggleVpc}
+          />
         </PageTab>
       </PageTabs>
 
-      {showModal && (
-        <ConnectionModal
-          providerId={props.provider}
-          onClose={handleModalClose}
-        />
-      )}
+      {showModal && <ConnectionModal providerId={props.provider} onClose={handleModalClose} />}
     </PageLayout>
   );
 }

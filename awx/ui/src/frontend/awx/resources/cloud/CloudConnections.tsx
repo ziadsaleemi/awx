@@ -16,7 +16,6 @@ import {
   Label,
   Modal,
   PageSection,
-  Spinner,
   TextInput,
 } from '@patternfly/react-core';
 import { postRequest, requestGet } from '../../../common/crud/Data';
@@ -25,7 +24,6 @@ import { useGet } from '../../../common/crud/useGet';
 import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
 import { awxAPI } from '../../common/api/awx-utils';
-import { AwxError } from '../../common/AwxError';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { CubesIcon, PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import { Credential } from '../../interfaces/Credential';
@@ -228,10 +226,7 @@ export function CloudConnections() {
   );
 }
 
-export function ConnectionModal(props: {
-  providerId: string;
-  onClose: () => void;
-}) {
+export function ConnectionModal(props: { providerId: string; onClose: () => void }) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
   const { providerId, onClose } = props;
@@ -425,9 +420,7 @@ export function ConnectionModal(props: {
         )}
         {providerId === 'vmware' && (
           <Alert isInline variant="info" title={t('VMware vSphere credential')}>
-            {t(
-              'Select a VMware vSphere credential. Each connection maps to one vCenter instance.'
-            )}
+            {t('Select a VMware vSphere credential. Each connection maps to one vCenter instance.')}
           </Alert>
         )}
 
@@ -435,7 +428,12 @@ export function ConnectionModal(props: {
         {entries.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--pf-v5-global--BorderColor--100)' }}>
+              <tr
+                style={{
+                  textAlign: 'left',
+                  borderBottom: '2px solid var(--pf-v5-global--BorderColor--100)',
+                }}
+              >
                 <th style={{ padding: '6px 8px' }}>{t('Name')}</th>
                 <th style={{ padding: '6px 8px' }}>{t('Status')}</th>
                 <th style={{ padding: '6px 8px' }}>{t('Credential')}</th>
@@ -452,24 +450,23 @@ export function ConnectionModal(props: {
                   <td style={{ padding: '8px' }}>
                     <StatusBadge status={entry.status} />
                   </td>
-                  <td style={{ padding: '8px', color: '#888' }}>
-                    {entry.credentialName || '-'}
-                  </td>
+                  <td style={{ padding: '8px', color: '#888' }}>{entry.credentialName || '-'}</td>
                   <td style={{ padding: '8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {entry.status === 'connected' ? (
                       <Button
                         variant="secondary"
-                        isSmall
+                        size="sm"
                         onClick={() => void onDisconnect(entry.id)}
                         style={{ marginRight: '0.4rem' }}
                       >
                         {t('Disconnect')}
                       </Button>
                     ) : (
-                      entry.credentialId != null && (
+                      entry.credentialId !== null &&
+                      entry.credentialId !== undefined && (
                         <Button
                           variant="primary"
-                          isSmall
+                          size="sm"
                           isLoading={connectingId === entry.id}
                           isDisabled={connectingId !== null}
                           onClick={() => void onConnect(entry.id, entry.credentialId!)}
@@ -481,7 +478,7 @@ export function ConnectionModal(props: {
                     )}
                     <Button
                       variant="plain"
-                      isSmall
+                      size="sm"
                       isDisabled={!!connectingId}
                       onClick={() => void onRemove(entry.id)}
                       aria-label={t('Remove connection')}
@@ -541,7 +538,7 @@ export function ConnectionModal(props: {
             <div style={{ display: 'flex', gap: 8 }}>
               <Button
                 variant="primary"
-                isSmall
+                size="sm"
                 isLoading={isAdding}
                 isDisabled={!newName.trim() || !newCredentialId || isAdding}
                 onClick={() => void handleAdd()}
@@ -550,7 +547,7 @@ export function ConnectionModal(props: {
               </Button>
               <Button
                 variant="link"
-                isSmall
+                size="sm"
                 isDisabled={isAdding}
                 onClick={() => {
                   setShowAddForm(false);
@@ -564,11 +561,7 @@ export function ConnectionModal(props: {
           </div>
         ) : (
           <div>
-            <Button
-              variant="link"
-              icon={<PlusCircleIcon />}
-              onClick={() => setShowAddForm(true)}
-            >
+            <Button variant="link" icon={<PlusCircleIcon />} onClick={() => setShowAddForm(true)}>
               {t('Add connection')}
             </Button>
           </div>

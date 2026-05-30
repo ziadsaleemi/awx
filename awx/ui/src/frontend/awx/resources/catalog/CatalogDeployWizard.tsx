@@ -32,9 +32,7 @@ import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogItem } from '../../interfaces/CatalogItem';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { generateCatalogName, parseCatalogDynamicFieldNames } from './catalogNaming';
-import {
-  fetchProviderState,
-} from '../cloud/cloudConnectionStore';
+import { fetchProviderState } from '../cloud/cloudConnectionStore';
 
 interface SchemaProperty {
   type?: 'string' | 'integer' | 'number' | 'boolean';
@@ -102,9 +100,7 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     if (q.max !== undefined) prop.maximum = q.max;
 
     if (q.type === 'multiplechoice' && q.choices) {
-      const choicesArr = Array.isArray(q.choices)
-        ? q.choices
-        : String(q.choices).split('\n');
+      const choicesArr = Array.isArray(q.choices) ? q.choices : String(q.choices).split('\n');
       prop.enum = choicesArr.map((c) => c.trim()).filter(Boolean);
     }
 
@@ -127,7 +123,8 @@ function renderDynamicTemplate(template: string, context: Record<string, string>
   });
 }
 
-function resolveSequenceSuffix(value: string, existingValues: string[]) {  const trimmed = value.trim();
+function resolveSequenceSuffix(value: string, existingValues: string[]) {
+  const trimmed = value.trim();
   if (!trimmed.endsWith('+1')) {
     return value;
   }
@@ -185,10 +182,12 @@ export function CatalogDeployWizard() {
   const id = params.id ?? '';
   const pageNavigate = usePageNavigate();
 
-  const { data: item, error, isLoading, refresh } = useGetItem<CatalogItem>(
-    awxAPI`/catalog_items`,
-    id
-  );
+  const {
+    data: item,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<CatalogItem>(awxAPI`/catalog_items`, id);
 
   const urlProvider = searchParams.get('provider') ?? '';
 
@@ -202,7 +201,7 @@ export function CatalogDeployWizard() {
         description={item.description}
         breadcrumbs={[{ label: t('Catalog'), to: undefined }, { label: item.name }]}
       />
-      <PageSection variant="light" hasBodyWrapper={false} style={{ padding: '1.5rem 2rem' }}>
+      <PageSection variant="light" style={{ padding: '1.5rem 2rem' }}>
         <CatalogDeployContent
           item={item}
           initialProvider={urlProvider}
@@ -250,7 +249,10 @@ export function CatalogDeployContent({
   }, [item.available_providers, item.cloud_backends, item.provider_workflows]);
 
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
-    if (initialProvider && (allProviders.includes(initialProvider) || initialProvider === 'default')) {
+    if (
+      initialProvider &&
+      (allProviders.includes(initialProvider) || initialProvider === 'default')
+    ) {
       return initialProvider;
     }
     return allProviders[0] ?? '';
@@ -285,7 +287,7 @@ export function CatalogDeployContent({
     if (providerSurveyData?.spec) {
       return surveySpecToSchema(providerSurveyData);
     }
-    return (deploySurvey?.schema ?? (item.extra_vars_schema ?? {})) as JsonSchema;
+    return (deploySurvey?.schema ?? item.extra_vars_schema ?? {}) as JsonSchema;
   }, [providerSurveyData, deploySurvey?.schema, item.extra_vars_schema]);
   const properties = schema.properties ?? {};
   const requiredSet = new Set<string>(schema.required ?? []);
@@ -371,7 +373,7 @@ export function CatalogDeployContent({
               for (const [key, val] of Object.entries(connData as Record<string, unknown>)) {
                 if (Array.isArray(val)) {
                   if (aggregated[key]) {
-                    (aggregated[key] as unknown[]).push(...val);
+                    aggregated[key].push(...val);
                   } else {
                     aggregated[key] = [...val];
                   }
@@ -436,7 +438,14 @@ export function CatalogDeployContent({
       existingNames,
       item.name ?? 'deployment'
     );
-  }, [deploymentList?.results, dynamicFieldNames, formValues, item.name, item.name_template, item.summary_fields?.organization?.name]);
+  }, [
+    deploymentList?.results,
+    dynamicFieldNames,
+    formValues,
+    item.name,
+    item.name_template,
+    item.summary_fields?.organization?.name,
+  ]);
 
   const setValue = useCallback((key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
@@ -517,346 +526,374 @@ export function CatalogDeployContent({
   };
 
   const sortedEntries = [
-    ...Object.entries(properties).filter(([key]) => requiredSet.has(key) && !hiddenFieldSet.has(key)),
-    ...Object.entries(properties).filter(([key]) => !requiredSet.has(key) && !hiddenFieldSet.has(key)),
+    ...Object.entries(properties).filter(
+      ([key]) => requiredSet.has(key) && !hiddenFieldSet.has(key)
+    ),
+    ...Object.entries(properties).filter(
+      ([key]) => !requiredSet.has(key) && !hiddenFieldSet.has(key)
+    ),
   ];
 
   return (
     <Form>
-          {/* Provider tabs — one per cloud/hypervisor backend.
+      {/* Provider tabs — one per cloud/hypervisor backend.
               When opened from a specific cloud icon (lockedProvider), restrict to that provider only. */}
-          {lockedProvider && !isProviderConfigured(lockedProvider) ? (
-            <Alert
-              variant="warning"
-              isInline
-              title={t('{{provider}} is not configured', {
-                provider: PROVIDER_LABELS[lockedProvider] ?? lockedProvider,
-              })}
-            >
-              {t(
-                'No workflow or Terraform template is configured for this provider on this catalog item. Ask an administrator to configure it in the catalog item settings.'
-              )}
-            </Alert>
-          ) : (lockedProvider ? [lockedProvider] : allProviders).length > 0 ? (
-            <Tabs
-              activeKey={selectedProvider}
-              onSelect={(_evt, key) => setSelectedProvider(String(key))}
-              style={{ marginBottom: '1.5rem' }}
-            >
-              {(lockedProvider ? [lockedProvider] : allProviders).map((p) => {
-                const tabLabel = PROVIDER_LABELS[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
-                return (
-                  <Tab key={p} eventKey={p} title={<TabTitleText>{tabLabel}</TabTitleText>}>
-                    {/* Only render content for the active tab so hooks/schema stay in sync */}
-                    {selectedProvider === p && (
-                      <div style={{ paddingTop: '1.25rem' }}>
-                        {/* Dynamic fields from the provider's WJT survey (or catalog deploy_survey fallback) */}
-                        {sortedEntries.map(([key, prop]) => {
-                          const fieldError = fieldErrors[key];
-                          const isReq = requiredSet.has(key);
-                          const fieldLabel = prop.title ?? key;
-                          const fieldId = `deploy-field-${key}`;
-                          const isAdminDisabledField = disabledFieldSet.has(key);
-
-                          // Check for a dynamic source configured for this field
-                          const dynamicSourcePath = providerFieldCfg?.dynamic_field_sources?.[key];
-                          let dynamicOptions = dynamicSourcePath
-                            ? resolveDynamicOptions(providerStateData, dynamicSourcePath)
-                            : [];
-
-                          // Apply admin allow-list for Proxmox templates
-                          if (
-                            dynamicOptions.length > 0 &&
-                            selectedProvider === 'proxmox' &&
-                            dynamicSourcePath?.startsWith('templates.')
-                          ) {
-                            const proxmoxAdmin = providerAdminSettings as {
-                              allowedTemplateNames?: string[] | null;
-                            } | null;
-                            if (proxmoxAdmin?.allowedTemplateNames != null) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                proxmoxAdmin.allowedTemplateNames!.includes(opt)
-                              );
-                            }
-                          }
-
-                          // Apply admin allow-list for VMware resources
-                          if (dynamicOptions.length > 0 && selectedProvider === 'vmware') {
-                            const vmwareAdmin = providerAdminSettings as {
-                              allowedNetworkNames?: string[] | null;
-                              allowedDatastoreNames?: string[] | null;
-                            } | null;
-                            if (
-                              dynamicSourcePath?.startsWith('networks.') &&
-                              vmwareAdmin?.allowedNetworkNames != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                vmwareAdmin.allowedNetworkNames!.includes(opt)
-                              );
-                            }
-                            if (
-                              dynamicSourcePath?.startsWith('datastores.') &&
-                              vmwareAdmin?.allowedDatastoreNames != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                vmwareAdmin.allowedDatastoreNames!.includes(opt)
-                              );
-                            }
-                          }
-
-                          // Apply admin allow-list for Azure resources
-                          if (dynamicOptions.length > 0 && selectedProvider === 'azure') {
-                            const azureAdmin = providerAdminSettings as {
-                              allowedVMImageUrns?: string[] | null;
-                              allowedLocationNames?: string[] | null;
-                              allowedVMSizeNames?: string[] | null;
-                            } | null;
-                            if (
-                              dynamicSourcePath?.startsWith('vm_images.') &&
-                              azureAdmin?.allowedVMImageUrns != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                azureAdmin.allowedVMImageUrns!.includes(opt)
-                              );
-                            }
-                            if (
-                              dynamicSourcePath?.startsWith('locations.') &&
-                              azureAdmin?.allowedLocationNames != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                azureAdmin.allowedLocationNames!.includes(opt)
-                              );
-                            }
-                            if (
-                              dynamicSourcePath?.startsWith('vm_sizes.') &&
-                              azureAdmin?.allowedVMSizeNames != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                azureAdmin.allowedVMSizeNames!.includes(opt)
-                              );
-                            }
-                          }
-
-                          // Apply admin allow-list for DigitalOcean resources
-                          if (dynamicOptions.length > 0 && selectedProvider === 'digitalocean') {
-                            const doAdmin = providerAdminSettings as {
-                              allowedRegionSlugs?: string[] | null;
-                              allowedSizeSlugs?: string[] | null;
-                              allowedVpcIds?: string[] | null;
-                            } | null;
-                            if (
-                              dynamicSourcePath?.startsWith('regions.') &&
-                              doAdmin?.allowedRegionSlugs != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                doAdmin.allowedRegionSlugs!.includes(opt)
-                              );
-                            }
-                            if (
-                              dynamicSourcePath?.startsWith('droplet_sizes.') &&
-                              doAdmin?.allowedSizeSlugs != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                doAdmin.allowedSizeSlugs!.includes(opt)
-                              );
-                            }
-                            if (
-                              dynamicSourcePath === 'vpcs.id' &&
-                              doAdmin?.allowedVpcIds != null
-                            ) {
-                              dynamicOptions = dynamicOptions.filter((opt) =>
-                                doAdmin.allowedVpcIds!.includes(opt)
-                              );
-                            }
-                          }
-
-                          if (dynamicOptions.length > 0) {
-                            return (
-                              <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
-                                {prop.description && (
-                                  <HelperText style={{ marginBottom: '0.25rem' }}>
-                                    <HelperTextItem>{prop.description}</HelperTextItem>
-                                  </HelperText>
-                                )}
-                                <FormSelect
-                                  id={fieldId}
-                                  value={formValues[key] ?? ''}
-                                  onChange={(_event, val) => setValue(key, val)}
-                                  validated={fieldError ? 'error' : 'default'}
-                                  isDisabled={isAdminDisabledField || isSubmitting}
-                                >
-                                  <FormSelectOption value="" label={t('— Select —')} />
-                                  {dynamicOptions.map((opt) => (
-                                    <FormSelectOption key={opt} value={opt} label={opt} />
-                                  ))}
-                                </FormSelect>
-                                {fieldError && (
-                                  <HelperText>
-                                    <HelperTextItem variant="error">{fieldError}</HelperTextItem>
-                                  </HelperText>
-                                )}
-                              </FormGroup>
-                            );
-                          }
-
-                          if (prop.enum && prop.enum.length > 0) {
-                            return (
-                              <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
-                                {prop.description && (
-                                  <HelperText style={{ marginBottom: '0.25rem' }}>
-                                    <HelperTextItem>{prop.description}</HelperTextItem>
-                                  </HelperText>
-                                )}
-                                <FormSelect
-                                  id={fieldId}
-                                  value={formValues[key] ?? ''}
-                                  onChange={(_event, val) => setValue(key, val)}
-                                  validated={fieldError ? 'error' : 'default'}
-                                  isDisabled={isAdminDisabledField || isSubmitting}
-                                >
-                                  {!isReq && <FormSelectOption value="" label={t('Select...')} />}
-                                  {prop.enum.map((opt) => (
-                                    <FormSelectOption key={opt} value={opt} label={opt} />
-                                  ))}
-                                </FormSelect>
-                                {fieldError && (
-                                  <HelperText>
-                                    <HelperTextItem variant="error">{fieldError}</HelperTextItem>
-                                  </HelperText>
-                                )}
-                              </FormGroup>
-                            );
-                          }
-                          return (
-                            <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
-                              {prop.description && (
-                                <HelperText style={{ marginBottom: '0.25rem' }}>
-                                  <HelperTextItem>{prop.description}</HelperTextItem>
-                                </HelperText>
-                              )}
-                              <TextInput
-                                id={fieldId}
-                                type={prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'}
-                                value={formValues[key] ?? ''}
-                                onChange={(_event, val) => setValue(key, val)}
-                                validated={fieldError ? 'error' : 'default'}
-                                isRequired={isReq}
-                                isDisabled={isAdminDisabledField || isSubmitting}
-                                {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
-                                {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
-                              />
-                              {fieldError && (
-                                <HelperText>
-                                  <HelperTextItem variant="error">{fieldError}</HelperTextItem>
-                                </HelperText>
-                              )}
-                            </FormGroup>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </Tab>
-                );
-              })}
-            </Tabs>
-          ) : (
-            /* Fallback when no cloud/hypervisor backends are configured */
-            <>
-              {sortedEntries.map(([key, prop]) => {
-                const fieldError = fieldErrors[key];
-                const isReq = requiredSet.has(key);
-                const fieldLabel = prop.title ?? key;
-                const fieldId = `deploy-field-${key}`;
-                const isAdminDisabledField = disabledFieldSet.has(key);
-                if (prop.enum && prop.enum.length > 0) {
-                  return (
-                    <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
-                      {prop.description && (
-                        <HelperText style={{ marginBottom: '0.25rem' }}>
-                          <HelperTextItem>{prop.description}</HelperTextItem>
-                        </HelperText>
-                      )}
-                      <FormSelect
-                        id={fieldId}
-                        value={formValues[key] ?? ''}
-                        onChange={(_event, val) => setValue(key, val)}
-                        validated={fieldError ? 'error' : 'default'}
-                        isDisabled={isAdminDisabledField || isSubmitting}
-                      >
-                        {!isReq && <FormSelectOption value="" label={t('Select...')} />}
-                        {prop.enum.map((opt) => (
-                          <FormSelectOption key={opt} value={opt} label={opt} />
-                        ))}
-                      </FormSelect>
-                      {fieldError && (
-                        <HelperText>
-                          <HelperTextItem variant="error">{fieldError}</HelperTextItem>
-                        </HelperText>
-                      )}
-                    </FormGroup>
-                  );
-                }
-                return (
-                  <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
-                    {prop.description && (
-                      <HelperText style={{ marginBottom: '0.25rem' }}>
-                        <HelperTextItem>{prop.description}</HelperTextItem>
-                      </HelperText>
-                    )}
-                    <TextInput
-                      id={fieldId}
-                      type={prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'}
-                      value={formValues[key] ?? ''}
-                      onChange={(_event, val) => setValue(key, val)}
-                      validated={fieldError ? 'error' : 'default'}
-                      isRequired={isReq}
-                      isDisabled={isAdminDisabledField || isSubmitting}
-                      {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
-                      {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
-                    />
-                    {fieldError && (
-                      <HelperText>
-                        <HelperTextItem variant="error">{fieldError}</HelperTextItem>
-                      </HelperText>
-                    )}
-                  </FormGroup>
-                );
-              })}
-            </>
+      {lockedProvider && !isProviderConfigured(lockedProvider) ? (
+        <Alert
+          variant="warning"
+          isInline
+          title={t('{{provider}} is not configured', {
+            provider: PROVIDER_LABELS[lockedProvider] ?? lockedProvider,
+          })}
+        >
+          {t(
+            'No workflow or Terraform template is configured for this provider on this catalog item. Ask an administrator to configure it in the catalog item settings.'
           )}
+        </Alert>
+      ) : (lockedProvider ? [lockedProvider] : allProviders).length > 0 ? (
+        <Tabs
+          activeKey={selectedProvider}
+          onSelect={(_evt, key) => setSelectedProvider(String(key))}
+          style={{ marginBottom: '1.5rem' }}
+        >
+          {(lockedProvider ? [lockedProvider] : allProviders).map((p) => {
+            const tabLabel = PROVIDER_LABELS[p] ?? p.charAt(0).toUpperCase() + p.slice(1);
+            return (
+              <Tab key={p} eventKey={p} title={<TabTitleText>{tabLabel}</TabTitleText>}>
+                {/* Only render content for the active tab so hooks/schema stay in sync */}
+                {selectedProvider === p && (
+                  <div style={{ paddingTop: '1.25rem' }}>
+                    {/* Dynamic fields from the provider's WJT survey (or catalog deploy_survey fallback) */}
+                    {sortedEntries.map(([key, prop]) => {
+                      const fieldError = fieldErrors[key];
+                      const isReq = requiredSet.has(key);
+                      const fieldLabel = prop.title ?? key;
+                      const fieldId = `deploy-field-${key}`;
+                      const isAdminDisabledField = disabledFieldSet.has(key);
 
-          <FormGroup label={t('Deployment name')} isRequired fieldId="deploy-name">
-            <TextInput
-              id="deploy-name"
-              value={generatedName}
-              onChange={() => undefined}
-              isRequired
-              isDisabled
-            />
-            <HelperText>
-              <HelperTextItem>
-                {t('Auto-generated from your template and deploy form values.')}
-              </HelperTextItem>
-            </HelperText>
-          </FormGroup>
+                      // Check for a dynamic source configured for this field
+                      const dynamicSourcePath = providerFieldCfg?.dynamic_field_sources?.[key];
+                      let dynamicOptions = dynamicSourcePath
+                        ? resolveDynamicOptions(providerStateData, dynamicSourcePath)
+                        : [];
 
-          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
-            <Button
-              variant="primary"
-              onClick={() => void onSubmit()}
-              isLoading={isSubmitting}
-              isDisabled={Boolean(lockedProvider) && !isProviderConfigured(lockedProvider!)}
-            >
-              {t('Deploy')}
-            </Button>
-            <Button
-              variant="link"
-              onClick={() => onCancel()}
-              isDisabled={isSubmitting}
-            >
-              {t('Cancel')}
-            </Button>
-          </div>
-        </Form>
+                      // Apply admin allow-list for Proxmox templates
+                      if (
+                        dynamicOptions.length > 0 &&
+                        selectedProvider === 'proxmox' &&
+                        dynamicSourcePath?.startsWith('templates.')
+                      ) {
+                        const proxmoxAdmin = providerAdminSettings as {
+                          allowedTemplateNames?: string[] | null;
+                        } | null;
+                        if (
+                          proxmoxAdmin?.allowedTemplateNames !== null &&
+                          proxmoxAdmin?.allowedTemplateNames !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            proxmoxAdmin.allowedTemplateNames!.includes(opt)
+                          );
+                        }
+                      }
+
+                      // Apply admin allow-list for VMware resources
+                      if (dynamicOptions.length > 0 && selectedProvider === 'vmware') {
+                        const vmwareAdmin = providerAdminSettings as {
+                          allowedNetworkNames?: string[] | null;
+                          allowedDatastoreNames?: string[] | null;
+                        } | null;
+                        if (
+                          dynamicSourcePath?.startsWith('networks.') &&
+                          vmwareAdmin?.allowedNetworkNames !== null &&
+                          vmwareAdmin?.allowedNetworkNames !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            vmwareAdmin.allowedNetworkNames!.includes(opt)
+                          );
+                        }
+                        if (
+                          dynamicSourcePath?.startsWith('datastores.') &&
+                          vmwareAdmin?.allowedDatastoreNames !== null &&
+                          vmwareAdmin?.allowedDatastoreNames !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            vmwareAdmin.allowedDatastoreNames!.includes(opt)
+                          );
+                        }
+                      }
+
+                      // Apply admin allow-list for Azure resources
+                      if (dynamicOptions.length > 0 && selectedProvider === 'azure') {
+                        const azureAdmin = providerAdminSettings as {
+                          allowedVMImageUrns?: string[] | null;
+                          allowedLocationNames?: string[] | null;
+                          allowedVMSizeNames?: string[] | null;
+                        } | null;
+                        if (
+                          dynamicSourcePath?.startsWith('vm_images.') &&
+                          azureAdmin?.allowedVMImageUrns !== null &&
+                          azureAdmin?.allowedVMImageUrns !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            azureAdmin.allowedVMImageUrns!.includes(opt)
+                          );
+                        }
+                        if (
+                          dynamicSourcePath?.startsWith('locations.') &&
+                          azureAdmin?.allowedLocationNames !== null &&
+                          azureAdmin?.allowedLocationNames !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            azureAdmin.allowedLocationNames!.includes(opt)
+                          );
+                        }
+                        if (
+                          dynamicSourcePath?.startsWith('vm_sizes.') &&
+                          azureAdmin?.allowedVMSizeNames !== null &&
+                          azureAdmin?.allowedVMSizeNames !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            azureAdmin.allowedVMSizeNames!.includes(opt)
+                          );
+                        }
+                      }
+
+                      // Apply admin allow-list for DigitalOcean resources
+                      if (dynamicOptions.length > 0 && selectedProvider === 'digitalocean') {
+                        const doAdmin = providerAdminSettings as {
+                          allowedRegionSlugs?: string[] | null;
+                          allowedSizeSlugs?: string[] | null;
+                          allowedVpcIds?: string[] | null;
+                        } | null;
+                        if (
+                          dynamicSourcePath?.startsWith('regions.') &&
+                          doAdmin?.allowedRegionSlugs !== null &&
+                          doAdmin?.allowedRegionSlugs !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            doAdmin.allowedRegionSlugs!.includes(opt)
+                          );
+                        }
+                        if (
+                          dynamicSourcePath?.startsWith('droplet_sizes.') &&
+                          doAdmin?.allowedSizeSlugs !== null &&
+                          doAdmin?.allowedSizeSlugs !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            doAdmin.allowedSizeSlugs!.includes(opt)
+                          );
+                        }
+                        if (
+                          dynamicSourcePath === 'vpcs.id' &&
+                          doAdmin?.allowedVpcIds !== null &&
+                          doAdmin?.allowedVpcIds !== undefined
+                        ) {
+                          dynamicOptions = dynamicOptions.filter((opt) =>
+                            doAdmin.allowedVpcIds!.includes(opt)
+                          );
+                        }
+                      }
+
+                      if (dynamicOptions.length > 0) {
+                        return (
+                          <FormGroup
+                            key={key}
+                            label={fieldLabel}
+                            isRequired={isReq}
+                            fieldId={fieldId}
+                          >
+                            {prop.description && (
+                              <HelperText style={{ marginBottom: '0.25rem' }}>
+                                <HelperTextItem>{prop.description}</HelperTextItem>
+                              </HelperText>
+                            )}
+                            <FormSelect
+                              id={fieldId}
+                              value={formValues[key] ?? ''}
+                              onChange={(_event, val) => setValue(key, val)}
+                              validated={fieldError ? 'error' : 'default'}
+                              isDisabled={isAdminDisabledField || isSubmitting}
+                            >
+                              <FormSelectOption value="" label={t('— Select —')} />
+                              {dynamicOptions.map((opt) => (
+                                <FormSelectOption key={opt} value={opt} label={opt} />
+                              ))}
+                            </FormSelect>
+                            {fieldError && (
+                              <HelperText>
+                                <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                              </HelperText>
+                            )}
+                          </FormGroup>
+                        );
+                      }
+
+                      if (prop.enum && prop.enum.length > 0) {
+                        return (
+                          <FormGroup
+                            key={key}
+                            label={fieldLabel}
+                            isRequired={isReq}
+                            fieldId={fieldId}
+                          >
+                            {prop.description && (
+                              <HelperText style={{ marginBottom: '0.25rem' }}>
+                                <HelperTextItem>{prop.description}</HelperTextItem>
+                              </HelperText>
+                            )}
+                            <FormSelect
+                              id={fieldId}
+                              value={formValues[key] ?? ''}
+                              onChange={(_event, val) => setValue(key, val)}
+                              validated={fieldError ? 'error' : 'default'}
+                              isDisabled={isAdminDisabledField || isSubmitting}
+                            >
+                              {!isReq && <FormSelectOption value="" label={t('Select...')} />}
+                              {prop.enum.map((opt) => (
+                                <FormSelectOption key={opt} value={opt} label={opt} />
+                              ))}
+                            </FormSelect>
+                            {fieldError && (
+                              <HelperText>
+                                <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                              </HelperText>
+                            )}
+                          </FormGroup>
+                        );
+                      }
+                      return (
+                        <FormGroup
+                          key={key}
+                          label={fieldLabel}
+                          isRequired={isReq}
+                          fieldId={fieldId}
+                        >
+                          {prop.description && (
+                            <HelperText style={{ marginBottom: '0.25rem' }}>
+                              <HelperTextItem>{prop.description}</HelperTextItem>
+                            </HelperText>
+                          )}
+                          <TextInput
+                            id={fieldId}
+                            type={
+                              prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'
+                            }
+                            value={formValues[key] ?? ''}
+                            onChange={(_event, val) => setValue(key, val)}
+                            validated={fieldError ? 'error' : 'default'}
+                            isRequired={isReq}
+                            isDisabled={isAdminDisabledField || isSubmitting}
+                            {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
+                            {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
+                          />
+                          {fieldError && (
+                            <HelperText>
+                              <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                            </HelperText>
+                          )}
+                        </FormGroup>
+                      );
+                    })}
+                  </div>
+                )}
+              </Tab>
+            );
+          })}
+        </Tabs>
+      ) : (
+        /* Fallback when no cloud/hypervisor backends are configured */
+        <>
+          {sortedEntries.map(([key, prop]) => {
+            const fieldError = fieldErrors[key];
+            const isReq = requiredSet.has(key);
+            const fieldLabel = prop.title ?? key;
+            const fieldId = `deploy-field-${key}`;
+            const isAdminDisabledField = disabledFieldSet.has(key);
+            if (prop.enum && prop.enum.length > 0) {
+              return (
+                <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
+                  {prop.description && (
+                    <HelperText style={{ marginBottom: '0.25rem' }}>
+                      <HelperTextItem>{prop.description}</HelperTextItem>
+                    </HelperText>
+                  )}
+                  <FormSelect
+                    id={fieldId}
+                    value={formValues[key] ?? ''}
+                    onChange={(_event, val) => setValue(key, val)}
+                    validated={fieldError ? 'error' : 'default'}
+                    isDisabled={isAdminDisabledField || isSubmitting}
+                  >
+                    {!isReq && <FormSelectOption value="" label={t('Select...')} />}
+                    {prop.enum.map((opt) => (
+                      <FormSelectOption key={opt} value={opt} label={opt} />
+                    ))}
+                  </FormSelect>
+                  {fieldError && (
+                    <HelperText>
+                      <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                    </HelperText>
+                  )}
+                </FormGroup>
+              );
+            }
+            return (
+              <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
+                {prop.description && (
+                  <HelperText style={{ marginBottom: '0.25rem' }}>
+                    <HelperTextItem>{prop.description}</HelperTextItem>
+                  </HelperText>
+                )}
+                <TextInput
+                  id={fieldId}
+                  type={prop.type === 'integer' || prop.type === 'number' ? 'number' : 'text'}
+                  value={formValues[key] ?? ''}
+                  onChange={(_event, val) => setValue(key, val)}
+                  validated={fieldError ? 'error' : 'default'}
+                  isRequired={isReq}
+                  isDisabled={isAdminDisabledField || isSubmitting}
+                  {...(prop.minimum !== undefined ? { min: prop.minimum } : {})}
+                  {...(prop.maximum !== undefined ? { max: prop.maximum } : {})}
+                />
+                {fieldError && (
+                  <HelperText>
+                    <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                  </HelperText>
+                )}
+              </FormGroup>
+            );
+          })}
+        </>
+      )}
+
+      <FormGroup label={t('Deployment name')} isRequired fieldId="deploy-name">
+        <TextInput
+          id="deploy-name"
+          value={generatedName}
+          onChange={() => undefined}
+          isRequired
+          isDisabled
+        />
+        <HelperText>
+          <HelperTextItem>
+            {t('Auto-generated from your template and deploy form values.')}
+          </HelperTextItem>
+        </HelperText>
+      </FormGroup>
+
+      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
+        <Button
+          variant="primary"
+          onClick={() => void onSubmit()}
+          isLoading={isSubmitting}
+          isDisabled={Boolean(lockedProvider) && !isProviderConfigured(lockedProvider!)}
+        >
+          {t('Deploy')}
+        </Button>
+        <Button variant="link" onClick={() => onCancel()} isDisabled={isSubmitting}>
+          {t('Cancel')}
+        </Button>
+      </div>
+    </Form>
   );
 }
