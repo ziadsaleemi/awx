@@ -748,3 +748,112 @@ def test_catalog_deprovision_passes_saved_vars(post, mocker, admin_user, organiz
     assert deployment.last_deprovision_vars.get('vm_name') == 'test-vm'
     assert deployment.provisioning_history
     assert deployment.provisioning_history[-1]['action'] == 'deprovision'
+
+
+@pytest.mark.django_db
+def test_catalog_lifecycle_runs_configure_and_validate_after_workflow_success(mocker, admin_user, organization):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='Provision lifecycle VM', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(
+        name='Configure lifecycle VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    validate_workflow = WorkflowJobTemplate.objects.create(
+        name='Validate lifecycle VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    item = CatalogItem.objects.create(
+        name='Lifecycle VM',
+        organization=organization,
+        provision_workflow=provision_workflow,
+        configure_workflow=configure_workflow,
+        validate_workflow=validate_workflow,
+    )
+    provision_job = provision_workflow.create_unified_job()
+    deployment = CatalogDeployment.objects.create(
+        name='lifecycle-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='provisioning',
+        provision_job=provision_job,
+        extra_vars={'vm_name': 'lifecycle-vm-01'},
+    )
+    deployment.append_history_entry('provision', job=provision_job, status='running')
+    deployment.save(update_fields=['provisioning_history'])
+
+    signal_start = mocker.patch.object(WorkflowJob, 'signal_start', return_value=None)
+
+    provision_job.status = 'successful'
+    provision_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'configuring'
+    assert deployment.configure_job_id is not None
+    assert deployment.configure_job.extra_vars_dict['vm_name'] == 'lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'provision'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'configure'
+    assert deployment.provisioning_history[-1]['details']['saved_var_keys'] == ['vm_name']
+    assert signal_start.call_count == 1
+
+    deployment.configure_job.status = 'successful'
+    deployment.configure_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'validating'
+    assert deployment.validate_job_id is not None
+    assert deployment.validate_job.extra_vars_dict['vm_name'] == 'lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'configure'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'validate'
+    assert signal_start.call_count == 2
+
+    deployment.validate_job.status = 'successful'
+    deployment.validate_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'active'
+    assert deployment.provisioning_history[-1]['action'] == 'validate'
+    assert deployment.provisioning_history[-1]['status'] == 'successful'
+
+
+@pytest.mark.django_db
+def test_catalog_lifecycle_runs_configure_after_terraform_success(mocker, admin_user, organization):
+    terraform_template = TerraformJobTemplate.objects.create(name='Terraform lifecycle VM', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(
+        name='Configure terraform VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    item = CatalogItem.objects.create(
+        name='Terraform lifecycle catalog item',
+        organization=organization,
+        terraform_job_template=terraform_template,
+        configure_workflow=configure_workflow,
+    )
+    terraform_job = terraform_template.create_unified_job()
+    deployment = CatalogDeployment.objects.create(
+        name='terraform-lifecycle-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='provisioning',
+        terraform_provision_job=terraform_job,
+        extra_vars={'vm_name': 'terraform-lifecycle-vm-01'},
+    )
+    deployment.append_history_entry('provision', job=terraform_job, status='running')
+    deployment.save(update_fields=['provisioning_history'])
+
+    signal_start = mocker.patch.object(WorkflowJob, 'signal_start', return_value=None)
+
+    terraform_job.status = 'successful'
+    terraform_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'configuring'
+    assert deployment.configure_job_id is not None
+    assert deployment.configure_job.extra_vars_dict['vm_name'] == 'terraform-lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'provision'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'configure'
+    assert signal_start.call_count == 1

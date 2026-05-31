@@ -41,6 +41,7 @@ from awx.main.models import (
     Role,
     SystemJob,
     SystemJobTemplate,
+    TerraformJob,
     UnifiedJob,
     UnifiedJobTemplate,
     User,
@@ -603,6 +604,7 @@ def save_user_session_membership(sender, **kwargs):
 # Catalog deployment status tracking (Phase D8)
 # ---------------------------------------------------------------------------
 
+
 def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_job):
     """
     Helper: update any CatalogDeployment linked to this workflow job.
@@ -616,65 +618,51 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
     for deployment in CatalogDeployment.objects.filter(provision_job_id=workflow_job_id).select_related(
         'catalog_item__configure_workflow',
         'catalog_item__validate_workflow',
+        'provision_job',
+        'terraform_provision_job',
     ):
+        if deployment.status != 'provisioning':
+            continue
         if terminal_status == 'successful':
             # Populate deployed_hosts from inventory populated by the workflow.
-            _populate_deployed_hosts(deployment, workflow_job)
+            _populate_deployed_hosts(deployment, workflow_job=workflow_job)
             deployment.last_failed_workflow_job = None
-            # Trigger configure_workflow if defined
-            configure_wf = deployment.catalog_item.configure_workflow if deployment.catalog_item_id else None
-            if configure_wf:
-                try:
-                    configure_job = configure_wf.create_unified_job()
-                    configure_job.signal_start()
-                    deployment.configure_job = configure_job
-                    new_status = 'configuring'
-                    deployment.append_history_entry('configure', job=configure_job, status='running')
-                except Exception:
-                    logger.exception(
-                        'Failed to launch configure_workflow for CatalogDeployment %s', deployment.pk
-                    )
-                    new_status = 'active'
-            else:
-                new_status = 'active'
+            new_status, extra_update_fields = _advance_catalog_lifecycle_after_provision(deployment)
         else:
             new_status = 'failed'
             deployment.last_failed_workflow_job = workflow_job
         deployment.status = new_status
         deployment.update_history_for_job(workflow_job_id, terminal_status)
-        deployment.save(update_fields=['status', 'last_failed_workflow_job', 'provisioning_history'])
+        update_fields = ['status', 'last_failed_workflow_job', 'provisioning_history']
+        if terminal_status == 'successful':
+            update_fields += extra_update_fields
+        deployment.save(update_fields=update_fields)
 
     # --- configure job completed ---
     for deployment in CatalogDeployment.objects.filter(configure_job_id=workflow_job_id).select_related(
         'catalog_item__validate_workflow',
+        'provision_job',
+        'terraform_provision_job',
     ):
+        if deployment.status != 'configuring':
+            continue
         if terminal_status == 'successful':
             deployment.last_failed_workflow_job = None
-            # Trigger validate_workflow if defined
-            validate_wf = deployment.catalog_item.validate_workflow if deployment.catalog_item_id else None
-            if validate_wf:
-                try:
-                    validate_job = validate_wf.create_unified_job()
-                    validate_job.signal_start()
-                    deployment.validate_job = validate_job
-                    new_status = 'validating'
-                    deployment.append_history_entry('validate', job=validate_job, status='running')
-                except Exception:
-                    logger.exception(
-                        'Failed to launch validate_workflow for CatalogDeployment %s', deployment.pk
-                    )
-                    new_status = 'active'
-            else:
-                new_status = 'active'
+            new_status, extra_update_fields = _advance_catalog_lifecycle_after_configure(deployment)
         else:
             new_status = 'failed'
             deployment.last_failed_workflow_job = workflow_job
         deployment.status = new_status
         deployment.update_history_for_job(workflow_job_id, terminal_status)
-        deployment.save(update_fields=['status', 'last_failed_workflow_job', 'provisioning_history'])
+        update_fields = ['status', 'last_failed_workflow_job', 'provisioning_history']
+        if terminal_status == 'successful':
+            update_fields += extra_update_fields
+        deployment.save(update_fields=update_fields)
 
     # --- validate job completed ---
     for deployment in CatalogDeployment.objects.filter(validate_job_id=workflow_job_id):
+        if deployment.status != 'validating':
+            continue
         if terminal_status == 'successful':
             new_status = 'active'
             deployment.last_failed_workflow_job = None
@@ -687,6 +675,8 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
 
     # --- deprovision job completed ---
     for deployment in CatalogDeployment.objects.filter(deprovision_job_id=workflow_job_id):
+        if deployment.status != 'deprovisioning':
+            continue
         if terminal_status == 'successful':
             new_status = 'destroyed'
         else:
@@ -696,7 +686,90 @@ def _update_catalog_deployment_status(workflow_job_id, status_field, workflow_jo
         deployment.save(update_fields=['status', 'provisioning_history'])
 
 
-def _populate_deployed_hosts(deployment, workflow_job):
+def _catalog_lifecycle_extra_vars(deployment):
+    extra_vars = {}
+    if isinstance(deployment.extra_vars, dict):
+        extra_vars.update(deployment.extra_vars)
+
+    if deployment.provision_job_id and deployment.provision_job:
+        try:
+            artifacts = deployment.provision_job.get_real_instance().get_effective_artifacts(parents_set=set())
+            if isinstance(artifacts, dict):
+                extra_vars.update(artifacts)
+        except Exception:
+            logger.exception('Failed to collect provision workflow artifacts for CatalogDeployment %s', deployment.pk)
+
+    if deployment.terraform_provision_job_id and deployment.terraform_provision_job:
+        artifacts = deployment.terraform_provision_job.artifacts
+        if isinstance(artifacts, dict):
+            extra_vars.update(artifacts)
+
+    return extra_vars
+
+
+def _catalog_lifecycle_workflow(deployment, field_name):
+    item = deployment.catalog_item
+    if item is None:
+        return None
+
+    workflow = getattr(item, field_name, None)
+    if workflow is None:
+        return None
+
+    if item.organization_id and workflow.organization_id != item.organization_id:
+        raise ValueError(
+            '{} must belong to the same organization as CatalogDeployment {}'.format(
+                field_name,
+                deployment.pk,
+            )
+        )
+
+    return workflow
+
+
+def _launch_catalog_lifecycle_workflow(deployment, field_name, action):
+    workflow = _catalog_lifecycle_workflow(deployment, field_name)
+    if workflow is None:
+        return None
+
+    extra_vars = _catalog_lifecycle_extra_vars(deployment)
+    launch_kwargs = {}
+    if extra_vars:
+        launch_kwargs['extra_vars'] = extra_vars
+
+    workflow_job = workflow.create_unified_job(**launch_kwargs)
+    workflow_job.signal_start()
+    setattr(deployment, '{}_job'.format(action), workflow_job)
+    details = {'saved_var_keys': sorted(extra_vars.keys())} if extra_vars else None
+    deployment.append_history_entry(action, job=workflow_job, status='running', details=details)
+    return workflow_job
+
+
+def _advance_catalog_lifecycle_after_provision(deployment):
+    try:
+        if _launch_catalog_lifecycle_workflow(deployment, 'configure_workflow', 'configure') is not None:
+            return 'configuring', ['configure_job']
+        if _launch_catalog_lifecycle_workflow(deployment, 'validate_workflow', 'validate') is not None:
+            return 'validating', ['validate_job']
+    except Exception:
+        logger.exception('Failed to launch post-provision lifecycle workflow for CatalogDeployment %s', deployment.pk)
+        return 'failed', []
+
+    return 'active', []
+
+
+def _advance_catalog_lifecycle_after_configure(deployment):
+    try:
+        if _launch_catalog_lifecycle_workflow(deployment, 'validate_workflow', 'validate') is not None:
+            return 'validating', ['validate_job']
+    except Exception:
+        logger.exception('Failed to launch validate_workflow for CatalogDeployment %s', deployment.pk)
+        return 'failed', []
+
+    return 'active', []
+
+
+def _populate_deployed_hosts(deployment, workflow_job=None, terraform_job=None):
     """
     After a successful provision workflow, collect all hosts that were added
     to the target inventory by the workflow's Terraform job nodes and link them
@@ -705,14 +778,19 @@ def _populate_deployed_hosts(deployment, workflow_job):
     try:
         from awx.main.models import WorkflowJobNode, TerraformJob, Host
 
-        terraform_job_ids = (
-            WorkflowJobNode.objects.filter(
+        terraform_jobs = []
+
+        if workflow_job is not None:
+            terraform_job_ids = WorkflowJobNode.objects.filter(
                 workflow_job=workflow_job,
                 unified_job__isnull=False,
-            )
-            .values_list('unified_job_id', flat=True)
-        )
-        for job in TerraformJob.objects.filter(id__in=terraform_job_ids, target_inventory__isnull=False):
+            ).values_list('unified_job_id', flat=True)
+            terraform_jobs.extend(TerraformJob.objects.filter(id__in=terraform_job_ids, target_inventory__isnull=False))
+
+        if terraform_job is not None and terraform_job.target_inventory_id:
+            terraform_jobs.append(terraform_job)
+
+        for job in terraform_jobs:
             hosts = Host.objects.filter(inventory_id=job.target_inventory_id)
             deployment.deployed_hosts.add(*hosts)
     except Exception:
@@ -732,7 +810,7 @@ def update_catalog_deployment_on_workflow_completion(sender, instance, created, 
     _update_catalog_deployment_status(instance.pk, 'status', instance)
 
 
-@receiver(post_save, sender=Job)
+@receiver(post_save, sender=TerraformJob)
 def update_catalog_deployment_on_terraform_completion(sender, instance, created, **kwargs):
     """
     When a TerraformJob linked to catalog provisioning reaches a terminal state,
@@ -740,24 +818,35 @@ def update_catalog_deployment_on_terraform_completion(sender, instance, created,
     """
     if created:
         return
-    if instance.polymorphic_ctype.model != 'terraformjob':
-        return
     if instance.status not in ('successful', 'failed', 'error', 'canceled'):
         return
 
     from awx.main.models.catalog import CatalogDeployment
 
     terminal_status = instance.status
-    new_status = 'active' if terminal_status == 'successful' else 'failed'
-    for deployment in CatalogDeployment.objects.filter(terraform_provision_job_id=instance.pk):
+    for deployment in CatalogDeployment.objects.filter(terraform_provision_job_id=instance.pk).select_related(
+        'catalog_item__configure_workflow',
+        'catalog_item__validate_workflow',
+        'provision_job',
+        'terraform_provision_job',
+    ):
+        if deployment.status != 'provisioning':
+            continue
+        if terminal_status == 'successful':
+            _populate_deployed_hosts(deployment, terraform_job=instance)
+            new_status, extra_update_fields = _advance_catalog_lifecycle_after_provision(deployment)
+        else:
+            new_status = 'failed'
+            extra_update_fields = []
         deployment.status = new_status
         deployment.update_history_for_job(instance.pk, terminal_status)
-        deployment.save(update_fields=['status', 'provisioning_history'])
+        deployment.save(update_fields=['status', 'provisioning_history'] + extra_update_fields)
 
 
 # ---------------------------------------------------------------------------
 # D5: Default catalog_user role assignment on login / user save
 # ---------------------------------------------------------------------------
+
 
 @receiver(post_save, sender=User)
 def assign_default_catalog_user_role(sender, instance, created, **kwargs):
