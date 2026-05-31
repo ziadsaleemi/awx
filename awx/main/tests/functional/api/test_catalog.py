@@ -4,7 +4,7 @@ from ansible_base.rbac.models import RoleDefinition, RoleUserAssignment
 
 from awx.api.versioning import reverse
 from awx.main.access import CatalogItemAccess
-from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Organization, User, WorkflowJob, WorkflowJobTemplate
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, CloudProviderState, Organization, User, WorkflowJob, WorkflowJobTemplate
 from awx.main.models.terraform import TerraformJobTemplate
 
 
@@ -428,6 +428,77 @@ def test_catalog_item_edit_persists_organization(patch, admin_user, organization
 
 
 @pytest.mark.django_db
+def test_marketplace_templates_use_org_scoped_provider_state(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-marketplace-org')
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data={
+            'images': [
+                {
+                    'id': 303,
+                    'name': 'Team Ubuntu 24.04 x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3', 'sfo3'],
+                },
+                {
+                    'id': 404,
+                    'name': 'Denied Fedora x64',
+                    'distribution': 'Fedora',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                },
+            ]
+        },
+        admin_settings={'allowedImageIds': [303], 'allowedRegionSlugs': ['nyc3']},
+    )
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        provider_data={
+            'images': [
+                {
+                    'id': 505,
+                    'name': 'Foreign Ubuntu x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                }
+            ]
+        },
+        admin_settings={'allowedImageIds': [505], 'allowedRegionSlugs': ['nyc3']},
+    )
+
+    response = get(f"{reverse('api:marketplace_template_list')}?organization={organization.pk}", org_admin, expect=200)
+
+    assert response.data['count'] == 1
+    assert len(response.data['providers']) == 1
+    provider = response.data['providers'][0]
+    assert provider['id'] == 'digitalocean'
+    assert provider['source'] == 'cloud_provider_state'
+    template = provider['templates'][0]
+    assert template['id'] == 'digitalocean-image-303'
+    assert template['name'] == 'Team Ubuntu 24.04 x64'
+    assert template['region'] == 'nyc3'
+    assert template['metadata']['id'] == 303
+    assert template['organization'] == organization.pk
+    assert {entry['id'] for entry in provider['templates']} == {'digitalocean-image-303'}
+
+
+@pytest.mark.django_db
+def test_marketplace_templates_reject_foreign_organization(get, org_admin):
+    other_org = Organization.objects.create(name='foreign-marketplace-org')
+
+    response = get(f"{reverse('api:marketplace_template_list')}?organization={other_org.pk}", org_admin, expect=403)
+
+    assert 'organization' in response.data
+
+
+@pytest.mark.django_db
 def test_marketplace_ingest_creates_org_scoped_catalog_item(post, org_admin, organization):
     response = post(
         reverse('api:marketplace_template_ingest'),
@@ -443,6 +514,45 @@ def test_marketplace_ingest_creates_org_scoped_catalog_item(post, org_admin, org
 
     item = CatalogItem.objects.get(pk=response.data['id'])
     assert item.name == 'Team Ubuntu VM'
+    assert item.organization_id == organization.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_accepts_provider_state_template(post, org_admin, organization):
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data={
+            'images': [
+                {
+                    'id': 303,
+                    'name': 'Team Ubuntu 24.04 x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                }
+            ]
+        },
+        admin_settings={'allowedImageIds': [303], 'allowedRegionSlugs': ['nyc3']},
+    )
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'digitalocean-image-303',
+            'organization': organization.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.name == 'Team Ubuntu 24.04 x64'
+    assert item.description == 'Ubuntu droplet image pulled from DigitalOcean.'
     assert item.organization_id == organization.pk
     assert item.available_providers == ['digitalocean']
     assert item.cloud_backends == {'digitalocean': None}

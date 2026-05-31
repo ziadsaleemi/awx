@@ -53,12 +53,15 @@ interface MarketplaceTemplate {
   description: string;
   region: string;
   metadata: Record<string, unknown>;
+  source?: string;
+  organization?: number | null;
 }
 
 interface MarketplaceProvider {
   id: string;
   label: string;
   templates: MarketplaceTemplate[];
+  source?: string;
 }
 
 interface MarketplaceListResponse {
@@ -74,6 +77,8 @@ interface OrganizationOption {
 interface OrganizationListResponse {
   results: OrganizationOption[];
 }
+
+const EMPTY_ORGANIZATIONS: OrganizationOption[] = [];
 
 // ---------------------------------------------------------------------------
 // Type badge colours
@@ -103,6 +108,7 @@ interface IngestModalProps {
   template: MarketplaceTemplate;
   organizations: OrganizationOption[];
   isLoadingOrganizations: boolean;
+  defaultOrganizationId?: string;
   onClose: () => void;
   onSuccess: (name: string) => void;
 }
@@ -111,6 +117,7 @@ function IngestModal({
   template,
   organizations,
   isLoadingOrganizations,
+  defaultOrganizationId,
   onClose,
   onSuccess,
 }: IngestModalProps) {
@@ -122,10 +129,26 @@ function IngestModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!organizationId && organizations.length > 0) {
+    if (organizations.length === 0) {
+      if (organizationId) setOrganizationId('');
+      return;
+    }
+    if (
+      defaultOrganizationId &&
+      organizations.some((organization) => String(organization.id) === defaultOrganizationId) &&
+      organizationId !== defaultOrganizationId
+    ) {
+      setOrganizationId(defaultOrganizationId);
+      return;
+    }
+    if (
+      (!organizationId ||
+        !organizations.some((organization) => String(organization.id) === organizationId)) &&
+      organizations.length > 0
+    ) {
       setOrganizationId(String(organizations[0].id));
     }
-  }, [organizationId, organizations]);
+  }, [defaultOrganizationId, organizationId, organizations]);
 
   const selectedOrganizationName =
     organizations.find((organization) => String(organization.id) === organizationId)?.name ??
@@ -316,6 +339,56 @@ function ProviderFilter({ providers, selected, onChange }: ProviderFilterProps) 
   );
 }
 
+interface OrganizationFilterProps {
+  organizations: OrganizationOption[];
+  selected: string;
+  isLoading: boolean;
+  onChange: (organizationId: string) => void;
+}
+
+function OrganizationFilter({
+  organizations,
+  selected,
+  isLoading,
+  onChange,
+}: OrganizationFilterProps) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedLabel =
+    organizations.find((organization) => String(organization.id) === selected)?.name ??
+    t('Select organization');
+
+  return (
+    <Select
+      isOpen={isOpen}
+      selected={selected}
+      onSelect={(_ev, value) => {
+        onChange(String(value));
+        setIsOpen(false);
+      }}
+      onOpenChange={setIsOpen}
+      toggle={(ref) => (
+        <Button
+          ref={ref}
+          variant="control"
+          onClick={() => setIsOpen(!isOpen)}
+          isDisabled={isLoading || organizations.length === 0}
+        >
+          {isLoading ? t('Loading organizations...') : selectedLabel}
+        </Button>
+      )}
+    >
+      <SelectList>
+        {organizations.map((organization) => (
+          <SelectOption key={organization.id} value={String(organization.id)}>
+            {organization.name}
+          </SelectOption>
+        ))}
+      </SelectList>
+    </Select>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Template Card
 // ---------------------------------------------------------------------------
@@ -370,24 +443,50 @@ export function MarketplaceIngestion() {
   const { t } = useTranslation();
   const { activeAwxUser } = useAwxActiveUser();
   const [providerFilter, setProviderFilter] = useState('');
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
   const [ingestTarget, setIngestTarget] = useState<MarketplaceTemplate | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
 
-  const url =
-    awxAPI`/marketplace/templates/` + (providerFilter ? `?provider=${providerFilter}` : '');
   const organizationsUrl = activeAwxUser?.is_superuser
     ? awxAPI`/organizations/?order_by=name&page_size=200`
     : activeAwxUser?.related?.admin_of_organizations;
 
-  const { data, isLoading, error } = useGet<MarketplaceListResponse>(url);
   const {
     data: organizationsData,
     isLoading: isLoadingOrganizations,
     error: organizationsError,
   } = useGet<OrganizationListResponse>(organizationsUrl || undefined);
 
+  const organizations = organizationsData?.results ?? EMPTY_ORGANIZATIONS;
+
+  useEffect(() => {
+    if (organizations.length === 0) {
+      if (selectedOrganizationId) setSelectedOrganizationId('');
+      return;
+    }
+    if (
+      !selectedOrganizationId ||
+      !organizations.some((organization) => String(organization.id) === selectedOrganizationId)
+    ) {
+      setSelectedOrganizationId(String(organizations[0].id));
+    }
+  }, [organizations, selectedOrganizationId]);
+
+  const marketplaceQuery = new URLSearchParams();
+  if (providerFilter) marketplaceQuery.set('provider', providerFilter);
+  if (selectedOrganizationId) marketplaceQuery.set('organization', selectedOrganizationId);
+  const marketplaceQueryString = marketplaceQuery.toString();
+  const shouldWaitForOrganizationSelection =
+    isLoadingOrganizations || (organizations.length > 0 && !selectedOrganizationId);
+  const url =
+    activeAwxUser && !shouldWaitForOrganizationSelection
+      ? `${awxAPI`/marketplace/templates/`}${marketplaceQueryString ? `?${marketplaceQueryString}` : ''}`
+      : undefined;
+
+  const { data, isLoading, error } = useGet<MarketplaceListResponse>(url);
   const allProviders: MarketplaceProvider[] = data?.providers ?? [];
-  const organizations = organizationsData?.results ?? [];
+  const isWaitingForTemplateRequest = Boolean(activeAwxUser) && shouldWaitForOrganizationSelection;
+  const isTemplateLoading = isLoading || isWaitingForTemplateRequest;
 
   const handleIngestSuccess = (name: string) => {
     setIngestTarget(null);
@@ -421,8 +520,19 @@ export function MarketplaceIngestion() {
           display: 'flex',
           gap: 12,
           alignItems: 'center',
+          flexWrap: 'wrap',
         }}
       >
+        <span style={{ fontWeight: 500 }}>{t('Organization:')}</span>
+        <OrganizationFilter
+          organizations={organizations}
+          selected={selectedOrganizationId}
+          isLoading={isLoadingOrganizations}
+          onChange={(organizationId) => {
+            setSelectedOrganizationId(organizationId);
+            setSuccessName(null);
+          }}
+        />
         <span style={{ fontWeight: 500 }}>{t('Filter by provider:')}</span>
         <ProviderFilter
           providers={allProviders}
@@ -440,14 +550,14 @@ export function MarketplaceIngestion() {
       </div>
 
       {/* Loading */}
-      {isLoading && (
+      {isTemplateLoading && (
         <div style={{ padding: '40px', textAlign: 'center' }}>
           <Spinner size="lg" />
         </div>
       )}
 
       {/* Error */}
-      {error && !isLoading && (
+      {url && error && !isTemplateLoading && (
         <div style={{ padding: '24px' }}>
           <Alert variant="danger" title={t('Failed to load marketplace templates')} isInline>
             {String(error)}
@@ -464,7 +574,7 @@ export function MarketplaceIngestion() {
       )}
 
       {/* Empty */}
-      {!isLoading && !error && allProviders.length === 0 && (
+      {url && !isTemplateLoading && !error && allProviders.length === 0 && (
         <EmptyState>
           <EmptyStateIcon icon={StoreIcon} />
           <Title headingLevel="h4" size="lg">
@@ -477,7 +587,7 @@ export function MarketplaceIngestion() {
       )}
 
       {/* Provider sections */}
-      {!isLoading &&
+      {!isTemplateLoading &&
         !error &&
         allProviders.map((provider) => (
           <div key={provider.id} style={{ padding: '0 24px 32px' }}>
@@ -511,6 +621,7 @@ export function MarketplaceIngestion() {
           template={ingestTarget}
           organizations={organizations}
           isLoadingOrganizations={isLoadingOrganizations}
+          defaultOrganizationId={selectedOrganizationId}
           onClose={() => setIngestTarget(null)}
           onSuccess={handleIngestSuccess}
         />

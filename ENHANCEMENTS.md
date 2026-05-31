@@ -304,6 +304,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | H8 | **EDA settings endpoint wiring parity** — The done-marked EDA overview card now points at a registered `/api/v2/settings/eda/` category backed by `EDA_SERVER_URL`, and the Settings navigation includes Event-Driven Ansible so the overview card no longer calls a missing endpoint | High | ✅ |
 | H9 | **OPA settings/API parity hardening** — OPA overview status and the policy tester now use the registered Policy as Code settings (`OPA_HOST`, `OPA_PORT`, `OPA_SSL`, auth, timeout/retry settings) instead of stale `OPA_ENABLED`/`OPA_SERVER_URL` fields; structured OPA responses with `allowed: false` now correctly deny; policy status/evaluation is restricted to system admins; token auth headers are copied per request so settings are not mutated | High | ✅ |
 | H10 | **Catalog lifecycle chaining parity** — Catalog configure/validate workflow chaining now persists `configure_job` and `validate_job`, passes saved deployment variables/artifacts into lifecycle workflows, advances idempotently through provisioning → configuring → validating → active, and runs after both Workflow and Terraform-backed catalog provisioning jobs | High | ✅ |
+| H11 | **Marketplace provider-state source parity** — Marketplace template listing and import now prefer org-scoped `CloudProviderState` data from connected providers, respect provider admin allow-lists, reject foreign organization reads/imports, and only fall back to the static seed catalog when no pulled provider state exists for the selected organization | High | ✅ |
 
 ---
 
@@ -314,7 +315,7 @@ Code review against the completed tracker found these remaining implementation g
 | # | Finding | Classification | Priority | Status |
 |---|---------|----------------|----------|--------|
 | AP1 | **Catalog post-provision lifecycle chain is not fully wired** — `configure_workflow` / `validate_workflow` fields exist and the UI exposes them, but signal persistence dropped `configure_job` / `validate_job`; Terraform-backed catalog deployments did not launch configure/validate workflows after a successful Terraform provision job | Implementation Bug | High | ✅ |
-| AP2 | **Marketplace template source is static** — `/api/v2/marketplace/templates/` returns hard-coded provider catalogs instead of provider data already pulled into `CloudProviderState`; imports therefore do not reflect connected organization-scoped cloud inventory | Stub / Approximation | High | ⬜ |
+| AP2 | **Marketplace template source is static** — `/api/v2/marketplace/templates/` returns hard-coded provider catalogs instead of provider data already pulled into `CloudProviderState`; imports therefore do not reflect connected organization-scoped cloud inventory | Stub / Approximation | High | ✅ |
 | AP3 | **Marketplace import is not deployment-ready from the modal** — the backend can accept optional workflow ids, but the UI only posts provider/template/name/organization, so imported items are browseable records that still need manual workflow/Terraform mapping before they can launch real provider deployments | Stub / Approximation | High | ⬜ |
 
 ## Notes
