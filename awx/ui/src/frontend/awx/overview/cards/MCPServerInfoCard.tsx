@@ -36,6 +36,16 @@ interface AISettings {
   configured: boolean;
 }
 
+interface MCPManifest {
+  tool_count?: number;
+  policy_context_enabled?: boolean;
+  capabilities?: {
+    audit?: {
+      activity_stream?: boolean;
+    };
+  };
+}
+
 function useBaseUrl(): string {
   if (typeof window !== 'undefined') {
     return `${window.location.protocol}//${window.location.host}`;
@@ -46,9 +56,16 @@ function useBaseUrl(): string {
 export function MCPServerInfoCard() {
   const { t } = useTranslation();
   const base = useBaseUrl();
-  const { data: aiSettings } = useSWR<AISettings>(
-    awxAPI`/ai/settings/`,
-    (url: string) => requestGet<AISettings>(url).catch(() => ({ enabled: false, provider: '', model: '', configured: false }))
+  const { data: aiSettings } = useSWR<AISettings>(awxAPI`/ai/settings/`, (url: string) =>
+    requestGet<AISettings>(url).catch(() => ({
+      enabled: false,
+      provider: '',
+      model: '',
+      configured: false,
+    }))
+  );
+  const { data: manifest } = useSWR<MCPManifest>(awxAPI`/mcp/manifest/`, (url: string) =>
+    requestGet<MCPManifest>(url).catch(() => ({}))
   );
 
   const manifestUrl = `${base}/api/v2/mcp/manifest/`;
@@ -86,7 +103,9 @@ export function MCPServerInfoCard() {
             title={t('AI is not enabled')}
             style={{ marginBottom: 12 }}
           >
-            {t('Enable the AI Assistant under Administration → Settings → AI Assistant to get AI-powered tool suggestions.')}
+            {t(
+              'Enable the AI Assistant under Administration → Settings → AI Assistant to get AI-powered tool suggestions.'
+            )}
           </Alert>
         )}
 
@@ -102,7 +121,12 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Manifest URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy
+                isReadOnly
+                variant={ClipboardCopyVariant.inline}
+                hoverTip={t('Copy')}
+                clickTip={t('Copied')}
+              >
                 {manifestUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
@@ -110,7 +134,12 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Tools URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy
+                isReadOnly
+                variant={ClipboardCopyVariant.inline}
+                hoverTip={t('Copy')}
+                clickTip={t('Copied')}
+              >
                 {toolsUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
@@ -118,7 +147,12 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Invoke URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy
+                isReadOnly
+                variant={ClipboardCopyVariant.inline}
+                hoverTip={t('Copy')}
+                clickTip={t('Copied')}
+              >
                 {invokeUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
@@ -127,6 +161,30 @@ export function MCPServerInfoCard() {
             <DescriptionListTerm>{t('Authentication')}</DescriptionListTerm>
             <DescriptionListDescription>
               {t('AWX personal access token (Bearer). Create one under User → Tokens.')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Tools')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {manifest?.tool_count
+                ? t('{{count}} tools available', { count: manifest.tool_count })
+                : t('Tool discovery enabled')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Audit')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {manifest?.capabilities?.audit?.activity_stream
+                ? t('Activity Stream records MCP actions')
+                : t('Activity Stream audit unavailable')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Policy context')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {manifest?.policy_context_enabled
+                ? t('Enabled for MCP tool responses')
+                : t('Configure MCP Policy Context in AI Assistant settings')}
             </DescriptionListDescription>
           </DescriptionListGroup>
         </DescriptionList>

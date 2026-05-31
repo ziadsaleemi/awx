@@ -1246,8 +1246,7 @@ register(
     default=False,
     label=_('Enable AI Assistant'),
     help_text=_(
-        'Enable the embedded AI chat assistant. When enabled, users will see a '
-        'chat panel in the navigation bar powered by the configured AI provider.'
+        'Enable the embedded AI chat assistant. When enabled, users will see a ' 'chat panel in the navigation bar powered by the configured AI provider.'
     ),
     category=_('AI Assistant'),
     category_slug='ai-assistant',
@@ -1349,6 +1348,21 @@ register(
     default=20,
     label=_('AI Rate Limit (requests per minute per user)'),
     help_text=_('Maximum number of AI chat requests a single user may make per minute. Prevents runaway API usage.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'MCP_POLICY_CONTEXT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('MCP Policy Context'),
+    help_text=_(
+        'Optional organisation policies and best-practice notes exposed to MCP clients. '
+        'Separate documents with blank lines; matching sections are returned with MCP tool responses '
+        'and included in OPA guardrail input for MCP launches.'
+    ),
     category=_('AI Assistant'),
     category_slug='ai-assistant',
 )
