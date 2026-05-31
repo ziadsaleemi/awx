@@ -559,6 +559,61 @@ def test_marketplace_ingest_accepts_provider_state_template(post, org_admin, org
 
 
 @pytest.mark.django_db
+def test_marketplace_ingest_wires_terraform_template(post, org_admin, organization, terraform_job_template):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': terraform_job_template.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.terraform_job_template_id == terraform_job_template.pk
+    assert item.provision_workflow_id is None
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': terraform_job_template.pk}
+    assert item.provider_workflows is None
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_wires_workflow_mappings(post, org_admin, organization):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Provision', organization=organization)
+    deprovision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Deprovision', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Configure', organization=organization)
+    validate_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Validate', organization=organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'provision_workflow': provision_workflow.pk,
+            'deprovision_workflow': deprovision_workflow.pk,
+            'configure_workflow': configure_workflow.pk,
+            'validate_workflow': validate_workflow.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.provision_workflow_id == provision_workflow.pk
+    assert item.deprovision_workflow_id == deprovision_workflow.pk
+    assert item.configure_workflow_id == configure_workflow.pk
+    assert item.validate_workflow_id == validate_workflow.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+    assert item.provider_workflows == {'digitalocean': provision_workflow.pk}
+    assert item.provider_deprovision_workflows == {'digitalocean': deprovision_workflow.pk}
+
+
+@pytest.mark.django_db
 def test_marketplace_ingest_rejects_foreign_organization(post, org_admin, organization):
     other_org = Organization.objects.create(name='other-org')
 
@@ -596,6 +651,53 @@ def test_marketplace_ingest_rejects_cross_org_workflow(post, org_admin, organiza
     )
 
     assert 'provision_workflow' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_cross_org_terraform_template(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_template = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': foreign_template.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_ambiguous_provision_targets(
+    post,
+    org_admin,
+    organization,
+    terraform_job_template,
+):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Provision', organization=organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': terraform_job_template.pk,
+            'provision_workflow': provision_workflow.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
     assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
 
 

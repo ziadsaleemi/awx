@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from awx.main.models import CatalogItem, CloudProviderState, Organization, WorkflowJobTemplate
+from awx.main.models.terraform import TerraformJobTemplate
 
 logger = logging.getLogger('awx.api.views.marketplace')
 
@@ -568,6 +569,7 @@ class MarketplaceTemplateIngestView(APIView):
           "provider": "digitalocean",
           "template_id": "do-ubuntu-22-04-x64",
           "organization": <org_pk>,
+          "terraform_job_template": <tft_pk>,      // optional, alternative to provision_workflow
           "provision_workflow": <wjt_pk>,          // optional
           "deprovision_workflow": <wjt_pk>,         // optional
           "configure_workflow": <wjt_pk>,           // optional
@@ -601,6 +603,15 @@ class MarketplaceTemplateIngestView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        def _has_value(key):
+            return request.data.get(key) not in (None, '')
+
+        if _has_value('provision_workflow') and _has_value('terraform_job_template'):
+            return Response(
+                {'terraform_job_template': ['Choose either a Terraform job template or a provision workflow, not both.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         def _get_wjt(key):
             pk = request.data.get(key)
             if not pk:
@@ -613,14 +624,32 @@ class MarketplaceTemplateIngestView(APIView):
                 return None, {key: ['Workflow job template must belong to the selected organization.']}
             return workflow, None
 
+        def _get_tft(key):
+            pk = request.data.get(key)
+            if not pk:
+                return None, None
+            try:
+                terraform_template = TerraformJobTemplate.objects.get(pk=int(pk))
+            except (TerraformJobTemplate.DoesNotExist, ValueError, TypeError):
+                return None, {key: ['Terraform job template not found.']}
+            if terraform_template.organization_id != organization.pk:
+                return None, {key: ['Terraform job template must belong to the selected organization.']}
+            return terraform_template, None
+
         workflows = {}
         for key in ('provision_workflow', 'deprovision_workflow', 'configure_workflow', 'validate_workflow'):
             workflow, error = _get_wjt(key)
             if error:
                 return Response(error, status=status.HTTP_400_BAD_REQUEST)
             workflows[key] = workflow
+        terraform_template, error = _get_tft('terraform_job_template')
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
 
         item_name = (request.data.get('name') or entry['name']).strip() or entry['name']
+        cloud_backends = {provider: terraform_template.pk if terraform_template else None}
+        provider_workflows = {provider: workflows['provision_workflow'].pk} if workflows['provision_workflow'] else None
+        provider_deprovision_workflows = {provider: workflows['deprovision_workflow'].pk} if workflows['deprovision_workflow'] else None
 
         # Build the CatalogItem
         catalog_item = CatalogItem(
@@ -628,11 +657,14 @@ class MarketplaceTemplateIngestView(APIView):
             description=entry.get('description', ''),
             organization=organization,
             provision_workflow=workflows['provision_workflow'],
+            terraform_job_template=terraform_template,
             deprovision_workflow=workflows['deprovision_workflow'],
             configure_workflow=workflows['configure_workflow'],
             validate_workflow=workflows['validate_workflow'],
             # Store original marketplace metadata for reference
-            cloud_backends={provider: None},
+            cloud_backends=cloud_backends,
+            provider_workflows=provider_workflows,
+            provider_deprovision_workflows=provider_deprovision_workflows,
             available_providers=[provider],
         )
         catalog_item.save()

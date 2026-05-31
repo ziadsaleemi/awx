@@ -21,8 +21,12 @@ import {
   FlexItem,
   Form,
   FormGroup,
+  FormSelect,
+  FormSelectOption,
   Gallery,
   GalleryItem,
+  HelperText,
+  HelperTextItem,
   Label,
   Modal,
   ModalBoxBody,
@@ -78,7 +82,19 @@ interface OrganizationListResponse {
   results: OrganizationOption[];
 }
 
+interface TemplateOption {
+  id: number;
+  name: string;
+}
+
+interface TemplateListResponse<T extends TemplateOption> {
+  results: T[];
+}
+
+type ProvisionTargetType = 'terraform' | 'workflow';
+
 const EMPTY_ORGANIZATIONS: OrganizationOption[] = [];
+const EMPTY_TEMPLATE_OPTIONS: TemplateOption[] = [];
 
 // ---------------------------------------------------------------------------
 // Type badge colours
@@ -125,8 +141,37 @@ function IngestModal({
   const [itemName, setItemName] = useState(template.name);
   const [organizationId, setOrganizationId] = useState('');
   const [isOrganizationSelectOpen, setIsOrganizationSelectOpen] = useState(false);
+  const [provisionTargetType, setProvisionTargetType] = useState<ProvisionTargetType>('terraform');
+  const [provisionTargetId, setProvisionTargetId] = useState('');
+  const [deprovisionWorkflowId, setDeprovisionWorkflowId] = useState('');
+  const [configureWorkflowId, setConfigureWorkflowId] = useState('');
+  const [validateWorkflowId, setValidateWorkflowId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const workflowTemplatesUrl = organizationId
+    ? `${awxAPI`/workflow_job_templates/`}?organization=${organizationId}&order_by=name&page_size=200`
+    : undefined;
+  const terraformTemplatesUrl = organizationId
+    ? `${awxAPI`/terraform_job_templates/`}?organization=${organizationId}&order_by=name&page_size=200`
+    : undefined;
+  const {
+    data: workflowTemplatesData,
+    isLoading: isLoadingWorkflowTemplates,
+    error: workflowTemplatesError,
+  } = useGet<TemplateListResponse<TemplateOption>>(workflowTemplatesUrl);
+  const {
+    data: terraformTemplatesData,
+    isLoading: isLoadingTerraformTemplates,
+    error: terraformTemplatesError,
+  } = useGet<TemplateListResponse<TemplateOption>>(terraformTemplatesUrl);
+  const workflowTemplates = workflowTemplatesData?.results ?? EMPTY_TEMPLATE_OPTIONS;
+  const terraformTemplates = terraformTemplatesData?.results ?? EMPTY_TEMPLATE_OPTIONS;
+  const isLoadingTargets = isLoadingWorkflowTemplates || isLoadingTerraformTemplates;
+  const hasTerraformTargets = terraformTemplates.length > 0;
+  const hasWorkflowTargets = workflowTemplates.length > 0;
+  const targetOptions =
+    provisionTargetType === 'terraform' ? terraformTemplates : workflowTemplates;
 
   useEffect(() => {
     if (organizations.length === 0) {
@@ -150,6 +195,23 @@ function IngestModal({
     }
   }, [defaultOrganizationId, organizationId, organizations]);
 
+  useEffect(() => {
+    setProvisionTargetId('');
+    setDeprovisionWorkflowId('');
+    setConfigureWorkflowId('');
+    setValidateWorkflowId('');
+  }, [organizationId]);
+
+  useEffect(() => {
+    if (isLoadingTargets) return;
+    if (provisionTargetType === 'terraform' && !hasTerraformTargets && hasWorkflowTargets) {
+      setProvisionTargetType('workflow');
+    }
+    if (provisionTargetType === 'workflow' && !hasWorkflowTargets && hasTerraformTargets) {
+      setProvisionTargetType('terraform');
+    }
+  }, [hasTerraformTargets, hasWorkflowTargets, isLoadingTargets, provisionTargetType]);
+
   const selectedOrganizationName =
     organizations.find((organization) => String(organization.id) === organizationId)?.name ??
     t('Select organization');
@@ -158,12 +220,27 @@ function IngestModal({
     setIsLoading(true);
     setError(null);
     try {
-      await postRequest(awxAPI`/marketplace/ingest/`, {
+      const payload: Record<string, unknown> = {
         provider: template.provider,
         template_id: template.id,
         name: itemName,
         organization: Number(organizationId),
-      });
+      };
+      if (provisionTargetType === 'terraform') {
+        payload.terraform_job_template = Number(provisionTargetId);
+      } else {
+        payload.provision_workflow = Number(provisionTargetId);
+      }
+      if (deprovisionWorkflowId) {
+        payload.deprovision_workflow = Number(deprovisionWorkflowId);
+      }
+      if (configureWorkflowId) {
+        payload.configure_workflow = Number(configureWorkflowId);
+      }
+      if (validateWorkflowId) {
+        payload.validate_workflow = Number(validateWorkflowId);
+      }
+      await postRequest(awxAPI`/marketplace/ingest/`, payload);
       onSuccess(itemName);
     } catch (err: unknown) {
       const message =
@@ -178,7 +255,7 @@ function IngestModal({
 
   return (
     <Modal
-      variant={ModalVariant.medium}
+      variant={ModalVariant.large}
       title={t('Import as Catalog Item')}
       isOpen
       onClose={onClose}
@@ -265,13 +342,145 @@ function IngestModal({
               isRequired
             />
           </FormGroup>
+          <FormGroup
+            label={t('Provisioning target type')}
+            isRequired
+            fieldId="provision-target-type"
+          >
+            <FormSelect
+              id="provision-target-type"
+              value={provisionTargetType}
+              onChange={(_ev, value) => {
+                setProvisionTargetType(value as ProvisionTargetType);
+                setProvisionTargetId('');
+              }}
+              isDisabled={isLoadingTargets}
+            >
+              <FormSelectOption
+                value="terraform"
+                label={t('Terraform template')}
+                isDisabled={!hasTerraformTargets && !isLoadingTerraformTemplates}
+              />
+              <FormSelectOption
+                value="workflow"
+                label={t('Provision workflow')}
+                isDisabled={!hasWorkflowTargets && !isLoadingWorkflowTemplates}
+              />
+            </FormSelect>
+            <HelperText>
+              <HelperTextItem>
+                {t('Imported marketplace items must have a launch target before users can deploy.')}
+              </HelperTextItem>
+            </HelperText>
+          </FormGroup>
+          <FormGroup label={t('Provisioning target')} isRequired fieldId="provision-target">
+            <FormSelect
+              id="provision-target"
+              value={provisionTargetId}
+              onChange={(_ev, value) => setProvisionTargetId(value)}
+              isDisabled={isLoadingTargets || targetOptions.length === 0}
+            >
+              <FormSelectOption
+                value=""
+                label={
+                  isLoadingTargets
+                    ? t('Loading targets...')
+                    : targetOptions.length === 0
+                      ? t('No targets available')
+                      : t('Select a target')
+                }
+              />
+              {targetOptions.map((target) => (
+                <FormSelectOption key={target.id} value={String(target.id)} label={target.name} />
+              ))}
+            </FormSelect>
+          </FormGroup>
+          <FormGroup label={t('Deprovision workflow')} fieldId="deprovision-workflow">
+            <FormSelect
+              id="deprovision-workflow"
+              value={deprovisionWorkflowId}
+              onChange={(_ev, value) => setDeprovisionWorkflowId(value)}
+              isDisabled={isLoadingWorkflowTemplates}
+            >
+              <FormSelectOption value="" label={t('No deprovision workflow')} />
+              {workflowTemplates.map((workflow) => (
+                <FormSelectOption
+                  key={workflow.id}
+                  value={String(workflow.id)}
+                  label={workflow.name}
+                />
+              ))}
+            </FormSelect>
+          </FormGroup>
+          <FormGroup label={t('Configure workflow')} fieldId="configure-workflow">
+            <FormSelect
+              id="configure-workflow"
+              value={configureWorkflowId}
+              onChange={(_ev, value) => setConfigureWorkflowId(value)}
+              isDisabled={isLoadingWorkflowTemplates}
+            >
+              <FormSelectOption value="" label={t('No configure workflow')} />
+              {workflowTemplates.map((workflow) => (
+                <FormSelectOption
+                  key={workflow.id}
+                  value={String(workflow.id)}
+                  label={workflow.name}
+                />
+              ))}
+            </FormSelect>
+          </FormGroup>
+          <FormGroup label={t('Validate workflow')} fieldId="validate-workflow">
+            <FormSelect
+              id="validate-workflow"
+              value={validateWorkflowId}
+              onChange={(_ev, value) => setValidateWorkflowId(value)}
+              isDisabled={isLoadingWorkflowTemplates}
+            >
+              <FormSelectOption value="" label={t('No validate workflow')} />
+              {workflowTemplates.map((workflow) => (
+                <FormSelectOption
+                  key={workflow.id}
+                  value={String(workflow.id)}
+                  label={workflow.name}
+                />
+              ))}
+            </FormSelect>
+          </FormGroup>
         </Form>
 
+        {(workflowTemplatesError || terraformTemplatesError) && (
+          <Alert
+            variant="danger"
+            title={t('Failed to load deployment targets')}
+            isInline
+            style={{ marginTop: 16 }}
+          >
+            {String(workflowTemplatesError || terraformTemplatesError)}
+          </Alert>
+        )}
+        {!isLoadingTargets && !hasWorkflowTargets && !hasTerraformTargets && organizationId && (
+          <Alert
+            variant="warning"
+            title={t('No deployment targets available')}
+            isInline
+            style={{ marginTop: 16 }}
+          >
+            {t(
+              'Create a workflow job template or Terraform template in this organization before importing marketplace templates.'
+            )}
+          </Alert>
+        )}
         <ActionGroup style={{ marginTop: 16 }}>
           <Button
             variant="primary"
             onClick={() => void handleIngest()}
-            isDisabled={isLoading || !itemName.trim() || !organizationId}
+            isDisabled={
+              isLoading ||
+              isLoadingTargets ||
+              !itemName.trim() ||
+              !organizationId ||
+              !provisionTargetId
+            }
             isLoading={isLoading}
             icon={<DownloadIcon />}
           >

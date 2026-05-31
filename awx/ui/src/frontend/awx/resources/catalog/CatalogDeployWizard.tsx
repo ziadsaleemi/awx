@@ -290,7 +290,9 @@ export function CatalogDeployContent({
   const isProviderConfigured = (p: string) =>
     Boolean(
       (item.provider_workflows && item.provider_workflows[p]) ||
-        (item.cloud_backends && item.cloud_backends[p])
+        (item.cloud_backends && item.cloud_backends[p]) ||
+        item.terraform_job_template ||
+        item.provision_workflow
     );
 
   const PROVIDER_LABELS: Record<string, string> = {

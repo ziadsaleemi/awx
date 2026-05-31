@@ -5594,7 +5594,7 @@ class CatalogItemDeploy(GenericAPIView):
 
         # Only look up a TFT when no per-provider workflow is configured
         if resolved_workflow is None:
-            if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
+            if target_provider and item.cloud_backends and item.cloud_backends.get(target_provider):
                 tft_id = item.cloud_backends[target_provider]
                 from awx.main.models.terraform import TerraformJobTemplate
                 try:
