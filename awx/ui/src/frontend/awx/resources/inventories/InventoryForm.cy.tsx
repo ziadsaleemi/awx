@@ -158,6 +158,167 @@ describe('Create Edit Inventory Form', () => {
           });
       });
     });
+
+    it('applies a generated inventory plan through inventory endpoints', () => {
+      cy.intercept(
+        { method: 'OPTIONS', url: '/api/v2/instance_groups/' },
+        { fixture: 'mock_options.json' }
+      );
+      cy.intercept('GET', '/api/v2/ai/settings/', {
+        body: {
+          enabled: true,
+          configured: true,
+          provider: 'test',
+          model: 'test',
+        },
+      }).as('aiSettings');
+      cy.intercept('POST', '/api/v2/ai/chat/', {
+        body: {
+          message: {
+            role: 'assistant',
+            content: [
+              '[web]',
+              'web1.example.com ansible_host=10.0.0.10',
+              '',
+              '[web:vars]',
+              'ansible_user=ec2-user',
+              '',
+              '[db]',
+              'db1.example.com',
+              '',
+              '[prod:children]',
+              'web',
+              'db',
+              '',
+              '[all:vars]',
+              'ansible_port=22',
+            ].join('\n'),
+          },
+          provider: 'test',
+          model: 'test',
+        },
+      }).as('aiChat');
+
+      cy.fixture('inventory').then((inventory: Inventory) => {
+        inventory.id = 42;
+        inventory.name = 'generated inventory';
+        inventory.organization = 1;
+        inventory.variables = 'existing: true\n';
+        inventory.summary_fields.labels.count = 0;
+        inventory.summary_fields.labels.results = [];
+        cy.intercept('POST', '/api/v2/inventories/', {
+          statusCode: 201,
+          body: inventory,
+        }).as('createInventory');
+        cy.intercept('PATCH', '/api/v2/inventories/42/', {
+          statusCode: 200,
+          body: inventory,
+        }).as('updateInventoryVariables');
+      });
+
+      cy.intercept(/\/api\/v2\/inventories\/42\/groups\/\?.*/, {
+        count: 0,
+        results: [],
+      }).as('findGroup');
+      cy.intercept(/\/api\/v2\/inventories\/42\/hosts\/\?.*/, {
+        count: 0,
+        results: [],
+      }).as('findHost');
+
+      cy.intercept('POST', '/api/v2/groups/', (req: CyHttpMessages.IncomingHttpRequest) => {
+        const body = req.body as { inventory: number; name: string; variables: string };
+        const ids: Record<string, number> = { web: 100, db: 101, prod: 102 };
+        expect(body.inventory).to.equal(42);
+        if (body.name === 'web') {
+          expect(body.variables).to.equal('ansible_user: ec2-user\n');
+        }
+        req.reply({
+          statusCode: 201,
+          body: {
+            id: ids[body.name],
+            inventory: body.inventory,
+            name: body.name,
+            summary_fields: {},
+          },
+        });
+      }).as('createGroup');
+
+      cy.intercept('POST', '/api/v2/hosts/', (req: CyHttpMessages.IncomingHttpRequest) => {
+        const body = req.body as {
+          enabled: boolean;
+          inventory: number;
+          name: string;
+          variables: string;
+        };
+        const ids: Record<string, number> = {
+          'web1.example.com': 200,
+          'db1.example.com': 201,
+        };
+        expect(body.enabled).to.equal(true);
+        expect(body.inventory).to.equal(42);
+        if (body.name === 'web1.example.com') {
+          expect(body.variables).to.equal('ansible_host: 10.0.0.10\n');
+        }
+        req.reply({
+          statusCode: 201,
+          body: {
+            id: ids[body.name],
+            inventory: body.inventory,
+            name: body.name,
+            summary_fields: { groups: { results: [] } },
+          },
+        });
+      }).as('createHost');
+
+      cy.intercept('POST', '/api/v2/groups/*/children/', { statusCode: 204 }).as('attachChild');
+      cy.intercept('POST', '/api/v2/groups/*/hosts/', { statusCode: 204 }).as('attachHost');
+
+      cy.mount(<CreateInventory inventoryKind="" />, {
+        path: '/inventories/:inventory_type/create',
+        initialEntries: ['/inventories/inventory/create'],
+      });
+
+      cy.wait('@aiSettings');
+      cy.get('[data-cy="name"]').type('generated inventory');
+      cy.fixture('organizations').then((orgResponse: AwxItemsResponse<Organization>) => {
+        cy.selectSingleSelectOption('[data-cy="organization"]', orgResponse.results[0].name);
+      });
+      cy.get('button[aria-label="AI Inventory Builder"]').should('be.visible').click();
+      cy.get('#ai-inventory-description').type('web, db, and prod groups');
+      cy.clickButton(/^Generate$/);
+      cy.wait('@aiChat');
+      cy.contains('Generated inventory (INI format)').should('be.visible');
+      cy.contains('web1.example.com').should('be.visible');
+      cy.clickButton(/^Use generated inventory$/);
+      cy.clickButton(/^Create inventory$/);
+
+      cy.wait('@createInventory')
+        .its('request.body')
+        .then((createdInventory) => {
+          expect(createdInventory).not.to.have.property('aiGeneratedInventory');
+        });
+      cy.wait(['@createGroup', '@createGroup', '@createGroup']);
+      cy.wait(['@attachChild', '@attachChild']).then((childRequests) => {
+        const childBodies: Array<{ id: number }> = childRequests.map(
+          (request) => request.request.body as { id: number }
+        );
+        expect(childBodies).to.deep.equal([{ id: 100 }, { id: 101 }]);
+      });
+      cy.wait(['@createHost', '@createHost']);
+      cy.wait(['@attachHost', '@attachHost']).then((hostRequests) => {
+        const hostBodies: Array<{ id: number }> = hostRequests.map(
+          (request) => request.request.body as { id: number }
+        );
+        expect(hostBodies).to.deep.equal([{ id: 200 }, { id: 201 }]);
+      });
+      cy.wait('@updateInventoryVariables')
+        .its('request.body')
+        .then((patchedInventory) => {
+          expect(patchedInventory).to.deep.equal({
+            variables: "existing: true\nansible_port: '22'\n",
+          });
+        });
+    });
   });
 
   describe('Edit Inventory', () => {

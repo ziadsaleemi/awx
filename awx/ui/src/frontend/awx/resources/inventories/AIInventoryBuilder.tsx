@@ -2,20 +2,22 @@
  * G4a — AI Natural-Language Inventory Builder
  *
  * A modal wizard where the user describes their infrastructure in plain text.
- * The AI generates a structured AWX inventory (YAML with groups, hosts,
- * and variables) as a preview before saving.
- *
- * Usage: <AIInventoryBuilder onInventoryGenerated={(yaml) => setValue('variables', yaml)} />
+ * The AI generates a structured AWX inventory plan with groups, hosts, and
+ * variables as a preview before saving.
  *
  * The button is hidden when AI is not enabled.
  */
 
 import {
-  ActionGroup,
   Button,
   CodeBlock,
   CodeBlockCode,
+  DescriptionList,
+  DescriptionListDescription,
+  DescriptionListGroup,
+  DescriptionListTerm,
   FormGroup,
+  Label,
   Modal,
   ModalVariant,
   Spinner,
@@ -33,6 +35,11 @@ import { useTranslation } from 'react-i18next';
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAIAssistantEnabled } from '../../common/AIAssistant';
+import {
+  GeneratedInventoryPlan,
+  countGeneratedInventoryHosts,
+  parseGeneratedInventory,
+} from './GeneratedInventory';
 
 interface AIChatResponse {
   message: { role: string; content: string };
@@ -41,7 +48,7 @@ interface AIChatResponse {
 }
 
 interface AIInventoryBuilderProps {
-  /** Form field name to set when user clicks "Insert". Defaults to "variables". */
+  /** Form field name to set when the generated plan is accepted. */
   fieldName?: string;
 }
 
@@ -71,13 +78,16 @@ function stripFences(text: string): string {
     .trim();
 }
 
-export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuilderProps) {
+export function AIInventoryBuilder({
+  fieldName = 'aiGeneratedInventory',
+}: AIInventoryBuilderProps) {
   const { t } = useTranslation();
   const { enabled: aiEnabled } = useAIAssistantEnabled();
   const { setValue } = useFormContext();
   const [isOpen, setIsOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [generated, setGenerated] = useState('');
+  const [generatedPlan, setGeneratedPlan] = useState<GeneratedInventoryPlan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,15 +98,23 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
     setIsLoading(true);
     setError(null);
     setGenerated('');
+    setGeneratedPlan(null);
     try {
-      const resp = await postRequest<AIChatResponse, { messages: { role: string; content: string }[]; system_override: string }>(
-        awxAPI`/ai/chat/`,
-        {
-          messages: [{ role: 'user', content: description.trim() }],
-          system_override: SYSTEM_PROMPT,
-        }
-      );
-      setGenerated(stripFences(resp.message.content));
+      const resp = await postRequest<
+        AIChatResponse,
+        { messages: { role: string; content: string }[]; system_override: string }
+      >(awxAPI`/ai/chat/`, {
+        messages: [{ role: 'user', content: description.trim() }],
+        system_override: SYSTEM_PROMPT,
+      });
+      const source = stripFences(resp.message.content);
+      const plan = parseGeneratedInventory(source);
+      if (countGeneratedInventoryHosts(plan) === 0 && plan.groups.length === 0) {
+        setError(t('The generated inventory did not include any groups or hosts.'));
+        return;
+      }
+      setGenerated(source);
+      setGeneratedPlan(plan);
     } catch (e) {
       setError(t('Failed to generate inventory. Please try again.'));
     } finally {
@@ -105,10 +123,12 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
   };
 
   const handleInsert = () => {
-    setValue(fieldName, generated);
+    if (!generatedPlan) return;
+    setValue(fieldName, generatedPlan, { shouldDirty: true });
     setIsOpen(false);
     setDescription('');
     setGenerated('');
+    setGeneratedPlan(null);
     setError(null);
   };
 
@@ -116,6 +136,7 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
     setIsOpen(false);
     setDescription('');
     setGenerated('');
+    setGeneratedPlan(null);
     setError(null);
   };
 
@@ -138,9 +159,9 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
         isOpen={isOpen}
         onClose={handleClose}
         actions={[
-          generated ? (
+          generatedPlan ? (
             <Button key="insert" variant="primary" onClick={handleInsert}>
-              {t('Insert into inventory')}
+              {t('Use generated inventory')}
             </Button>
           ) : (
             <Button
@@ -163,8 +184,13 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
               <Text component={TextVariants.p}>
                 {t('Describe your infrastructure in plain text. For example:')}
               </Text>
-              <Text component={TextVariants.small} style={{ fontStyle: 'italic', color: 'var(--pf-v5-global--Color--200)' }}>
-                {t('"3 web servers (web1-web3.prod.example.com) and 1 Postgres database (db1.prod.example.com), all accessible via ec2-user"')}
+              <Text
+                component={TextVariants.small}
+                style={{ fontStyle: 'italic', color: 'var(--pf-v5-global--Color--200)' }}
+              >
+                {t(
+                  '"3 web servers (web1-web3.prod.example.com) and 1 Postgres database (db1.prod.example.com), all accessible via ec2-user"'
+                )}
               </Text>
             </TextContent>
           </StackItem>
@@ -194,7 +220,10 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
           {error && (
             <StackItem>
               <TextContent>
-                <Text component={TextVariants.p} style={{ color: 'var(--pf-v5-global--danger-color--100)' }}>
+                <Text
+                  component={TextVariants.p}
+                  style={{ color: 'var(--pf-v5-global--danger-color--100)' }}
+                >
                   {error}
                 </Text>
               </TextContent>
@@ -212,17 +241,44 @@ export function AIInventoryBuilder({ fieldName = 'variables' }: AIInventoryBuild
 
           {generated && (
             <StackItem>
+              {generatedPlan && (
+                <DescriptionList
+                  isHorizontal
+                  isCompact
+                  style={{ marginBottom: 'var(--pf-v5-global--spacer--sm)' }}
+                >
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Groups')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <Label color="blue">{generatedPlan.groups.length}</Label>
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Hosts')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <Label color="green">{countGeneratedInventoryHosts(generatedPlan)}</Label>
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Variables')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <Label color="purple">
+                        {Object.keys(generatedPlan.variables).length +
+                          generatedPlan.groups.reduce(
+                            (count, group) => count + Object.keys(group.variables).length,
+                            0
+                          )}
+                      </Label>
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                </DescriptionList>
+              )}
               <TextContent style={{ marginBottom: 6 }}>
                 <Text component={TextVariants.h4}>{t('Generated inventory (INI format)')}</Text>
               </TextContent>
               <CodeBlock>
                 <CodeBlockCode>{generated}</CodeBlockCode>
               </CodeBlock>
-              <TextContent style={{ marginTop: 6 }}>
-                <Text component={TextVariants.small} style={{ color: 'var(--pf-v5-global--Color--200)' }}>
-                  {t('Review the generated inventory above. Click "Insert into inventory" to populate the variables field, or close to discard.')}
-                </Text>
-              </TextContent>
             </StackItem>
           )}
         </Stack>

@@ -13,7 +13,7 @@ import { PageFormGroup } from '../../../../framework/PageForm/Inputs/PageFormGro
 import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFormTextInput';
 import { PageFormSubmitHandler } from '../../../../framework/PageForm/PageForm';
 import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSection';
-import { postRequest, requestPatch } from '../../../common/crud/Data';
+import { postRequest, requestGet, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { PageFormSelectOrganization } from '../../access/organizations/components/PageFormOrganizationSelect';
@@ -23,11 +23,12 @@ import { AwxPageForm } from '../../common/AwxPageForm';
 import { PageFormLabelSelect } from '../../common/PageFormLabelSelect';
 import { awxAPI } from '../../common/api/awx-utils';
 import { getAddedAndRemoved } from '../../common/util/getAddedAndRemoved';
+import { AwxHost } from '../../interfaces/AwxHost';
 import { InstanceGroup } from '../../interfaces/InstanceGroup';
 import { Inventory } from '../../interfaces/Inventory';
+import { InventoryGroup, InventoryGroupCreate } from '../../interfaces/InventoryGroup';
 import { Label } from '../../interfaces/Label';
 import { AwxRoute } from '../../main/AwxRoutes';
-import { requestGet } from '../../../common/crud/Data';
 import { PageFormMultiSelectAwxResource } from '../../common/PageFormMultiSelectAwxResource';
 import { useInventoriesColumns } from './hooks/useInventoriesColumns';
 import { useInventoriesFilters } from './hooks/useInventoriesFilters';
@@ -38,12 +39,19 @@ import { ConstructedInventoryHint } from './components/ConstructedInventoryHint'
 import { LabelHelp } from './components/LabelHelp';
 import { valueToObject } from '../../../../framework';
 import { AIInventoryBuilder } from './AIInventoryBuilder';
+import {
+  GeneratedInventoryGroup,
+  GeneratedInventoryHost,
+  GeneratedInventoryPlan,
+  inventoryVariablesToYaml,
+} from './GeneratedInventory';
 
 export type InventoryCreate = Inventory & {
   instanceGroups: InstanceGroup[];
   labels: Label[];
   inventories?: Inventory[];
   inputInventories?: InputInventory[];
+  aiGeneratedInventory?: GeneratedInventoryPlan;
 };
 
 const kinds: { [key: string]: string } = {
@@ -59,7 +67,7 @@ export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'sm
   const postRequest = usePostRequest<Inventory, Inventory>();
 
   const onSubmit: PageFormSubmitHandler<InventoryCreate> = async (data) => {
-    const { instanceGroups, ...inventory } = data;
+    const { instanceGroups, aiGeneratedInventory, ...inventory } = data;
 
     let inputInventories: InputInventory[] = [];
     if (props.inventoryKind === 'constructed') {
@@ -88,6 +96,10 @@ export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'sm
     // Update new inventory with selected labels
     if (newInventory.kind === '' && data.labels.length > 0)
       promises.push(submitLabels(newInventory, data.labels));
+
+    if (newInventory.kind === '' && aiGeneratedInventory) {
+      promises.push(submitGeneratedInventory(newInventory, aiGeneratedInventory));
+    }
 
     await Promise.all(promises);
 
@@ -185,7 +197,7 @@ export function EditInventory() {
   const originalInstanceGroups = igResponse?.results;
 
   const onSubmit: PageFormSubmitHandler<InventoryCreate> = async (data) => {
-    const { labels, instanceGroups, ...editedInventory } = data;
+    const { labels, instanceGroups, aiGeneratedInventory, ...editedInventory } = data;
 
     let inputInventories: InputInventory[] = [];
     if (params.inventory_type === 'constructed_inventory') {
@@ -221,6 +233,10 @@ export function EditInventory() {
           inputInventoriesResponse?.results || []
         )
       );
+    }
+
+    if (updatedInventory.kind === '' && aiGeneratedInventory) {
+      promises.push(submitGeneratedInventory(updatedInventory, aiGeneratedInventory));
     }
 
     await Promise.all(promises);
@@ -436,7 +452,7 @@ function InventoryInputs(props: { inventoryKind: string }) {
           labelHelp={<LabelHelp inventoryKind={inventoryKind} />}
           additionalControls={
             inventoryKind === '' ? (
-              <AIInventoryBuilder fieldName="variables" />
+              <AIInventoryBuilder fieldName="aiGeneratedInventory" />
             ) : undefined
           }
           validate={(item) => {
@@ -487,6 +503,124 @@ async function submitLabels(inventory: Inventory, labels: Label[]) {
 
   const results = await Promise.all([...disassociationPromises, ...associationPromises]);
   return results;
+}
+
+async function findInventoryGroup(inventory: Inventory, name: string) {
+  const response = await requestGet<AwxItemsResponse<InventoryGroup>>(
+    `${awxAPI`/inventories/${inventory.id.toString()}/groups/`}?name=${encodeURIComponent(name)}&page_size=1`
+  );
+  return response.results[0];
+}
+
+async function ensureInventoryGroup(
+  inventory: Inventory,
+  group: Pick<GeneratedInventoryGroup, 'name' | 'variables'>
+) {
+  const existing = await findInventoryGroup(inventory, group.name);
+  if (existing) {
+    return existing;
+  }
+
+  return postRequest<InventoryGroup, InventoryGroupCreate>(awxAPI`/groups/`, {
+    name: group.name,
+    description: '',
+    inventory: inventory.id,
+    variables: inventoryVariablesToYaml(group.variables),
+  });
+}
+
+async function findInventoryHost(inventory: Inventory, name: string) {
+  const response = await requestGet<AwxItemsResponse<AwxHost>>(
+    `${awxAPI`/inventories/${inventory.id.toString()}/hosts/`}?name=${encodeURIComponent(name)}&page_size=1`
+  );
+  return response.results[0];
+}
+
+async function ensureInventoryHost(inventory: Inventory, host: GeneratedInventoryHost) {
+  const existing = await findInventoryHost(inventory, host.name);
+  if (existing) {
+    return existing;
+  }
+
+  return postRequest<
+    AwxHost,
+    { name: string; inventory: number; variables: string; enabled: boolean }
+  >(awxAPI`/hosts/`, {
+    name: host.name,
+    inventory: inventory.id,
+    variables: inventoryVariablesToYaml(host.variables),
+    enabled: true,
+  });
+}
+
+async function attachHostToGroup(group: InventoryGroup, host: AwxHost) {
+  if (host.summary_fields?.groups?.results?.some((item) => item.id === group.id)) {
+    return;
+  }
+  await postRequest(awxAPI`/groups/${group.id.toString()}/hosts/`, { id: host.id });
+}
+
+async function attachChildGroup(parent: InventoryGroup, child: InventoryGroup) {
+  if (parent.id === child.id) {
+    return;
+  }
+  await postRequest(awxAPI`/groups/${parent.id.toString()}/children/`, { id: child.id });
+}
+
+async function submitGeneratedInventory(inventory: Inventory, plan: GeneratedInventoryPlan) {
+  const groupsByName = new Map<string, InventoryGroup>();
+
+  for (const group of plan.groups) {
+    groupsByName.set(group.name, await ensureInventoryGroup(inventory, group));
+  }
+
+  for (const group of plan.groups) {
+    for (const childName of group.children) {
+      if (!groupsByName.has(childName)) {
+        groupsByName.set(
+          childName,
+          await ensureInventoryGroup(inventory, { name: childName, variables: {} })
+        );
+      }
+      const parent = groupsByName.get(group.name);
+      const child = groupsByName.get(childName);
+      if (parent && child) {
+        await attachChildGroup(parent, child);
+      }
+    }
+  }
+
+  const hostsByName = new Map<string, AwxHost>();
+  for (const host of plan.hosts) {
+    hostsByName.set(host.name, await ensureInventoryHost(inventory, host));
+  }
+
+  for (const groupPlan of plan.groups) {
+    const group = groupsByName.get(groupPlan.name);
+    if (!group) {
+      continue;
+    }
+    for (const hostPlan of groupPlan.hosts) {
+      let host = hostsByName.get(hostPlan.name);
+      if (!host) {
+        host = await ensureInventoryHost(inventory, hostPlan);
+        hostsByName.set(hostPlan.name, host);
+      }
+      await attachHostToGroup(group, host);
+    }
+  }
+
+  if (Object.keys(plan.variables).length > 0) {
+    const parsedVariables = valueToObject(inventory.variables || '{}');
+    const existingVariables =
+      parsedVariables instanceof Error ? {} : (parsedVariables as Record<string, unknown>);
+    await requestPatch<Inventory>(awxAPI`/inventories/${inventory.id.toString()}/`, {
+      variables: inventoryVariablesToYaml({
+        ...existingVariables,
+        ...plan.variables,
+      }),
+    });
+  }
 }
 
 async function submitInstanceGroups(
