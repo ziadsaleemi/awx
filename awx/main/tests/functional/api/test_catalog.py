@@ -268,6 +268,90 @@ def test_catalog_deployment_retry_rejects_cross_org_tft(post, org_admin, organiz
 
 
 @pytest.mark.django_db
+def test_catalog_deployment_cancel_allows_owner(post, org_auditor, organization):
+    item = CatalogItem.objects.create(name='Cancelable Owner VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='owner-cancel-vm',
+        catalog_item=item,
+        owner=org_auditor,
+        status='provisioning',
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}),
+        {},
+        org_auditor,
+        expect=200,
+    )
+
+    deployment.refresh_from_db()
+    assert response.data['status'] == 'failed'
+    assert deployment.status == 'failed'
+    assert deployment.provisioning_history[-1]['action'] == 'cancel'
+    assert deployment.provisioning_history[-1]['details']['canceled_by'] == org_auditor.username
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_allows_org_admin(post, org_admin, rando, organization):
+    item = CatalogItem.objects.create(name='Cancelable Admin VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='admin-cancel-vm',
+        catalog_item=item,
+        owner=rando,
+        status='deprovisioning',
+    )
+
+    response = post(reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}), {}, org_admin, expect=200)
+
+    deployment.refresh_from_db()
+    assert response.data['status'] == 'active'
+    assert deployment.status == 'active'
+    assert deployment.provisioning_history[-1]['details']['canceled_by'] == org_admin.username
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_rejects_foreign_org_admin(post, org_admin, rando):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_item = CatalogItem.objects.create(name='Foreign Cancel VM', organization=other_org)
+    deployment = CatalogDeployment.objects.create(
+        name='foreign-cancel-vm',
+        catalog_item=foreign_item,
+        owner=rando,
+        status='provisioning',
+    )
+
+    post(reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}), {}, org_admin, expect=403)
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'provisioning'
+    assert deployment.provisioning_history == []
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_rejects_forged_catalog_item_permission(post, org_admin, rando, organization):
+    other_org = Organization.objects.create(name='other-forged-org')
+    accessible_item = CatalogItem.objects.create(name='Accessible Cancel VM', organization=organization)
+    inaccessible_item = CatalogItem.objects.create(name='Inaccessible Cancel VM', organization=other_org)
+    deployment = CatalogDeployment.objects.create(
+        name='forged-cancel-vm',
+        catalog_item=inaccessible_item,
+        owner=rando,
+        status='provisioning',
+    )
+
+    post(
+        reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}),
+        {'catalog_item': accessible_item.pk},
+        org_admin,
+        expect=403,
+    )
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'provisioning'
+    assert deployment.provisioning_history == []
+
+
+@pytest.mark.django_db
 def test_catalog_item_edit_persists_organization(patch, admin_user, organization, workflow_job_template):
     item = CatalogItem.objects.create(
         name='Org VM',

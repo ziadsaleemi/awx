@@ -14,12 +14,15 @@ import { CatalogItemDetails } from '../../resources/catalog/CatalogItemDetails';
 import { CatalogItemCloudProviders } from '../../resources/catalog/CatalogItemCloudProviders';
 import { CreateCatalogItem, EditCatalogItem } from '../../resources/catalog/CatalogItemForm';
 import { CatalogAdminDeployments } from '../../resources/catalog/CatalogAdminDeployments';
+import { CatalogAdminRouteGuard } from '../../resources/catalog/CatalogAdminRouteGuard';
 import { CatalogVmSizes } from '../../resources/catalog/CatalogVmSizes';
 import { MarketplaceIngestion } from '../../resources/catalog/MarketplaceIngestion';
+import { useCatalogAdminAccess } from '../../resources/catalog/useCatalogAdminAccess';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCatalogRoutes() {
   const { t } = useTranslation();
+  const { canManageCatalog } = useCatalogAdminAccess();
   const catalogRoutes = useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.Catalog,
@@ -71,21 +74,34 @@ export function useAwxCatalogRoutes() {
           id: AwxRoute.CatalogAdminItems,
           label: t('Catalog Items'),
           path: 'admin/items',
+          hidden: !canManageCatalog,
           children: [
             {
               id: AwxRoute.CreateCatalogItem,
               path: 'create',
-              element: <CreateCatalogItem />,
+              element: (
+                <CatalogAdminRouteGuard>
+                  <CreateCatalogItem />
+                </CatalogAdminRouteGuard>
+              ),
             },
             {
               id: AwxRoute.EditCatalogItem,
               path: ':id/edit',
-              element: <EditCatalogItem />,
+              element: (
+                <CatalogAdminRouteGuard>
+                  <EditCatalogItem />
+                </CatalogAdminRouteGuard>
+              ),
             },
             {
               id: AwxRoute.CatalogItemPage,
               path: ':id',
-              element: <CatalogItemPage />,
+              element: (
+                <CatalogAdminRouteGuard>
+                  <CatalogItemPage />
+                </CatalogAdminRouteGuard>
+              ),
               children: [
                 {
                   id: AwxRoute.CatalogItemDetails,
@@ -100,34 +116,56 @@ export function useAwxCatalogRoutes() {
                 { path: '', element: <Navigate to="details" replace /> },
               ],
             },
-            { path: '', element: <CatalogItems /> },
+            {
+              path: '',
+              element: (
+                <CatalogAdminRouteGuard>
+                  <CatalogItems />
+                </CatalogAdminRouteGuard>
+              ),
+            },
           ],
         },
         {
           id: AwxRoute.CatalogAdminVmSizes,
           label: t('VM Sizes'),
           path: 'admin/vm-sizes',
-          element: <CatalogVmSizes />,
+          hidden: !canManageCatalog,
+          element: (
+            <CatalogAdminRouteGuard>
+              <CatalogVmSizes />
+            </CatalogAdminRouteGuard>
+          ),
         },
         // Admin — All Deployments
         {
           id: AwxRoute.CatalogAdminDeployments,
           label: t('All Deployments'),
           path: 'admin/deployments',
-          element: <CatalogAdminDeployments />,
+          hidden: !canManageCatalog,
+          element: (
+            <CatalogAdminRouteGuard>
+              <CatalogAdminDeployments />
+            </CatalogAdminRouteGuard>
+          ),
         },
         // Marketplace ingestion
         {
           id: AwxRoute.CatalogMarketplace,
           label: t('Marketplace'),
           path: 'admin/marketplace',
-          element: <MarketplaceIngestion />,
+          hidden: !canManageCatalog,
+          element: (
+            <CatalogAdminRouteGuard>
+              <MarketplaceIngestion />
+            </CatalogAdminRouteGuard>
+          ),
         },
         // Default redirect
         { path: '', element: <Navigate to="browse" replace /> },
       ],
     }),
-    [t]
+    [canManageCatalog, t]
   );
 
   return catalogRoutes;

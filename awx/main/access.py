@@ -2095,9 +2095,19 @@ class CatalogDeploymentAccess(BaseAccess):
             return True
         return CatalogItemAccess(self.user).can_change(obj.catalog_item, None)
 
+    def can_cancel(self, obj):
+        if obj.catalog_item_id is None:
+            return False
+        if not CatalogItemAccess(self.user).can_read(obj.catalog_item):
+            return False
+        if obj.owner_id == self.user.id:
+            return True
+        return CatalogItemAccess(self.user).can_change(obj.catalog_item, None)
+
     def get_user_capabilities(self, obj, **kwargs):
         user_capabilities = super().get_user_capabilities(obj, **kwargs)
         user_capabilities['retry'] = self.can_retry(obj)
+        user_capabilities['cancel'] = self.can_cancel(obj)
         return user_capabilities
 
 

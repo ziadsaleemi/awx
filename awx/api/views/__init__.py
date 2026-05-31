@@ -5850,6 +5850,7 @@ class CatalogDeploymentCancel(GenericAPIView):
 
     model = models.CatalogDeployment
     serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'cancel'
     resource_purpose = 'cancel an in-progress catalog deployment'
 
     def post(self, request, *args, **kwargs):
