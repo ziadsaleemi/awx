@@ -361,6 +361,7 @@ export function CatalogDeployContent({
 
   const [formValues, setFormValues] = useState<Record<string, string>>(initialFormValues);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [leaseError, setLeaseError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Generic provider state for dynamic field source resolution
@@ -548,6 +549,12 @@ export function CatalogDeployContent({
     }
 
     setFieldErrors(errors);
+    if (requireLease && (leaseDurationMinutes === null || leaseDurationMinutes <= 0)) {
+      setLeaseError(t('This catalog item requires a lease duration.'));
+      valid = false;
+    } else {
+      setLeaseError('');
+    }
     return valid;
   };
 
@@ -1062,7 +1069,10 @@ export function CatalogDeployContent({
               key={preset.minutes}
               variant={leaseDurationMinutes === preset.minutes ? 'primary' : 'secondary'}
               size="sm"
-              onClick={() => setLeaseDurationMinutes(preset.minutes)}
+              onClick={() => {
+                setLeaseDurationMinutes(preset.minutes);
+                setLeaseError('');
+              }}
             >
               {preset.label}
             </Button>
@@ -1070,14 +1080,21 @@ export function CatalogDeployContent({
           <Button
             variant={leaseDurationMinutes === null ? 'secondary' : 'plain'}
             size="sm"
+            isDisabled={requireLease}
             onClick={() => {
               setLeaseDurationMinutes(null);
               setAutoDeprovision(false);
+              setLeaseError('');
             }}
           >
             {t('No limit')}
           </Button>
         </div>
+        {leaseError && (
+          <HelperText>
+            <HelperTextItem variant="error">{leaseError}</HelperTextItem>
+          </HelperText>
+        )}
         {leaseDurationMinutes !== null && (
           <div style={{ marginTop: '0.75rem' }}>
             <Checkbox

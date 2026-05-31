@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 import pytest
 
 from ansible_base.rbac.models import RoleDefinition, RoleUserAssignment
+from django.utils.timezone import now
 
 from awx.api.versioning import reverse
 from awx.main.access import CatalogItemAccess
@@ -833,6 +836,73 @@ def test_catalog_deployment_uses_first_dynamic_field_when_template_empty(post, a
     )
 
     assert response.data['name'] == 'web02 deployment'
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_persists_lease_fields(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Leased VM',
+        organization=organization,
+    )
+    expires_at = (now() + timedelta(hours=2)).isoformat()
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'leased-vm-01', 'expires_at': expires_at, 'auto_deprovision': True},
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.get(pk=response.data['id'])
+    assert deployment.expires_at is not None
+    assert deployment.expires_at > now()
+    assert deployment.auto_deprovision is True
+    assert response.data['auto_deprovision'] is True
+    assert response.data['time_remaining_seconds'] > 0
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_requires_lease_when_item_requires_it(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Required Lease VM',
+        organization=organization,
+        require_lease=True,
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'required-lease-vm-01', 'extra_vars': {}},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'expires_at' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_rejects_invalid_lease_fields(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Invalid Lease VM',
+        organization=organization,
+    )
+
+    invalid_expiry = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'invalid-lease-vm-01', 'expires_at': 'not-a-date'},
+        admin_user,
+        expect=400,
+    )
+    missing_expiry = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'missing-expiry-vm-01', 'auto_deprovision': True},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'expires_at' in invalid_expiry.data
+    assert 'auto_deprovision' in missing_expiry.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
 
 
 @pytest.mark.django_db

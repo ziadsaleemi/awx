@@ -27,8 +27,9 @@ from django.db import IntegrityError, ProgrammingError, transaction, connection
 from django.db.models.fields.related import ManyToManyField, ForeignKey
 from django.db.models.functions import Trunc
 from django.shortcuts import get_object_or_404
+from django.utils.dateparse import parse_datetime
 from django.utils.safestring import mark_safe
-from django.utils.timezone import now
+from django.utils.timezone import is_naive, make_aware, now
 from django.views.decorators.csrf import csrf_exempt
 from django.template.loader import render_to_string
 from django.http import HttpResponse, HttpResponseRedirect
@@ -5482,6 +5483,35 @@ def _parse_catalog_dynamic_field_templates(raw_value, dynamic_fields):
     return templates
 
 
+def _parse_catalog_deployment_bool(raw_value):
+    if raw_value in (None, ''):
+        return False, None
+    if isinstance(raw_value, bool):
+        return raw_value, None
+    if isinstance(raw_value, str):
+        value = raw_value.strip().lower()
+        if value in ('true', '1', 'yes', 'on'):
+            return True, None
+        if value in ('false', '0', 'no', 'off'):
+            return False, None
+    return None, _('Must be a boolean value.')
+
+
+def _parse_catalog_deployment_expires_at(raw_value):
+    if raw_value in (None, ''):
+        return None, None
+    if not isinstance(raw_value, str):
+        return None, _('Enter a valid ISO-8601 datetime.')
+    parsed = parse_datetime(raw_value)
+    if parsed is None:
+        return None, _('Enter a valid ISO-8601 datetime.')
+    if is_naive(parsed):
+        parsed = make_aware(parsed, dt_timezone.utc)
+    if parsed <= now():
+        return None, _('Lease expiry must be in the future.')
+    return parsed, None
+
+
 def _catalog_related_object_matches_item_org(item, obj):
     if obj is None or item.organization_id is None:
         return True
@@ -5541,6 +5571,25 @@ class CatalogItemDeploy(GenericAPIView):
             launch_extra_vars = extra_vars.copy()
         else:
             return Response({'extra_vars': ['This field must be a dictionary.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        expires_at, expires_at_error = _parse_catalog_deployment_expires_at(request.data.get('expires_at'))
+        if expires_at_error:
+            return Response({'expires_at': [expires_at_error]}, status=status.HTTP_400_BAD_REQUEST)
+        auto_deprovision, auto_deprovision_error = _parse_catalog_deployment_bool(
+            request.data.get('auto_deprovision')
+        )
+        if auto_deprovision_error:
+            return Response({'auto_deprovision': [auto_deprovision_error]}, status=status.HTTP_400_BAD_REQUEST)
+        if item.require_lease and expires_at is None:
+            return Response(
+                {'expires_at': [_('This catalog item requires a lease duration.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if auto_deprovision and expires_at is None:
+            return Response(
+                {'auto_deprovision': [_('Auto-deprovision requires a lease expiry.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         name = request.data.get('name', '')
         if isinstance(name, str) and name.strip():
@@ -5655,6 +5704,8 @@ class CatalogItemDeploy(GenericAPIView):
             extra_vars=deployment_extra_vars,
             last_failed_workflow_job=None,
             target_provider=target_provider or '',
+            expires_at=expires_at,
+            auto_deprovision=auto_deprovision,
         )
         if workflow_job:
             deployment.append_history_entry('provision', job=workflow_job, status='running')
