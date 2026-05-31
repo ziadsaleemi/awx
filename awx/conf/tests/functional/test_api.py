@@ -63,6 +63,13 @@ def test_setting_singleton_detail_retrieve(api_request, dummy_setting):
 
 
 @pytest.mark.django_db
+def test_eda_settings_category_is_registered(api_request):
+    response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'eda'}))
+    assert response.status_code == 200
+    assert response.data['EDA_SERVER_URL'] == ''
+
+
+@pytest.mark.django_db
 def test_setting_singleton_detail_invalid_retrieve(api_request, dummy_setting, normal_user):
     with dummy_setting('FOO_BAR_1', field_class=fields.IntegerField, category='FooBar', category_slug='foobar'), dummy_setting(
         'FOO_BAR_2', field_class=fields.IntegerField, category='FooBar', category_slug='foobar'

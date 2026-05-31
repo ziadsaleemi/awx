@@ -199,6 +199,9 @@ MAX_UI_JOB_EVENTS = 4000
 # to update job data in response to status changes websocket events
 UI_LIVE_UPDATES_ENABLED = True
 
+# Optional Event-Driven Ansible controller URL surfaced by the AWX overview.
+EDA_SERVER_URL = ''
+
 # The maximum size of the ansible callback event's res data structure
 # beyond this limit and the value will be removed
 MAX_EVENT_RES_DATA = 700000

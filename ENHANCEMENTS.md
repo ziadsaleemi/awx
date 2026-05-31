@@ -301,6 +301,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | H5 | **Catalog admin access + cancel endpoint parity** — Catalog admin sidebar entries and direct admin routes now require superuser or organization-admin access, with non-admin users receiving an unauthorized state instead of dead admin links; Catalog deployment cancel now has an explicit `cancel` access check so owners can cancel their own deployments, org admins can cancel same-org deployments, and forged or foreign-org cancel requests are rejected | High | ✅ |
 | H6 | **CatalogItem direct RBAC + audit parity** — CatalogItems now register with DAB RBAC and Activity Stream, include an object-level `use_catalogitem` permission, and direct per-item `use_role` grants unlock Catalog deploy endpoints while syncing RoleUserAssignment and audit records | High | ✅ |
 | H7 | **Default catalog user org-isolation hardening** — The default catalog-user signal no longer adds new users to every organization; automatic member-role assignment is limited to unambiguous single-org installs, while multi-org environments require explicit org or direct CatalogItem grants | High | ✅ |
+| H8 | **EDA settings endpoint wiring parity** — The done-marked EDA overview card now points at a registered `/api/v2/settings/eda/` category backed by `EDA_SERVER_URL`, and the Settings navigation includes Event-Driven Ansible so the overview card no longer calls a missing endpoint | High | ✅ |
 
 ---
 

@@ -214,6 +214,19 @@ register(
 )
 
 register(
+    'EDA_SERVER_URL',
+    field_class=fields.URLField,
+    default='',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('EDA Controller URL'),
+    help_text=_('Base URL for an Event-Driven Ansible Controller instance used by AWX overview integration status.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
     'AWX_ANALYTICS_CANDLEPIN_CA',
     field_class=fields.CharField,
     default='/etc/rhsm/ca/redhat-uep.pem',

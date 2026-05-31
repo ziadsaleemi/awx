@@ -100,6 +100,13 @@ export function useAwxSettingsGroupsBase() {
         categories: [],
       },
       {
+        id: 'eda',
+        name: t('Event-Driven Ansible'),
+        description: t('Configure Event-Driven Ansible controller integration.'),
+        defaultSlugs: ['eda'],
+        categories: [],
+      },
+      {
         id: 'other',
         name: t('Other'),
         categories: [],
@@ -161,8 +168,12 @@ export function useAwxSettingsGroups() {
 
       let category = group.categories.find((category) => category.name === categoryName);
       if (!category) {
+        const categoryId =
+          group.defaultSlugs?.length === 1 && group.defaultSlugs[0] === slug
+            ? group.id
+            : categoryName.toLowerCase().replace(/ /g, '-');
         category = {
-          id: categoryName.toLowerCase().replace(/ /g, '-'),
+          id: categoryId,
           name: categoryName,
           slugs: [],
         };

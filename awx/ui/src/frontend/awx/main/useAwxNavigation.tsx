@@ -327,6 +327,55 @@ export function useAwxNavigation() {
           ],
         },
         {
+          id: AwxRoute.SettingsPolicyAsCode,
+          label: t('Policy as Code'),
+          path: 'policy-as-code',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="policyascode" key="policyascode" />,
+            },
+            {
+              path: '',
+              element: (
+                <AwxSettingsCategoryDetailsPage categoryId="policyascode" key="policyascode" />
+              ),
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsAiAssistant,
+          label: t('AI Assistant'),
+          path: 'ai-assistant',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="ai-assistant" key="ai-assistant" />,
+            },
+            {
+              path: '',
+              element: (
+                <AwxSettingsCategoryDetailsPage categoryId="ai-assistant" key="ai-assistant" />
+              ),
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsEda,
+          label: t('Event-Driven Ansible'),
+          path: 'eda',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="eda" key="eda" />,
+            },
+            {
+              path: '',
+              element: <AwxSettingsCategoryDetailsPage categoryId="eda" key="eda" />,
+            },
+          ],
+        },
+        {
           id: AwxRoute.SettingsOther,
           label: t('Other'),
           path: 'other',
