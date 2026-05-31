@@ -8,9 +8,10 @@ Provides:
   - `OPAPolicyListView` — list configured policy bundles/paths
 
 Configuration (in AWX settings):
-  OPA_SERVER_URL     — base URL of the OPA server, e.g. http://opa:8181
-  OPA_ENABLED        — bool, whether to enforce OPA checks (default False)
-  OPA_TIMEOUT        — request timeout in seconds (default 5)
+  OPA_HOST            — OPA server hostname; empty disables policy checks
+  OPA_PORT            — OPA server port, e.g. 8181
+  OPA_SSL             — whether to use https
+  OPA_REQUEST_TIMEOUT — request timeout in seconds
 
 OPA input schema for job launch checks:
   {
@@ -22,6 +23,7 @@ OPA input schema for job launch checks:
 """
 
 import logging
+import re
 
 import requests
 from django.conf import settings
@@ -30,8 +32,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from rest_framework.permissions import IsAuthenticated
 from awx.api.permissions import IsSystemAdmin as IsSuperUser
+from awx.main.tasks.policy import OPA_AUTH_TYPES, opa_cert_file
 
 logger = logging.getLogger('awx.api.opa')
 
@@ -63,12 +65,37 @@ class OPAPolicyEngine:
     """Thin client for the OPA REST API (v1 data API)."""
 
     def __init__(self):
-        self.base_url = getattr(settings, 'OPA_SERVER_URL', '').rstrip('/')
-        self.timeout = int(getattr(settings, 'OPA_TIMEOUT', 5))
-        self.enabled = bool(getattr(settings, 'OPA_ENABLED', False))
+        self.host = getattr(settings, 'OPA_HOST', '')
+        self.port = getattr(settings, 'OPA_PORT', 8181)
+        self.ssl = bool(getattr(settings, 'OPA_SSL', False))
+        self.timeout = getattr(settings, 'OPA_REQUEST_TIMEOUT', 1.5)
+        self.base_url = self._build_base_url()
 
     def is_available(self) -> bool:
-        return self.enabled and bool(self.base_url)
+        return bool(self.host)
+
+    def _build_base_url(self) -> str:
+        if not self.host:
+            return ''
+        protocol = 'https' if self.ssl else 'http'
+        return f'{protocol}://{self.host}:{self.port}'
+
+    def _headers(self) -> dict:
+        headers = {'Content-Type': 'application/json'}
+        headers.update(getattr(settings, 'OPA_AUTH_CUSTOM_HEADERS', {}) or {})
+        if getattr(settings, 'OPA_AUTH_TYPE', OPA_AUTH_TYPES.NONE) == OPA_AUTH_TYPES.TOKEN:
+            headers['Authorization'] = f"Bearer {getattr(settings, 'OPA_AUTH_TOKEN', '')}"
+        return headers
+
+    def validate_configuration(self):
+        auth_type = getattr(settings, 'OPA_AUTH_TYPE', OPA_AUTH_TYPES.NONE)
+        if auth_type == OPA_AUTH_TYPES.CERTIFICATE and not self.ssl:
+            raise ValueError(_('OPA_AUTH_TYPE=Certificate requires OPA_SSL to be enabled.'))
+
+        if auth_type == OPA_AUTH_TYPES.CERTIFICATE:
+            missing = [key for key in ('OPA_AUTH_CLIENT_CERT', 'OPA_AUTH_CLIENT_KEY', 'OPA_AUTH_CA_CERT') if not getattr(settings, key, '')]
+            if missing:
+                raise ValueError(_('Following certificate settings are missing for OPA_AUTH_TYPE=Certificate: {}').format(missing))
 
     def evaluate(self, policy_path: str, input_data: dict) -> dict:
         """
@@ -79,14 +106,19 @@ class OPAPolicyEngine:
         if not self.is_available():
             return {'result': True}
 
+        self.validate_configuration()
         url = f'{self.base_url}/v1/data/{policy_path}'
         try:
-            resp = requests.post(
-                url,
-                json={'input': input_data},
-                timeout=self.timeout,
-                headers={'Content-Type': 'application/json'},
-            )
+            with opa_cert_file() as cert_files:
+                cert, verify = cert_files
+                resp = requests.post(
+                    url,
+                    json={'input': input_data},
+                    timeout=self.timeout,
+                    headers=self._headers(),
+                    cert=cert,
+                    verify=verify,
+                )
             resp.raise_for_status()
             return resp.json()
         except requests.Timeout:
@@ -103,14 +135,25 @@ def check_opa_policy(policy_path: str, input_data: dict) -> bool:
     Fails open (returns True) if OPA is not configured or unreachable.
     """
     engine = OPAPolicyEngine()
-    result = engine.evaluate(policy_path, input_data)
-    # OPA returns {"result": <value>}; treat truthy as allow
-    return bool(result.get('result', True))
+    try:
+        result = engine.evaluate(policy_path, input_data)
+    except Exception as exc:
+        logger.error('OPA policy check failed (%s): %s — defaulting to allow', policy_path, exc)
+        return True
+    return opa_response_allows(result)
+
+
+def opa_response_allows(opa_response: dict) -> bool:
+    result = opa_response.get('result', True)
+    if isinstance(result, dict) and 'allowed' in result:
+        return bool(result['allowed'])
+    return bool(result)
 
 
 # ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
+
 
 class OPAPolicyListView(APIView):
     """
@@ -118,15 +161,18 @@ class OPAPolicyListView(APIView):
 
     List configured OPA policy paths.
     """
+
     permission_classes = [IsSuperUser]
 
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
-        return Response({
-            'enabled': engine.is_available(),
-            'server_url': getattr(settings, 'OPA_SERVER_URL', ''),
-            'policies': DEFAULT_POLICIES,
-        })
+        return Response(
+            {
+                'enabled': engine.is_available(),
+                'server_url': engine.base_url,
+                'policies': DEFAULT_POLICIES,
+            }
+        )
 
 
 class OPAPolicyEvaluateView(APIView):
@@ -148,7 +194,8 @@ class OPAPolicyEvaluateView(APIView):
             "opa_response": { ... }
         }
     """
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsSuperUser]
 
     def post(self, request, *args, **kwargs):
         policy_path = request.data.get('policy_path')
@@ -166,8 +213,7 @@ class OPAPolicyEvaluateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Restrict path to prevent SSRF — only allow alphanumeric + slash + underscore
-        import re
+        # Restrict path to prevent SSRF — only allow alphanumeric + slash + underscore.
         if not re.match(r'^[a-zA-Z0-9_/]+$', policy_path):
             return Response(
                 {'detail': _('policy_path contains invalid characters.')},
@@ -176,24 +222,31 @@ class OPAPolicyEvaluateView(APIView):
 
         engine = OPAPolicyEngine()
         if not engine.is_available():
-            return Response({
-                'result': None,
-                'allowed': True,
-                'opa_response': None,
-                'detail': 'OPA is not enabled or configured.',
-            })
+            return Response(
+                {
+                    'result': None,
+                    'allowed': True,
+                    'opa_response': None,
+                    'detail': 'OPA is not enabled or configured.',
+                }
+            )
 
         try:
+            engine.validate_configuration()
             opa_resp = engine.evaluate(policy_path, input_data)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
             return Response(
                 {'detail': f'OPA evaluation error: {exc}'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        allowed = bool(opa_resp.get('result', True))
-        return Response({
-            'result': opa_resp.get('result'),
-            'allowed': allowed,
-            'opa_response': opa_resp,
-        })
+        allowed = opa_response_allows(opa_resp)
+        return Response(
+            {
+                'result': opa_resp.get('result'),
+                'allowed': allowed,
+                'opa_response': opa_resp,
+            }
+        )

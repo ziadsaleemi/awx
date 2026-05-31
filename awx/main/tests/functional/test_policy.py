@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 import requests.exceptions
+from django.conf import settings
 from django.test import override_settings
 
 from awx.main.models import (
@@ -629,3 +630,4 @@ def test_opa_client_token_auth():
         # Verify opa_client was called with the correct headers
         expected_headers = {'X-Custom': 'Header', 'Authorization': 'Bearer secret-token'}
         mock_opa_client_cm.assert_called_once_with(headers=expected_headers)
+        assert settings.OPA_AUTH_CUSTOM_HEADERS == {'X-Custom': 'Header'}

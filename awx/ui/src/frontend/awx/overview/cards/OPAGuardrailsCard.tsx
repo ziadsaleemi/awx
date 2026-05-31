@@ -49,6 +49,7 @@ interface OPAStatusResponse {
   enabled: boolean;
   server_url: string;
   policies: OPAPolicy[];
+  can_evaluate?: boolean;
 }
 
 interface OPAEvalResponse {
@@ -60,11 +61,14 @@ interface OPAEvalResponse {
 
 function useOPAStatus() {
   return useSWR<OPAStatusResponse>(awxAPI`/opa/policies/`, (url: string) =>
-    requestGet<OPAStatusResponse>(url).catch(() => ({
-      enabled: false,
-      server_url: '',
-      policies: [],
-    }))
+    requestGet<OPAStatusResponse>(url)
+      .then((response) => ({ ...response, can_evaluate: true }))
+      .catch(() => ({
+        enabled: false,
+        server_url: '',
+        policies: [],
+        can_evaluate: false,
+      }))
   );
 }
 
@@ -111,14 +115,16 @@ export function OPAGuardrailsCard() {
         width="md"
         height="sm"
         headerControls={
-          <Button
-            variant="plain"
-            aria-label={t('Test a policy')}
-            title={t('Open policy tester')}
-            onClick={() => setTesterOpen(true)}
-          >
-            <SecurityIcon />
-          </Button>
+          data?.can_evaluate ? (
+            <Button
+              variant="plain"
+              aria-label={t('Test a policy')}
+              title={t('Open policy tester')}
+              onClick={() => setTesterOpen(true)}
+            >
+              <SecurityIcon />
+            </Button>
+          ) : undefined
         }
       >
         <CardBody>
@@ -169,7 +175,7 @@ export function OPAGuardrailsCard() {
                       style={{ color: 'var(--pf-v5-global--Color--200)' }}
                     >
                       {t(
-                        'Set OPA_ENABLED=True and OPA_SERVER_URL in AWX settings to enforce policy guardrails on all actions.'
+                        'Set OPA server hostname under Settings → Policy as Code to enforce policy guardrails on all actions.'
                       )}
                     </Text>
                   </TextContent>

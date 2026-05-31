@@ -372,7 +372,7 @@ def evaluate_policy(instance):
 
     input_data = JobSerializer(instance=instance).data
 
-    headers = settings.OPA_AUTH_CUSTOM_HEADERS
+    headers = dict(settings.OPA_AUTH_CUSTOM_HEADERS or {})
     if settings.OPA_AUTH_TYPE == OPA_AUTH_TYPES.TOKEN:
         headers.update({'Authorization': 'Bearer {}'.format(settings.OPA_AUTH_TOKEN)})
 
