@@ -256,11 +256,24 @@ activity_stream_registrar.connect(WorkflowJobTemplateNode)
 activity_stream_registrar.connect(WorkflowJob)
 activity_stream_registrar.connect(WorkflowApproval)
 activity_stream_registrar.connect(WorkflowApprovalTemplate)
+activity_stream_registrar.connect(CatalogItem)
 activity_stream_registrar.connect(CloudProviderConnection)
 activity_stream_registrar.connect(CloudProviderState)
 
 # Register models
-permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, TerraformJobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
+permission_registry.register(
+    Project,
+    Team,
+    WorkflowJobTemplate,
+    JobTemplate,
+    TerraformJobTemplate,
+    CatalogItem,
+    Inventory,
+    Organization,
+    Credential,
+    NotificationTemplate,
+    ExecutionEnvironment,
+)
 permission_registry.register(InstanceGroup, parent_field_name=None)  # Not part of an organization
 
 # prevent API filtering on certain Django-supplied sensitive fields

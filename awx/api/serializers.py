@@ -196,6 +196,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'approved_or_denied_by': ('id', 'username', 'first_name', 'last_name'),
     'credential_type': DEFAULT_SUMMARY_FIELDS,
     'resource': ('ansible_id', 'resource_type'),
+    'catalog_item': DEFAULT_SUMMARY_FIELDS + ('organization_id',),
     'cloud_provider_connection': ('id', 'name', 'provider_id', 'status'),
     'cloud_provider_state': ('id', 'provider_id', 'pulled_at'),
 }
@@ -6496,6 +6497,7 @@ class ActivityStreamSerializer(BaseSerializer):
             ('ad_hoc_command', ('id', 'name', 'status', 'limit')),
             ('workflow_approval', ('id', 'name', 'unified_job_id')),
             ('instance', ('id', 'hostname')),
+            ('catalog_item', ('id', 'name', 'description', 'organization_id')),
             ('cloud_provider_connection', ('id', 'name', 'provider_id', 'status')),
             ('cloud_provider_state', ('id', 'provider_id', 'pulled_at')),
         ]

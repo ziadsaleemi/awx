@@ -331,6 +331,7 @@ def model_serializer_mapping():
         models.WorkflowApproval: serializers.WorkflowApprovalActivityStreamSerializer,
         models.WorkflowApprovalTemplate: serializers.WorkflowApprovalTemplateSerializer,
         models.WorkflowJob: serializers.WorkflowJobSerializer,
+        models.CatalogItem: serializers.CatalogItemSerializer,
         models.CloudProviderConnection: serializers.CloudProviderConnectionSerializer,
         models.CloudProviderState: serializers.CloudProviderStateSerializer,
     }
@@ -761,25 +762,28 @@ def update_catalog_deployment_on_terraform_completion(sender, instance, created,
 @receiver(post_save, sender=User)
 def assign_default_catalog_user_role(sender, instance, created, **kwargs):
     """
-    D5: If a user has no explicit role memberships, assign them to the
-    member_role of every organization.  This ensures new users are treated
-    as catalog_user (can browse catalog items) without requiring manual
-    role assignment.
+    D5: In single-organization installs, give new zero-role users the
+    organization member role so they can browse that organization's catalog.
 
-    This only runs when the user is first created so it doesn't override
-    intentional removals.
+    In multi-organization installs there is no safe organization context to
+    infer, so membership must be granted explicitly.
     """
-    if not created:
+    if not created or instance.is_superuser:
         return
-    # Avoid import-time circular dependency
     try:
-        orgs = Organization.objects.all()
+        from ansible_base.rbac.models import RoleUserAssignment
+
+        if instance.roles.exists() or RoleUserAssignment.objects.filter(user=instance).exists():
+            return
+
+        orgs = list(Organization.objects.all()[:2])
+        if len(orgs) != 1:
+            return
     except Exception:
         logger.exception('Failed to query organizations for default catalog_user role for user %s', instance.pk)
         return
-    for org in orgs:
-        try:
-            with transaction.atomic():
-                org.member_role.members.add(instance)
-        except Exception:
-            logger.exception('Failed to assign default catalog_user role for org %s to user %s', org.pk, instance.pk)
+    try:
+        with transaction.atomic():
+            orgs[0].member_role.members.add(instance)
+    except Exception:
+        logger.exception('Failed to assign default catalog_user role for org %s to user %s', orgs[0].pk, instance.pk)

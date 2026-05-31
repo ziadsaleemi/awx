@@ -29,6 +29,9 @@ class CatalogItem(CommonModelNameNotUnique):
         app_label = 'main'
         ordering = ('name',)
         default_permissions = ('change', 'delete', 'view')
+        permissions = [
+            ('use_catalogitem', 'Can deploy this catalog item'),
+        ]
 
     icon_url = models.URLField(
         max_length=1024,

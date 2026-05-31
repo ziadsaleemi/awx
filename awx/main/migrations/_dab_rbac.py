@@ -346,6 +346,23 @@ def setup_managed_role_definitions(apps, schema_editor):
         if 'org_children' in to_create and (cls_name not in ('organization', 'instancegroup', 'team')):
             org_child_perms = object_perms.copy()
             org_child_perms.add(Permission.objects.get(codename='view_organization'))
+            if cls_name == 'jobtemplate':
+                try:
+                    terraform_ct = ContentType.objects.get_for_model(apps.get_model('main', 'TerraformJobTemplate'))
+                except LookupError:
+                    terraform_ct = None
+                if terraform_ct is not None:
+                    org_child_perms.update(
+                        Permission.objects.filter(
+                            content_type=terraform_ct,
+                            codename__in=(
+                                'change_terraformjobtemplate',
+                                'delete_terraformjobtemplate',
+                                'execute_terraformjobtemplate',
+                                'view_terraformjobtemplate',
+                            ),
+                        )
+                    )
 
             managed_role_definitions.append(
                 get_or_create_managed(
@@ -373,6 +390,17 @@ def setup_managed_role_definitions(apps, schema_editor):
                         if other_perm.codename == 'use_inventory':
                             perm_list.append(other_perm)
                             break
+                if cls_name == 'organization' and action == 'member':
+                    try:
+                        catalog_ct = ContentType.objects.get_for_model(apps.get_model('main', 'CatalogItem'))
+                    except LookupError:
+                        catalog_ct = None
+                    if catalog_ct is not None:
+                        for other_perm in Permission.objects.filter(
+                            content_type=catalog_ct, codename__in=('use_catalogitem', 'view_catalogitem')
+                        ):
+                            if other_perm not in perm_list:
+                                perm_list.append(other_perm)
                 managed_role_definitions.append(
                     get_or_create_managed(
                         to_create['special'].format(cls=cls, action=action.title()),
@@ -407,7 +435,15 @@ def setup_managed_role_definitions(apps, schema_editor):
         )
     )
 
-    org_execute_permissions = {'view_jobtemplate', 'execute_jobtemplate', 'view_workflowjobtemplate', 'execute_workflowjobtemplate', 'view_organization'}
+    org_execute_permissions = {
+        'view_jobtemplate',
+        'execute_jobtemplate',
+        'view_workflowjobtemplate',
+        'execute_workflowjobtemplate',
+        'view_terraformjobtemplate',
+        'execute_terraformjobtemplate',
+        'view_organization',
+    }
     managed_role_definitions.append(
         get_or_create_managed(
             'Organization Execute',

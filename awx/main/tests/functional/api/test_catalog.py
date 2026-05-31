@@ -1,7 +1,10 @@
 import pytest
 
+from ansible_base.rbac.models import RoleDefinition, RoleUserAssignment
+
 from awx.api.versioning import reverse
-from awx.main.models import CatalogDeployment, CatalogItem, Organization, WorkflowJob, WorkflowJobTemplate
+from awx.main.access import CatalogItemAccess
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Organization, User, WorkflowJob, WorkflowJobTemplate
 from awx.main.models.terraform import TerraformJobTemplate
 
 
@@ -128,6 +131,36 @@ def test_catalog_item_deploy_survey_requires_use_permission(get, workflow_job_te
 
 
 @pytest.mark.django_db
+def test_catalog_item_direct_use_role_grants_endpoint_access_and_syncs_rbac(get, workflow_job_template, organization, rando, setup_managed_roles):
+    item = CatalogItem.objects.create(
+        name='Direct Use Role VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=403)
+    assert not CatalogItemAccess(rando).can_use(item)
+
+    item.use_role.members.add(rando)
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=200)
+    assert CatalogItemAccess(rando).can_use(item)
+
+    role_definition = RoleDefinition.objects.get(name='CatalogItem Use')
+    assert RoleUserAssignment.objects.filter(
+        user=rando,
+        role_definition=role_definition,
+        object_id=item.pk,
+    ).exists()
+    assert ActivityStream.objects.filter(
+        catalog_item=item,
+        role=item.use_role,
+        user=rando,
+        operation='associate',
+    ).exists()
+
+
+@pytest.mark.django_db
 def test_catalog_item_list_is_scoped_to_org_admin(get, org_admin, organization):
     other_org = Organization.objects.create(name='other-org')
     own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
@@ -138,6 +171,16 @@ def test_catalog_item_list_is_scoped_to_org_admin(get, org_admin, organization):
     item_ids = {item['id'] for item in response.data['results']}
     assert own_item.pk in item_ids
     assert not CatalogItem.objects.filter(pk__in=item_ids, organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_default_catalog_user_signal_does_not_cross_org_boundaries(organization):
+    other_org = Organization.objects.create(name='other-org')
+
+    user = User.objects.create(username='new-multi-org-user')
+
+    assert user not in organization.member_role
+    assert user not in other_org.member_role
 
 
 @pytest.mark.django_db
