@@ -476,7 +476,13 @@ function PageTableView<T extends object>(props: PageTableProps<T>) {
         .map((fn) => fn(item))
         .filter((content) => content !== null && content !== undefined);
       if (expandedRowContent.length === 0) return null;
-      return <Stack hasGutter>{expandedRowFunctions.map((fn) => fn(item))}</Stack>;
+      return (
+        <Stack hasGutter>
+          {expandedRowFunctions.map((fn, index) => (
+            <Fragment key={index}>{fn(item)}</Fragment>
+          ))}
+        </Stack>
+      );
     };
 
     return newExpandedRow;

@@ -102,7 +102,7 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Manifest URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly isInline hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
                 {manifestUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
@@ -110,7 +110,7 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Tools URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly isInline hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
                 {toolsUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
@@ -118,7 +118,7 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Invoke URL')}</DescriptionListTerm>
             <DescriptionListDescription>
-              <ClipboardCopy isReadOnly isInline hoverTip={t('Copy')} clickTip={t('Copied')}>
+              <ClipboardCopy isReadOnly variant={ClipboardCopyVariant.inline} hoverTip={t('Copy')} clickTip={t('Copied')}>
                 {invokeUrl}
               </ClipboardCopy>
             </DescriptionListDescription>
