@@ -296,6 +296,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 |---|------|----------|--------|
 | H1 | **Hard namespace boundaries between orgs in Catalog and Cloud** — `CloudProviderConnection` and `CloudProviderState` gain `organization` FKs (migration 0245); cloud connection/state RBAC scopes reads and writes to system users or org admins; provider-state, validate, and pull endpoints resolve accessible org-scoped connections before touching provider data; Catalog deploy/VM-size/provider views pass organization context so cloud resources, pulled provider data, and catalog controls stay isolated per org | High | ✅ |
 | H2 | **Org isolation endpoint parity matrix** — added functional coverage for org-admin Catalog item/deployment list scope, cross-org Terraform/workflow launch rejection, deprovision/retry permission boundaries, and every Cloud validate/pull endpoint rejecting foreign or mismatched connection organization context; frontend Catalog Item cloud-provider wiring now filters connections by the selected item organization | High | ✅ |
+| H3 | **Catalog job-link route parity** — Catalog deployment details, My Deployments, All Deployments, and provisioning history now route workflow jobs through `/jobs/workflow/:id/output` and Terraform jobs through `/terraform-templates/jobs/:job_id/output`; Terraform history rows no longer attempt to render workflow topology and route params use `job_id` consistently | High | ✅ |
 
 ---
 
