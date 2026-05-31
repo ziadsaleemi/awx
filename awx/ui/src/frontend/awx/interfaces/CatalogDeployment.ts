@@ -1,7 +1,10 @@
 export type CatalogDeploymentStatus =
   | 'pending'
   | 'provisioning'
+  | 'configuring'
+  | 'validating'
   | 'active'
+  | 'expired'
   | 'deprovisioning'
   | 'failed'
   | 'destroyed';

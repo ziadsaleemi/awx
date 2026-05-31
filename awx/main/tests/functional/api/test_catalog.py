@@ -906,6 +906,102 @@ def test_catalog_deployment_rejects_invalid_lease_fields(post, admin_user, organ
 
 
 @pytest.mark.django_db
+def test_expire_catalog_deployments_marks_non_auto_lease_expired(admin_user, organization):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    item = CatalogItem.objects.create(name='Manual Expiry VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='manual-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=False,
+    )
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'expired'
+    assert deployment.deprovision_job_id is None
+    assert deployment.provisioning_history[-1]['action'] == 'expire'
+    assert deployment.provisioning_history[-1]['status'] == 'expired'
+
+
+@pytest.mark.django_db
+def test_expire_catalog_deployments_auto_deprovision_uses_saved_vars(mocker, admin_user, organization, workflow_job_template):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    workflow_job_template.organization = organization
+    workflow_job_template.save(update_fields=['organization'])
+    item = CatalogItem.objects.create(
+        name='Auto Expiry VM',
+        organization=organization,
+        deprovision_workflow=workflow_job_template,
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='auto-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        extra_vars={'vm_id': 'vm-123'},
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=True,
+    )
+    launched_job = workflow_job_template.create_unified_job()
+    captured_kwargs = {}
+
+    def fake_create_unified_job(**kwargs):
+        captured_kwargs.update(kwargs)
+        return launched_job
+
+    mocker.patch.object(WorkflowJobTemplate, 'create_unified_job', side_effect=fake_create_unified_job)
+    mocker.patch.object(launched_job, 'signal_start', return_value=None)
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'deprovisioning'
+    assert deployment.deprovision_job_id == launched_job.pk
+    assert captured_kwargs['extra_vars']['vm_id'] == 'vm-123'
+    assert captured_kwargs['extra_vars']['catalog_deployment_id'] == deployment.pk
+    assert deployment.last_deprovision_vars == captured_kwargs['extra_vars']
+    assert deployment.provisioning_history[-1]['action'] == 'auto_expire_deprovision'
+
+
+@pytest.mark.django_db
+def test_expire_catalog_deployments_rejects_cross_org_provider_deprovision_workflow(mocker, admin_user, organization):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    other_org = Organization.objects.create(name='other-expiry-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Foreign Expiry Deprovision', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Auto Expiry VM',
+        organization=organization,
+        provider_deprovision_workflows={'digitalocean': foreign_workflow.pk},
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='isolated-auto-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        target_provider='digitalocean',
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=True,
+    )
+    create_job = mocker.patch.object(WorkflowJobTemplate, 'create_unified_job')
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    create_job.assert_not_called()
+    assert deployment.status == 'expired'
+    assert deployment.deprovision_job_id is None
+    assert deployment.provisioning_history[-1]['action'] == 'expire'
+    assert deployment.provisioning_history[-1]['details']['reason'] == 'provider_deprovision_workflows'
+
+
+@pytest.mark.django_db
 def test_catalog_deployment_persists_effective_workflow_extra_vars(post, mocker, admin_user, organization, workflow_job_template):
     item = CatalogItem.objects.create(
         name='Persist Effective Vars',

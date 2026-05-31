@@ -103,6 +103,7 @@ from awx.main.utils import (
     ScheduleWorkflowManager,
     ignore_inventory_computed_fields,
 )
+from awx.main.utils.catalog import catalog_related_object_matches_item_org, collect_catalog_deployment_saved_vars
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
 from awx.main.utils.plugins import compute_cloud_inventory_sources
@@ -5366,22 +5367,7 @@ def _build_catalog_item_live_schema(item):
 
 
 def _collect_deployment_saved_vars(deployment):
-    saved_vars = {}
-    if isinstance(deployment.extra_vars, dict):
-        saved_vars.update(deployment.extra_vars)
-
-    if deployment.provision_job_id and deployment.provision_job:
-        try:
-            saved_vars.update(deployment.provision_job.get_real_instance().get_effective_artifacts(parents_set=set()))
-        except Exception:
-            logger.exception('Failed to collect workflow artifacts for CatalogDeployment %s', deployment.pk)
-
-    if deployment.terraform_provision_job_id and deployment.terraform_provision_job:
-        artifacts = deployment.terraform_provision_job.artifacts
-        if isinstance(artifacts, dict):
-            saved_vars.update(artifacts)
-
-    return saved_vars
+    return collect_catalog_deployment_saved_vars(deployment)
 
 
 def _parse_catalog_launch_extra_vars(raw_extra_vars):
@@ -5513,9 +5499,7 @@ def _parse_catalog_deployment_expires_at(raw_value):
 
 
 def _catalog_related_object_matches_item_org(item, obj):
-    if obj is None or item.organization_id is None:
-        return True
-    return getattr(obj, 'organization_id', None) == item.organization_id
+    return catalog_related_object_matches_item_org(item, obj)
 
 
 def _catalog_related_org_mismatch_response(field_name):

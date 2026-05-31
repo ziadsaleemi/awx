@@ -240,6 +240,7 @@ DEPLOYMENT_STATUS_CHOICES = [
     ('configuring', _('Configuring')),
     ('validating', _('Validating')),
     ('active', _('Active')),
+    ('expired', _('Expired')),
     ('deprovisioning', _('Deprovisioning')),
     ('failed', _('Failed')),
     ('destroyed', _('Destroyed')),

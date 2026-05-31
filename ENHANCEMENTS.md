@@ -307,6 +307,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | H11 | **Marketplace provider-state source parity** — Marketplace template listing and import now prefer org-scoped `CloudProviderState` data from connected providers, respect provider admin allow-lists, reject foreign organization reads/imports, and only fall back to the static seed catalog when no pulled provider state exists for the selected organization | High | ✅ |
 | H12 | **Marketplace deployment-target import parity** — Marketplace imports can now wire either an org-scoped Terraform template or provision workflow plus optional deprovision/configure/validate workflows; the modal requires a launch target before import, posts the selected lifecycle IDs, and imported provider cards are backed by `cloud_backends` / `provider_workflows` so Catalog browse deployments are immediately launchable | High | ✅ |
 | H13 | **Catalog lease API enforcement parity** — Catalog deploy now persists `expires_at` / `auto_deprovision`, validates ISO-8601 future expiry values, rejects `auto_deprovision` without a lease, and enforces `CatalogItem.require_lease` at the API boundary so TTL settings cannot be bypassed outside the UI | High | ✅ |
+| H14 | **Catalog lease expiration lifecycle parity** — Expired active deployments now transition to an explicit `expired` lifecycle state when auto-deprovision is off or no valid same-org deprovision workflow is available; auto-expiry uses the same saved variables/artifacts as manual deprovision and refuses cross-organization deprovision workflow mappings | High | ✅ |
 
 ---
 
@@ -320,6 +321,7 @@ Code review against the completed tracker found these remaining implementation g
 | AP2 | **Marketplace template source is static** — `/api/v2/marketplace/templates/` returns hard-coded provider catalogs instead of provider data already pulled into `CloudProviderState`; imports therefore do not reflect connected organization-scoped cloud inventory | Stub / Approximation | High | ✅ |
 | AP3 | **Marketplace import is not deployment-ready from the modal** — the backend can accept optional workflow ids, but the UI only posts provider/template/name/organization, so imported items are browseable records that still need manual workflow/Terraform mapping before they can launch real provider deployments | Stub / Approximation | High | ✅ |
 | AP4 | **Catalog deployment lease fields are UI-only** — E30 added TTL controls, model fields, serializers, and an expiry task, but `CatalogItemDeploy` did not persist `expires_at` / `auto_deprovision` and did not enforce `require_lease`, so API launches silently ignored TTL choices and could bypass required leases | Implementation Bug | High | ✅ |
+| AP5 | **Catalog lease expiry never marks manual leases expired** — E30 promised deployments would be marked expired when a TTL elapsed, but `expire_catalog_deployments` only queried `auto_deprovision=True` rows; manual-expiry deployments stayed `active` forever, and the auto path did not reuse manual deprovision saved vars or reject stale cross-org workflow mappings | Implementation Bug | High | ✅ |
 
 ## Notes
 
