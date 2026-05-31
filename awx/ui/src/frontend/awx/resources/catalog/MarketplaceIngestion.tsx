@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActionGroup,
@@ -34,11 +34,12 @@ import {
   TextInput,
   Title,
 } from '@patternfly/react-core';
-import { CloudIcon, DownloadIcon, SearchIcon, StoreIcon } from '@patternfly/react-icons';
+import { CloudIcon, DownloadIcon, StoreIcon } from '@patternfly/react-icons';
 import { PageHeader, PageLayout } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
-import { requestGet, postRequest } from '../../../common/crud/Data';
+import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
+import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +64,15 @@ interface MarketplaceProvider {
 interface MarketplaceListResponse {
   count: number;
   providers: MarketplaceProvider[];
+}
+
+interface OrganizationOption {
+  id: number;
+  name: string;
+}
+
+interface OrganizationListResponse {
+  results: OrganizationOption[];
 }
 
 // ---------------------------------------------------------------------------
@@ -91,15 +101,35 @@ function TypeBadge({ type }: { type: string }) {
 
 interface IngestModalProps {
   template: MarketplaceTemplate;
+  organizations: OrganizationOption[];
+  isLoadingOrganizations: boolean;
   onClose: () => void;
   onSuccess: (name: string) => void;
 }
 
-function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
+function IngestModal({
+  template,
+  organizations,
+  isLoadingOrganizations,
+  onClose,
+  onSuccess,
+}: IngestModalProps) {
   const { t } = useTranslation();
   const [itemName, setItemName] = useState(template.name);
+  const [organizationId, setOrganizationId] = useState('');
+  const [isOrganizationSelectOpen, setIsOrganizationSelectOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!organizationId && organizations.length > 0) {
+      setOrganizationId(String(organizations[0].id));
+    }
+  }, [organizationId, organizations]);
+
+  const selectedOrganizationName =
+    organizations.find((organization) => String(organization.id) === organizationId)?.name ??
+    t('Select organization');
 
   const handleIngest = async () => {
     setIsLoading(true);
@@ -109,6 +139,7 @@ function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
         provider: template.provider,
         template_id: template.id,
         name: itemName,
+        organization: Number(organizationId),
       });
       onSuccess(itemName);
     } catch (err: unknown) {
@@ -131,7 +162,12 @@ function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
     >
       <ModalBoxBody>
         {error && (
-          <Alert variant="danger" title={t('Ingestion error')} isInline style={{ marginBottom: 16 }}>
+          <Alert
+            variant="danger"
+            title={t('Ingestion error')}
+            isInline
+            style={{ marginBottom: 16 }}
+          >
             {error}
           </Alert>
         )}
@@ -166,6 +202,38 @@ function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
         </DescriptionList>
 
         <Form>
+          <FormGroup label={t('Organization')} isRequired fieldId="organization">
+            <Select
+              isOpen={isOrganizationSelectOpen}
+              selected={organizationId}
+              onSelect={(_ev, value) => {
+                setOrganizationId(String(value));
+                setIsOrganizationSelectOpen(false);
+              }}
+              onOpenChange={setIsOrganizationSelectOpen}
+              toggle={(ref) => (
+                <Button
+                  id="organization"
+                  ref={ref}
+                  variant="control"
+                  onClick={() => setIsOrganizationSelectOpen(!isOrganizationSelectOpen)}
+                  isDisabled={isLoadingOrganizations || organizations.length === 0}
+                >
+                  {isLoadingOrganizations
+                    ? t('Loading organizations...')
+                    : selectedOrganizationName}
+                </Button>
+              )}
+            >
+              <SelectList>
+                {organizations.map((organization) => (
+                  <SelectOption key={organization.id} value={String(organization.id)}>
+                    {organization.name}
+                  </SelectOption>
+                ))}
+              </SelectList>
+            </Select>
+          </FormGroup>
           <FormGroup label={t('Catalog item name')} isRequired fieldId="item-name">
             <TextInput
               id="item-name"
@@ -180,7 +248,7 @@ function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
           <Button
             variant="primary"
             onClick={() => void handleIngest()}
-            isDisabled={isLoading || !itemName.trim()}
+            isDisabled={isLoading || !itemName.trim() || !organizationId}
             isLoading={isLoading}
             icon={<DownloadIcon />}
           >
@@ -190,6 +258,16 @@ function IngestModal({ template, onClose, onSuccess }: IngestModalProps) {
             {t('Cancel')}
           </Button>
         </ActionGroup>
+        {!isLoadingOrganizations && organizations.length === 0 && (
+          <Alert
+            variant="warning"
+            title={t('No organizations available')}
+            isInline
+            style={{ marginTop: 16 }}
+          >
+            {t('You must administer an organization before importing marketplace templates.')}
+          </Alert>
+        )}
       </ModalBoxBody>
     </Modal>
   );
@@ -209,8 +287,7 @@ function ProviderFilter({ providers, selected, onChange }: ProviderFilterProps) 
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
 
-  const selectedLabel =
-    providers.find((p) => p.id === selected)?.label ?? t('All Providers');
+  const selectedLabel = providers.find((p) => p.id === selected)?.label ?? t('All Providers');
 
   return (
     <Select
@@ -291,16 +368,26 @@ function TemplateCard({ template, onIngest }: TemplateCardProps) {
 
 export function MarketplaceIngestion() {
   const { t } = useTranslation();
+  const { activeAwxUser } = useAwxActiveUser();
   const [providerFilter, setProviderFilter] = useState('');
   const [ingestTarget, setIngestTarget] = useState<MarketplaceTemplate | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
 
   const url =
     awxAPI`/marketplace/templates/` + (providerFilter ? `?provider=${providerFilter}` : '');
+  const organizationsUrl = activeAwxUser?.is_superuser
+    ? awxAPI`/organizations/?order_by=name&page_size=200`
+    : activeAwxUser?.related?.admin_of_organizations;
 
   const { data, isLoading, error } = useGet<MarketplaceListResponse>(url);
+  const {
+    data: organizationsData,
+    isLoading: isLoadingOrganizations,
+    error: organizationsError,
+  } = useGet<OrganizationListResponse>(organizationsUrl || undefined);
 
   const allProviders: MarketplaceProvider[] = data?.providers ?? [];
+  const organizations = organizationsData?.results ?? [];
 
   const handleIngestSuccess = (name: string) => {
     setIngestTarget(null);
@@ -368,6 +455,14 @@ export function MarketplaceIngestion() {
         </div>
       )}
 
+      {organizationsError && (
+        <div style={{ padding: '0 24px 16px' }}>
+          <Alert variant="danger" title={t('Failed to load organizations')} isInline>
+            {String(organizationsError)}
+          </Alert>
+        </div>
+      )}
+
       {/* Empty */}
       {!isLoading && !error && allProviders.length === 0 && (
         <EmptyState>
@@ -414,6 +509,8 @@ export function MarketplaceIngestion() {
       {ingestTarget && (
         <IngestModal
           template={ingestTarget}
+          organizations={organizations}
+          isLoadingOrganizations={isLoadingOrganizations}
           onClose={() => setIngestTarget(null)}
           onSuccess={handleIngestSuccess}
         />

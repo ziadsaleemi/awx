@@ -14,7 +14,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from awx.api.permissions import IsSystemAdmin
 from awx.main.models import CatalogItem, Organization, WorkflowJobTemplate
 
 logger = logging.getLogger('awx.api.views.marketplace')
@@ -277,7 +276,7 @@ class MarketplaceTemplateIngestView(APIView):
     Response: the newly created CatalogItem serialized by CatalogItemSerializer.
     """
 
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         provider = request.data.get('provider', '').strip().lower()
@@ -304,38 +303,69 @@ class MarketplaceTemplateIngestView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Resolve optional FK fields
-        org_pk = request.data.get('organization')
-        organization = None
-        if org_pk:
+        admin_orgs = Organization.objects.all() if request.user.is_superuser else Organization.accessible_objects(request.user, 'admin_role')
+        if not admin_orgs.exists():
+            return Response(
+                {'organization': ['You must be an organization administrator to import marketplace templates.']},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Marketplace imports create CatalogItems, so they must always be scoped
+        # to an organization the caller administers.
+        org_pk = request.data.get('organization') or request.data.get('organization_id')
+        if not org_pk:
+            if admin_orgs.count() == 1:
+                organization = admin_orgs.first()
+            else:
+                return Response(
+                    {'organization': ['Organization is required.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
             try:
-                organization = Organization.objects.get(pk=int(org_pk))
+                org_id = int(org_pk)
+                organization = Organization.objects.get(pk=org_id)
             except (Organization.DoesNotExist, ValueError, TypeError):
                 return Response(
-                    {'error': f'Organization {org_pk} not found.'},
+                    {'organization': [f'Organization {org_pk} not found.']},
                     status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not request.user.is_superuser and not admin_orgs.filter(pk=organization.pk).exists():
+                return Response(
+                    {'organization': ['You do not have permission to import into this organization.']},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
         def _get_wjt(key):
             pk = request.data.get(key)
             if not pk:
-                return None
+                return None, None
             try:
-                return WorkflowJobTemplate.objects.get(pk=int(pk))
+                workflow = WorkflowJobTemplate.objects.get(pk=int(pk))
             except (WorkflowJobTemplate.DoesNotExist, ValueError, TypeError):
-                return None
+                return None, {key: ['Workflow job template not found.']}
+            if workflow.organization_id != organization.pk:
+                return None, {key: ['Workflow job template must belong to the selected organization.']}
+            return workflow, None
 
-        item_name = request.data.get('name') or entry['name']
+        workflows = {}
+        for key in ('provision_workflow', 'deprovision_workflow', 'configure_workflow', 'validate_workflow'):
+            workflow, error = _get_wjt(key)
+            if error:
+                return Response(error, status=status.HTTP_400_BAD_REQUEST)
+            workflows[key] = workflow
+
+        item_name = (request.data.get('name') or entry['name']).strip() or entry['name']
 
         # Build the CatalogItem
         catalog_item = CatalogItem(
             name=item_name,
             description=entry.get('description', ''),
             organization=organization,
-            provision_workflow=_get_wjt('provision_workflow'),
-            deprovision_workflow=_get_wjt('deprovision_workflow'),
-            configure_workflow=_get_wjt('configure_workflow'),
-            validate_workflow=_get_wjt('validate_workflow'),
+            provision_workflow=workflows['provision_workflow'],
+            deprovision_workflow=workflows['deprovision_workflow'],
+            configure_workflow=workflows['configure_workflow'],
+            validate_workflow=workflows['validate_workflow'],
             # Store original marketplace metadata for reference
             cloud_backends={provider: None},
             available_providers=[provider],

@@ -301,6 +301,85 @@ def test_catalog_item_edit_persists_organization(patch, admin_user, organization
 
 
 @pytest.mark.django_db
+def test_marketplace_ingest_creates_org_scoped_catalog_item(post, org_admin, organization):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'name': 'Team Ubuntu VM',
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.name == 'Team Ubuntu VM'
+    assert item.organization_id == organization.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_foreign_organization(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': other_org.pk,
+        },
+        org_admin,
+        expect=403,
+    )
+
+    assert 'organization' in response.data
+    assert not CatalogItem.objects.filter(organization=other_org, name='Ubuntu 22.04 LTS (x64)').exists()
+    assert not CatalogItem.objects.filter(organization__isnull=True, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_cross_org_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Marketplace Workflow', organization=other_org)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'provision_workflow': foreign_workflow.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provision_workflow' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_non_admin(post, rando, organization):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+        },
+        rando,
+        expect=403,
+    )
+
+    assert 'organization' in response.data
+    assert not CatalogItem.objects.filter(name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
 def test_catalog_deployment_retry_relaunches_failed_deployment(post, admin_user, organization, workflow_job_template):
     item = CatalogItem.objects.create(
         name='Oracle VM',
@@ -426,11 +505,7 @@ def test_catalog_deployment_persists_effective_workflow_extra_vars(post, mocker,
     )
 
     launched_job = workflow_job_template.create_unified_job()
-    launched_job.extra_vars = (
-        '{"vm_name": "awx-apache-vm-01", '
-        '"proxmox_template_name": "ubuntu-24-04-cloud-template-qga", '
-        '"cpu": 2, "ram": 2048}'
-    )
+    launched_job.extra_vars = '{"vm_name": "awx-apache-vm-01", ' '"proxmox_template_name": "ubuntu-24-04-cloud-template-qga", ' '"cpu": 2, "ram": 2048}'
 
     def fake_create_unified_job(**kwargs):
         return launched_job
