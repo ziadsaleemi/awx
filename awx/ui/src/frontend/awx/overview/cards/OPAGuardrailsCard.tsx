@@ -59,14 +59,12 @@ interface OPAEvalResponse {
 }
 
 function useOPAStatus() {
-  return useSWR<OPAStatusResponse>(
-    awxAPI`/opa/policies/`,
-    (url: string) =>
-      requestGet<OPAStatusResponse>(url).catch(() => ({
-        enabled: false,
-        server_url: '',
-        policies: [],
-      }))
+  return useSWR<OPAStatusResponse>(awxAPI`/opa/policies/`, (url: string) =>
+    requestGet<OPAStatusResponse>(url).catch(() => ({
+      enabled: false,
+      server_url: '',
+      policies: [],
+    }))
   );
 }
 
@@ -75,7 +73,9 @@ export function OPAGuardrailsCard() {
   const { data, isLoading } = useOPAStatus();
   const [testerOpen, setTesterOpen] = useState(false);
   const [policyPath, setPolicyPath] = useState('awx/job_launch/allow');
-  const [inputJson, setInputJson] = useState('{\n  "user": {"username": "admin", "is_superuser": true},\n  "template": {"id": 1, "name": "Deploy App"}\n}');
+  const [inputJson, setInputJson] = useState(
+    '{\n  "user": {"username": "admin", "is_superuser": true},\n  "template": {"id": 1, "name": "Deploy App"}\n}'
+  );
   const [evalResult, setEvalResult] = useState<OPAEvalResponse | null>(null);
   const [evalLoading, setEvalLoading] = useState(false);
   const [evalError, setEvalError] = useState<string | null>(null);
@@ -132,9 +132,13 @@ export function OPAGuardrailsCard() {
                     <DescriptionListTerm>{t('Status')}</DescriptionListTerm>
                     <DescriptionListDescription>
                       {data?.enabled ? (
-                        <Label color="green" icon={<CheckCircleIcon />}>{t('Enabled')}</Label>
+                        <Label color="green" icon={<CheckCircleIcon />}>
+                          {t('Enabled')}
+                        </Label>
                       ) : (
-                        <Label color="grey" icon={<TimesCircleIcon />}>{t('Disabled')}</Label>
+                        <Label color="grey" icon={<TimesCircleIcon />}>
+                          {t('Disabled')}
+                        </Label>
                       )}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
@@ -142,7 +146,7 @@ export function OPAGuardrailsCard() {
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('OPA Server')}</DescriptionListTerm>
                       <DescriptionListDescription>
-                        <ClipboardCopy isReadOnly isInline hoverTip={t('Copy')} clickTip={t('Copied')}>
+                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
                           {data.server_url}
                         </ClipboardCopy>
                       </DescriptionListDescription>
@@ -150,7 +154,9 @@ export function OPAGuardrailsCard() {
                   )}
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Active policies')}</DescriptionListTerm>
-                    <DescriptionListDescription>{data?.policies.length ?? 0}</DescriptionListDescription>
+                    <DescriptionListDescription>
+                      {data?.policies.length ?? 0}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                 </DescriptionList>
               </StackItem>
@@ -158,8 +164,13 @@ export function OPAGuardrailsCard() {
               {!data?.enabled && (
                 <StackItem>
                   <TextContent>
-                    <Text component={TextVariants.small} style={{ color: 'var(--pf-v5-global--Color--200)' }}>
-                      {t('Set OPA_ENABLED=True and OPA_SERVER_URL in AWX settings to enforce policy guardrails on all actions.')}
+                    <Text
+                      component={TextVariants.small}
+                      style={{ color: 'var(--pf-v5-global--Color--200)' }}
+                    >
+                      {t(
+                        'Set OPA_ENABLED=True and OPA_SERVER_URL in AWX settings to enforce policy guardrails on all actions.'
+                      )}
                     </Text>
                   </TextContent>
                 </StackItem>
@@ -172,7 +183,15 @@ export function OPAGuardrailsCard() {
                       {data.policies.map((p) => (
                         <tr key={p.id}>
                           <td style={{ padding: '2px 8px 2px 0', fontWeight: 600 }}>{p.id}</td>
-                          <td style={{ color: 'var(--pf-v5-global--Color--200)', fontFamily: 'monospace', fontSize: 11 }}>{p.path}</td>
+                          <td
+                            style={{
+                              color: 'var(--pf-v5-global--Color--200)',
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                            }}
+                          >
+                            {p.path}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -247,7 +266,9 @@ export function OPAGuardrailsCard() {
                 <Text component={TextVariants.h4}>{t('Full OPA response')}</Text>
               </TextContent>
               <CodeBlock>
-                <CodeBlockCode>{JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}</CodeBlockCode>
+                <CodeBlockCode>
+                  {JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}
+                </CodeBlockCode>
               </CodeBlock>
             </StackItem>
           )}

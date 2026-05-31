@@ -60,6 +60,7 @@ export function useRelaunchOptions(): IPageAction<UnifiedJob>[] {
         label: t(`Resume`),
         isHidden: (job: UnifiedJob) =>
           !job.related.resume ||
+          !job.status ||
           !['failed', 'canceled', 'error'].includes(job.status) ||
           job.type !== 'workflow_job',
         onClick: (job: UnifiedJob) => void resumeWorkflowJob(job),

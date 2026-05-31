@@ -1,3 +1,5 @@
+import { SummaryFieldCredential, SummaryFieldRecentJob } from './summary-fields/summary-fields';
+
 export interface TerraformJobTemplate {
   id: number;
   type: 'terraform_job_template';
@@ -33,7 +35,11 @@ export interface TerraformJobTemplate {
   summary_fields: {
     organization?: { id: number; name: string };
     project?: { id: number; name: string; scm_type: string };
+    inventory?: { id: number; name: string; kind: string };
+    execution_environment?: { id: number; name: string };
     target_inventory?: { id: number; name: string; kind: string };
+    recent_jobs?: SummaryFieldRecentJob[];
+    labels?: { count: number; results: { id: number; name: string }[] };
     last_job?: {
       id: number;
       name: string;
@@ -49,7 +55,7 @@ export interface TerraformJobTemplate {
       start: boolean;
       copy: boolean;
     };
-    credentials?: { id: number; name: string; description: string; kind: string; cloud: boolean }[];
+    credentials?: SummaryFieldCredential[];
     created_by?: { id: number; username: string };
     modified_by?: { id: number; username: string };
   };

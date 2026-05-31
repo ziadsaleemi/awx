@@ -15,6 +15,7 @@ const ResourceLink: Record<UnifiedJobType, AwxRoute> = {
   job: AwxRoute.JobTemplateDetails,
   project_update: AwxRoute.ProjectDetails,
   system_job: AwxRoute.ManagementJobSchedules,
+  terraform_job: AwxRoute.TerraformTemplateDetails,
   workflow_approval: AwxRoute.WorkflowApprovalDetails,
   workflow_job: AwxRoute.WorkflowJobTemplateDetails,
 };

@@ -35,10 +35,12 @@ export function TerraformTemplateLaunch() {
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest<Partial<TerraformLaunchFormValues>, TerraformJob>();
 
-  const { data: template, error, isLoading, refresh } = useGetItem<TerraformJobTemplate>(
-    awxAPI`/terraform_job_templates`,
-    id
-  );
+  const {
+    data: template,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<TerraformJobTemplate>(awxAPI`/terraform_job_templates`, id);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !template) return <LoadingPage />;
@@ -119,8 +121,9 @@ export function TerraformTemplateLaunch() {
           <PageFormTextArea
             name="extra_vars"
             label={t('Extra Variables')}
-            helperText={t('Variables in JSON or YAML format to pass to Terraform as a tfvars file.')}
-            style={{ fontFamily: 'monospace' }}
+            helperText={t(
+              'Variables in JSON or YAML format to pass to Terraform as a tfvars file.'
+            )}
           />
         )}
       </AwxPageForm>

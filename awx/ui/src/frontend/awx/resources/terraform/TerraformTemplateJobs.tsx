@@ -102,7 +102,9 @@ export function TerraformTemplateJobs() {
       },
       {
         header: t('Duration'),
-        cell: (job) => <ElapsedTimeCell value={job.elapsed} />,
+        cell: (job) => (
+          <ElapsedTimeCell start={job.started ?? undefined} finish={job.finished ?? undefined} />
+        ),
       },
       {
         header: t('Launched by'),

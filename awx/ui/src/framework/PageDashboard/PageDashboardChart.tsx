@@ -85,6 +85,29 @@ export function PageDashboardChart(props: {
       color: group.color,
       link: group.link,
     }));
+  const pointClickEvents = useMemo(
+    () =>
+      onPointClick
+        ? [
+            {
+              target: 'data' as const,
+              eventHandlers: {
+                onClick: (
+                  _event: React.SyntheticEvent,
+                  point?: { datum?: { x?: string | number } }
+                ) => {
+                  const label = point?.datum?.x;
+                  if (label !== undefined) {
+                    onPointClick(label.toString());
+                  }
+                  return [];
+                },
+              },
+            },
+          ]
+        : undefined,
+    [onPointClick]
+  );
 
   const maxDomainY = useMemo(() => {
     const maxValues: Record<string, number> = {};
@@ -177,8 +200,10 @@ export function PageDashboardChart(props: {
                       name={'scatter-' + index}
                       data={group.values.map((value) => ({ x: value.label, y: value.value }))}
                       size={({ active }) => (active ? 6 : 3)}
-                      style={{ data: { fill: group.color, cursor: onPointClick ? 'pointer' : undefined } }}
-                      events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
+                      style={{
+                        data: { fill: group.color, cursor: onPointClick ? 'pointer' : undefined },
+                      }}
+                      events={pointClickEvents}
                     />
                   ))}
                 {(!props.variant || props.variant === 'stackedAreaChart') && (
@@ -206,7 +231,7 @@ export function PageDashboardChart(props: {
                         }))}
                         size={({ active }) => (active ? 6 : 3)}
                         style={{ data: { cursor: onPointClick ? 'pointer' : undefined } }}
-                        events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
+                        events={pointClickEvents}
                       />
                     ))}
                   </ChartStack>

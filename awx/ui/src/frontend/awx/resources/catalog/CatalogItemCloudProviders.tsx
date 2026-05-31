@@ -1,12 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import { useState } from 'react';
-import {
-  Alert,
-  Label,
-  Switch,
-  Title,
-} from '@patternfly/react-core';
+import { Alert, Label, Switch, Title } from '@patternfly/react-core';
 import { LoadingPage } from '../../../../framework';
 import { useGetItem, useGet } from '../../../common/crud/useGet';
 import { requestPatch } from '../../../common/crud/Data';
@@ -29,6 +24,8 @@ const PROVIDER_COLORS: Record<string, { bg: string; fg: string; abbr: string }> 
   aws: { bg: '#FF9900', fg: '#1a1a1a', abbr: 'AWS' },
   vmware: { bg: '#607078', fg: '#fff', abbr: 'VM' },
 };
+
+const DEFAULT_PROVIDER_COLOR = { bg: '#888', fg: '#fff' };
 
 interface CloudConnectionApiResult {
   count: number;
@@ -64,9 +61,12 @@ export function CatalogItemCloudProviders() {
     refresh,
   } = useGetItem<CatalogItem>(awxAPI`/catalog_items`, params.id);
 
-  const { data: connectionsData } = useGet<CloudConnectionApiResult>(
-    awxAPI`/catalog_cloud/connections/`
-  );
+  const connectionsUrl = item
+    ? item.organization
+      ? `${awxAPI`/catalog_cloud/connections/`}?organization=${item.organization}`
+      : awxAPI`/catalog_cloud/connections/`
+    : undefined;
+  const { data: connectionsData } = useGet<CloudConnectionApiResult>(connectionsUrl);
 
   const [saving, setSaving] = useState<string | null>(null);
   const [availableProviders, setAvailableProviders] = useState<string[] | null>(null);
@@ -77,10 +77,9 @@ export function CatalogItemCloudProviders() {
   // Collect all workflow IDs we need names for
   const provisionMap = item?.provider_workflows ?? {};
   const deprovisionMap = item?.provider_deprovision_workflows ?? {};
-  const allWfIds = [
-    ...Object.values(provisionMap),
-    ...Object.values(deprovisionMap),
-  ].filter(Boolean) as number[];
+  const allWfIds = [...Object.values(provisionMap), ...Object.values(deprovisionMap)].filter(
+    (id): id is number => typeof id === 'number'
+  );
 
   const wfNames = useWorkflowNames(allWfIds);
 
@@ -96,10 +95,7 @@ export function CatalogItemCloudProviders() {
 
   // Providers configured on the item (union of connections + any in provider_workflows)
   const configuredProviderIds = [
-    ...new Set([
-      ...Object.keys(groups),
-      ...Object.keys(provisionMap),
-    ]),
+    ...new Set([...Object.keys(groups), ...Object.keys(provisionMap)]),
   ];
 
   const handleToggle = async (providerId: string, enable: boolean) => {
@@ -121,11 +117,7 @@ export function CatalogItemCloudProviders() {
   if (configuredProviderIds.length === 0) {
     return (
       <div style={{ padding: '2rem 1.5rem' }}>
-        <Alert
-          isInline
-          variant="info"
-          title={t('No cloud providers configured')}
-        >
+        <Alert isInline variant="info" title={t('No cloud providers configured')}>
           {t(
             'No cloud connections are configured. Add connections in the cloud provider settings pages, then re-open this catalog item.'
           )}
@@ -144,19 +136,17 @@ export function CatalogItemCloudProviders() {
           const conns = groups[pid] ?? [];
           const enabled = effectiveProviders.includes(pid);
           const hasConnected = conns.some((c) => c.status === 'connected');
-          const color =
-            PROVIDER_COLORS[pid] ?? {
-              bg: '#888',
-              fg: '#fff',
-              abbr: pid.slice(0, 2).toUpperCase(),
-            };
+          const color = PROVIDER_COLORS[pid] ?? {
+            ...DEFAULT_PROVIDER_COLOR,
+            abbr: pid.slice(0, 2).toUpperCase(),
+          };
           const label = PROVIDER_LABELS[pid] ?? pid;
 
           const provisionWfId = provisionMap[pid] ?? null;
           const deprovisionWfId = deprovisionMap[pid] ?? null;
-          const provisionName = provisionWfId ? (wfNames[provisionWfId] ?? `#${provisionWfId}`) : '-';
+          const provisionName = provisionWfId ? wfNames[provisionWfId] ?? `#${provisionWfId}` : '-';
           const deprovisionName = deprovisionWfId
-            ? (wfNames[deprovisionWfId] ?? `#${deprovisionWfId}`)
+            ? wfNames[deprovisionWfId] ?? `#${deprovisionWfId}`
             : '-';
 
           return (
@@ -197,9 +187,7 @@ export function CatalogItemCloudProviders() {
                   <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{label}</div>
                   {/* Connectors */}
                   {conns.length > 0 && (
-                    <div
-                      style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}
-                    >
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                       {conns.map((conn) => (
                         <span
                           key={conn.id}
@@ -279,7 +267,6 @@ export function CatalogItemCloudProviders() {
                   )}
                 </div>
               </div>
-
             </div>
           );
         })}

@@ -16,7 +16,7 @@ Covers:
 import pytest
 
 from awx.api.versioning import reverse
-from awx.main.models import CatalogDeployment, CatalogItem
+from awx.main.models import CatalogDeployment, CatalogItem, Credential, CredentialType, Organization
 from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
 from awx.main.models.terraform import TerraformJobTemplate
 
@@ -107,6 +107,55 @@ DO_ADMIN_SETTINGS = {
 }
 
 
+CLOUD_CONNECTOR_ENDPOINTS = [
+    (
+        'digitalocean',
+        'digitalocean_terraform',
+        {'do_token': 'dop_v1_test'},
+        'api:catalog_cloud_digitalocean_validate',
+    ),
+    (
+        'digitalocean',
+        'digitalocean_terraform',
+        {'do_token': 'dop_v1_test'},
+        'api:catalog_cloud_digitalocean_pull_images',
+    ),
+    (
+        'proxmox',
+        'proxmox_ve',
+        {
+            'pm_api_url': 'https://proxmox.example/api2/json',
+            'pm_api_token_id': 'user@pam!token',
+            'pm_api_token_secret': 'secret',
+            'pm_tls_insecure': True,
+        },
+        'api:catalog_cloud_proxmox_pull_resources',
+    ),
+    (
+        'vmware',
+        'vmware',
+        {
+            'host': 'vcenter.example',
+            'username': 'administrator',
+            'password': 'secret',
+            'validate_certs': False,
+        },
+        'api:catalog_cloud_vmware_pull_resources',
+    ),
+    (
+        'azure',
+        'azure_rm_terraform',
+        {
+            'arm_subscription_id': 'sub-id',
+            'arm_client_id': 'client-id',
+            'arm_client_secret': 'secret',
+            'arm_tenant_id': 'tenant-id',
+        },
+        'api:catalog_cloud_azure_pull_resources',
+    ),
+]
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -171,6 +220,34 @@ def multi_cloud_catalog_item(organization, do_terraform_job_template, other_terr
             },
         },
     )
+
+
+def _credential_type(namespace, inputs):
+    return CredentialType.objects.create(
+        name=f'{namespace} test credential type',
+        namespace=namespace,
+        kind='cloud',
+        inputs={
+            'fields': [
+                {'id': field, 'label': field, 'type': 'boolean' if isinstance(value, bool) else 'string'}
+                for field, value in inputs.items()
+            ],
+            'required': list(inputs.keys()),
+        },
+        injectors={},
+    )
+
+
+def _cloud_credential(namespace, inputs, organization, user):
+    credential_type = _credential_type(namespace, inputs)
+    credential = Credential.objects.create(
+        name=f'{namespace} credential',
+        organization=organization,
+        credential_type=credential_type,
+        inputs=inputs,
+    )
+    credential.use_role.members.add(user)
+    return credential
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +480,53 @@ def test_do_provider_state_provider_data_present(get, admin_user, do_provider_st
     assert 202 in image_ids
 
 
+@pytest.mark.django_db
+def test_provider_state_is_scoped_to_org_admin_org(get, rando, organization):
+    """Org admins can read only provider state scoped to their organization."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        admin_settings={'allowedImageIds': [101]},
+    )
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        admin_settings={'allowedImageIds': [202]},
+    )
+
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    response = get(f'{url}?organization={organization.pk}', rando, expect=200)
+    assert response.data['organization'] == organization.pk
+    assert response.data['admin_settings']['allowedImageIds'] == [101]
+
+    get(f'{url}?organization={other_org.pk}', rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_provider_state_org_admin_patch_updates_only_scoped_row(patch, rando, organization):
+    """Org admin PATCH writes the row for the requested organization."""
+    organization.admin_role.members.add(rando)
+    state = CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        admin_settings={'allowedImageIds': [101]},
+    )
+
+    url = reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})
+    response = patch(
+        f'{url}?organization={organization.pk}',
+        {'admin_settings': {'allowedImageIds': [303]}},
+        rando,
+        expect=200,
+    )
+
+    assert response.data['organization'] == organization.pk
+    state.refresh_from_db()
+    assert state.admin_settings['allowedImageIds'] == [303]
+
+
 # ---------------------------------------------------------------------------
 # CloudProviderConnection tests
 # ---------------------------------------------------------------------------
@@ -443,6 +567,94 @@ def test_do_cloud_provider_connection_not_accessible_by_non_admin(get, rando):
     """Non-admin cannot list cloud provider connections."""
     url = reverse('api:catalog_cloud_connection_list')
     get(url, rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_cloud_provider_connection_list_is_scoped_to_org_admin(get, rando, organization):
+    """Org admins list connections from their organization only."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Own Org Connection',
+        status='connected',
+        organization=organization,
+    )
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Other Org Connection',
+        status='connected',
+        organization=other_org,
+    )
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Global Connection',
+        status='connected',
+    )
+
+    url = reverse('api:catalog_cloud_connection_list')
+    response = get(url, rando, expect=200)
+    names = [c['name'] for c in response.data['results']]
+    assert names == ['Own Org Connection']
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('provider_id, namespace, inputs, url_name', CLOUD_CONNECTOR_ENDPOINTS)
+def test_cloud_connector_endpoint_rejects_other_org_connection(
+    post,
+    rando,
+    organization,
+    provider_id,
+    namespace,
+    inputs,
+    url_name,
+):
+    """Connector validate/pull endpoints cannot use a connection from another organization."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    credential = _cloud_credential(namespace, inputs, organization, rando)
+    foreign_connection = CloudProviderConnection.objects.create(
+        provider_id=provider_id,
+        name='Other Org Connection',
+        status='connected',
+        organization=other_org,
+        credential=credential,
+    )
+
+    post(
+        reverse(url_name),
+        {'credential_id': credential.pk, 'connection_id': foreign_connection.pk},
+        rando,
+        expect=403,
+    )
+
+
+@pytest.mark.django_db
+def test_cloud_connector_endpoint_rejects_connection_organization_mismatch(post, rando, organization):
+    """Connector endpoints must reject payload org context that does not match connection org."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    credential = _cloud_credential('proxmox_ve', {}, organization, rando)
+    connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Own Org Connection',
+        status='connected',
+        organization=organization,
+        credential=credential,
+    )
+
+    response = post(
+        reverse('api:catalog_cloud_proxmox_pull_resources'),
+        {
+            'credential_id': credential.pk,
+            'connection_id': connection.pk,
+            'organization': other_org.pk,
+        },
+        rando,
+        expect=400,
+    )
+
+    assert 'organization' in str(response.data)
 
 
 @pytest.mark.django_db

@@ -45,7 +45,6 @@ import { isRequestError } from '../../../common/crud/RequestError';
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
-import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   CloudConnectionEntry,
   VmwareAdminSettings,
@@ -62,6 +61,7 @@ import {
 } from './cloudConnectionStore';
 import VmwareLogo from '../../../assets/vmware.svg';
 import { ConnectionModal } from './CloudConnections';
+import { useCloudOrganization } from './useCloudOrganization';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -252,13 +252,21 @@ function DatastoresTab(props: {
         type: PageActionType.Button,
         selection: PageActionSelection.Multiple,
         label: t('Allow selected'),
-        onClick: (items: VmwareDatastore[]) => onBulkToggle(items.map((d) => d.name), true),
+        onClick: (items: VmwareDatastore[]) =>
+          onBulkToggle(
+            items.map((d) => d.name),
+            true
+          ),
       },
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Multiple,
         label: t('Deny selected'),
-        onClick: (items: VmwareDatastore[]) => onBulkToggle(items.map((d) => d.name), false),
+        onClick: (items: VmwareDatastore[]) =>
+          onBulkToggle(
+            items.map((d) => d.name),
+            false
+          ),
       },
     ];
   }, [onBulkToggle, t]);
@@ -373,13 +381,21 @@ function NetworksTab(props: {
         type: PageActionType.Button,
         selection: PageActionSelection.Multiple,
         label: t('Allow selected'),
-        onClick: (items: VmwareNetwork[]) => onBulkToggle(items.map((n) => n.name), true),
+        onClick: (items: VmwareNetwork[]) =>
+          onBulkToggle(
+            items.map((n) => n.name),
+            true
+          ),
       },
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Multiple,
         label: t('Deny selected'),
-        onClick: (items: VmwareNetwork[]) => onBulkToggle(items.map((n) => n.name), false),
+        onClick: (items: VmwareNetwork[]) =>
+          onBulkToggle(
+            items.map((n) => n.name),
+            false
+          ),
       },
     ];
   }, [onBulkToggle, t]);
@@ -799,7 +815,7 @@ function OverviewTab(props: {
 
 export function VmwareProviderSettings() {
   const { t } = useTranslation();
-  const { activeAwxUser } = useAwxActiveUser();
+  const { canManageCloud, organizationId } = useCloudOrganization();
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -809,12 +825,12 @@ export function VmwareProviderSettings() {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadData = useCallback(() => {
-    void fetchCloudConnections('vmware').then(setConnectionEntries);
-    void fetchProviderState('vmware').then((state) => {
+    void fetchCloudConnections('vmware', organizationId).then(setConnectionEntries);
+    void fetchProviderState('vmware', organizationId).then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
       setAdminSettings((state?.admin_settings as VmwareAdminSettings | null) ?? null);
     });
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     loadData();
@@ -822,11 +838,8 @@ export function VmwareProviderSettings() {
 
   const handleModalClose = useCallback(() => {
     setShowModal(false);
-    void fetchCloudConnections('vmware').then(setConnectionEntries);
-  }, []);
-
-  const canManageCloud =
-    Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
+    void fetchCloudConnections('vmware', organizationId).then(setConnectionEntries);
+  }, [organizationId]);
 
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
@@ -916,9 +929,9 @@ export function VmwareProviderSettings() {
         allowedDatastoreNames: adminSettings?.allowedDatastoreNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('vmware', { admin_settings: newSettings });
+      await patchProviderState('vmware', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.networks]
+    [adminSettings, allData.networks, organizationId]
   );
 
   const onBulkToggleDatastore = useCallback(
@@ -941,9 +954,9 @@ export function VmwareProviderSettings() {
         allowedDatastoreNames: next,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('vmware', { admin_settings: newSettings });
+      await patchProviderState('vmware', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.datastores]
+    [adminSettings, allData.datastores, organizationId]
   );
 
   const onPull = async () => {
@@ -970,9 +983,11 @@ export function VmwareProviderSettings() {
             datastore_count: number;
             network_count: number;
           },
-          { credential_id: number }
+          { credential_id: number; connection_id: string; organization: number | null }
         >(awxAPI`/catalog_cloud/connectors/vmware/pull_resources/`, {
           credential_id: conn.credentialId!,
+          connection_id: conn.id,
+          organization: conn.organizationId,
         });
         successCount++;
       } catch (err) {
@@ -992,7 +1007,7 @@ export function VmwareProviderSettings() {
     }
 
     // Reload from DB after all pulls complete
-    const state = await fetchProviderState('vmware');
+    const state = await fetchProviderState('vmware', organizationId);
     if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
 
     if (successCount > 0) {
@@ -1135,9 +1150,9 @@ export function VmwareProviderSettings() {
           >
             <DatastoresTab
               datastores={activeData.datastores}
-              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              adminSettings={canManageCloud ? adminSettings : undefined}
               onBulkToggle={
-                activeAwxUser?.is_superuser
+                canManageCloud
                   ? (names, allowed) => void onBulkToggleDatastore(names, allowed)
                   : undefined
               }
@@ -1151,9 +1166,9 @@ export function VmwareProviderSettings() {
           >
             <NetworksTab
               networks={activeData.networks}
-              adminSettings={activeAwxUser?.is_superuser ? adminSettings : undefined}
+              adminSettings={canManageCloud ? adminSettings : undefined}
               onBulkToggle={
-                activeAwxUser?.is_superuser
+                canManageCloud
                   ? (names, allowed) => void onBulkToggleNetwork(names, allowed)
                   : undefined
               }
@@ -1170,7 +1185,14 @@ export function VmwareProviderSettings() {
         </PageTabs>
       )}
 
-      {showModal && <ConnectionModal providerId="vmware" onClose={handleModalClose} />}
+      {showModal && (
+        <ConnectionModal
+          providerId="vmware"
+          userOrgId={organizationId}
+          canManageCloud={canManageCloud}
+          onClose={handleModalClose}
+        />
+      )}
     </PageLayout>
   );
 }

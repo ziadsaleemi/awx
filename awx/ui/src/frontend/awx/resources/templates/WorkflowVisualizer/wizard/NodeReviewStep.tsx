@@ -24,6 +24,7 @@ const ResourceLink: Record<UnifiedJobType, AwxRoute> = {
   job: AwxRoute.JobTemplateDetails,
   project_update: AwxRoute.ProjectDetails,
   system_job: AwxRoute.ManagementJobSchedules,
+  terraform_job: AwxRoute.TerraformTemplateDetails,
   workflow_approval: AwxRoute.WorkflowApprovalDetails,
   workflow_job: AwxRoute.WorkflowJobTemplateDetails,
 };
@@ -39,6 +40,9 @@ function getSurveySpecUrl(template: AllResources | NodeResource | null) {
     case 'workflow_job_template':
     case 'workflow_job':
       return awxAPI`/workflow_job_templates/${template?.id.toString()}/survey_spec/`;
+    case 'terraform_job_template':
+    case 'terraform_job':
+      return awxAPI`/terraform_job_templates/${template?.id.toString()}/survey_spec/`;
     default:
       return '';
   }

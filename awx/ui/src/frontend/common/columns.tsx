@@ -141,7 +141,7 @@ export function useLastRanColumn(options?: {
 export function useLabelsColumn() {
   const { t } = useTranslation();
   const column: ITableColumn<{
-    summary_fields?: { labels: { count: number; results: { id: number; name: string }[] } };
+    summary_fields?: { labels?: { count: number; results: { id: number; name: string }[] } };
   }> = useMemo(
     () => ({
       header: t('Labels'),

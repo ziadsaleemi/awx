@@ -46,10 +46,9 @@ export function TerraformTemplatePage() {
           { label: template.name },
         ]}
         headerActions={
-          <PageActions
+          <PageActions<TerraformJobTemplate>
             actions={itemActions}
             position={DropdownPosition.right}
-            additionalActionButtonProps={{ size: 'sm' }}
             selectedItem={template}
           />
         }

@@ -5,14 +5,17 @@ import { useGet } from '../../../../common/crud/useGet';
 import { usePostRequest } from '../../../../common/crud/usePostRequest';
 import type { Spec, Survey } from '../../../interfaces/Survey';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
+
+type SurveyTemplateType = (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)['type'];
 
 export function useDeleteSurvey(props: {
   onClose: () => void;
   onComplete: (questions: Spec[]) => void;
   onError: (err: unknown) => void;
   id?: string;
-  templateType?: (JobTemplate | WorkflowJobTemplate)['type'];
+  templateType?: SurveyTemplateType;
 }) {
   const { onClose, onComplete, onError, id, templateType } = props;
   const postRequest = usePostRequest();

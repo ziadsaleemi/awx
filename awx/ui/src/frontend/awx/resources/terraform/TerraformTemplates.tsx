@@ -1,8 +1,10 @@
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import {
+  IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageActionSelection,
+  PageActionType,
   PageHeader,
   PageLayout,
   PageTable,
@@ -36,30 +38,29 @@ export function TerraformTemplates() {
 
   const deleteTerraformTemplates = useDeleteTerraformTemplates(view.unselectItemsAndRefresh);
 
-  const { data } = useOptions<OptionsResponse<ActionsResponse>>(
-    awxAPI`/terraform_job_templates/`
-  );
+  const { data } = useOptions<OptionsResponse<ActionsResponse>>(awxAPI`/terraform_job_templates/`);
   const canCreate = Boolean(data?.actions?.['POST']);
 
-  const toolbarActions = useMemo(
+  const toolbarActions = useMemo<IPageAction<TerraformJobTemplate>[]>(
     () => [
       {
-        type: 'button' as const,
-        selection: 'none' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.None,
         variant: ButtonVariant.primary,
         isPinned: true,
         label: t('Create Terraform template'),
-        icon: <PlusCircleIcon />,
+        icon: PlusCircleIcon,
         onClick: () => pageNavigate(AwxRoute.CreateTerraformTemplate),
         isDisabled: () =>
           canCreate
-            ? ''
+            ? undefined
             : t(
                 'You do not have permission to create a Terraform template. Please contact your organization administrator.'
               ),
       },
       {
-        type: 'bulk' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
         variant: ButtonVariant.danger,
         label: t('Delete selected'),
         onClick: deleteTerraformTemplates,
@@ -68,31 +69,34 @@ export function TerraformTemplates() {
     [canCreate, deleteTerraformTemplates, pageNavigate, t]
   );
 
-  const rowActions = useMemo(
+  const rowActions = useMemo<IPageAction<TerraformJobTemplate>[]>(
     () => [
       {
-        type: 'button' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Edit'),
         onClick: (template: TerraformJobTemplate) =>
           pageNavigate(AwxRoute.EditTerraformTemplate, { params: { id: template.id } }),
         isDisabled: (template: TerraformJobTemplate) =>
-          template.summary_fields.user_capabilities.edit ? '' : t('No permission'),
+          template.summary_fields.user_capabilities.edit ? undefined : t('No permission'),
       },
       {
-        type: 'button' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Launch'),
         onClick: (template: TerraformJobTemplate) =>
           pageNavigate(AwxRoute.TerraformTemplateLaunch, { params: { id: template.id } }),
         isDisabled: (template: TerraformJobTemplate) =>
-          template.summary_fields.user_capabilities.start ? '' : t('No permission'),
+          template.summary_fields.user_capabilities.start ? undefined : t('No permission'),
       },
       {
-        type: 'button' as const,
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
         label: t('Delete'),
         isDanger: true,
         onClick: (template: TerraformJobTemplate) => deleteTerraformTemplates([template]),
         isDisabled: (template: TerraformJobTemplate) =>
-          template.summary_fields.user_capabilities.delete ? '' : t('No permission'),
+          template.summary_fields.user_capabilities.delete ? undefined : t('No permission'),
       },
     ],
     [deleteTerraformTemplates, pageNavigate, t]
@@ -177,14 +181,13 @@ function useTerraformTemplatesColumns(): ITableColumn<TerraformJobTemplate>[] {
         defaultSort: true,
         card: 'name',
         list: 'name',
-        value: (template) => template.name,
-        onClick: (template) =>
+        value: (template: TerraformJobTemplate) => template.name,
+        onClick: (template: TerraformJobTemplate) =>
           pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id: template.id } }),
       },
       {
         header: t('Status'),
-        cell: (template) =>
-          template.status ? <StatusCell status={template.status} /> : <></>,
+        cell: (template) => (template.status ? <StatusCell status={template.status} /> : <></>),
         sort: 'status',
       },
       {
@@ -205,9 +208,7 @@ function useTerraformTemplatesColumns(): ITableColumn<TerraformJobTemplate>[] {
       {
         header: t('Last run'),
         cell: (template) =>
-          template.last_job_run
-            ? new Date(template.last_job_run).toLocaleString()
-            : t('Never'),
+          template.last_job_run ? new Date(template.last_job_run).toLocaleString() : t('Never'),
         sort: 'last_job_run',
       },
     ],

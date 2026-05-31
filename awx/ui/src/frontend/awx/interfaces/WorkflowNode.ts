@@ -46,7 +46,8 @@ export interface WorkflowNode {
         | 'project_update'
         | 'workflow_approval'
         | 'inventory_update'
-        | 'system_job';
+        | 'system_job'
+        | 'terraform_job';
       timeout?: number;
     };
     inventory: SummaryFieldInventory;

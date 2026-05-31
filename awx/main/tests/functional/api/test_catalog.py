@@ -2,6 +2,7 @@ import pytest
 
 from awx.api.versioning import reverse
 from awx.main.models import CatalogDeployment, CatalogItem, Organization, WorkflowJob, WorkflowJobTemplate
+from awx.main.models.terraform import TerraformJobTemplate
 
 
 @pytest.mark.django_db
@@ -124,6 +125,146 @@ def test_catalog_item_deploy_survey_requires_use_permission(get, workflow_job_te
     )
 
     get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_catalog_item_list_is_scoped_to_org_admin(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
+    CatalogItem.objects.create(name='Other Org VM', organization=other_org)
+
+    response = get(reverse('api:catalog_item_list'), org_admin, expect=200)
+
+    item_ids = {item['id'] for item in response.data['results']}
+    assert own_item.pk in item_ids
+    assert not CatalogItem.objects.filter(pk__in=item_ids, organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_list_is_scoped_to_org_admin(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
+    other_item = CatalogItem.objects.create(name='Other Org VM', organization=other_org)
+    own_deployment = CatalogDeployment.objects.create(
+        name='own-deployment',
+        catalog_item=own_item,
+        owner=org_admin,
+        status='active',
+    )
+    CatalogDeployment.objects.create(
+        name='other-deployment',
+        catalog_item=other_item,
+        owner=org_admin,
+        status='active',
+    )
+
+    response = get(reverse('api:catalog_deployment_list'), org_admin, expect=200)
+
+    deployment_ids = {deployment['id'] for deployment in response.data['results']}
+    assert own_deployment.pk in deployment_ids
+    assert not CatalogDeployment.objects.filter(pk__in=deployment_ids, catalog_item__organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_rejects_cross_org_provider_tft(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_tft = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated DigitalOcean VM',
+        organization=organization,
+        cloud_backends={'digitalocean': foreign_tft.pk},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'target_provider': 'digitalocean'},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'cloud_backends' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_rejects_cross_org_provider_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Workflow', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Workflow VM',
+        organization=organization,
+        provider_workflows={'digitalocean': foreign_workflow.pk},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'target_provider': 'digitalocean'},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provider_workflows' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_deprovision_rejects_cross_org_provider_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Deprovision', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Deprovision VM',
+        organization=organization,
+        provider_deprovision_workflows={'digitalocean': foreign_workflow.pk},
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='isolated-vm',
+        catalog_item=item,
+        owner=org_admin,
+        status='active',
+        target_provider='digitalocean',
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_deprovision', kwargs={'pk': deployment.pk}),
+        {},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provider_deprovision_workflows' in response.data
+    deployment.refresh_from_db()
+    assert deployment.status == 'active'
+    assert deployment.deprovision_job_id is None
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_retry_rejects_cross_org_tft(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_tft = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Retry VM',
+        organization=organization,
+        terraform_job_template=foreign_tft,
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='retry-vm',
+        catalog_item=item,
+        owner=org_admin,
+        status='failed',
+        extra_vars={},
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_retry', kwargs={'pk': deployment.pk}),
+        {},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
+    deployment.refresh_from_db()
+    assert deployment.status == 'failed'
+    assert deployment.terraform_provision_job_id is None
 
 
 @pytest.mark.django_db

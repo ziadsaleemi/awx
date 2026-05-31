@@ -16,11 +16,13 @@
  */
 
 import {
-  ActionGroup,
   Button,
   CodeBlock,
   CodeBlockCode,
+  FormHelperText,
   FormGroup,
+  HelperText,
+  HelperTextItem,
   Modal,
   ModalVariant,
   Spinner,
@@ -83,13 +85,13 @@ Just the ${formatLabel} code itself.`;
     setError(null);
     setGenerated('');
     try {
-      const resp = await postRequest<AIChatResponse, { messages: { role: string; content: string }[]; system_override?: string }>(
-        awxAPI`/ai/chat/`,
-        {
-          messages: [{ role: 'user', content: prompt.trim() }],
-          system_override: systemInstruction,
-        }
-      );
+      const resp = await postRequest<
+        AIChatResponse,
+        { messages: { role: string; content: string }[]; system_override?: string }
+      >(awxAPI`/ai/chat/`, {
+        messages: [{ role: 'user', content: prompt.trim() }],
+        system_override: systemInstruction,
+      });
       // Strip markdown code fences if the model included them
       const raw = resp.message.content
         .replace(/^```[a-z]*\n?/i, '')
@@ -165,13 +167,7 @@ Just the ${formatLabel} code itself.`;
           </Button>,
         ]}
       >
-        <FormGroup
-          label={t('Describe what you need')}
-          fieldId="ai-prompt"
-          helperText={t(
-            'E.g. "Variables for deploying a Python 3.11 web app on port 8080 with debug disabled"'
-          )}
-        >
+        <FormGroup label={t('Describe what you need')} fieldId="ai-prompt">
           <TextArea
             id="ai-prompt"
             aria-label={t('AI prompt')}
@@ -187,6 +183,15 @@ Just the ${formatLabel} code itself.`;
             resizeOrientation="vertical"
             isDisabled={loading}
           />
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem>
+                {t(
+                  'E.g. "Variables for deploying a Python 3.11 web app on port 8080 with debug disabled"'
+                )}
+              </HelperTextItem>
+            </HelperText>
+          </FormHelperText>
         </FormGroup>
 
         {loading && (

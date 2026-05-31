@@ -104,7 +104,9 @@ export function NodeEditWizard({ node }: { node: GraphNode }) {
         }
 
         if (
-          (node_type === RESOURCE_TYPE.workflow_job || node_type === RESOURCE_TYPE.job) &&
+          (node_type === RESOURCE_TYPE.workflow_job ||
+            node_type === RESOURCE_TYPE.job ||
+            node_type === RESOURCE_TYPE.terraform_job) &&
           resource
         ) {
           return shouldHideOtherStep(launch_config);
@@ -124,7 +126,12 @@ export function NodeEditWizard({ node }: { node: GraphNode }) {
         if (Object.keys(wizardData).length === 0) {
           return true;
         }
-        if (node_type && ![RESOURCE_TYPE.workflow_job, RESOURCE_TYPE.job].includes(node_type)) {
+        if (
+          node_type &&
+          node_type !== RESOURCE_TYPE.workflow_job &&
+          node_type !== RESOURCE_TYPE.job &&
+          node_type !== RESOURCE_TYPE.terraform_job
+        ) {
           return true;
         }
         return !launch_config?.survey_enabled;

@@ -446,6 +446,15 @@ class CloudProviderConnection(models.Model):
         default='',
         help_text=_('Last error message, if any.'),
     )
+    organization = models.ForeignKey(
+        'Organization',
+        related_name='cloud_provider_connections',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Organization this connection belongs to.'),
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def get_absolute_url(self, request=None):
@@ -454,18 +463,35 @@ class CloudProviderConnection(models.Model):
 
 class CloudProviderState(models.Model):
     """
-    Per-provider singleton storing pulled resource data and admin allow-list
-    settings.  Previously stored in browser localStorage.
+    Per-provider, per-organization state storing pulled resource data and
+    admin allow-list settings.  Rows with organization=None are global and
+    visible only to system-level users.
     """
 
     class Meta:
         app_label = 'main'
-        ordering = ('provider_id',)
+        ordering = ('organization_id', 'provider_id')
+        unique_together = (('provider_id', 'organization'),)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('provider_id',),
+                condition=models.Q(organization__isnull=True),
+                name='main_cloudproviderstate_global_provider_unique',
+            )
+        ]
 
     provider_id = models.CharField(
         max_length=64,
-        unique=True,
         help_text=_('Identifier of the cloud provider (e.g. digitalocean).'),
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        related_name='cloud_provider_states',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Organization this provider state belongs to.'),
     )
     pulled_at = models.DateTimeField(
         null=True,

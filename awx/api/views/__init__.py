@@ -116,6 +116,7 @@ from awx.api.permissions import (
     VariableDataPermission,
     WorkflowApprovalPermission,
     IsSystemAdminOrAuditor,
+    ModelAccessPermission,
 )
 from awx.api import renderers
 from awx.api import serializers
@@ -5481,6 +5482,25 @@ def _parse_catalog_dynamic_field_templates(raw_value, dynamic_fields):
     return templates
 
 
+def _catalog_related_object_matches_item_org(item, obj):
+    if obj is None or item.organization_id is None:
+        return True
+    return getattr(obj, 'organization_id', None) == item.organization_id
+
+
+def _catalog_related_org_mismatch_response(field_name):
+    return Response(
+        {field_name: [_('Configured template must belong to the same organization as the catalog item.')]},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _catalog_validate_related_object_org(item, obj, field_name):
+    if _catalog_related_object_matches_item_org(item, obj):
+        return None
+    return _catalog_related_org_mismatch_response(field_name)
+
+
 class CatalogItemDeploySurvey(GenericAPIView):
     model = models.CatalogItem
     serializer_class = serializers.EmptySerializer
@@ -5489,6 +5509,10 @@ class CatalogItemDeploySurvey(GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         item = self.get_object()
+        if item.provision_workflow_id:
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
         schema = _build_catalog_item_live_schema(item)
         return Response({'schema': schema})
 
@@ -5563,6 +5587,10 @@ class CatalogItemDeploy(GenericAPIView):
                 resolved_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
             except WorkflowJobTemplate.DoesNotExist:
                 pass
+            else:
+                mismatch = _catalog_validate_related_object_org(item, resolved_workflow, 'provider_workflows')
+                if mismatch is not None:
+                    return mismatch
 
         # Only look up a TFT when no per-provider workflow is configured
         if resolved_workflow is None:
@@ -5576,9 +5604,15 @@ class CatalogItemDeploy(GenericAPIView):
                         {'target_provider': ['Configured Terraform job template not found.']},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-            elif not target_provider:
-                # Only use global terraform_job_template when no specific provider was requested
+                mismatch = _catalog_validate_related_object_org(item, resolved_tft, 'cloud_backends')
+                if mismatch is not None:
+                    return mismatch
+            else:
+                # Unknown or omitted providers fall back to the global Terraform template.
                 resolved_tft = item.terraform_job_template
+                mismatch = _catalog_validate_related_object_org(item, resolved_tft, 'terraform_job_template')
+                if mismatch is not None:
+                    return mismatch
 
         workflow_job = None
         terraform_job = None
@@ -5594,8 +5628,11 @@ class CatalogItemDeploy(GenericAPIView):
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
             terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
-        elif item.provision_workflow and not target_provider:
-            # Only use global provision_workflow fallback when no specific provider was requested
+        elif item.provision_workflow:
+            # Unknown or omitted providers fall back to the global provision workflow.
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
@@ -5654,6 +5691,7 @@ class CatalogDeploymentDeprovision(GenericAPIView):
 
     model = models.CatalogDeployment
     serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'deprovision'
     resource_purpose = 'deprovision a catalog deployment'
 
     def post(self, request, *args, **kwargs):
@@ -5680,8 +5718,19 @@ class CatalogDeploymentDeprovision(GenericAPIView):
                     resolved_deprovision_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
                 except WorkflowJobTemplate.DoesNotExist:
                     pass
+                else:
+                    mismatch = _catalog_validate_related_object_org(
+                        item,
+                        resolved_deprovision_workflow,
+                        'provider_deprovision_workflows',
+                    )
+                    if mismatch is not None:
+                        return mismatch
             if resolved_deprovision_workflow is None:
                 resolved_deprovision_workflow = item.deprovision_workflow
+                mismatch = _catalog_validate_related_object_org(item, resolved_deprovision_workflow, 'deprovision_workflow')
+                if mismatch is not None:
+                    return mismatch
 
         if resolved_deprovision_workflow:
             launch_kwargs = {}
@@ -5745,12 +5794,21 @@ class CatalogDeploymentRetry(GenericAPIView):
         terraform_job = None
         retry_from_workflow = deployment.last_failed_workflow_job or deployment.provision_job
         if retry_from_workflow and retry_from_workflow.status in ['failed', 'canceled', 'error'] and not retry_from_workflow.is_sliced_job:
+            mismatch = _catalog_validate_related_object_org(item, retry_from_workflow, 'last_failed_workflow_job')
+            if mismatch is not None:
+                return mismatch
             workflow_job = retry_from_workflow.create_resume_workflow_job()
             workflow_job.signal_start()
         elif item.terraform_job_template:
+            mismatch = _catalog_validate_related_object_org(item, item.terraform_job_template, 'terraform_job_template')
+            if mismatch is not None:
+                return mismatch
             terraform_job = item.terraform_job_template.create_unified_job(extra_vars=json.dumps(launch_extra_vars))
             terraform_job.signal_start()
         elif item.provision_workflow:
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
             workflow_job = item.provision_workflow.create_unified_job(extra_vars=launch_extra_vars)
             workflow_job.signal_start()
 
@@ -5830,6 +5888,102 @@ class CatalogDeploymentCancel(GenericAPIView):
         return Response(serializer.data)
 
 
+def _cloud_admin_orgs(user):
+    return models.Organization.accessible_objects(user, 'admin_role')
+
+
+def _user_can_read_cloud(user):
+    return bool(user.is_superuser or user.is_system_auditor or _cloud_admin_orgs(user).exists())
+
+
+def _user_can_manage_cloud(user):
+    return bool(user.is_superuser or _cloud_admin_orgs(user).exists())
+
+
+def _get_request_organization_id(request):
+    return (
+        request.data.get('organization')
+        or request.data.get('organization_id')
+        or request.query_params.get('organization')
+        or request.query_params.get('organization_id')
+    )
+
+
+def _resolve_cloud_organization(request, allow_auditor=False):
+    raw_org_id = _get_request_organization_id(request)
+    if raw_org_id in (None, ''):
+        if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
+            return None
+        admin_orgs = _cloud_admin_orgs(request.user)
+        count = admin_orgs.count()
+        if count == 1:
+            return admin_orgs.first()
+        if count == 0:
+            raise PermissionDenied(_('You do not have permission to manage cloud provider state.'))
+        raise ParseError(_('Organization is required because the user administers multiple organizations.'))
+
+    try:
+        org_id = int(raw_org_id)
+    except (TypeError, ValueError):
+        raise ParseError(_('Organization must be a valid integer.'))
+
+    organization = get_object_or_400(models.Organization, pk=org_id)
+    if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
+        return organization
+    if not _cloud_admin_orgs(request.user).filter(pk=organization.pk).exists():
+        raise PermissionDenied(_('You do not have permission to manage cloud resources for this organization.'))
+    return organization
+
+
+def _get_or_create_cloud_provider_state(provider_id, organization):
+    state = models.CloudProviderState.objects.filter(
+        provider_id=provider_id,
+        organization=organization,
+    ).first()
+    if state is not None:
+        return state
+    return models.CloudProviderState.objects.create(provider_id=provider_id, organization=organization)
+
+
+def _resolve_cloud_connection(request, provider_id, credential_id=None):
+    connection_id = request.data.get('connection_id') or request.query_params.get('connection_id')
+    raw_organization_id = _get_request_organization_id(request)
+    organization_id = None
+    if raw_organization_id not in (None, ''):
+        try:
+            organization_id = int(raw_organization_id)
+        except (TypeError, ValueError):
+            raise ParseError(_('Organization must be a valid integer.'))
+
+    qs = request.user.get_queryset(models.CloudProviderConnection).filter(provider_id=provider_id)
+
+    if connection_id not in (None, ''):
+        try:
+            connection_id = int(connection_id)
+        except (TypeError, ValueError):
+            raise ParseError(_('connection_id must be a valid integer.'))
+        try:
+            connection = qs.get(pk=connection_id)
+        except models.CloudProviderConnection.DoesNotExist:
+            raise PermissionDenied(_('Cloud provider connection is not accessible.'))
+        if credential_id is not None and connection.credential_id != credential_id:
+            raise ParseError(_('connection_id does not match credential_id.'))
+        if organization_id is not None and connection.organization_id != organization_id:
+            raise ParseError(_('connection_id does not match organization.'))
+        return connection
+
+    if credential_id is not None:
+        qs = qs.filter(credential_id=credential_id)
+    if organization_id is not None:
+        qs = qs.filter(organization_id=organization_id)
+    count = qs.count()
+    if count == 1:
+        return qs.first()
+    if count == 0:
+        raise PermissionDenied(_('No accessible cloud provider connection was found.'))
+    raise ParseError(_('connection_id is required because multiple accessible connections match this request.'))
+
+
 class CloudProviderConnectionList(ListCreateAPIView):
     """
     GET  /api/v2/catalog_cloud/connections/
@@ -5838,19 +5992,31 @@ class CloudProviderConnectionList(ListCreateAPIView):
 
     model = models.CloudProviderConnection
     serializer_class = serializers.CloudProviderConnectionSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (ModelAccessPermission,)
+
+    def get(self, request, *args, **kwargs):
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view cloud provider connections.'))
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().post(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = models.CloudProviderConnection.objects.all()
+        qs = self.request.user.get_queryset(self.model)
         provider_id = self.request.query_params.get('provider_id')
         if provider_id:
             qs = qs.filter(provider_id=provider_id)
+        organization_id = self.request.query_params.get('organization') or self.request.query_params.get('organization_id')
+        if organization_id not in (None, ''):
+            try:
+                organization_id = int(organization_id)
+            except (TypeError, ValueError):
+                raise ParseError(_('Organization must be a valid integer.'))
+            qs = qs.filter(organization_id=organization_id)
         return qs
-
-    def post(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can manage cloud connections.'))
-        return super().post(request, *args, **kwargs)
 
 
 class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
@@ -5862,17 +6028,27 @@ class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
 
     model = models.CloudProviderConnection
     serializer_class = serializers.CloudProviderConnectionSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (ModelAccessPermission,)
 
-    def destroy(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can delete cloud connections.'))
-        return super().destroy(request, *args, **kwargs)
+    def get(self, request, *args, **kwargs):
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view cloud provider connections.'))
+        return super().get(request, *args, **kwargs)
 
-    def update(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can update cloud connections.'))
-        return super().update(request, *args, **kwargs)
+    def patch(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().patch(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().put(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().delete(request, *args, **kwargs)
 
 
 class CloudProviderStateDetail(GenericAPIView):
@@ -5885,24 +6061,27 @@ class CloudProviderStateDetail(GenericAPIView):
     """
 
     serializer_class = serializers.CloudProviderStateSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
 
-    def _get_or_create(self, provider_id):
-        obj, _ = models.CloudProviderState.objects.get_or_create(provider_id=provider_id)
-        return obj
+    def _get_or_create(self, provider_id, organization):
+        return _get_or_create_cloud_provider_state(provider_id, organization)
 
     def get(self, request, provider_id, *args, **kwargs):
-        obj = self._get_or_create(provider_id)
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view provider state.'))
+        organization = _resolve_cloud_organization(request, allow_auditor=True)
+        obj = self._get_or_create(provider_id, organization)
         serializer = self.get_serializer(obj)
         return Response(serializer.data)
 
     def patch(self, request, provider_id, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can update provider state.'))
-        obj = self._get_or_create(provider_id)
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to update provider state.'))
+        organization = _resolve_cloud_organization(request)
+        obj = self._get_or_create(provider_id, organization)
         serializer = self.get_serializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        serializer.save(provider_id=provider_id, organization=organization)
         return Response(serializer.data)
 
 
@@ -5915,7 +6094,7 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'validate DigitalOcean cloud connector'
 
     @staticmethod
@@ -5930,6 +6109,9 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
         return token
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to validate cloud provider connections.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
@@ -5950,6 +6132,7 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'digitalocean', credential_id)
         do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
         if not do_token:
             return Response(
@@ -5972,6 +6155,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': _('Could not reach DigitalOcean API. Check network connectivity.'),
@@ -5982,6 +6167,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': _('DigitalOcean API request timed out.'),
@@ -6010,6 +6197,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': detail,
@@ -6023,6 +6212,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
             {
                 'provider': 'digitalocean',
                 'credential_id': credential_id,
+                'connection_id': connection.pk,
+                'organization': connection.organization_id,
                 'validated': True,
                 'status': 'connected',
                 'account_email': account.get('email'),
@@ -6042,7 +6233,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull DigitalOcean image catalog and pricing'
 
     @staticmethod
@@ -6085,6 +6276,9 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         return items
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
@@ -6105,6 +6299,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'digitalocean', credential_id)
         do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
         if not do_token:
             return Response(
@@ -6208,6 +6403,8 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         response_data = {
             'provider': 'digitalocean',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': pulled_at.isoformat(),
             'image_count': len(image_results),
             'pricing_count': len(pricing_results),
@@ -6220,7 +6417,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         }
 
         # Persist pulled data to the database so it survives across sessions.
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='digitalocean')
+        state = _get_or_create_cloud_provider_state('digitalocean', connection.organization)
         state.pulled_at = pulled_at
         state.provider_data = response_data
         state.save(update_fields=['pulled_at', 'provider_data'])
@@ -6238,10 +6435,13 @@ class CatalogProxmoxPullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull Proxmox VE cluster inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6268,6 +6468,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'proxmox', credential_id)
         pm_api_url = (credential.get_input('pm_api_url', default='') or '').rstrip('/')
         pm_api_token_id = credential.get_input('pm_api_token_id', default='') or ''
         pm_api_token_secret = credential.get_input('pm_api_token_secret', default='') or ''
@@ -6397,6 +6598,8 @@ class CatalogProxmoxPullResources(GenericAPIView):
         response_data = {
             'provider': 'proxmox',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': pulled_at,
             'node_count': len(node_results),
             'vm_count': len(vm_results),
@@ -6412,12 +6615,8 @@ class CatalogProxmoxPullResources(GenericAPIView):
             'networks': network_results,
         }
 
-        # Look up the connection record so we can key the data by connection ID.
-        # This allows multiple Proxmox connections to coexist in provider_data.
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='proxmox', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        # Key per-connection data inside the org-scoped provider state row.
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': pulled_at,
@@ -6429,7 +6628,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
             'networks': network_results,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='proxmox')
+        state = _get_or_create_cloud_provider_state('proxmox', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing
@@ -6449,10 +6648,13 @@ class CatalogVmwarePullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull VMware vSphere inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6479,6 +6681,7 @@ class CatalogVmwarePullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'vmware', credential_id)
         vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
         vcenter_user = credential.get_input('username', default='') or ''
         vcenter_pass = credential.get_input('password', default='') or ''
@@ -6628,6 +6831,8 @@ class CatalogVmwarePullResources(GenericAPIView):
         response_data = {
             'provider': 'vmware',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': now().isoformat(),
             'datacenter_count': len(datacenters),
             'cluster_count': len(clusters),
@@ -6643,10 +6848,7 @@ class CatalogVmwarePullResources(GenericAPIView):
             'datastores': datastores,
         }
 
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='vmware', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': now().isoformat(),
@@ -6658,7 +6860,7 @@ class CatalogVmwarePullResources(GenericAPIView):
             'datastores': datastores,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='vmware')
+        state = _get_or_create_cloud_provider_state('vmware', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing
@@ -6679,10 +6881,13 @@ class CatalogAzurePullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull Azure subscription inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6709,6 +6914,7 @@ class CatalogAzurePullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'azure', credential_id)
         subscription_id = credential.get_input('arm_subscription_id', default='') or ''
         client_id = credential.get_input('arm_client_id', default='') or ''
         client_secret = credential.get_input('arm_client_secret', default='') or ''
@@ -7149,6 +7355,8 @@ class CatalogAzurePullResources(GenericAPIView):
         response_data = {
             'provider': 'azure',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'subscription_id': subscription_id,
             'pulled_at': now().isoformat(),
             'resource_group_count': len(resource_groups),
@@ -7169,10 +7377,7 @@ class CatalogAzurePullResources(GenericAPIView):
             'accessible_subscriptions': accessible_subscriptions,
         }
 
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='azure', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': now().isoformat(),
@@ -7185,7 +7390,7 @@ class CatalogAzurePullResources(GenericAPIView):
             'vm_sizes': vm_sizes,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='azure')
+        state = _get_or_create_cloud_provider_state('azure', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing

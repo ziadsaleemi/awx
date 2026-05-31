@@ -56,7 +56,6 @@ import { useGet } from '../../../common/crud/useGet';
 import { Credential } from '../../interfaces/Credential';
 import { awxAPI } from '../../common/api/awx-utils';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
-import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   AzureAdminSettings,
   AzureLocation,
@@ -75,6 +74,7 @@ import {
   removeCloudConnectionApi,
   updateCloudConnectionApi,
 } from './cloudConnectionStore';
+import { useCloudOrganization } from './useCloudOrganization';
 // ─── styled ──────────────────────────────────────────────────────────────────
 
 const DarkCard = styled(Card)`
@@ -153,14 +153,34 @@ function ResourceGroupsTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
-      { key: 'provisioning_state', label: t('Provisioning State'), type: ToolbarFilterType.SingleText, query: 'provisioning_state', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
+      {
+        key: 'provisioning_state',
+        label: t('Provisioning State'),
+        type: ToolbarFilterType.SingleText,
+        query: 'provisioning_state',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return resourceGroups;
     return resourceGroups.filter((item) =>
       searches.every(({ k, v }) => {
@@ -281,17 +301,55 @@ function VMImagesTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'publisher', label: t('Publisher'), type: ToolbarFilterType.SingleText, query: 'publisher', comparison: 'contains' },
-      { key: 'offer', label: t('Offer'), type: ToolbarFilterType.SingleText, query: 'offer', comparison: 'contains' },
-      { key: 'sku', label: t('SKU'), type: ToolbarFilterType.SingleText, query: 'sku', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
-      { key: 'os_type', label: t('OS Type'), type: ToolbarFilterType.SingleText, query: 'os_type', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'publisher',
+        label: t('Publisher'),
+        type: ToolbarFilterType.SingleText,
+        query: 'publisher',
+        comparison: 'contains',
+      },
+      {
+        key: 'offer',
+        label: t('Offer'),
+        type: ToolbarFilterType.SingleText,
+        query: 'offer',
+        comparison: 'contains',
+      },
+      {
+        key: 'sku',
+        label: t('SKU'),
+        type: ToolbarFilterType.SingleText,
+        query: 'sku',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
+      {
+        key: 'os_type',
+        label: t('OS Type'),
+        type: ToolbarFilterType.SingleText,
+        query: 'os_type',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return vmImages;
     return vmImages.filter((item) =>
       searches.every(({ k, v }) => {
@@ -436,15 +494,41 @@ function VMSizesTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'tier', label: t('Tier'), type: ToolbarFilterType.SingleText, query: 'tier', comparison: 'contains' },
-      { key: 'family', label: t('Family'), type: ToolbarFilterType.SingleText, query: 'family', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'tier',
+        label: t('Tier'),
+        type: ToolbarFilterType.SingleText,
+        query: 'tier',
+        comparison: 'contains',
+      },
+      {
+        key: 'family',
+        label: t('Family'),
+        type: ToolbarFilterType.SingleText,
+        query: 'family',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return vmSizes;
     return vmSizes.filter((item) =>
       searches.every(({ k, v }) => {
@@ -579,16 +663,48 @@ function VMsTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
-      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
-      { key: 'vm_size', label: t('VM Size'), type: ToolbarFilterType.SingleText, query: 'vm_size', comparison: 'contains' },
-      { key: 'os_type', label: t('OS Type'), type: ToolbarFilterType.SingleText, query: 'os_type', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
+      {
+        key: 'resource_group',
+        label: t('Resource Group'),
+        type: ToolbarFilterType.SingleText,
+        query: 'resource_group',
+        comparison: 'contains',
+      },
+      {
+        key: 'vm_size',
+        label: t('VM Size'),
+        type: ToolbarFilterType.SingleText,
+        query: 'vm_size',
+        comparison: 'contains',
+      },
+      {
+        key: 'os_type',
+        label: t('OS Type'),
+        type: ToolbarFilterType.SingleText,
+        query: 'os_type',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return vms;
     return vms.filter((item) =>
       searches.every(({ k, v }) => {
@@ -694,14 +810,34 @@ function VNetsTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
-      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
+      {
+        key: 'resource_group',
+        label: t('Resource Group'),
+        type: ToolbarFilterType.SingleText,
+        query: 'resource_group',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return vnets;
     return vnets.filter((item) =>
       searches.every(({ k, v }) => {
@@ -813,16 +949,48 @@ function StorageTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'location', label: t('Location'), type: ToolbarFilterType.SingleText, query: 'location', comparison: 'contains' },
-      { key: 'resource_group', label: t('Resource Group'), type: ToolbarFilterType.SingleText, query: 'resource_group', comparison: 'contains' },
-      { key: 'kind', label: t('Kind'), type: ToolbarFilterType.SingleText, query: 'kind', comparison: 'contains' },
-      { key: 'sku', label: t('SKU'), type: ToolbarFilterType.SingleText, query: 'sku', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'location',
+        label: t('Location'),
+        type: ToolbarFilterType.SingleText,
+        query: 'location',
+        comparison: 'contains',
+      },
+      {
+        key: 'resource_group',
+        label: t('Resource Group'),
+        type: ToolbarFilterType.SingleText,
+        query: 'resource_group',
+        comparison: 'contains',
+      },
+      {
+        key: 'kind',
+        label: t('Kind'),
+        type: ToolbarFilterType.SingleText,
+        query: 'kind',
+        comparison: 'contains',
+      },
+      {
+        key: 'sku',
+        label: t('SKU'),
+        type: ToolbarFilterType.SingleText,
+        query: 'sku',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return storageAccounts;
     return storageAccounts.filter((item) =>
       searches.every(({ k, v }) => {
@@ -916,14 +1084,34 @@ function LocationsTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'display_name', label: t('Display Name'), type: ToolbarFilterType.SingleText, query: 'display_name', comparison: 'contains' },
-      { key: 'region_type', label: t('Region Type'), type: ToolbarFilterType.SingleText, query: 'region_type', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'display_name',
+        label: t('Display Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'display_name',
+        comparison: 'contains',
+      },
+      {
+        key: 'region_type',
+        label: t('Region Type'),
+        type: ToolbarFilterType.SingleText,
+        query: 'region_type',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return locations;
     return locations.filter((item) =>
       searches.every(({ k, v }) => {
@@ -1452,7 +1640,7 @@ function ManageConnectionsModal(props: {
 
 export function AzureProviderSettings() {
   const { t } = useTranslation();
-  const { activeAwxUser } = useAwxActiveUser();
+  const { canManageCloud, organizationId } = useCloudOrganization();
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -1463,16 +1651,16 @@ export function AzureProviderSettings() {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadConnections = useCallback(() => {
-    void fetchCloudConnections('azure').then(setConnectionEntries);
-  }, []);
+    void fetchCloudConnections('azure', organizationId).then(setConnectionEntries);
+  }, [organizationId]);
 
   useEffect(() => {
     loadConnections();
-    void fetchProviderState('azure').then((state) => {
+    void fetchProviderState('azure', organizationId).then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
       setAdminSettings((state?.admin_settings as AzureAdminSettings | null) ?? null);
     });
-  }, [loadConnections]);
+  }, [loadConnections, organizationId]);
 
   const { data: credData } = useGet<{ count: number; results: Credential[] }>(
     awxAPI`/credentials/?order_by=name&page_size=200`
@@ -1487,9 +1675,6 @@ export function AzureProviderSettings() {
       return ns === 'azure_rm_terraform' || typeName.includes('azure');
     });
   }, [credData]);
-
-  const canManageCloud =
-    Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
@@ -1572,7 +1757,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedVMImageUrns ?? null;
       const allKeys = allData.vm_images.map((i) => i.urn);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(urn); else next.delete(urn);
+      if (allowed) next.add(urn);
+      else next.delete(urn);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: [...next],
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1583,9 +1769,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.vm_images]
+    [adminSettings, allData.vm_images, organizationId]
   );
 
   const onToggleLocation = useCallback(
@@ -1593,7 +1779,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedLocationNames ?? null;
       const allKeys = allData.locations.map((l) => l.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: [...next],
@@ -1604,9 +1791,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.locations]
+    [adminSettings, allData.locations, organizationId]
   );
 
   const onToggleVMSize = useCallback(
@@ -1614,7 +1801,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedVMSizeNames ?? null;
       const allKeys = allData.vm_sizes.map((s) => s.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1625,9 +1813,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.vm_sizes]
+    [adminSettings, allData.vm_sizes, organizationId]
   );
 
   const onToggleResourceGroup = useCallback(
@@ -1635,7 +1823,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedResourceGroupNames ?? null;
       const allKeys = allData.resource_groups.map((rg) => rg.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1646,9 +1835,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.resource_groups]
+    [adminSettings, allData.resource_groups, organizationId]
   );
 
   const onToggleVM = useCallback(
@@ -1656,7 +1845,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedVMIds ?? null;
       const allKeys = allData.vms.map((vm) => vm.id);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(id); else next.delete(id);
+      if (allowed) next.add(id);
+      else next.delete(id);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1667,9 +1857,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.vms]
+    [adminSettings, allData.vms, organizationId]
   );
 
   const onToggleVNet = useCallback(
@@ -1677,7 +1867,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedVNetNames ?? null;
       const allKeys = allData.vnets.map((vn) => vn.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1688,9 +1879,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: adminSettings?.allowedStorageAccountNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.vnets]
+    [adminSettings, allData.vnets, organizationId]
   );
 
   const onToggleStorage = useCallback(
@@ -1698,7 +1889,8 @@ export function AzureProviderSettings() {
       const current = adminSettings?.allowedStorageAccountNames ?? null;
       const allKeys = allData.storage_accounts.map((sa) => sa.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: AzureAdminSettings = {
         allowedVMImageUrns: adminSettings?.allowedVMImageUrns ?? null,
         allowedLocationNames: adminSettings?.allowedLocationNames ?? null,
@@ -1709,9 +1901,9 @@ export function AzureProviderSettings() {
         allowedStorageAccountNames: [...next],
       };
       setAdminSettings(newSettings);
-      await patchProviderState('azure', { admin_settings: newSettings });
+      await patchProviderState('azure', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.storage_accounts]
+    [adminSettings, allData.storage_accounts, organizationId]
   );
 
   const onConnect = useCallback(
@@ -1776,11 +1968,12 @@ export function AzureProviderSettings() {
         credentialId,
         credentialName: cred?.name ?? '',
         error: '',
+        organizationId,
       });
       loadConnections();
       await onConnect(newEntry.id, credentialId);
     },
-    [credData, loadConnections, onConnect]
+    [credData, loadConnections, onConnect, organizationId]
   );
 
   const onPull = async () => {
@@ -1801,9 +1994,11 @@ export function AzureProviderSettings() {
       try {
         await postRequest<
           { pulled_at: string; subscription_id: string; resource_group_count: number },
-          { credential_id: number }
+          { credential_id: number; connection_id: string; organization: number | null }
         >(awxAPI`/catalog_cloud/connectors/azure/pull_resources/`, {
           credential_id: conn.credentialId!,
+          connection_id: conn.id,
+          organization: conn.organizationId,
         });
         successCount++;
       } catch (err) {
@@ -1823,7 +2018,7 @@ export function AzureProviderSettings() {
     }
 
     // Reload from DB after all pulls complete
-    const state = await fetchProviderState('azure');
+    const state = await fetchProviderState('azure', organizationId);
     if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
 
     if (successCount > 0) {

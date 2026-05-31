@@ -48,7 +48,6 @@ import { isRequestError } from '../../../common/crud/RequestError';
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
-import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   CloudConnectionEntry,
   ProxmoxAdminSettings,
@@ -64,6 +63,7 @@ import {
 } from './cloudConnectionStore';
 import ProxmoxLogo from '../../../assets/proxmox.svg';
 import { ConnectionModal } from './CloudConnections';
+import { useCloudOrganization } from './useCloudOrganization';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -179,13 +179,27 @@ function NodesTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
-      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
+      {
+        key: 'node',
+        label: t('Node'),
+        type: ToolbarFilterType.SingleText,
+        query: 'node',
+        comparison: 'contains',
+      },
+      {
+        key: 'status',
+        label: t('Status'),
+        type: ToolbarFilterType.SingleText,
+        query: 'status',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return nodes;
     return nodes.filter((item) =>
       searches.every(({ k, v }) => {
@@ -280,14 +294,34 @@ function VMsTab(props: { vms: ProxmoxVM[] }) {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
-      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'status',
+        label: t('Status'),
+        type: ToolbarFilterType.SingleText,
+        query: 'status',
+        comparison: 'contains',
+      },
+      {
+        key: 'node',
+        label: t('Node'),
+        type: ToolbarFilterType.SingleText,
+        query: 'node',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return props.vms;
     return props.vms.filter((item) =>
       searches.every(({ k, v }) => {
@@ -379,14 +413,34 @@ function ContainersTab(props: { containers: ProxmoxContainer[] }) {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
-      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'status',
+        label: t('Status'),
+        type: ToolbarFilterType.SingleText,
+        query: 'status',
+        comparison: 'contains',
+      },
+      {
+        key: 'node',
+        label: t('Node'),
+        type: ToolbarFilterType.SingleText,
+        query: 'node',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return props.containers;
     return props.containers.filter((item) =>
       searches.every(({ k, v }) => {
@@ -523,15 +577,41 @@ function StorageTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'storage', label: t('Storage'), type: ToolbarFilterType.SingleText, query: 'storage', comparison: 'contains' },
-      { key: 'type', label: t('Type'), type: ToolbarFilterType.SingleText, query: 'type', comparison: 'contains' },
-      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
-      { key: 'content', label: t('Content'), type: ToolbarFilterType.SingleText, query: 'content', comparison: 'contains' },
+      {
+        key: 'storage',
+        label: t('Storage'),
+        type: ToolbarFilterType.SingleText,
+        query: 'storage',
+        comparison: 'contains',
+      },
+      {
+        key: 'type',
+        label: t('Type'),
+        type: ToolbarFilterType.SingleText,
+        query: 'type',
+        comparison: 'contains',
+      },
+      {
+        key: 'status',
+        label: t('Status'),
+        type: ToolbarFilterType.SingleText,
+        query: 'status',
+        comparison: 'contains',
+      },
+      {
+        key: 'content',
+        label: t('Content'),
+        type: ToolbarFilterType.SingleText,
+        query: 'content',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return storage;
     return storage.filter((item) =>
       searches.every(({ k, v }) => {
@@ -654,14 +734,34 @@ function NetworksTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'iface', label: t('Interface'), type: ToolbarFilterType.SingleText, query: 'iface', comparison: 'contains' },
-      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
-      { key: 'type', label: t('Type'), type: ToolbarFilterType.SingleText, query: 'type', comparison: 'contains' },
+      {
+        key: 'iface',
+        label: t('Interface'),
+        type: ToolbarFilterType.SingleText,
+        query: 'iface',
+        comparison: 'contains',
+      },
+      {
+        key: 'node',
+        label: t('Node'),
+        type: ToolbarFilterType.SingleText,
+        query: 'node',
+        comparison: 'contains',
+      },
+      {
+        key: 'type',
+        label: t('Type'),
+        type: ToolbarFilterType.SingleText,
+        query: 'type',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return networks;
     return networks.filter((item) =>
       searches.every(({ k, v }) => {
@@ -771,14 +871,34 @@ function TemplatesTab(props: {
   const clearAllFilters = useCallback(() => setFilterState({}), []);
   const toolbarFilters = useMemo<IToolbarFilter[]>(
     () => [
-      { key: 'name', label: t('Name'), type: ToolbarFilterType.SingleText, query: 'name', comparison: 'contains' },
-      { key: 'status', label: t('Status'), type: ToolbarFilterType.SingleText, query: 'status', comparison: 'contains' },
-      { key: 'node', label: t('Node'), type: ToolbarFilterType.SingleText, query: 'node', comparison: 'contains' },
+      {
+        key: 'name',
+        label: t('Name'),
+        type: ToolbarFilterType.SingleText,
+        query: 'name',
+        comparison: 'contains',
+      },
+      {
+        key: 'status',
+        label: t('Status'),
+        type: ToolbarFilterType.SingleText,
+        query: 'status',
+        comparison: 'contains',
+      },
+      {
+        key: 'node',
+        label: t('Node'),
+        type: ToolbarFilterType.SingleText,
+        query: 'node',
+        comparison: 'contains',
+      },
     ],
     [t]
   );
   const filteredItems = useMemo(() => {
-    const searches = Object.entries(filterState).filter(([, v]) => v && v.length > 0).map(([k, v]) => ({ k, v: v! }));
+    const searches = Object.entries(filterState)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => ({ k, v: v! }));
     if (!searches.length) return templates;
     return templates.filter((item) =>
       searches.every(({ k, v }) => {
@@ -1165,7 +1285,7 @@ function OverviewTab(props: {
 
 export function ProxmoxProviderSettings() {
   const { t } = useTranslation();
-  const { activeAwxUser } = useAwxActiveUser();
+  const { canManageCloud, organizationId } = useCloudOrganization();
   const alertToaster = usePageAlertToaster();
   const [isPulling, setIsPulling] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -1175,13 +1295,13 @@ export function ProxmoxProviderSettings() {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
   const loadData = useCallback(() => {
-    void fetchCloudConnections('proxmox').then(setConnectionEntries);
-    void fetchProviderState('proxmox').then((state) => {
+    void fetchCloudConnections('proxmox', organizationId).then(setConnectionEntries);
+    void fetchProviderState('proxmox', organizationId).then((state) => {
       if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
       if (state?.admin_settings !== undefined)
         setAdminSettings(state.admin_settings as ProxmoxAdminSettings | null);
     });
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     loadData();
@@ -1189,11 +1309,8 @@ export function ProxmoxProviderSettings() {
 
   const handleModalClose = useCallback(() => {
     setShowModal(false);
-    void fetchCloudConnections('proxmox').then(setConnectionEntries);
-  }, []);
-
-  const canManageCloud =
-    Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
+    void fetchCloudConnections('proxmox', organizationId).then(setConnectionEntries);
+  }, [organizationId]);
 
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
@@ -1272,7 +1389,8 @@ export function ProxmoxProviderSettings() {
       const current = adminSettings?.allowedTemplateNames ?? null;
       const allKeys = allData.templates.map((t) => t.name);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: ProxmoxAdminSettings = {
         allowedTemplateNames: [...next],
         allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
@@ -1280,9 +1398,9 @@ export function ProxmoxProviderSettings() {
         allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('proxmox', { admin_settings: newSettings });
+      await patchProviderState('proxmox', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.templates]
+    [adminSettings, allData.templates, organizationId]
   );
 
   const onToggleNode = useCallback(
@@ -1290,7 +1408,8 @@ export function ProxmoxProviderSettings() {
       const current = adminSettings?.allowedNodeNames ?? null;
       const allKeys = allData.nodes.map((n) => n.node);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(name); else next.delete(name);
+      if (allowed) next.add(name);
+      else next.delete(name);
       const newSettings: ProxmoxAdminSettings = {
         allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
         allowedNodeNames: [...next],
@@ -1298,9 +1417,9 @@ export function ProxmoxProviderSettings() {
         allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('proxmox', { admin_settings: newSettings });
+      await patchProviderState('proxmox', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.nodes]
+    [adminSettings, allData.nodes, organizationId]
   );
 
   const onToggleStorage = useCallback(
@@ -1308,7 +1427,8 @@ export function ProxmoxProviderSettings() {
       const current = adminSettings?.allowedStorageNames ?? null;
       const allKeys = allData.storage.map((s) => s.storage);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(id); else next.delete(id);
+      if (allowed) next.add(id);
+      else next.delete(id);
       const newSettings: ProxmoxAdminSettings = {
         allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
         allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
@@ -1316,9 +1436,9 @@ export function ProxmoxProviderSettings() {
         allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
       };
       setAdminSettings(newSettings);
-      await patchProviderState('proxmox', { admin_settings: newSettings });
+      await patchProviderState('proxmox', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.storage]
+    [adminSettings, allData.storage, organizationId]
   );
 
   const onToggleNetwork = useCallback(
@@ -1326,7 +1446,8 @@ export function ProxmoxProviderSettings() {
       const current = adminSettings?.allowedNetworkNames ?? null;
       const allKeys = allData.networks.map((n) => `${n.node}:${n.iface}`);
       const next = new Set(current === null ? allKeys : current);
-      if (allowed) next.add(key); else next.delete(key);
+      if (allowed) next.add(key);
+      else next.delete(key);
       const newSettings: ProxmoxAdminSettings = {
         allowedTemplateNames: adminSettings?.allowedTemplateNames ?? null,
         allowedNodeNames: adminSettings?.allowedNodeNames ?? null,
@@ -1334,9 +1455,9 @@ export function ProxmoxProviderSettings() {
         allowedNetworkNames: [...next],
       };
       setAdminSettings(newSettings);
-      await patchProviderState('proxmox', { admin_settings: newSettings });
+      await patchProviderState('proxmox', { admin_settings: newSettings }, organizationId);
     },
-    [adminSettings, allData.networks]
+    [adminSettings, allData.networks, organizationId]
   );
 
   const onPull = async () => {
@@ -1355,10 +1476,14 @@ export function ProxmoxProviderSettings() {
 
     for (const conn of toPull) {
       try {
-        await postRequest<Record<string, unknown>, { credential_id: number }>(
-          awxAPI`/catalog_cloud/connectors/proxmox/pull_resources/`,
-          { credential_id: conn.credentialId! }
-        );
+        await postRequest<
+          Record<string, unknown>,
+          { credential_id: number; connection_id: string; organization: number | null }
+        >(awxAPI`/catalog_cloud/connectors/proxmox/pull_resources/`, {
+          credential_id: conn.credentialId!,
+          connection_id: conn.id,
+          organization: conn.organizationId,
+        });
         successCount++;
       } catch (err) {
         const detail =
@@ -1372,7 +1497,7 @@ export function ProxmoxProviderSettings() {
     }
 
     // Reload persisted data from DB so all connections' data is shown
-    const state = await fetchProviderState('proxmox');
+    const state = await fetchProviderState('proxmox', organizationId);
     if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
 
     if (successCount > 0) {
@@ -1564,7 +1689,14 @@ export function ProxmoxProviderSettings() {
         </PageTabs>
       )}
 
-      {showModal && <ConnectionModal providerId="proxmox" onClose={handleModalClose} />}
+      {showModal && (
+        <ConnectionModal
+          providerId="proxmox"
+          userOrgId={organizationId}
+          canManageCloud={canManageCloud}
+          onClose={handleModalClose}
+        />
+      )}
     </PageLayout>
   );
 }

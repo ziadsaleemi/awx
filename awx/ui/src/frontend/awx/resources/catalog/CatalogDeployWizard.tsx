@@ -108,7 +108,7 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     if (q.max !== undefined) prop.maximum = q.max;
 
     if (q.type === 'multiplechoice' && q.choices) {
-      const choicesArr = Array.isArray(q.choices) ? q.choices : String(q.choices).split('\n');
+      const choicesArr = q.choices.split('\n');
       prop.enum = choicesArr.map((c) => c.trim()).filter(Boolean);
     }
 
@@ -246,15 +246,20 @@ export function CatalogDeployContent({
   // TTL / lease state
   const defaultLeaseMinutes = item.default_lease_minutes ?? null;
   const requireLease = item.require_lease ?? false;
-  const [leaseDurationMinutes, setLeaseDurationMinutes] = useState<number | null>(defaultLeaseMinutes);
+  const [leaseDurationMinutes, setLeaseDurationMinutes] = useState<number | null>(
+    defaultLeaseMinutes
+  );
   const [autoDeprovision, setAutoDeprovision] = useState<boolean>(Boolean(defaultLeaseMinutes));
 
-  const TTL_PRESETS = useMemo(() => [
-    { label: t('2 h'), minutes: 120 },
-    { label: t('8 h'), minutes: 480 },
-    { label: t('24 h'), minutes: 1440 },
-    { label: t('7 d'), minutes: 10080 },
-  ], [t]);
+  const TTL_PRESETS = useMemo(
+    () => [
+      { label: t('2 h'), minutes: 120 },
+      { label: t('8 h'), minutes: 480 },
+      { label: t('24 h'), minutes: 1440 },
+      { label: t('7 d'), minutes: 10080 },
+    ],
+    [t]
+  );
 
   // Multi-cloud state — pre-select from initialProvider prop
   const allProviders = useMemo(() => {
@@ -310,7 +315,7 @@ export function CatalogDeployContent({
     }
     return (deploySurvey?.schema ?? item.extra_vars_schema ?? {}) as JsonSchema;
   }, [providerSurveyData, deploySurvey?.schema, item.extra_vars_schema]);
-  const properties = schema.properties ?? {};
+  const properties = useMemo(() => schema.properties ?? {}, [schema.properties]);
   const requiredSet = new Set<string>(schema.required ?? []);
 
   const existingDynamicFieldValues = useMemo(() => {
@@ -373,7 +378,7 @@ export function CatalogDeployContent({
       setProviderAdminSettings(null);
       return;
     }
-    void fetchProviderState(selectedProvider).then((state) => {
+    void fetchProviderState(selectedProvider, item.organization).then((state) => {
       const rawData = state?.provider_data as Record<string, unknown> | null | undefined;
       if (rawData && typeof rawData === 'object') {
         if (selectedProvider === 'digitalocean') {
@@ -397,10 +402,11 @@ export function CatalogDeployContent({
             if (connData && typeof connData === 'object') {
               for (const [key, val] of Object.entries(connData as Record<string, unknown>)) {
                 if (Array.isArray(val)) {
+                  const values = val as unknown[];
                   if (aggregated[key]) {
-                    aggregated[key].push(...val);
+                    aggregated[key].push(...values);
                   } else {
-                    aggregated[key] = [...val];
+                    aggregated[key] = [...values];
                   }
                 }
               }
@@ -413,16 +419,16 @@ export function CatalogDeployContent({
       }
       setProviderAdminSettings(state?.admin_settings ?? null);
     });
-  }, [selectedProvider]);
+  }, [item.organization, selectedProvider]);
 
   // Fetch global VM size presets once on mount
   useEffect(() => {
-    void fetchProviderState('global').then((state) => {
+    void fetchProviderState('global', item.organization).then((state) => {
       const settings = state?.provider_settings as { vm_sizes?: VmSizePreset[] } | null | undefined;
       const sizes = settings?.vm_sizes ?? [];
       setGlobalVmSizes(sizes.filter((s) => s.enabled !== false));
     });
-  }, []);
+  }, [item.organization]);
 
   // When provider changes, reset form values so stale fields from a previous survey don't persist
   useEffect(() => {
@@ -460,21 +466,24 @@ export function CatalogDeployContent({
   const vmSizeSettings = providerFieldCfg?.vm_size_settings;
   const showVmSizePicker = vmSizeSettings?.enabled !== false && globalVmSizes.length > 0;
 
-  const onVmSizeSelect = useCallback((sizeName: string) => {
-    setSelectedVmSize(sizeName);
-    if (!sizeName) return;
-    const size = globalVmSizes.find((s) => s.name === sizeName);
-    if (size) {
-      if (vmSizeSettings?.cpu_variable) {
-        setFormValues((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: size.cpu }));
-        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: '' }));
+  const onVmSizeSelect = useCallback(
+    (sizeName: string) => {
+      setSelectedVmSize(sizeName);
+      if (!sizeName) return;
+      const size = globalVmSizes.find((s) => s.name === sizeName);
+      if (size) {
+        if (vmSizeSettings?.cpu_variable) {
+          setFormValues((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: size.cpu }));
+          setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: '' }));
+        }
+        if (vmSizeSettings?.ram_variable) {
+          setFormValues((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: size.ram }));
+          setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: '' }));
+        }
       }
-      if (vmSizeSettings?.ram_variable) {
-        setFormValues((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: size.ram }));
-        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: '' }));
-      }
-    }
-  }, [globalVmSizes, vmSizeSettings]);
+    },
+    [globalVmSizes, vmSizeSettings]
+  );
 
   // Determine whether the current CPU / RAM values exceed the configured limits
   const isLimitExceeded = useMemo(() => {
@@ -668,7 +677,9 @@ export function CatalogDeployContent({
                         <HelperText>
                           <HelperTextItem>
                             {vmSizeSettings?.allow_manual
-                              ? t('Selecting a preset pre-fills CPU and RAM. You can still edit them.')
+                              ? t(
+                                  'Selecting a preset pre-fills CPU and RAM. You can still edit them.'
+                                )
                               : t('Selecting a preset fills in CPU and RAM automatically.')}
                           </HelperTextItem>
                         </HelperText>
@@ -687,7 +698,8 @@ export function CatalogDeployContent({
                         showVmSizePicker &&
                         !vmSizeSettings?.allow_manual &&
                         selectedVmSize !== '' &&
-                        (key === vmSizeSettings?.cpu_variable || key === vmSizeSettings?.ram_variable);
+                        (key === vmSizeSettings?.cpu_variable ||
+                          key === vmSizeSettings?.ram_variable);
                       const isEffectivelyDisabled = isAdminDisabledField || isVmSizeLocked;
 
                       // Check for a dynamic source configured for this field
@@ -1034,8 +1046,14 @@ export function CatalogDeployContent({
       <FormGroup
         label={requireLease ? t('Lease duration (required)') : t('Lease duration (optional)')}
         fieldId="deploy-ttl"
-        labelHelp={t('Set a time limit on this deployment. After the lease expires the deployment will be marked expired.')}
       >
+        <HelperText>
+          <HelperTextItem>
+            {t(
+              'Set a time limit on this deployment. After the lease expires the deployment will be marked expired.'
+            )}
+          </HelperTextItem>
+        </HelperText>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           {TTL_PRESETS.map((preset) => (
             <Button
@@ -1050,7 +1068,10 @@ export function CatalogDeployContent({
           <Button
             variant={leaseDurationMinutes === null ? 'secondary' : 'plain'}
             size="sm"
-            onClick={() => { setLeaseDurationMinutes(null); setAutoDeprovision(false); }}
+            onClick={() => {
+              setLeaseDurationMinutes(null);
+              setAutoDeprovision(false);
+            }}
           >
             {t('No limit')}
           </Button>
@@ -1067,7 +1088,9 @@ export function CatalogDeployContent({
               <HelperTextItem>
                 {autoDeprovision
                   ? t('The deprovision workflow will run automatically when the lease expires.')
-                  : t('The deployment will be flagged as expired but resources will not be removed automatically.')}
+                  : t(
+                      'The deployment will be flagged as expired but resources will not be removed automatically.'
+                    )}
               </HelperTextItem>
             </HelperText>
           </div>

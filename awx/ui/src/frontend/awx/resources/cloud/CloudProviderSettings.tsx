@@ -34,7 +34,6 @@ import {
 } from '../../../../framework';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
 import { awxAPI } from '../../common/api/awx-utils';
-import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import {
   CloudConnectionEntry,
   DigitalOceanAdminSettings,
@@ -53,6 +52,7 @@ import { ConnectionModal } from './CloudConnections';
 import { AzureProviderSettings } from './AzureProviderSettings';
 import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
 import { VmwareProviderSettings } from './VmwareProviderSettings';
+import { useCloudOrganization } from './useCloudOrganization';
 
 interface PullApiResponse {
   pulled_at: string;
@@ -311,6 +311,7 @@ function ImagesTab(props: {
   onToggleImage: (id: number, enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const { images, enabledImages, onToggleImage } = props;
   const tableColumns = useMemo<ITableColumn<DigitalOceanImage>[]>(
     () => [
       {
@@ -351,8 +352,8 @@ function ImagesTab(props: {
         cell: (img) => (
           <Switch
             id={`image-allowed-${img.id}`}
-            isChecked={props.enabledImages.has(img.id)}
-            onChange={(_evt, checked) => props.onToggleImage(img.id, checked)}
+            isChecked={enabledImages.has(img.id)}
+            onChange={(_evt, checked) => onToggleImage(img.id, checked)}
             aria-label={img.name}
           />
         ),
@@ -382,12 +383,12 @@ function ImagesTab(props: {
         table: 'expanded',
       },
     ],
-    [t, props.enabledImages, props.onToggleImage]
+    [t, enabledImages, onToggleImage]
   );
 
   const view = useInMemoryView<DigitalOceanImage>({
     keyFn: (img) => img.id.toString(),
-    items: props.images,
+    items: images,
     tableColumns,
   });
 
@@ -411,6 +412,7 @@ function SizesTab(props: {
   onToggleSize: (slug: string, enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const { pricing, enabledSizes, onToggleSize } = props;
   const tableColumns = useMemo<ITableColumn<DigitalOceanSize>[]>(
     () => [
       {
@@ -472,8 +474,8 @@ function SizesTab(props: {
         cell: (size) => (
           <Switch
             id={`size-allowed-${size.slug}`}
-            isChecked={props.enabledSizes.has(size.slug)}
-            onChange={(_evt, checked) => props.onToggleSize(size.slug, checked)}
+            isChecked={enabledSizes.has(size.slug)}
+            onChange={(_evt, checked) => onToggleSize(size.slug, checked)}
             aria-label={size.slug}
           />
         ),
@@ -497,12 +499,12 @@ function SizesTab(props: {
         table: 'expanded',
       },
     ],
-    [t, props.enabledSizes, props.onToggleSize]
+    [t, enabledSizes, onToggleSize]
   );
 
   const view = useInMemoryView<DigitalOceanSize>({
     keyFn: (size) => size.slug,
-    items: props.pricing,
+    items: pricing,
     tableColumns,
   });
 
@@ -526,6 +528,7 @@ function RegionsTab(props: {
   onToggleRegion: (slug: string, enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const { regions, enabledRegions, onToggleRegion } = props;
   const tableColumns = useMemo<ITableColumn<DigitalOceanRegion>[]>(
     () => [
       {
@@ -551,8 +554,8 @@ function RegionsTab(props: {
         cell: (region) => (
           <Switch
             id={`region-allowed-${region.slug}`}
-            isChecked={props.enabledRegions.has(region.slug)}
-            onChange={(_evt, checked) => props.onToggleRegion(region.slug, checked)}
+            isChecked={enabledRegions.has(region.slug)}
+            onChange={(_evt, checked) => onToggleRegion(region.slug, checked)}
             aria-label={region.name}
           />
         ),
@@ -568,12 +571,12 @@ function RegionsTab(props: {
         table: 'expanded',
       },
     ],
-    [t, props.enabledRegions, props.onToggleRegion]
+    [t, enabledRegions, onToggleRegion]
   );
 
   const view = useInMemoryView<DigitalOceanRegion>({
     keyFn: (region) => region.slug,
-    items: props.regions,
+    items: regions,
     tableColumns,
   });
 
@@ -597,6 +600,7 @@ function NetworksTab(props: {
   onToggleVpc: (id: string, enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const { vpcs, enabledVpcs, onToggleVpc } = props;
   const tableColumns = useMemo<ITableColumn<DigitalOceanVpc>[]>(
     () => [
       {
@@ -630,8 +634,8 @@ function NetworksTab(props: {
         cell: (vpc) => (
           <Switch
             id={`vpc-allowed-${vpc.id}`}
-            isChecked={props.enabledVpcs.has(vpc.id)}
-            onChange={(_evt, checked) => props.onToggleVpc(vpc.id, checked)}
+            isChecked={enabledVpcs.has(vpc.id)}
+            onChange={(_evt, checked) => onToggleVpc(vpc.id, checked)}
             aria-label={vpc.name}
           />
         ),
@@ -649,12 +653,12 @@ function NetworksTab(props: {
         table: 'expanded',
       },
     ],
-    [t, props.enabledVpcs, props.onToggleVpc]
+    [t, enabledVpcs, onToggleVpc]
   );
 
   const view = useInMemoryView<DigitalOceanVpc>({
     keyFn: (vpc) => vpc.id,
-    items: props.vpcs,
+    items: vpcs,
     tableColumns,
   });
 
@@ -675,12 +679,10 @@ function NetworksTab(props: {
 function DefaultProviderSettings(props: { provider: string }) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
-  const { activeAwxUser } = useAwxActiveUser();
+  const { canManageCloud, organizationId } = useCloudOrganization();
   const providerLabel = getCloudProviderLabel(props.provider);
   const [connectionEntries, setConnectionEntries] = useState<CloudConnectionEntry[]>([]);
   const connectedEntry = connectionEntries.find((e) => e.status === 'connected');
-  const canManageCloud =
-    Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
 
   const [data, setData] = useState<DigitalOceanProviderData | null>(null);
   const [isPulling, setIsPulling] = useState(false);
@@ -694,8 +696,8 @@ function DefaultProviderSettings(props: { provider: string }) {
 
   // Load connections and previously pulled provider data from the database.
   useEffect(() => {
-    void fetchCloudConnections(props.provider).then(setConnectionEntries);
-    void fetchProviderState(props.provider).then((state) => {
+    void fetchCloudConnections(props.provider, organizationId).then(setConnectionEntries);
+    void fetchProviderState(props.provider, organizationId).then((state) => {
       if (state?.provider_data) {
         setData(state.provider_data as DigitalOceanProviderData);
       }
@@ -703,14 +705,14 @@ function DefaultProviderSettings(props: { provider: string }) {
         setAdminSettings(state.admin_settings as DigitalOceanAdminSettings);
       }
     });
-  }, [props.provider]);
+  }, [props.provider, organizationId]);
 
   const saveAdminSettings = useCallback(
     (next: DigitalOceanAdminSettings) => {
       setAdminSettings(next);
-      void patchProviderState(props.provider, { admin_settings: next });
+      void patchProviderState(props.provider, { admin_settings: next }, organizationId);
     },
-    [props.provider]
+    [props.provider, organizationId]
   );
 
   const allSizeSlugs = useMemo(() => data?.pricing.map((s) => s.slug) ?? [], [data]);
@@ -790,8 +792,8 @@ function DefaultProviderSettings(props: { provider: string }) {
   const handleModalClose = useCallback(() => {
     setShowModal(false);
     // Re-fetch connections after the modal closes (user may have connected).
-    void fetchCloudConnections(props.provider).then(setConnectionEntries);
-  }, [props.provider]);
+    void fetchCloudConnections(props.provider, organizationId).then(setConnectionEntries);
+  }, [props.provider, organizationId]);
 
   const isConnected = Boolean(connectedEntry);
 
@@ -827,10 +829,14 @@ function DefaultProviderSettings(props: { provider: string }) {
 
     setIsPulling(true);
     try {
-      const result = await postRequest<PullApiResponse, { credential_id: number }>(
-        awxAPI`/catalog_cloud/connectors/digitalocean/pull_images/`,
-        { credential_id: connectedEntry.credentialId }
-      );
+      const result = await postRequest<
+        PullApiResponse,
+        { credential_id: number; connection_id: string; organization: number | null }
+      >(awxAPI`/catalog_cloud/connectors/digitalocean/pull_images/`, {
+        credential_id: connectedEntry.credentialId,
+        connection_id: connectedEntry.id,
+        organization: connectedEntry.organizationId,
+      });
       const newData: DigitalOceanProviderData = {
         pulledAt: result.pulled_at,
         images: result.images ?? [],
@@ -979,7 +985,14 @@ function DefaultProviderSettings(props: { provider: string }) {
         </PageTab>
       </PageTabs>
 
-      {showModal && <ConnectionModal providerId={props.provider} onClose={handleModalClose} />}
+      {showModal && (
+        <ConnectionModal
+          providerId={props.provider}
+          userOrgId={organizationId}
+          canManageCloud={canManageCloud}
+          onClose={handleModalClose}
+        />
+      )}
     </PageLayout>
   );
 }

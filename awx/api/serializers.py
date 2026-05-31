@@ -4132,14 +4132,14 @@ class CatalogDeploymentSerializer(BaseSerializer):
 class CloudProviderConnectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProviderConnection
-        fields = ('id', 'provider_id', 'name', 'status', 'credential', 'credential_name', 'error', 'updated_at')
+        fields = ('id', 'provider_id', 'name', 'status', 'credential', 'credential_name', 'error', 'organization', 'updated_at')
         read_only_fields = ('updated_at',)
 
 
 class CloudProviderStateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProviderState
-        fields = ('id', 'provider_id', 'pulled_at', 'provider_data', 'admin_settings', 'provider_settings')
+        fields = ('id', 'provider_id', 'organization', 'pulled_at', 'provider_data', 'admin_settings', 'provider_settings')
 
 
 class WorkflowJobTemplateSerializer(LabelsListMixin, UnifiedJobTemplateSerializer):
