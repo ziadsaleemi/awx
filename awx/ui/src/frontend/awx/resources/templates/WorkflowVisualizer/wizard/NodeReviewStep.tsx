@@ -19,7 +19,7 @@ import { PromptReviewDetails } from './PromptReviewDetails';
 import { RESOURCE_TYPE } from '../constants';
 import { useGetNodeTypeDetail, useGetTimeoutString } from '../hooks';
 
-const ResourceLink: Record<UnifiedJobType, AwxRoute> = {
+const ResourceLink: Partial<Record<UnifiedJobType, AwxRoute>> = {
   inventory_update: AwxRoute.InventorySourceDetail,
   job: AwxRoute.JobTemplateDetails,
   project_update: AwxRoute.ProjectDetails,
@@ -95,13 +95,20 @@ export function NodeReviewStep() {
     node_alias,
     node_convergence,
     node_days_to_keep,
+    eda_activation_id,
+    eda_event_source,
+    eda_event_source_status,
+    eda_rulebook_name,
     survey,
   } = wizardData;
 
   const { data: surveyConfig } = useGet<Survey>(getSurveySpecUrl(resource ?? null));
   const hasPromptDetails = Boolean(visibleSteps.find((step) => step.id === 'nodePromptsStep'));
   const nodeTypeDetail = useGetNodeTypeDetail(node_type);
-  const nameDetail = getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
+  const nameDetail =
+    node_type === RESOURCE_TYPE.eda_rulebook
+      ? eda_rulebook_name
+      : getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
   const descriptionDetail = getValueBasedOnJobType(
     node_type,
     resource?.description || '',
@@ -115,9 +122,12 @@ export function NodeReviewStep() {
     ? jsonToYaml(JSON.stringify({ days: node_days_to_keep }))
     : '';
 
-  let resourceDetailsLink = getPageUrl(ResourceLink[node_type], {
-    params: { id: resource?.id },
-  });
+  const resourceRoute = ResourceLink[node_type];
+  let resourceDetailsLink = resourceRoute
+    ? getPageUrl(resourceRoute, {
+        params: { id: resource?.id },
+      })
+    : '';
 
   let surveyDetails = '{}';
   if (survey && surveyConfig) {
@@ -142,9 +152,22 @@ export function NodeReviewStep() {
       <PageDetails numberOfColumns="single">
         <PageDetail label={t('Type')}>{nodeTypeDetail}</PageDetail>
         <PageDetail label={t('Name')}>
-          <Link to={resourceDetailsLink}>{nameDetail}</Link>
+          {resourceDetailsLink ? <Link to={resourceDetailsLink}>{nameDetail}</Link> : nameDetail}
         </PageDetail>
         <PageDetail label={t('Description')}>{descriptionDetail}</PageDetail>
+        {node_type === RESOURCE_TYPE.eda_rulebook && (
+          <>
+            <PageDetail label={t('Activation id')} isEmpty={!eda_activation_id}>
+              {eda_activation_id}
+            </PageDetail>
+            <PageDetail label={t('Event source')} isEmpty={!eda_event_source}>
+              {eda_event_source}
+            </PageDetail>
+            <PageDetail label={t('Event source status')} isEmpty={!eda_event_source_status}>
+              {eda_event_source_status}
+            </PageDetail>
+          </>
+        )}
         <PageDetail label={t('Timeout')}>{timeoutDetail}</PageDetail>
         <PageDetail label={t('Convergence')}>{convergenceDetail}</PageDetail>
         <PageDetail label={t('Alias')}>{node_alias}</PageDetail>

@@ -10,7 +10,7 @@ import { InventorySource } from '../../../../interfaces/InventorySource';
 import { WorkflowNode } from '../../../../interfaces/WorkflowNode';
 import { UnifiedJobType } from '../types';
 
-const ResourceLink: Record<UnifiedJobType, AwxRoute> = {
+const ResourceLink: Partial<Record<UnifiedJobType, AwxRoute>> = {
   inventory_update: AwxRoute.InventorySourceDetail,
   job: AwxRoute.JobTemplateDetails,
   project_update: AwxRoute.ProjectDetails,
@@ -27,13 +27,24 @@ export function NodeNameDetail({ nodeData }: { nodeData: WorkflowNode }) {
   const { id, name, unified_job_type: type } = nodeData.summary_fields?.unified_job_template || {};
   let link: ReactNode;
 
+  if (nodeData.node_type === RESOURCE_TYPE.eda_rulebook) {
+    return (
+      <PageDetail label={t('Name')}>
+        {nodeData.summary_fields?.eda_rulebook?.name || nodeData.eda_rulebook_name}
+      </PageDetail>
+    );
+  }
+
   if (type === RESOURCE_TYPE.inventory_update) {
     link = <InventorySourceLink id={id?.toString() || ''}>{name}</InventorySourceLink>;
   } else if (type) {
-    const url = getPageUrl(ResourceLink[type], {
-      params: { id },
-    });
-    link = <Link to={url}>{name}</Link>;
+    const route = ResourceLink[type];
+    if (route) {
+      const url = getPageUrl(route, {
+        params: { id },
+      });
+      link = <Link to={url}>{name}</Link>;
+    }
   }
 
   return (

@@ -167,7 +167,11 @@ export function NodeTypeStep(props: { hasSourceNode?: boolean }) {
       }
     };
 
-    if (nodeType === RESOURCE_TYPE.job || nodeType === RESOURCE_TYPE.workflow_job || nodeType === RESOURCE_TYPE.terraform_job) {
+    if (
+      nodeType === RESOURCE_TYPE.job ||
+      nodeType === RESOURCE_TYPE.workflow_job ||
+      nodeType === RESOURCE_TYPE.terraform_job
+    ) {
       void setLaunchToWizardData();
     }
   }, [
@@ -237,6 +241,7 @@ function NodeTypeInput() {
         { label: t('Inventory Source Sync'), value: RESOURCE_TYPE.inventory_update },
         { label: t('Management Job'), value: RESOURCE_TYPE.system_job },
         { label: t('Terraform Template'), value: RESOURCE_TYPE.terraform_job },
+        { label: t('EDA Rulebook Activation'), value: RESOURCE_TYPE.eda_rulebook },
       ]}
     />
   );
@@ -294,10 +299,33 @@ function NodeResourceInput() {
             );
           case RESOURCE_TYPE.terraform_job:
             return (
-              <PageFormTerraformJobTemplateSelect<WizardFormValues>
-                name="resource"
-                isRequired
-              />
+              <PageFormTerraformJobTemplateSelect<WizardFormValues> name="resource" isRequired />
+            );
+          case RESOURCE_TYPE.eda_rulebook:
+            return (
+              <>
+                <PageFormTextInput<WizardFormValues>
+                  label={t('Rulebook activation')}
+                  name="eda_rulebook_name"
+                  id="eda_rulebook_name"
+                  isRequired
+                />
+                <PageFormTextInput<WizardFormValues>
+                  label={t('Activation id')}
+                  name="eda_activation_id"
+                  id="eda_activation_id"
+                />
+                <PageFormTextInput<WizardFormValues>
+                  label={t('Event source')}
+                  name="eda_event_source"
+                  id="eda_event_source"
+                />
+                <PageFormTextInput<WizardFormValues>
+                  label={t('Event source status')}
+                  name="eda_event_source_status"
+                  id="eda_event_source_status"
+                />
+              </>
             );
           default:
             return;

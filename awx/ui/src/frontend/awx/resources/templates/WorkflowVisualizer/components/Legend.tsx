@@ -75,6 +75,12 @@ export const Legend = () => {
               <DescriptionListDescription>
                 <LegendDescription label={t('System Job')} icon={<CogIcon />} />
               </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription
+                  label={t('EDA Rulebook Activation')}
+                  icon={<ProcessAutomationIcon />}
+                />
+              </DescriptionListDescription>
             </DescriptionListGroup>
             <DescriptionListGroup data-cy="legend-node-status-types">
               <DescriptionListTerm>{t('Node status types')}</DescriptionListTerm>

@@ -1,6 +1,17 @@
 import { ExecutionEnvironment } from './ExecutionEnvironment';
 import { SummaryFieldInventory } from './summary-fields/summary-fields';
 
+export type WorkflowNodeType =
+  | 'template'
+  | 'job'
+  | 'workflow_job'
+  | 'project_update'
+  | 'workflow_approval'
+  | 'inventory_update'
+  | 'system_job'
+  | 'terraform_job'
+  | 'eda_rulebook';
+
 export interface WorkflowNode {
   id: number;
   type: string;
@@ -13,7 +24,7 @@ export interface WorkflowNode {
     success_nodes: string;
     failure_nodes: string;
     always_nodes: string;
-    unified_job_template: string;
+    unified_job_template?: string;
     workflow_job_template: string;
   };
   summary_fields: {
@@ -47,8 +58,15 @@ export interface WorkflowNode {
         | 'workflow_approval'
         | 'inventory_update'
         | 'system_job'
-        | 'terraform_job';
+        | 'terraform_job'
+        | 'eda_rulebook';
       timeout?: number;
+    };
+    eda_rulebook?: {
+      name: string;
+      activation_id?: string;
+      event_source?: string;
+      event_source_status?: string;
     };
     inventory: SummaryFieldInventory;
     execution_environment: ExecutionEnvironment;
@@ -72,7 +90,12 @@ export interface WorkflowNode {
   job_slice_count: null;
   timeout: number | null;
   workflow_job_template: number;
-  unified_job_template: number;
+  unified_job_template: number | null;
+  node_type: WorkflowNodeType;
+  eda_rulebook_name: string;
+  eda_activation_id: string;
+  eda_event_source: string;
+  eda_event_source_status: string;
   success_nodes: number[];
   failure_nodes: number[];
   always_nodes: number[];

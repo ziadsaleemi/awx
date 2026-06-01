@@ -92,6 +92,50 @@ def test_create_node_with_field(field_name, field_value, workflow_job_template, 
 
 
 @pytest.mark.django_db
+def test_create_eda_rulebook_node(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {
+            'node_type': 'eda_rulebook',
+            'eda_rulebook_name': 'ops-alerts',
+            'eda_activation_id': 'activation-1',
+            'eda_event_source': 'webhook',
+            'eda_event_source_status': 'running',
+            'identifier': 'ops-alerts',
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert res.data['node_type'] == 'eda_rulebook'
+    assert res.data['unified_job_template'] is None
+    assert res.data['eda_rulebook_name'] == 'ops-alerts'
+    assert res.data['summary_fields']['eda_rulebook']['event_source'] == 'webhook'
+
+
+@pytest.mark.django_db
+def test_eda_rulebook_node_requires_rulebook_name(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(url, {'node_type': 'eda_rulebook'}, user=admin_user, expect=400)
+
+    assert 'eda_rulebook_name' in res.data
+
+
+@pytest.mark.django_db
+def test_eda_rulebook_node_rejects_unified_job_template(workflow_job_template, post, admin_user, job_template):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {'node_type': 'eda_rulebook', 'eda_rulebook_name': 'ops-alerts', 'unified_job_template': job_template.pk},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'unified_job_template' in res.data
+
+
+@pytest.mark.django_db
 class TestApprovalNodes:
     def test_approval_node_creation(self, post, approval_node, admin_user):
         url = reverse('api:workflow_job_template_node_create_approval', kwargs={'pk': approval_node.pk, 'version': 'v2'})

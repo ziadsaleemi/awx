@@ -61,6 +61,12 @@ logger = logging.getLogger('awx.main.models.workflow')
 
 WORKFLOW_BASE_URL = "{}/jobs/workflow/{}"
 _HOST_IP_ARTIFACT_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
+WORKFLOW_NODE_TYPE_TEMPLATE = 'template'
+WORKFLOW_NODE_TYPE_EDA_RULEBOOK = 'eda_rulebook'
+WORKFLOW_NODE_TYPES = (
+    (WORKFLOW_NODE_TYPE_TEMPLATE, _('Template')),
+    (WORKFLOW_NODE_TYPE_EDA_RULEBOOK, _('EDA rulebook activation')),
+)
 
 
 class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
@@ -97,6 +103,11 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         default=None,
         on_delete=models.SET_NULL,
     )
+    node_type = models.CharField(max_length=32, choices=WORKFLOW_NODE_TYPES, default=WORKFLOW_NODE_TYPE_TEMPLATE)
+    eda_rulebook_name = models.CharField(max_length=512, blank=True, default='')
+    eda_activation_id = models.CharField(max_length=128, blank=True, default='')
+    eda_event_source = models.CharField(max_length=512, blank=True, default='')
+    eda_event_source_status = models.CharField(max_length=64, blank=True, default='')
 
     def get_parent_nodes(self):
         '''Returns queryset containing all parents of this node'''
@@ -113,6 +124,11 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         return [
             'workflow_job',
             'unified_job_template',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
             'extra_data',
             'survey_passwords',
             'inventory',
@@ -160,6 +176,11 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
 class WorkflowJobTemplateNode(WorkflowNodeBase):
     FIELDS_TO_PRESERVE_AT_COPY = [
         'unified_job_template',
+        'node_type',
+        'eda_rulebook_name',
+        'eda_activation_id',
+        'eda_event_source',
+        'eda_event_source_status',
         'workflow_job_template',
         'success_nodes',
         'failure_nodes',

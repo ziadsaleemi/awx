@@ -107,6 +107,7 @@ from awx.main.models import (
 )
 from awx.main.models.base import VERBOSITY_CHOICES, NEW_JOB_TYPE_CHOICES
 from awx.main.models.rbac import role_summary_fields_generator, give_creator_permissions, get_role_codenames, to_permissions, get_role_from_object_role
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 from awx.main.fields import ImplicitRoleField
 from awx.main.utils import (
     get_model_for_type,
@@ -4555,6 +4556,7 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
     failure_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     always_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     exclude_errors = ('required',)  # required variables may be provided by WFJT or on launch
+    eda_fields = ('node_type', 'eda_rulebook_name', 'eda_activation_id', 'eda_event_source', 'eda_event_source_status')
 
     class Meta:
         model = WorkflowJobTemplateNode
@@ -4572,6 +4574,11 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
             'always_nodes',
             'all_parents_must_converge',
             'identifier',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
         )
 
     def get_related(self, obj):
@@ -4600,7 +4607,45 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
         summary_fields = super(WorkflowJobTemplateNodeSerializer, self).get_summary_fields(obj)
         if isinstance(obj.unified_job_template, WorkflowApprovalTemplate):
             summary_fields['unified_job_template']['timeout'] = obj.unified_job_template.timeout
+        if obj.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            summary_fields['eda_rulebook'] = {
+                'name': obj.eda_rulebook_name,
+                'activation_id': obj.eda_activation_id,
+                'event_source': obj.eda_event_source,
+                'event_source_status': obj.eda_event_source_status,
+            }
         return summary_fields
+
+    def validate(self, attrs):
+        eda_values = {field_name: attrs[field_name] for field_name in self.eda_fields if field_name in attrs}
+        unified_job_template_submitted = 'unified_job_template' in attrs
+        submitted_unified_job_template = attrs.get('unified_job_template')
+        attrs = super(WorkflowJobTemplateNodeSerializer, self).validate(attrs)
+        attrs.update(eda_values)
+        if unified_job_template_submitted:
+            attrs['unified_job_template'] = submitted_unified_job_template
+
+        node_type = attrs.get('node_type')
+        if node_type is None and self.instance:
+            node_type = self.instance.node_type
+        node_type = node_type or WORKFLOW_NODE_TYPE_TEMPLATE
+
+        unified_job_template = attrs.get('unified_job_template')
+        if unified_job_template is None and self.instance and not unified_job_template_submitted:
+            unified_job_template = self.instance.unified_job_template
+
+        if node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            if unified_job_template is not None:
+                raise serializers.ValidationError({'unified_job_template': _('EDA rulebook nodes cannot also reference a unified job template.')})
+            rulebook_name = attrs.get('eda_rulebook_name') or getattr(self.instance, 'eda_rulebook_name', '')
+            if not rulebook_name:
+                raise serializers.ValidationError({'eda_rulebook_name': _('This field is required for EDA rulebook nodes.')})
+            return attrs
+
+        if any(attrs.get(field_name) for field_name in self.eda_fields if field_name != 'node_type'):
+            raise serializers.ValidationError({'node_type': _('EDA metadata is only valid when node_type is eda_rulebook.')})
+
+        return attrs
 
 
 class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):

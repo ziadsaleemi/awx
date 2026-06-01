@@ -146,7 +146,8 @@ Schema:
 }
 Use only available AWX template ids/names from context for executable nodes.
 Use workflow_approval for human gates.
-Use eda_rulebook or ai_task only when user explicitly asks for event-driven or runtime AI behavior; these are preview-only until AWX persistence supports them.
+Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX can persist these nodes but runtime launch/status handling is not available yet.
+Use ai_task only when user explicitly asks for runtime AI behavior; these are preview-only until AWX persistence supports them.
 List at most 8 nodes.`;
 
 const typeAliases: Record<string, UnifiedJobType | 'eda_rulebook' | 'ai_task'> = {
@@ -252,13 +253,13 @@ function resolveWorkflowPlan(
 
     if (nodeType === 'eda_rulebook') {
       const reason = edaStatus?.configured
-        ? 'EDA rulebook node can be planned from the configured controller, but AWX workflow persistence and launch/status handling are not implemented yet.'
+        ? undefined
         : 'EDA Controller is not configured. Set Administration > Settings > EDA before using rulebook activation nodes.';
       return {
         planNode,
         key,
         nodeType,
-        valid: false,
+        valid: edaStatus?.configured ?? false,
         error: reason,
       };
     }
@@ -491,7 +492,8 @@ export function AIWorkflowSuggester() {
       idMap.set(node.key, nodeId);
       const nodeName = node.planNode.name || node.template?.name || t('AI workflow node');
       const nodeDescription = node.planNode.description || node.template?.description || '';
-      const nodeType = node.nodeType as UnifiedJobType;
+      const nodeType = node.nodeType;
+      const isEda = nodeType === 'eda_rulebook';
       const isApproval = nodeType === RESOURCE_TYPE.workflow_approval;
       const nodeToCreate = {
         id: nodeId,
@@ -507,15 +509,31 @@ export function AIWorkflowSuggester() {
             failure_nodes: [],
             success_nodes: [],
             identifier: nodeName,
+            node_type: isEda ? RESOURCE_TYPE.eda_rulebook : undefined,
+            eda_rulebook_name: isEda ? nodeName : undefined,
+            eda_activation_id: isEda ? node.planNode.template_name || '' : undefined,
+            eda_event_source: isEda ? node.planNode.description || '' : undefined,
+            eda_event_source_status: isEda ? 'planned' : undefined,
             all_parents_must_converge: node.planNode.convergence === 'all',
             summary_fields: {
-              unified_job_template: {
-                id: isApproval ? -1 : Number(node.template?.id || 0),
-                name: nodeName,
-                description: nodeDescription,
-                unified_job_type: nodeType,
-                timeout: isApproval ? node.planNode.approval_timeout || 0 : undefined,
-              },
+              ...(isEda
+                ? {
+                    eda_rulebook: {
+                      name: nodeName,
+                      activation_id: node.planNode.template_name || '',
+                      event_source: node.planNode.description || '',
+                      event_source_status: 'planned',
+                    },
+                  }
+                : {
+                    unified_job_template: {
+                      id: isApproval ? -1 : Number(node.template?.id || 0),
+                      name: nodeName,
+                      description: nodeDescription,
+                      unified_job_type: nodeType as UnifiedJobType,
+                      timeout: isApproval ? node.planNode.approval_timeout || 0 : undefined,
+                    },
+                  }),
             },
           },
           launch_data: createEmptyPromptValues(),

@@ -32,6 +32,7 @@ const NodeIcon: { [key: string]: ElementType<SVGIconProps> } = {
   terraform_job: InfrastructureIcon,
   workflow_approval: ClockIcon,
   workflow_job: ShareAltIcon,
+  eda_rulebook: ProcessAutomationIcon,
   deleted_resource: TrashIcon,
 };
 
@@ -40,7 +41,8 @@ export const CustomNode: FC<
 > = observer(({ element, onSelect, ...rest }) => {
   const { setSidebarMode } = useViewOptions();
   const jobType =
-    element.getData()?.resource?.summary_fields?.unified_job_template?.unified_job_type;
+    element.getData()?.resource?.summary_fields?.unified_job_template?.unified_job_type ||
+    element.getData()?.resource?.node_type;
 
   const id = element.getId();
   const data = element.getData();

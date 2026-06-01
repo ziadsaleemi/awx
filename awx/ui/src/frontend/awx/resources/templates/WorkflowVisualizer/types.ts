@@ -115,6 +115,17 @@ export interface NodeResource {
   summary_fields?: { inventory: { kind: string } };
 }
 
+export interface EDARulebookResource {
+  id: number;
+  name: string;
+  description: string;
+  type: 'eda_rulebook';
+  rulebook_name: string;
+  activation_id?: string;
+  event_source?: string;
+  event_source_status?: string;
+}
+
 export interface PromptFormValues {
   inventory: Partial<Inventory> | SummaryFieldInventory | null;
   credentials:
@@ -165,7 +176,8 @@ export type AllResources =
   | SystemJobTemplate
   | TerraformJobTemplate
   | WorkflowApproval
-  | WorkflowJobTemplate;
+  | WorkflowJobTemplate
+  | EDARulebookResource;
 
 export interface WizardFormValues {
   approval_description: string;
@@ -174,6 +186,10 @@ export interface WizardFormValues {
   node_alias: string;
   node_convergence: 'any' | 'all';
   node_days_to_keep: number;
+  eda_activation_id: string;
+  eda_event_source: string;
+  eda_event_source_status: string;
+  eda_rulebook_name: string;
   resource: AllResources | NodeResource | null;
   node_type: UnifiedJobType;
   node_status_type?: EdgeStatus;
@@ -191,4 +207,5 @@ export type UnifiedJobType =
   | 'workflow_approval'
   | 'inventory_update'
   | 'system_job'
-  | 'terraform_job';
+  | 'terraform_job'
+  | 'eda_rulebook';

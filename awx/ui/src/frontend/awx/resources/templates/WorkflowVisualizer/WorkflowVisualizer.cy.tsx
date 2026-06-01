@@ -197,7 +197,7 @@ describe('WorkflowVisualizer', () => {
     cy.contains('button:not(:disabled):not(:hidden)', 'Save').should('be.visible');
   });
 
-  it('Should show EDA workflow plans as blocked until persisted node support exists', () => {
+  it('Should apply EDA workflow plans as persisted metadata nodes', () => {
     cy.intercept('GET', '/api/v2/ai/settings/', {
       body: {
         enabled: true,
@@ -252,6 +252,48 @@ describe('WorkflowVisualizer', () => {
         },
       },
     }).as('aiWorkflowChat');
+    cy.intercept('POST', '/api/v2/workflow_job_templates/*/workflow_nodes/', (req) => {
+      expect(req.body.node_type).to.equal('eda_rulebook');
+      expect(req.body.eda_rulebook_name).to.equal('Restart web on alert');
+      expect(req.body.eda_event_source_status).to.equal('planned');
+      req.reply({
+        id: 9001,
+        type: 'workflow_job_template_node',
+        url: '/api/v2/workflow_job_template_nodes/9001/',
+        related: {
+          labels: '/api/v2/workflow_job_template_nodes/9001/labels/',
+          credentials: '/api/v2/workflow_job_template_nodes/9001/credentials/',
+          instance_groups: '/api/v2/workflow_job_template_nodes/9001/instance_groups/',
+          create_approval_template:
+            '/api/v2/workflow_job_template_nodes/9001/create_approval_template/',
+          success_nodes: '/api/v2/workflow_job_template_nodes/9001/success_nodes/',
+          failure_nodes: '/api/v2/workflow_job_template_nodes/9001/failure_nodes/',
+          always_nodes: '/api/v2/workflow_job_template_nodes/9001/always_nodes/',
+          workflow_job_template: '/api/v2/workflow_job_templates/1/',
+        },
+        summary_fields: {
+          workflow_job_template: { id: 1, name: 'E2E 6GDe', description: '' },
+          eda_rulebook: {
+            name: 'Restart web on alert',
+            activation_id: '',
+            event_source: 'Rulebook activation listens for alert webhook events.',
+            event_source_status: 'planned',
+          },
+        },
+        node_type: 'eda_rulebook',
+        eda_rulebook_name: 'Restart web on alert',
+        eda_activation_id: '',
+        eda_event_source: 'Rulebook activation listens for alert webhook events.',
+        eda_event_source_status: 'planned',
+        workflow_job_template: 1,
+        unified_job_template: null,
+        success_nodes: [],
+        failure_nodes: [],
+        always_nodes: [],
+        all_parents_must_converge: false,
+        identifier: 'Restart web on alert',
+      });
+    }).as('createEdaWorkflowNode');
 
     cy.mount(<WorkflowVisualizer />);
     cy.wait('@aiSettings');
@@ -264,12 +306,13 @@ describe('WorkflowVisualizer', () => {
     cy.wait('@aiWorkflowChat');
     cy.get('[data-cy="ai-workflow-eda-status"]').should('contain.text', 'https://eda.example.test');
     cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Event driven restart');
-    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Blocked');
-    cy.get('[data-cy="ai-workflow-plan-preview"]').should(
-      'contain.text',
-      'workflow persistence and launch/status handling are not implemented yet'
-    );
-    cy.get('[data-cy="ai-workflow-apply"]').should('be.disabled');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').should('be.enabled');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').click();
+    cy.wait('@createEdaWorkflowNode');
   });
 
   it('Should toggle the expand collapse button in the toolbar', () => {
