@@ -14,8 +14,19 @@ module.exports = function (env, argv) {
   // FavIcons
   config.plugins.unshift(
     new FaviconsWebpackPlugin({
-      logo: './frontend/assets/awx-icon.svg',
+      logo: './frontend/assets/awx-logo.svg',
+      mode: 'webapp',
+      devMode: 'webapp',
       inject: true,
+      favicons: {
+        appName: 'AWX',
+        appShortName: 'AWX',
+        appDescription: 'AWX',
+        developerName: 'Red Hat',
+        developerURL: null,
+        background: '#000000',
+        theme_color: '#000000',
+      },
     })
   );
 

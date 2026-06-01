@@ -80,6 +80,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 21 | **Custom login background image in DB** — upload or paste an https:// URL in Settings → User Interface; stored in `CUSTOM_LOGIN_BACKGROUND` AWX setting (database), served from `/api/` root before auth, no more localStorage | Medium | ✅ |
 | 22 | **Remove first-letter icon placeholders from sidebar** — nav items without an explicit icon now show only their label text in expanded mode; first-letter fallback kept only for collapsed (icon-only) mode | Low | ✅ |
 | 23 | **Catalog deploy dynamic field interpolation** — deploy form now resolves `dynamic_field_templates` placeholders (for example `{mnemonic}{cores}`) using current form values before submitting `extra_vars` | High | ✅ |
+| 24 | **AWX PWA install branding** — AWX favicon/PWA generation now uses the full AWX logo artwork and explicit manifest names (`name` / `short_name`) so browser install prompts show `AWX` instead of the shared npm package name | Medium | ✅ |
 
 ---
 
