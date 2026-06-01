@@ -181,7 +181,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
   return (
     <PageDashboardCard
       title={t('Automation Insights')}
-      width="md"
+      width="half"
       height="sm"
       headerControls={
         aiEnabled && aiConfigured ? (

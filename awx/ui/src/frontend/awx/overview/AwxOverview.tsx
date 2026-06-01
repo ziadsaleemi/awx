@@ -16,9 +16,6 @@ import { AwxRecentProjectsCard } from './cards/AwxRecentProjectsCard';
 import { AwxROICard } from './cards/AwxROICard';
 import { AwxInsightsCard } from './cards/AwxInsightsCard';
 import { AwxPerformanceCard } from './cards/AwxPerformanceCard';
-import { MCPServerInfoCard } from './cards/MCPServerInfoCard';
-import { EDAIntegrationCard } from './cards/EDAIntegrationCard';
-import { OPAGuardrailsCard } from './cards/OPAGuardrailsCard';
 import { useManagedAwxDashboard } from './hooks/useManagedAwxDashboard';
 
 type Resource = { id: string; name: string };
@@ -49,9 +46,12 @@ export function AwxOverview() {
 
 function AwxOverviewInternal(props: { managedResources: Resource[] }) {
   const { managedResources } = props;
-  const { data, isLoading, mutate: refreshDashboard } = useSWR<IAwxDashboardData>(
-    awxAPI`/dashboard/`,
-    (url: string) => fetch(url).then((r) => r.json())
+  const {
+    data,
+    isLoading,
+    mutate: refreshDashboard,
+  } = useSWR<IAwxDashboardData>(awxAPI`/dashboard/`, (url: string) =>
+    fetch(url).then((r) => r.json())
   );
 
   // Refresh dashboard data whenever a job changes state (real-time via WebSocket)
@@ -90,12 +90,6 @@ function AwxOverviewInternal(props: { managedResources: Resource[] }) {
             return <AwxInsightsCard key={resource.id} />;
           case 'performance_metrics':
             return <AwxPerformanceCard key={resource.id} />;
-          case 'mcp_server':
-            return <MCPServerInfoCard key={resource.id} />;
-          case 'eda_integration':
-            return <EDAIntegrationCard key={resource.id} />;
-          case 'opa_guardrails':
-            return <OPAGuardrailsCard key={resource.id} />;
           default:
             return <></>;
         }

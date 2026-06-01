@@ -365,6 +365,7 @@ Code review against the completed tracker found these remaining implementation g
 | AP24 | **Performance metrics do not include trends or failed-host analysis** — G2c displays current execution node capacity and slowest successful templates, but it does not calculate capacity trends over time or most-failed hosts from job events | Stub / Approximation | Medium | 🔄 |
 | AP25 | **MCP policy context is not vector-backed RAG and auth scoping is still generic** — G3b/G3c are partially complete through `MCP_POLICY_CONTEXT`, token-style ranking, and Activity Stream audit, but there is no embedding/vector-store pipeline and no MCP-specific OAuth2 scope model beyond normal authenticated AWX access | Stub / Approximation | High | 🔄 |
 | AP26 | **OPA guardrail scope is narrower than the completed claim** — OPA settings, REST evaluation, standard job execution policy checks, and MCP launch guardrails exist, but there is no middleware before every launch type, no upload/edit Rego bundle UI, and no human-approval/destructive-action enforcement path for future AI workflow nodes | Stub / Approximation | High | 🔄 |
+| AP27 | **Overview mixed information cards with configuration surfaces** — the overview dashboard rendered MCP connection setup, EDA settings guidance, OPA guardrail status/configuration, and an ROI assumptions editor alongside status cards; overview now keeps informational resource/job/project/inventory/ROI/insights/performance cards only and aligns the remaining cards into full/half-width rows | Implementation Bug | High | ✅ |
 
 ## Notes
 

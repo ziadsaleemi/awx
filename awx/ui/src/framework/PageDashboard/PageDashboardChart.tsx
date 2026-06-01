@@ -7,7 +7,6 @@ import {
   ChartLine,
   ChartScatter,
   ChartStack,
-  ChartVoronoiContainer,
   ChartVoronoiContainerProps,
   createContainer,
 } from '@patternfly/react-charts';
@@ -130,6 +129,22 @@ export function PageDashboardChart(props: {
     left: (props.padding?.left ?? 12) + Math.round(maxDomainY).toString().length * 9.5 + 16,
     right: (props.padding?.right ?? 0) + 16,
   };
+  const chartContainerComponent = showTooltip ? (
+    <CursorVoronoiContainer
+      cursorDimension="x"
+      labels={(point: { datum: { y: string | number } }) => point.datum.y.toString()}
+      labelComponent={
+        <ChartLegendTooltip
+          // title={(datum: { x: number | string }) => datum.x}
+          legendData={legendData}
+          cornerRadius={8}
+        />
+      }
+      mouseFollowTooltips
+      voronoiDimension="x"
+      voronoiPadding={50}
+    />
+  ) : undefined;
 
   return (
     <div
@@ -161,28 +176,7 @@ export function PageDashboardChart(props: {
                 width={size.width}
                 minDomain={minDomain}
                 maxDomain={{ y: maxDomainY }}
-                containerComponent={
-                  showTooltip ? (
-                    <CursorVoronoiContainer
-                      cursorDimension="x"
-                      labels={(point: { datum: { y: string | number } }) =>
-                        point.datum.y.toString()
-                      }
-                      labelComponent={
-                        <ChartLegendTooltip
-                          // title={(datum: { x: number | string }) => datum.x}
-                          legendData={legendData}
-                          cornerRadius={8}
-                        />
-                      }
-                      mouseFollowTooltips
-                      voronoiDimension="x"
-                      voronoiPadding={50}
-                    />
-                  ) : (
-                    <ChartVoronoiContainer voronoiDimension="x" voronoiPadding={50} />
-                  )
-                }
+                containerComponent={chartContainerComponent}
               >
                 <ChartAxis fixLabelOverlap />
                 <ChartAxis

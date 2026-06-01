@@ -53,12 +53,18 @@ interface UnifiedJobsResponse {
 function usePerformanceData() {
   const { data: instances, isLoading: instLoading } = useSWR<InstancesResponse>(
     awxAPI`/instances/?page_size=50`,
-    (url: string) => fetch(url).then((r) => r.json()).catch(() => ({ count: 0, results: [] }))
+    (url: string) =>
+      fetch(url)
+        .then((r) => r.json())
+        .catch(() => ({ count: 0, results: [] }))
   );
 
   const { data: recentJobs, isLoading: jobsLoading } = useSWR<UnifiedJobsResponse>(
     awxAPI`/unified_jobs/?status=successful&page_size=200&order_by=-elapsed`,
-    (url: string) => fetch(url).then((r) => r.json()).catch(() => ({ count: 0, results: [] }))
+    (url: string) =>
+      fetch(url)
+        .then((r) => r.json())
+        .catch(() => ({ count: 0, results: [] }))
   );
 
   // Compute slowest templates
@@ -106,7 +112,7 @@ export function AwxPerformanceCard() {
       title={t('Performance Metrics')}
       linkText={t('View instances')}
       to={getPageUrl(AwxRoute.Instances)}
-      width="lg"
+      width="full"
       height="md"
     >
       <CardBody>
@@ -118,7 +124,10 @@ export function AwxPerformanceCard() {
             {executionNodes.length > 0 && (
               <StackItem>
                 <TextContent style={{ marginBottom: 8 }}>
-                  <Text component={TextVariants.h4} style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+                  <Text
+                    component={TextVariants.h4}
+                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+                  >
                     {t('Execution node capacity')}
                   </Text>
                 </TextContent>
@@ -157,7 +166,10 @@ export function AwxPerformanceCard() {
             {slowestTemplates.length > 0 && (
               <StackItem>
                 <TextContent style={{ marginBottom: 8 }}>
-                  <Text component={TextVariants.h4} style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+                  <Text
+                    component={TextVariants.h4}
+                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+                  >
                     {t('Slowest templates (avg)')}
                   </Text>
                 </TextContent>
@@ -201,7 +213,10 @@ export function AwxPerformanceCard() {
             {slowestTemplates.length === 0 && executionNodes.length === 0 && (
               <StackItem>
                 <TextContent>
-                  <Text component={TextVariants.small} style={{ color: 'var(--pf-v5-global--Color--200)' }}>
+                  <Text
+                    component={TextVariants.small}
+                    style={{ color: 'var(--pf-v5-global--Color--200)' }}
+                  >
                     {t('No performance data available yet. Run some jobs to see metrics here.')}
                   </Text>
                 </TextContent>
