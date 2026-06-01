@@ -1,4 +1,4 @@
-const AWX_PROTOCOL = process.env.AWX_PROTOCOL || 'http';
+const AWX_PROTOCOL = process.env.AWX_PROTOCOL || 'https';
 const AWX_HOST = process.env.AWX_HOST || 'localhost:8043';
 const AWX_SERVER =
   process.env.AWX_SERVER || process.env.CYPRESS_AWX_SERVER || `${AWX_PROTOCOL}://${AWX_HOST}`;
