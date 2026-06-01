@@ -289,7 +289,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
         top: 72,
         right: 0,
         bottom: 0,
-        width: 'min(420px, calc(100vw - 24px))',
+        width: 'min(640px, calc(100vw - 24px))',
         zIndex: 600,
         backgroundColor: 'var(--pf-v5-global--BackgroundColor--100)',
         borderLeft: '1px solid var(--pf-v5-global--BorderColor--100)',

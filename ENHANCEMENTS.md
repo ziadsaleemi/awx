@@ -244,7 +244,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language | High | ✅ |
+| G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language; assistant panel width increased for easier resource-plan review on desktop while preserving mobile viewport constraints | High | ✅ |
 | G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | 🔄 |
 | G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ✅ |
 | G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ✅ |
