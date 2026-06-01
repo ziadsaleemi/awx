@@ -11,6 +11,9 @@ import {
 import { RobotIcon, TimesIcon } from '@patternfly/react-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import styled from 'styled-components';
 import { postRequest, requestGet } from '../../common/crud/Data';
 import { awxAPI } from './api/awx-utils';
 
@@ -31,6 +34,53 @@ interface AIChatResponse {
   model: string;
   provider: string;
 }
+
+const AssistantMarkdown = styled.div`
+  p,
+  ul,
+  ol,
+  pre,
+  blockquote {
+    margin-block-start: 0;
+    margin-block-end: 0.5rem;
+  }
+
+  p:last-child,
+  ul:last-child,
+  ol:last-child,
+  pre:last-child,
+  blockquote:last-child {
+    margin-block-end: 0;
+  }
+
+  ul,
+  ol {
+    padding-inline-start: 1.25rem;
+  }
+
+  code {
+    background: var(--pf-v5-global--BackgroundColor--300);
+    border-radius: 3px;
+    padding: 1px 4px;
+  }
+
+  pre {
+    background: var(--pf-v5-global--BackgroundColor--300);
+    border-radius: 4px;
+    overflow-x: auto;
+    padding: 8px;
+    white-space: pre-wrap;
+  }
+
+  pre code {
+    background: transparent;
+    padding: 0;
+  }
+
+  a {
+    color: var(--pf-v5-global--link--Color);
+  }
+`;
 
 export function useAIAssistantEnabled() {
   const [enabled, setEnabled] = useState(false);
@@ -182,12 +232,18 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 color: msg.role === 'user' ? '#fff' : 'inherit',
                 borderRadius: 8,
                 padding: '8px 12px',
-                whiteSpace: 'pre-wrap',
+                whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
                 wordBreak: 'break-word',
                 fontSize: 14,
               }}
             >
-              {msg.content}
+              {msg.role === 'assistant' ? (
+                <AssistantMarkdown className="pf-v5-c-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                </AssistantMarkdown>
+              ) : (
+                msg.content
+              )}
             </div>
           ))}
 

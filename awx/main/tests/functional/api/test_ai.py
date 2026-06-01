@@ -7,6 +7,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
+from awx.main.models import Host, Inventory
 
 
 class FakeJSONResponse:
@@ -91,6 +92,29 @@ def test_ai_chat_openai_codex_provider_uses_device_token_without_api_key(post, g
     assert requests_post.call_args.args[0] == 'https://chatgpt.com/backend-api/codex/responses'
     assert requests_post.call_args.kwargs['headers']['chatgpt-account-id'] == 'acct_123'
     assert requests_post.call_args.kwargs['headers']['OpenAI-Beta'] == 'responses=experimental'
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_answers_visible_host_count_without_provider(post, admin_user, organization):
+    source_inv = Inventory.objects.create(name='source-inv', organization=organization)
+    source_host = source_inv.hosts.create(name='host1')
+    source_inv.hosts.create(name='host2')
+
+    constructed = Inventory.objects.create(name='constructed-inv', kind='constructed', organization=organization)
+    Host.objects.create(name='host1', inventory=constructed, instance_id=str(source_host.pk))
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many hosts do we have?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 2 hosts visible to you in AWX.'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
 
 
 @pytest.mark.django_db

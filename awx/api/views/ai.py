@@ -4,6 +4,7 @@
 import json
 import time
 import logging
+import re
 import urllib.parse
 from base64 import urlsafe_b64decode
 from collections import defaultdict
@@ -23,6 +24,8 @@ from rest_framework.permissions import IsAuthenticated
 
 from awx.api.permissions import IsSystemAdmin
 from awx.conf.models import Setting
+from awx.main import models
+from awx.main.access import get_user_queryset
 from awx.main.tasks.system import clear_setting_cache
 
 logger = logging.getLogger('awx.api.views.ai')
@@ -672,6 +675,67 @@ def _call_ai_provider(provider: str, model: str, messages: list, max_tokens: int
         raise AIProviderError(_('Could not parse the AI provider response.'))
 
 
+def _visible_host_count(user) -> int:
+    return get_user_queryset(user, models.Host).exclude(inventory__kind='constructed').distinct().count()
+
+
+def _visible_awx_counts(user) -> dict:
+    return {
+        'hosts': _visible_host_count(user),
+        'inventories': get_user_queryset(user, models.Inventory).distinct().count(),
+        'projects': get_user_queryset(user, models.Project).distinct().count(),
+        'job_templates': get_user_queryset(user, models.JobTemplate).distinct().count(),
+        'workflow_job_templates': get_user_queryset(user, models.WorkflowJobTemplate).distinct().count(),
+        'catalog_items': get_user_queryset(user, models.CatalogItem).distinct().count(),
+    }
+
+
+def _latest_user_message(messages: list) -> str:
+    for message in reversed(messages):
+        if message.get('role') == 'user':
+            return message.get('content', '')
+    return ''
+
+
+def _is_count_question(message: str, resource_pattern: str) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    if not re.search(resource_pattern, normalized):
+        return False
+    return bool(re.search(r'\bhow many\b', normalized) or re.search(r'\b(count|total|number of)\b', normalized) or re.search(r'\bdo we have\b', normalized))
+
+
+def _try_answer_awx_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    if _is_count_question(latest_message, r'\bhosts?\b'):
+        count = _visible_host_count(user)
+        noun = 'host' if count == 1 else 'hosts'
+        return f'There are {count} {noun} visible to you in AWX.'
+    return None
+
+
+def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
+    try:
+        counts = _visible_awx_counts(user)
+    except Exception as exc:
+        logger.warning('Could not build AI assistant AWX context: %s', exc)
+        return system_prompt
+
+    context = (
+        '\n\nLive AWX context for the requesting user:\n'
+        '- Counts are filtered by the requester\'s AWX RBAC permissions.\n'
+        '- Host count excludes constructed-inventory synthetic hosts, matching the dashboard.\n'
+        f"- Hosts visible: {counts['hosts']}\n"
+        f"- Inventories visible: {counts['inventories']}\n"
+        f"- Projects visible: {counts['projects']}\n"
+        f"- Job templates visible: {counts['job_templates']}\n"
+        f"- Workflow job templates visible: {counts['workflow_job_templates']}\n"
+        f"- Catalog items visible: {counts['catalog_items']}\n"
+        'Use this live context when answering direct questions about this AWX instance. '
+        'Do not say you cannot see the AWX instance when the answer is present in this context.'
+    )
+    return f'{system_prompt}{context}'
+
+
 class AIChatView(APIView):
     """
     POST /api/v2/ai/chat/
@@ -735,14 +799,6 @@ class AIChatView(APIView):
 
         provider = getattr(settings, 'AI_PROVIDER', 'openai')
         api_key = getattr(settings, 'AI_API_KEY', '')
-        if provider != 'openai_codex' and not api_key:
-            return Response(
-                {'detail': _('AI_API_KEY is not configured. Set it in Settings → AI Assistant.')},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        base_url = getattr(settings, 'AI_API_URL', '')
-        max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
         system_prompt = getattr(settings, 'AI_SYSTEM_PROMPT', '')
         # Allow callers to override the system prompt for specialised tasks (e.g. code generation).
         # The override must be a non-empty string and is validated to be under 4 KB.
@@ -754,6 +810,26 @@ class AIChatView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             system_prompt = system_override
+        else:
+            builtin_answer = _try_answer_awx_fact_question(request.user, messages)
+            if builtin_answer is not None:
+                return Response(
+                    {
+                        'message': {'role': 'assistant', 'content': builtin_answer},
+                        'model': 'awx-live-context',
+                        'provider': 'awx',
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            system_prompt = _system_prompt_with_awx_context(system_prompt, request.user)
+        if provider != 'openai_codex' and not api_key:
+            return Response(
+                {'detail': _('AI_API_KEY is not configured. Set it in Settings → AI Assistant.')},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        base_url = getattr(settings, 'AI_API_URL', '')
+        max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
         defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
         if provider == 'openai_codex':
             model = _openai_codex_effective_default_model()
