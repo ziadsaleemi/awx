@@ -13,6 +13,7 @@ export function useGetPageUrl() {
       }
     ) => {
       let url = routes[id] ?? '';
+      const routesInitialized = Object.keys(routes).length > 0;
       const params = options?.params;
       const query = options?.query;
       if (url) {
@@ -38,7 +39,7 @@ export function useGetPageUrl() {
             .join('&')
             .replace('/&&/g', '&')}`;
         }
-      } else {
+      } else if (routesInitialized) {
         console.error(`Page id ${id} not found`); // eslint-disable-line no-console
       }
 

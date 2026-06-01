@@ -52,7 +52,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 |---|-------------|----------|--------|
 | 9  | **Virtual scrolling for large lists** — use PatternFly `VirtualizedTable` for job/host lists with thousands of rows | High | ⬜ |
 | 10 | **WebSocket-driven dashboard refresh** — replace 30s polling with real-time AWX WebSocket event stream | Medium | ✅ |
-| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | 🔄 |
+| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | ✅ |
 
 ### Operations
 
@@ -361,13 +361,14 @@ Code review against the completed tracker found these remaining implementation g
 | AP18 | **MCP is mostly read/launch, not authoring** — MCP exposes list/get and job launch tools with guardrails, but it does not expose safe create/update tools for AI-generated projects, playbooks, roles, inventories, smart inventories, catalog items, or workflows | Stub / Approximation | High | ⬜ |
 | AP19 | **Theme persistence is not server-side** — row 3 claimed theme storage in the user profile, but `PageSettingsProvider` persists preferences in browser `localStorage` under `user-preferences` / `user-preferences-{id}`; changing browser or device loses the setting | Documentation Drift | Medium | 🔄 |
 | AP20 | **VirtualizedTable is not implemented** — row 9 claimed PatternFly `VirtualizedTable` for large job/host lists, but the UI has no `VirtualizedTable` usage in `awx/ui/src`; large lists still rely on the existing paginated table path | Stub / Approximation | High | ⬜ |
-| AP21 | **Navigation count prefetch is partial** — row 11 claimed sidebar resource-count prefetch, but `useAwxPrefetch()` only warms `/dashboard/`, `/instances/?page_size=50`, and `/config/`; it does not preload hosts, inventories, templates, or sidebar count data | Documentation Drift | Low | 🔄 |
+| AP21 | **Navigation count prefetch was partial** — app startup now seeds SWR for overview data plus the core navigation/resource-count endpoints (`hosts`, `inventories`, `templates`, `projects`, `schedules`, Catalog, access, infrastructure, and admin-only cloud/settings endpoints when applicable) using small `page_size=1` requests | Documentation Drift | Low | ✅ |
 | AP22 | **Azure/DigitalOcean workflow survey IDs are environment-local** — E28 refers to concrete TFT/WJT IDs and surveys, but the repository contains Terraform example directories only; no migration, fixture, or management command creates those Azure/DigitalOcean provision/deprovision workflow templates reproducibly | Environment / Setup Issue | High | 🔄 |
 | AP23 | **Automation insights remain job-statistics only** — G2b now avoids runaway AI calls, but the card still analyzes recent unified jobs and top failing templates only; it does not perform inventory drift detection, execution-time anomaly detection, or true real-time recommendation generation | Stub / Approximation | High | 🔄 |
 | AP24 | **Performance metrics do not include trends or failed-host analysis** — G2c displays current execution node capacity and slowest successful templates, but it does not calculate capacity trends over time or most-failed hosts from job events | Stub / Approximation | Medium | 🔄 |
 | AP25 | **MCP policy context is not vector-backed RAG and auth scoping is still generic** — G3b/G3c are partially complete through `MCP_POLICY_CONTEXT`, token-style ranking, and Activity Stream audit, but there is no embedding/vector-store pipeline and no MCP-specific OAuth2 scope model beyond normal authenticated AWX access | Stub / Approximation | High | 🔄 |
 | AP26 | **OPA guardrail scope is narrower than the completed claim** — OPA settings, REST evaluation, standard job execution policy checks, and MCP launch guardrails exist, but there is no middleware before every launch type, no upload/edit Rego bundle UI, and no human-approval/destructive-action enforcement path for future AI workflow nodes | Stub / Approximation | High | 🔄 |
 | AP27 | **Overview mixed information cards with configuration surfaces** — the overview dashboard rendered MCP connection setup, EDA settings guidance, OPA guardrail status/configuration, and an ROI assumptions editor alongside status cards; overview now keeps informational resource/job/project/inventory/ROI/insights/performance cards only and aligns the remaining cards into full/half-width rows | Implementation Bug | High | ✅ |
+| AP28 | **Template create links logged false missing-route errors on first render** — Templates rendered create actions before `PageApp` populated the navigation route map, causing transient `Page id ... not found` console errors even though the links resolved after context initialization; `useGetPageUrl()` now waits until routes exist before reporting a missing ID, while still logging real missing routes afterward | Implementation Bug | Medium | ✅ |
 
 ## Notes
 
