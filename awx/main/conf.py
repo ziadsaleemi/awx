@@ -1257,6 +1257,7 @@ register(
     field_class=fields.ChoiceField,
     choices=[
         ('openai', _('OpenAI')),
+        ('openai_codex', _('OpenAI Codex device login')),
         ('azure_openai', _('Azure OpenAI')),
         ('redhat_ai', _('Red Hat AI')),
         ('watsonx', _('IBM watsonx')),
@@ -1264,7 +1265,10 @@ register(
     ],
     default='openai',
     label=_('AI Provider'),
-    help_text=_('The AI provider to use for the assistant. Each provider requires its own API key and endpoint URL.'),
+    help_text=_(
+        'The AI provider to use for the assistant. OpenAI uses an API key; OpenAI Codex device login '
+        'uses the device-code connection below instead of AI_API_KEY. Other providers require their own API key and endpoint URL.'
+    ),
     category=_('AI Assistant'),
     category_slug='ai-assistant',
 )
@@ -1295,6 +1299,101 @@ register(
     category=_('AI Assistant'),
     category_slug='ai-assistant',
     encrypted=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_CLIENT_ID',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='app_EMoamEEZ73f0CkXaXp7hrann',
+    label=_('OpenAI Codex Client ID'),
+    help_text=_('OpenAI public client id used for Codex device login. Change only if OpenAI provides a replacement client id.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_OPENAI_CODEX_SCOPE',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='openid profile email offline_access model.request api.responses.write',
+    label=_('OpenAI Codex OAuth Scope'),
+    help_text=_('OAuth scopes requested during OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_OPENAI_CODEX_ACCESS_TOKEN',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Access Token'),
+    help_text=_('Encrypted access token created by OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_REFRESH_TOKEN',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Refresh Token'),
+    help_text=_('Encrypted refresh token created by OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_TOKEN_EXPIRES_AT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Token Expiry'),
+    help_text=_('Expiration timestamp for the current OpenAI Codex access token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex ChatGPT Account ID'),
+    help_text=_('ChatGPT account id extracted from the OpenAI Codex device-login token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_PLAN_TYPE',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Plan Type'),
+    help_text=_('ChatGPT plan type extracted from the OpenAI Codex device-login token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_AVAILABLE_MODELS',
+    field_class=fields.StringListField,
+    default=[],
+    label=_('OpenAI Codex Available Models'),
+    help_text=_('Cached model ids available to the OpenAI Codex device-login provider.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
 )
 
 register(

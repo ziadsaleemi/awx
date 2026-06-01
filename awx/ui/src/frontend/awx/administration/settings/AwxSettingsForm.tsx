@@ -17,6 +17,7 @@ import { PageFormFileUpload } from '../../../../framework/PageForm/Inputs/PageFo
 import { useRevertAllSettingsModal } from './useRevertAllSettingsModal';
 import { AwxLogoUpload } from './AwxLogoUpload';
 import { AwxBgImageUpload } from './AwxBgImageUpload';
+import { OpenAICodexDeviceLogin } from './OpenAICodexDeviceLogin';
 
 export interface AwxSettingsOptionsResponse {
   actions: {
@@ -199,6 +200,9 @@ export function AwxSettingsForm(props: {
         </Button>
       }
     >
+      {Object.values(props.options).some((option) => option.category_slug === 'ai-assistant') && (
+        <OpenAICodexDeviceLogin />
+      )}
       {Object.entries(otherOptions).map(([key, option]) => (
         <React.Fragment key={key}>
           <OptionActionsFormInput name={key} option={option} />
@@ -234,7 +238,8 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
   const option = props.option;
   const isReadOnly = props.option.defined_in_file;
 
-  if (props.name.endsWith('SECRET') || props.name.endsWith('PASSWORD')) {    return (
+  if (props.name.endsWith('SECRET') || props.name.endsWith('PASSWORD')) {
+    return (
       <PageFormTextInput
         label={option.label}
         name={props.name}
@@ -269,11 +274,7 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
   if (props.name === 'CUSTOM_LOGO') {
     return (
       <PageFormSection singleColumn>
-        <AwxLogoUpload
-          name={props.name}
-          label={option.label}
-          helpText={option.help_text}
-        />
+        <AwxLogoUpload name={props.name} label={option.label} helpText={option.help_text} />
       </PageFormSection>
     );
   }
@@ -281,11 +282,7 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
   if (props.name === 'CUSTOM_LOGIN_BACKGROUND') {
     return (
       <PageFormSection singleColumn>
-        <AwxBgImageUpload
-          name={props.name}
-          label={option.label}
-          helpText={option.help_text}
-        />
+        <AwxBgImageUpload name={props.name} label={option.label} helpText={option.help_text} />
       </PageFormSection>
     );
   }

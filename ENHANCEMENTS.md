@@ -246,6 +246,8 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | ✅ |
 | G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ✅ |
 | G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ✅ |
+| G1e | **OpenAI Codex device-login provider** — AI Assistant settings now include OpenAI Codex device-code authentication as a separate provider alongside existing OpenAI API-key support; tokens are stored encrypted and refreshed for ChatGPT Codex responses backend calls | High | ✅ |
+| G1f | **OpenAI Codex model catalog/default selection** — Codex device-login settings can refresh available models, fall back to a curated Codex catalog when `/v1/models` is unavailable for OAuth tokens, and save the selected default model used by AI chat | High | ✅ |
 
 ### G2 — Automation Insights Dashboard
 
@@ -328,6 +330,7 @@ Code review against the completed tracker found these remaining implementation g
 | AP6 | **MCP completion was partial** — G3 claimed catalog/deployment resource exposure, RAG policy injection, and Activity Stream audit, but the MCP tool catalog omitted Catalog Items/Deployments, policy context was not surfaced to agents or OPA guardrails, and `_tag_activity` only wrote a logger line instead of an auditable Activity Stream record | Stub / Approximation | High | ✅ |
 | AP7 | **AI inventory builder did not save inventory structure** — G4a claimed natural-language output created a structured AWX inventory preview before saving, but the UI only inserted generated INI text into the `variables` YAML editor; no groups, hosts, child groups, or generated variable records were applied through AWX inventory endpoints | Stub / Approximation | High | ✅ |
 | AP8 | **Cloud resource inventory mapping was missing** — G4b claimed pulled cloud resources were run through an AI mapping step to suggest AWX inventory structure, but provider state only stored raw resource payloads and the cloud pages had no inventory suggestion or create-inventory path | Stub / Approximation | High | ✅ |
+| AP9 | **Automation Insights retried AI chat indefinitely** — G2b claimed dashboard AI recommendations were complete, but provider failures or rate-limit responses left the summary empty and caused the card to re-post to `/api/v2/ai/chat/` on repeated renders until the backend returned 429/502 storms | Implementation Bug | High | ✅ |
 
 ## Notes
 

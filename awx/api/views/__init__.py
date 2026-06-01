@@ -1794,11 +1794,15 @@ class CredentialExternalTest(OIDCCredentialTestMixin, SubDetailAPIView):
     obj_permission_type = 'use'
     resource_purpose = 'test external credential'
 
-    @extend_schema_if_available(extensions={"x-ai-description": """Test update the input values and metadata of an external credential.
+    @extend_schema_if_available(
+        extensions={
+            "x-ai-description": """Test update the input values and metadata of an external credential.
         This endpoint supports testing credentials that connect to external secret management systems
         such as CyberArk AIM, CyberArk Conjur, HashiCorp Vault, AWS Secrets Manager, Azure Key Vault,
         Centrify Vault, Thycotic DevOps Secrets Vault, and GitHub App Installation Access Token Lookup.
-        It does not support standard credential types such as Machine, SCM, and Cloud."""})
+        It does not support standard credential types such as Machine, SCM, and Cloud."""
+        }
+    )
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
         if obj.credential_type.kind != 'external':
@@ -5082,6 +5086,7 @@ class WorkflowApprovalDeny(RetrieveAPIView):
 # Terraform Job Template + Terraform Job views
 # ---------------------------------------------------------------------------
 
+
 class TerraformJobTemplateList(ListCreateAPIView):
     model = models.TerraformJobTemplate
     serializer_class = serializers.TerraformJobTemplateSerializer
@@ -5335,9 +5340,7 @@ def _build_catalog_item_live_schema(item):
                 required_fields.add(variable)
 
     dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
-    dynamic_field_templates = _parse_catalog_dynamic_field_templates(
-        item.dynamic_field_templates, dynamic_fields
-    )
+    dynamic_field_templates = _parse_catalog_dynamic_field_templates(item.dynamic_field_templates, dynamic_fields)
 
     for dynamic_field in dynamic_fields:
         prop = schema['properties'].setdefault(
@@ -5564,9 +5567,7 @@ class CatalogItemDeploy(GenericAPIView):
         expires_at, expires_at_error = _parse_catalog_deployment_expires_at(request.data.get('expires_at'))
         if expires_at_error:
             return Response({'expires_at': [expires_at_error]}, status=status.HTTP_400_BAD_REQUEST)
-        auto_deprovision, auto_deprovision_error = _parse_catalog_deployment_bool(
-            request.data.get('auto_deprovision')
-        )
+        auto_deprovision, auto_deprovision_error = _parse_catalog_deployment_bool(request.data.get('auto_deprovision'))
         if auto_deprovision_error:
             return Response({'auto_deprovision': [auto_deprovision_error]}, status=status.HTTP_400_BAD_REQUEST)
         if item.require_lease and expires_at is None:
@@ -5622,6 +5623,7 @@ class CatalogItemDeploy(GenericAPIView):
             wf_id = item.provider_workflows[target_provider]
             try:
                 from awx.main.models import WorkflowJobTemplate
+
                 resolved_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
             except WorkflowJobTemplate.DoesNotExist:
                 pass
@@ -5635,6 +5637,7 @@ class CatalogItemDeploy(GenericAPIView):
             if target_provider and item.cloud_backends and item.cloud_backends.get(target_provider):
                 tft_id = item.cloud_backends[target_provider]
                 from awx.main.models.terraform import TerraformJobTemplate
+
                 try:
                     resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
                 except TerraformJobTemplate.DoesNotExist:
@@ -5703,9 +5706,7 @@ class CatalogItemDeploy(GenericAPIView):
             deployment.append_history_entry('provision', job=terraform_job, status='running')
             deployment.save(update_fields=['provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         headers = {'Location': deployment.get_absolute_url(request)}
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -5755,6 +5756,7 @@ class CatalogDeploymentDeprovision(GenericAPIView):
                 wf_id = item.provider_deprovision_workflows[stored_provider]
                 try:
                     from awx.main.models import WorkflowJobTemplate
+
                     resolved_deprovision_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
                 except WorkflowJobTemplate.DoesNotExist:
                     pass
@@ -5791,9 +5793,7 @@ class CatalogDeploymentDeprovision(GenericAPIView):
             )
         deployment.save(update_fields=['status', 'deprovision_job', 'last_deprovision_vars', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
 
 
@@ -5871,9 +5871,7 @@ class CatalogDeploymentRetry(GenericAPIView):
             deployment.append_history_entry('retry', job=terraform_job, status='running', details={'mode': 'relaunch'})
         deployment.save(update_fields=['status', 'provision_job', 'terraform_provision_job', 'extra_vars', 'last_failed_workflow_job', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
 
 
@@ -5923,9 +5921,7 @@ class CatalogDeploymentCancel(GenericAPIView):
         )
         deployment.save(update_fields=['status', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
 
 
@@ -6142,12 +6138,8 @@ def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_sour
     if not getattr(settings, 'AI_ENABLED', False):
         return None, 'disabled', None, None
 
-    api_key = getattr(settings, 'AI_API_KEY', '')
-    if not api_key:
-        return None, 'not_configured', None, None
-
     try:
-        from awx.api.views.ai import _PROVIDER_DEFAULTS, _build_headers, _build_request_payload, _build_url, _check_rate_limit
+        from awx.api.views.ai import _PROVIDER_DEFAULTS, _call_ai_provider, _check_rate_limit, _provider_configured
     except Exception:
         logger.exception('Could not load AI proxy helpers for cloud inventory mapping.')
         return None, 'unavailable', None, None
@@ -6157,9 +6149,13 @@ def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_sour
         return None, 'rate_limited', None, None
 
     provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    if not _provider_configured(provider):
+        return None, 'not_configured', provider, None
+
     defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
     model = getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
     base_url = getattr(settings, 'AI_API_URL', '')
+    api_key = getattr(settings, 'AI_API_KEY', '')
     max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
 
     resource_sample = [
@@ -6185,31 +6181,11 @@ def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_sour
             ),
         }
     ]
-    url = _build_url(provider, base_url, model)
-    headers = _build_headers(provider, api_key)
-    payload = _build_request_payload(provider, model, messages, max_tokens, _CLOUD_INVENTORY_AI_SYSTEM_PROMPT)
-
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-    except requests.exceptions.Timeout:
-        return None, 'timeout', provider, model
-    except requests.exceptions.RequestException as exc:
-        logger.warning('Cloud inventory AI mapping request failed: %s', exc)
-        return None, 'provider_unreachable', provider, model
-
-    if not resp.ok:
-        logger.warning('Cloud inventory AI mapping provider returned %d: %s', resp.status_code, resp.text[:500])
-        return None, 'provider_error', provider, model
-
-    try:
-        data = resp.json()
-        if provider == 'watsonx':
-            content = data['results'][0]['generated_text']
-        else:
-            content = data['choices'][0]['message']['content']
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        content = _call_ai_provider(provider, model, messages, max_tokens, _CLOUD_INVENTORY_AI_SYSTEM_PROMPT, api_key, base_url)
+    except Exception as exc:
         logger.warning('Could not parse cloud inventory AI mapping response: %s', exc)
-        return None, 'invalid_response', provider, model
+        return None, 'provider_error', provider, model
 
     source = _strip_ai_inventory_fences(content)
     plan = parse_inventory_source(source)
@@ -6472,9 +6448,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 except Exception:
                     pass
                 if response.status_code == 401:
-                    message = _(
-                        '%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)'
-                    ) % {'message': message}
+                    message = _('%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)') % {'message': message}
                 raise ParseError(_('DigitalOcean API error: %(message)s') % {'message': message})
 
             payload = response.json()
@@ -6695,10 +6669,12 @@ class CatalogProxmoxPullResources(GenericAPIView):
             )
 
         session = requests.Session()
-        session.headers.update({
-            'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
-            'Accept': 'application/json',
-        })
+        session.headers.update(
+            {
+                'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
+                'Accept': 'application/json',
+            }
+        )
         session.verify = not bool(pm_tls_insecure)
 
         def _get(path):
@@ -6710,10 +6686,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
                     detail = resp.json().get('errors') or resp.json().get('message') or detail
                 except Exception:
                     pass
-                raise ParseError(
-                    _('Proxmox API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('Proxmox API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             return resp.json().get('data', []) or []
 
         # ── cluster/resources gives a flat list of every resource ───────────
@@ -6728,15 +6701,17 @@ class CatalogProxmoxPullResources(GenericAPIView):
         for item in raw_resources:
             rtype = item.get('type')
             if rtype == 'node':
-                node_results.append({
-                    'node': item.get('node', ''),
-                    'status': item.get('status', 'unknown'),
-                    'type': 'node',
-                    'maxcpu': item.get('maxcpu', 0),
-                    'maxmem': item.get('maxmem', 0),
-                    'maxdisk': item.get('maxdisk', 0),
-                    'uptime': item.get('uptime', 0),
-                })
+                node_results.append(
+                    {
+                        'node': item.get('node', ''),
+                        'status': item.get('status', 'unknown'),
+                        'type': 'node',
+                        'maxcpu': item.get('maxcpu', 0),
+                        'maxmem': item.get('maxmem', 0),
+                        'maxdisk': item.get('maxdisk', 0),
+                        'uptime': item.get('uptime', 0),
+                    }
+                )
                 node_names.append(item.get('node', ''))
             elif rtype == 'qemu':
                 entry = {
@@ -6755,33 +6730,37 @@ class CatalogProxmoxPullResources(GenericAPIView):
                 else:
                     vm_results.append(entry)
             elif rtype == 'lxc':
-                container_results.append({
-                    'vmid': item.get('vmid', 0),
-                    'name': item.get('name', ''),
-                    'status': item.get('status', 'stopped'),
-                    'node': item.get('node', ''),
-                    'cpus': item.get('maxcpu', 0),
-                    'maxmem': item.get('maxmem', 0),
-                    'maxdisk': item.get('maxdisk', 0),
-                    'uptime': item.get('uptime', 0),
-                    'type': 'lxc',
-                })
+                container_results.append(
+                    {
+                        'vmid': item.get('vmid', 0),
+                        'name': item.get('name', ''),
+                        'status': item.get('status', 'stopped'),
+                        'node': item.get('node', ''),
+                        'cpus': item.get('maxcpu', 0),
+                        'maxmem': item.get('maxmem', 0),
+                        'maxdisk': item.get('maxdisk', 0),
+                        'uptime': item.get('uptime', 0),
+                        'type': 'lxc',
+                    }
+                )
 
         # ── storage ──────────────────────────────────────────────────────────
         storage_raw = _get('/storage')
         storage_results = []
         for s in storage_raw:
-            storage_results.append({
-                'storage': s.get('storage', ''),
-                'type': s.get('type', ''),
-                'status': 'active' if s.get('active', 0) else 'inactive',
-                'nodes': s.get('nodes', ''),
-                'avail': s.get('avail', 0),
-                'total': s.get('total', 0),
-                'used': s.get('used', 0),
-                'shared': bool(s.get('shared', 0)),
-                'content': s.get('content', ''),
-            })
+            storage_results.append(
+                {
+                    'storage': s.get('storage', ''),
+                    'type': s.get('type', ''),
+                    'status': 'active' if s.get('active', 0) else 'inactive',
+                    'nodes': s.get('nodes', ''),
+                    'avail': s.get('avail', 0),
+                    'total': s.get('total', 0),
+                    'used': s.get('used', 0),
+                    'shared': bool(s.get('shared', 0)),
+                    'content': s.get('content', ''),
+                }
+            )
 
         # ── networks (per-node) ───────────────────────────────────────────────
         network_results = []
@@ -6791,17 +6770,19 @@ class CatalogProxmoxPullResources(GenericAPIView):
             except Exception:
                 continue
             for iface in ifaces:
-                network_results.append({
-                    'iface': iface.get('iface', ''),
-                    'type': iface.get('type', 'eth'),
-                    'node': node_name,
-                    'active': bool(iface.get('active', 0)),
-                    'address': iface.get('address', ''),
-                    'netmask': iface.get('netmask', ''),
-                    'cidr': iface.get('cidr', ''),
-                    'bridge_ports': iface.get('bridge_ports', ''),
-                    'comments': iface.get('comments', ''),
-                })
+                network_results.append(
+                    {
+                        'iface': iface.get('iface', ''),
+                        'type': iface.get('type', 'eth'),
+                        'node': node_name,
+                        'active': bool(iface.get('active', 0)),
+                        'address': iface.get('address', ''),
+                        'netmask': iface.get('netmask', ''),
+                        'cidr': iface.get('cidr', ''),
+                        'bridge_ports': iface.get('bridge_ports', ''),
+                        'comments': iface.get('comments', ''),
+                    }
+                )
 
         pulled_at = now().isoformat()
         response_data = {
@@ -6919,25 +6900,21 @@ class CatalogVmwarePullResources(GenericAPIView):
         try:
             auth_resp = session.post(auth_url, auth=(vcenter_user, vcenter_pass), timeout=20)
         except requests.RequestException as exc:
-            raise ParseError(
-                _('Could not connect to vCenter (%(host)s): %(exc)s')
-                % {'host': vcenter_host, 'exc': str(exc)}
-            )
+            raise ParseError(_('Could not connect to vCenter (%(host)s): %(exc)s') % {'host': vcenter_host, 'exc': str(exc)})
 
         if not auth_resp.ok:
-            raise ParseError(
-                _('vCenter authentication failed (%(status)s). Check credentials.')
-                % {'status': auth_resp.status_code}
-            )
+            raise ParseError(_('vCenter authentication failed (%(status)s). Check credentials.') % {'status': auth_resp.status_code})
 
         session_token = auth_resp.json().get('value', '')
         if not session_token:
             raise ParseError(_('vCenter returned an empty session token.'))
 
-        session.headers.update({
-            'vmware-api-session-id': session_token,
-            'Accept': 'application/json',
-        })
+        session.headers.update(
+            {
+                'vmware-api-session-id': session_token,
+                'Accept': 'application/json',
+            }
+        )
 
         def _get(path):
             url = f'{vcenter_host}/rest{path}'
@@ -6948,19 +6925,13 @@ class CatalogVmwarePullResources(GenericAPIView):
                     detail = resp.json().get('value', {}).get('messages', [{}])[0].get('default_message', detail)
                 except Exception:
                     pass
-                raise ParseError(
-                    _('vCenter API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('vCenter API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             return resp.json().get('value', []) or []
 
         try:
             # ── Datacenters ──────────────────────────────────────────────────
             raw_dcs = _get('/vcenter/datacenter')
-            datacenters = [
-                {'id': dc.get('datacenter', ''), 'name': dc.get('name', '')}
-                for dc in raw_dcs
-            ]
+            datacenters = [{'id': dc.get('datacenter', ''), 'name': dc.get('name', '')} for dc in raw_dcs]
 
             # ── Clusters ────────────────────────────────────────────────────
             raw_clusters = _get('/vcenter/cluster')
@@ -7160,11 +7131,14 @@ class CatalogAzurePullResources(GenericAPIView):
                 'scope': 'https://management.microsoftazure.de/.default',
             },
         }
-        endpoints = env_map.get(environment, {
-            'login': 'https://login.microsoftonline.com',
-            'arm': 'https://management.azure.com',
-            'scope': 'https://management.azure.com/.default',
-        })
+        endpoints = env_map.get(
+            environment,
+            {
+                'login': 'https://login.microsoftonline.com',
+                'arm': 'https://management.azure.com',
+                'scope': 'https://management.azure.com/.default',
+            },
+        )
 
         arm_base = endpoints['arm'].rstrip('/')
 
@@ -7182,19 +7156,14 @@ class CatalogAzurePullResources(GenericAPIView):
                 timeout=20,
             )
         except requests.RequestException as exc:
-            raise ParseError(
-                _('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)}
-            )
+            raise ParseError(_('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)})
 
         if not token_resp.ok:
             try:
                 error_detail = token_resp.json().get('error_description', token_resp.text)
             except Exception:
                 error_detail = token_resp.text
-            raise ParseError(
-                _('Azure authentication failed (%(status)s): %(detail)s')
-                % {'status': token_resp.status_code, 'detail': error_detail}
-            )
+            raise ParseError(_('Azure authentication failed (%(status)s): %(detail)s') % {'status': token_resp.status_code, 'detail': error_detail})
 
         access_token = token_resp.json().get('access_token', '')
         if not access_token:
@@ -7209,10 +7178,12 @@ class CatalogAzurePullResources(GenericAPIView):
         }
 
         arm_session = requests.Session()
-        arm_session.headers.update({
-            'Authorization': f'Bearer {access_token}',
-            'Accept': 'application/json',
-        })
+        arm_session.headers.update(
+            {
+                'Authorization': f'Bearer {access_token}',
+                'Accept': 'application/json',
+            }
+        )
 
         def _arm_get(path, api_version):
             url = f'{arm_base}{path}'
@@ -7225,10 +7196,7 @@ class CatalogAzurePullResources(GenericAPIView):
                     detail = err.get('error', {}).get('message', detail)
                 except Exception:
                     pass
-                raise ParseError(
-                    _('Azure API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('Azure API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             data = resp.json()
             return data.get('value', []) or []
 
@@ -7283,16 +7251,18 @@ class CatalogAzurePullResources(GenericAPIView):
             storage_profile = props.get('storageProfile', {})
             os_disk = storage_profile.get('osDisk', {})
             # Power state comes from instance view; omit to avoid per-VM calls
-            vms.append({
-                'id': vm.get('id', ''),
-                'name': vm.get('name', ''),
-                'location': vm.get('location', ''),
-                'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
-                'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
-                'os_type': os_disk.get('osType', ''),
-                'provisioning_state': props.get('provisioningState', ''),
-                'tags': vm.get('tags') or {},
-            })
+            vms.append(
+                {
+                    'id': vm.get('id', ''),
+                    'name': vm.get('name', ''),
+                    'location': vm.get('location', ''),
+                    'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
+                    'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
+                    'os_type': os_disk.get('osType', ''),
+                    'provisioning_state': props.get('provisioningState', ''),
+                    'tags': vm.get('tags') or {},
+                }
+            )
 
         # ── Virtual Networks ──────────────────────────────────────────────────
         raw_vnets = _arm_get(
@@ -7364,19 +7334,21 @@ class CatalogAzurePullResources(GenericAPIView):
                 props = img.get('properties', {})
                 os_disk = props.get('storageProfile', {}).get('osDisk', {})
                 rg = img.get('id', '').split('/')[4] if img.get('id') else ''
-                vm_images.append({
-                    'id': img.get('id', ''),
-                    'name': img.get('name', ''),
-                    'publisher': '',
-                    'offer': '',
-                    'sku': '',
-                    'version': '',
-                    'os_type': os_disk.get('osType', ''),
-                    'image_type': 'custom',
-                    'location': img.get('location', ''),
-                    'urn': img.get('id', ''),
-                    'description': f'Custom image · resource group: {rg}',
-                })
+                vm_images.append(
+                    {
+                        'id': img.get('id', ''),
+                        'name': img.get('name', ''),
+                        'publisher': '',
+                        'offer': '',
+                        'sku': '',
+                        'version': '',
+                        'os_type': os_disk.get('osType', ''),
+                        'image_type': 'custom',
+                        'location': img.get('location', ''),
+                        'urn': img.get('id', ''),
+                        'description': f'Custom image · resource group: {rg}',
+                    }
+                )
         except Exception:
             pass
 
@@ -7391,26 +7363,27 @@ class CatalogAzurePullResources(GenericAPIView):
                 gallery_rg = gallery.get('id', '').split('/')[4] if gallery.get('id') else ''
                 try:
                     gallery_images = _arm_get(
-                        f'{sub_prefix}/resourceGroups/{gallery_rg}'
-                        f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
+                        f'{sub_prefix}/resourceGroups/{gallery_rg}' f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
                         '2023-07-01',
                     )
                     for gimg in gallery_images:
                         gprops = gimg.get('properties', {})
                         ident = gprops.get('identifier', {})
-                        vm_images.append({
-                            'id': gimg.get('id', ''),
-                            'name': gimg.get('name', ''),
-                            'publisher': ident.get('publisher', ''),
-                            'offer': ident.get('offer', ''),
-                            'sku': ident.get('sku', ''),
-                            'version': '',
-                            'os_type': gprops.get('osType', ''),
-                            'image_type': 'gallery',
-                            'location': gimg.get('location', ''),
-                            'urn': gimg.get('id', ''),
-                            'description': f'Compute Gallery: {gallery_name}',
-                        })
+                        vm_images.append(
+                            {
+                                'id': gimg.get('id', ''),
+                                'name': gimg.get('name', ''),
+                                'publisher': ident.get('publisher', ''),
+                                'offer': ident.get('offer', ''),
+                                'sku': ident.get('sku', ''),
+                                'version': '',
+                                'os_type': gprops.get('osType', ''),
+                                'image_type': 'gallery',
+                                'location': gimg.get('location', ''),
+                                'urn': gimg.get('id', ''),
+                                'description': f'Compute Gallery: {gallery_name}',
+                            }
+                        )
                 except Exception:
                     pass
         except Exception:
@@ -7419,14 +7392,50 @@ class CatalogAzurePullResources(GenericAPIView):
         # 3 — Popular marketplace images: resolve latest version via ARM
         _CURATED = [
             # Ubuntu
-            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS Gen2'},
+            {
+                'publisher': 'Canonical',
+                'offer': '0001-com-ubuntu-server-jammy',
+                'sku': '22_04-lts-gen2',
+                'os_type': 'Linux',
+                'name': 'Ubuntu Server 22.04 LTS Gen2',
+            },
             {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS'},
-            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-focal', 'sku': '20_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 20.04 LTS Gen2'},
+            {
+                'publisher': 'Canonical',
+                'offer': '0001-com-ubuntu-server-focal',
+                'sku': '20_04-lts-gen2',
+                'os_type': 'Linux',
+                'name': 'Ubuntu Server 20.04 LTS Gen2',
+            },
             # Windows Server
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter-azure-edition', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter Azure Edition'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2019-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2019 Datacenter'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2016-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2016 Datacenter'},
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2022-datacenter-azure-edition',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2022 Datacenter Azure Edition',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2022-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2022 Datacenter',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2019-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2019 Datacenter',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2016-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2016 Datacenter',
+            },
             # RHEL
             {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '9-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 9 LVM Gen2'},
             {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '8-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 8 LVM Gen2'},
@@ -7456,19 +7465,21 @@ class CatalogAzurePullResources(GenericAPIView):
                 if vresp.ok:
                     versions = vresp.json()
                     latest = versions[0].get('name', 'latest') if versions else 'latest'
-                    vm_images.append({
-                        'id': f'marketplace/{pub}/{offer}/{sku}',
-                        'name': curated['name'],
-                        'publisher': pub,
-                        'offer': offer,
-                        'sku': sku,
-                        'version': latest,
-                        'os_type': curated['os_type'],
-                        'image_type': 'marketplace',
-                        'location': primary_location,
-                        'urn': f'{pub}:{offer}:{sku}:{latest}',
-                        'description': '',
-                    })
+                    vm_images.append(
+                        {
+                            'id': f'marketplace/{pub}/{offer}/{sku}',
+                            'name': curated['name'],
+                            'publisher': pub,
+                            'offer': offer,
+                            'sku': sku,
+                            'version': latest,
+                            'os_type': curated['os_type'],
+                            'image_type': 'marketplace',
+                            'location': primary_location,
+                            'urn': f'{pub}:{offer}:{sku}:{latest}',
+                            'description': '',
+                        }
+                    )
             except Exception:
                 pass
 
@@ -7477,8 +7488,7 @@ class CatalogAzurePullResources(GenericAPIView):
         try:
             _sku_api = '2021-07-01'
             skus_resp = arm_session.get(
-                f'https://management.azure.com/subscriptions/{subscription_id}'
-                f'/providers/Microsoft.Compute/skus',
+                f'https://management.azure.com/subscriptions/{subscription_id}' f'/providers/Microsoft.Compute/skus',
                 params={
                     'api-version': _sku_api,
                     '$filter': f"location eq '{primary_location}'",
@@ -7490,35 +7500,31 @@ class CatalogAzurePullResources(GenericAPIView):
                     if sku_item.get('resourceType') != 'virtualMachines':
                         continue
                     # Skip location-restricted SKUs
-                    if any(
-                        r.get('type') == 'Location'
-                        for r in sku_item.get('restrictions', [])
-                    ):
+                    if any(r.get('type') == 'Location' for r in sku_item.get('restrictions', [])):
                         continue
-                    caps = {
-                        c['name']: c['value']
-                        for c in sku_item.get('capabilities', [])
-                    }
+                    caps = {c['name']: c['value'] for c in sku_item.get('capabilities', [])}
                     # Zones for this location
                     zones = []
                     for li in sku_item.get('locationInfo', []):
                         if li.get('location', '').lower() == primary_location.lower():
                             zones = sorted(li.get('zones', []))
-                    vm_sizes.append({
-                        'name': sku_item.get('name', ''),
-                        'tier': sku_item.get('tier', ''),
-                        'family': sku_item.get('family', ''),
-                        'vcpus': int(caps.get('vCPUs', 0) or 0),
-                        'memory_gb': float(caps.get('MemoryGB', 0) or 0),
-                        'gpus': int(caps.get('GPUs', 0) or 0),
-                        'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
-                        'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
-                        'premium_io': caps.get('PremiumIO', '').lower() == 'true',
-                        'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
-                        'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
-                        'zones': zones,
-                        'location': primary_location,
-                    })
+                    vm_sizes.append(
+                        {
+                            'name': sku_item.get('name', ''),
+                            'tier': sku_item.get('tier', ''),
+                            'family': sku_item.get('family', ''),
+                            'vcpus': int(caps.get('vCPUs', 0) or 0),
+                            'memory_gb': float(caps.get('MemoryGB', 0) or 0),
+                            'gpus': int(caps.get('GPUs', 0) or 0),
+                            'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
+                            'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
+                            'premium_io': caps.get('PremiumIO', '').lower() == 'true',
+                            'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
+                            'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
+                            'zones': zones,
+                            'location': primary_location,
+                        }
+                    )
                 vm_sizes.sort(key=lambda s: (s['family'], s['name']))
         except Exception:
             pass
@@ -7529,11 +7535,7 @@ class CatalogAzurePullResources(GenericAPIView):
             prices_url = 'https://prices.azure.com/api/retail/prices'
             prices_params: dict = {
                 'api-version': '2023-01-01-preview',
-                '$filter': (
-                    f"serviceName eq 'Virtual Machines' and "
-                    f"armRegionName eq '{primary_location}' and "
-                    f"priceType eq 'Consumption'"
-                ),
+                '$filter': (f"serviceName eq 'Virtual Machines' and " f"armRegionName eq '{primary_location}' and " f"priceType eq 'Consumption'"),
             }
             while True:
                 pr = requests.get(prices_url, params=prices_params, timeout=20)
