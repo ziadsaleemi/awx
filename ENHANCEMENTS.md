@@ -243,7 +243,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | # | Task | Priority | Status |
 |---|------|----------|--------|
 | G1a | **Embedded chat assistant UI** — generative AI chat panel accessible from the masthead or a dedicated route; answers platform admin and management queries in natural language | High | ✅ |
-| G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | ✅ |
+| G1b | **Playbook / task coding assistant** — AI-generated playbook and task suggestions inline in the job template extra-vars and survey editors | High | 🔄 |
 | G1c | **BYOM (Bring Your Own Model) settings** — Settings page section to configure the AI provider: Red Hat AI, OpenAI, Azure OpenAI, IBM watsonx, or Google Gemini; stores endpoint URL + API key in AWX settings (encrypted) | Medium | ✅ |
 | G1d | **Backend AI proxy** — Django view that forwards chat/completion requests to the configured model provider; masks credentials from the browser; enforces per-user rate limits | High | ✅ |
 | G1e | **OpenAI Codex device-login provider** — AI Assistant settings now include OpenAI Codex device-code authentication as a separate provider alongside existing OpenAI API-key support; tokens are stored encrypted and refreshed for ChatGPT Codex responses backend calls | High | ✅ |
@@ -276,9 +276,9 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G5a | **Multi-mode workflow canvas** — extend the workflow visualiser to support three node types side-by-side: deterministic (existing Ansible/Terraform), event-driven (EDA rulebook activations), and AI-driven (Lightspeed-generated tasks) | High | ✅ |
-| G5b | **Event-Driven Ansible (EDA) integration** — connect AWX to an EDA Controller instance; surface rulebook activations as workflow nodes; show event source status in the sidebar | High | ✅ |
-| G5c | **AI-driven node type** — workflow node that delegates execution plan generation to the configured AI model at runtime; human-approval gate before execution | Medium | ✅ |
+| G5a | **Multi-mode workflow canvas** — extend the workflow visualiser to support three node types side-by-side: deterministic (existing Ansible/Terraform), event-driven (EDA rulebook activations), and AI-driven (Lightspeed-generated tasks) | High | 🔄 |
+| G5b | **Event-Driven Ansible (EDA) integration** — connect AWX to an EDA Controller instance; surface rulebook activations as workflow nodes; show event source status in the sidebar | High | 🔄 |
+| G5c | **AI-driven node type** — workflow node that delegates execution plan generation to the configured AI model at runtime; human-approval gate before execution | Medium | ⬜ |
 
 ### G6 — OPA (Open Policy Agent) Guardrails
 
@@ -316,6 +316,23 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 ---
 
+## Phase I — AI-Native Resource Authoring & Cross-App Wiring
+
+The AI assistant should become a reviewable AWX resource authoring layer, not isolated helper buttons. These items track the next implementation slice.
+
+| # | Task | Priority | Status |
+|---|------|----------|--------|
+| I1 | **Unified AI action framework** — backend endpoint that turns natural-language requests into typed AWX resource plans, validates them against serializers/RBAC/OPA, returns a diff/preview, and only applies changes after explicit user approval | High | ⬜ |
+| I2 | **AI resource creation coverage** — support create/update plans for projects, job templates, workflow job templates, inventories, smart inventories, constructed inventories, inventory sources, schedules, credentials references, catalog items, and role assignments without bypassing existing AWX permissions | High | ⬜ |
+| I3 | **AI playbook and role authoring** — generate playbooks, task files, handlers, defaults, vars, meta, and README content into a project-backed content workspace, then create/update AWX Project and Job Template records that point at the generated files | High | ⬜ |
+| I4 | **AI smart/constructed inventory authoring** — generate and validate smart inventory `host_filter` expressions and constructed inventory `source_vars`, including a preview of matching hosts/groups before save | High | ⬜ |
+| I5 | **Contextual AI actions throughout the app** — add consistent AI entry points to resource create/edit/detail pages and pass current route/resource context so suggestions are grounded in the object being edited | High | ⬜ |
+| I6 | **Workflow plan apply** — upgrade the workflow AI suggestion panel from plain text guidance to a structured plan that can add deterministic, approval, EDA, Terraform, and future AI nodes to the visualizer with preview before save | High | ⬜ |
+| I7 | **EDA node parity** — represent EDA controller connections, rulebook activations, and event source status as first-class workflow visualizer node choices, with backend launch/status handling instead of settings-only wiring | High | ⬜ |
+| I8 | **AI safety, audit, and rollback** — every AI-applied change writes Activity Stream audit metadata, records model/provider/prompt summary, links created resources, and supports rollback or delete of generated drafts where the underlying AWX object supports it | High | ⬜ |
+
+---
+
 ## Current Parity Audit Findings
 
 Code review against the completed tracker found these remaining implementation gaps.
@@ -334,6 +351,12 @@ Code review against the completed tracker found these remaining implementation g
 | AP10 | **Overview console noise from automatic AI insights and chart tooltip** — Overview no longer auto-posts AI insight generation on page load, avoiding background `429`/`502` console noise when the provider is unavailable or rate-limited; the job activity chart disables the PatternFly cursor tooltip path that emits the React `defaultProps` warning in development | Implementation Bug | High | ✅ |
 | AP11 | **Catalog provider survey choices crashed Proxmox deploy** — Provider workflow surveys can return `choices` as arrays, but the catalog deploy wizard only accepted newline-delimited strings; Proxmox Apache deploy now normalizes both formats and preserves multiselect values as arrays for launch extra vars | Implementation Bug | High | ✅ |
 | AP12 | **AI Assistant lacked live AWX grounding and markdown rendering** — The chat assistant could answer AWX instance questions with generic external guidance and rendered markdown as raw `**` / `-` text; it now answers direct visible-host count questions from RBAC-filtered AWX data, includes live AWX counts in the default prompt context, and renders assistant responses as markdown | Implementation Bug | High | ✅ |
+| AP13 | **G1b was over-marked done** — `AICodeAssistant` is currently wired into Job Template extra variables and Terraform variables only; survey question authoring and project-backed playbook/role file generation are not implemented | Documentation Drift | High | 🔄 |
+| AP14 | **G5 workflow parity was over-marked done** — the workflow visualizer supports deterministic AWX/Terraform/approval nodes and an AI text suggestion modal, but it has no EDA node type, AI node type, runtime AI execution-plan generation, or human-approved AI apply path | Documentation Drift | High | 🔄 |
+| AP15 | **AI resource creation is not end-to-end** — the assistant can answer questions and some forms can generate field content, but there is no typed plan/preview/apply workflow for creating AWX resources such as projects, job templates, inventories, smart inventories, schedules, catalog items, or role assignments | Stub / Approximation | High | ⬜ |
+| AP16 | **AI inventory coverage is narrow** — natural-language inventory save parity works for normal static inventories only; smart inventory filters and constructed inventory source variables still need AI generation, validation, preview, and save coverage | Stub / Approximation | High | ⬜ |
+| AP17 | **AI features are not consistently contextual across the app** — the masthead assistant is globally available, but contextual AI controls exist only in selected template/inventory/cloud/workflow surfaces and do not receive normalized route/resource context across all create/edit/detail pages | Documentation Drift | High | ⬜ |
+| AP18 | **MCP is mostly read/launch, not authoring** — MCP exposes list/get and job launch tools with guardrails, but it does not expose safe create/update tools for AI-generated projects, playbooks, roles, inventories, smart inventories, catalog items, or workflows | Stub / Approximation | High | ⬜ |
 
 ## Notes
 
