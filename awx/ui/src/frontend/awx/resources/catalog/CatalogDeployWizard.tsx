@@ -27,6 +27,7 @@ import {
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGetItem } from '../../../common/crud/useGet';
 import { useGet } from '../../../common/crud/useGet';
+import { requestGet } from '../../../common/crud/Data';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
@@ -322,6 +323,20 @@ export function CatalogDeployContent({
     return allProviders[0] ?? '';
   });
 
+  useEffect(() => {
+    if (
+      initialProvider &&
+      (allProviders.includes(initialProvider) || initialProvider === 'default')
+    ) {
+      setSelectedProvider(initialProvider);
+      return;
+    }
+    if (selectedProvider && allProviders.includes(selectedProvider)) {
+      return;
+    }
+    setSelectedProvider(allProviders[0] ?? '');
+  }, [allProviders, initialProvider, selectedProvider]);
+
   // When the modal is opened from a specific provider icon, lock to that provider
   // and skip rendering tabs for other providers.
   const lockedProvider = initialProvider ?? null;
@@ -346,7 +361,24 @@ export function CatalogDeployContent({
     selectedProvider && item.related?.provider_workflow_surveys
       ? item.related.provider_workflow_surveys[selectedProvider]
       : undefined;
-  const { data: providerSurveyData } = useGet<WjtSurveySpec>(providerSurveyUrl);
+  const [providerSurveyData, setProviderSurveyData] = useState<WjtSurveySpec | undefined>();
+  const [providerSurveyError, setProviderSurveyError] = useState<Error | undefined>();
+
+  useEffect(() => {
+    setProviderSurveyData(undefined);
+    setProviderSurveyError(undefined);
+    if (!providerSurveyUrl) return;
+
+    const abortController = new AbortController();
+    void requestGet<WjtSurveySpec>(providerSurveyUrl, abortController.signal)
+      .then((data) => setProviderSurveyData(data))
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setProviderSurveyError(err instanceof Error ? err : new Error(String(err)));
+      });
+
+    return () => abortController.abort();
+  }, [providerSurveyUrl]);
 
   // The active schema: provider survey > catalog deploy_survey > extra_vars_schema
   const schema = useMemo((): JsonSchema => {
@@ -693,6 +725,16 @@ export function CatalogDeployContent({
 
   return (
     <Form>
+      {providerSurveyError && (
+        <Alert
+          variant="danger"
+          isInline
+          title={t('Failed to load provider survey')}
+          style={{ marginBottom: '1rem' }}
+        >
+          {providerSurveyError.message}
+        </Alert>
+      )}
       {/* Provider tabs — one per cloud/hypervisor backend.
               When opened from a specific cloud icon (lockedProvider), restrict to that provider only. */}
       {lockedProvider && !isProviderConfigured(lockedProvider) ? (
