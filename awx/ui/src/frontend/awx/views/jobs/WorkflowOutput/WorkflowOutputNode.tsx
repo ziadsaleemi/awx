@@ -59,6 +59,7 @@ const NodeIcon: { [key: string]: ElementType<SVGIconProps> } = {
   terraform_job: CodeIcon,
   workflow_approval: ClockIcon,
   workflow_job: ShareAltIcon,
+  eda_rulebook: ProcessAutomationIcon,
   deleted_resource: TrashIcon,
 };
 
@@ -83,9 +84,9 @@ export const WorkflowOutputNode = observer(({ element, selected }: WorkflowOutpu
   const statusDecorator = useStatusDecorator();
   const status = element.getController().getNodeById(element.getId())?.getNodeStatus();
   const data = element.getData();
-  const { job, unified_job_template } = data?.resource?.summary_fields || {};
+  const { job, unified_job_template, eda_rulebook } = data?.resource?.summary_fields || {};
   const { unified_job_type: templateType } = unified_job_template || {};
-  const Icon = NodeIcon[templateType ?? 'deleted_resource'];
+  const Icon = NodeIcon[templateType ?? (eda_rulebook ? 'eda_rulebook' : 'deleted_resource')];
 
   function handleSelect() {
     if (!job) return;

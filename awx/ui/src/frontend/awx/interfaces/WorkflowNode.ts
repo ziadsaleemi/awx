@@ -67,6 +67,7 @@ export interface WorkflowNode {
       activation_id?: string;
       event_source?: string;
       event_source_status?: string;
+      status?: string;
     };
     inventory: SummaryFieldInventory;
     execution_environment: ExecutionEnvironment;

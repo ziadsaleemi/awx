@@ -6,6 +6,7 @@ from awx.main.models import (
     WorkflowJobTemplateNode,
     WorkflowJobNode,
 )
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_EDA_RULEBOOK
 
 # AWX
 from awx.main.scheduler.dag_simple import SimpleDAG
@@ -48,6 +49,15 @@ class WorkflowDAG(SimpleDAG):
         for edge in always_nodes:
             self.add_edge(wfn_by_id[edge[0]], wfn_by_id[edge[1]], 'always_nodes')
 
+    def _is_eda_rulebook_node(self, obj):
+        return getattr(obj, 'node_type', None) == WORKFLOW_NODE_TYPE_EDA_RULEBOOK
+
+    def _node_waits_for_virtual_success(self, obj):
+        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and self._is_eda_rulebook_node(obj)
+
+    def _node_waits_for_job_or_virtual_success(self, obj):
+        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and (obj.unified_job_template or self._is_eda_rulebook_node(obj))
+
     def _are_relevant_parents_finished(self, node):
         obj = node['node_object']
         parent_nodes = [p['node_object'] for p in self.get_parents(obj)]
@@ -56,6 +66,8 @@ class WorkflowDAG(SimpleDAG):
                 continue
             elif p.bypassed_job_status:
                 continue
+            elif self._is_eda_rulebook_node(p):
+                return False
             elif p.unified_job_template is None:
                 continue
             # do_not_run is False, node might still run a job and thus blocks children
@@ -113,6 +125,12 @@ class WorkflowDAG(SimpleDAG):
                     nodes.extend(self.get_children(obj, 'failure_nodes') + self.get_children(obj, 'always_nodes'))
                 elif obj.job.status == 'successful':
                     nodes.extend(self.get_children(obj, 'success_nodes') + self.get_children(obj, 'always_nodes'))
+            elif self._is_eda_rulebook_node(obj):
+                if not obj.all_parents_must_converge and self._are_relevant_parents_finished(n):
+                    nodes_found.append(n)
+                elif obj.all_parents_must_converge and self._are_relevant_parents_finished(n):
+                    if self._all_parents_met_convergence_criteria(n):
+                        nodes_found.append(n)
             elif obj.unified_job_template is None:
                 nodes.extend(self.get_children(obj, 'failure_nodes') + self.get_children(obj, 'always_nodes'))
             else:
@@ -145,7 +163,7 @@ class WorkflowDAG(SimpleDAG):
     def is_workflow_done(self):
         for node in self.nodes:
             obj = node['node_object']
-            if obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and obj.unified_job_template:
+            if self._node_waits_for_job_or_virtual_success(obj):
                 return False
             elif obj.job and obj.job.status not in ['successful', 'failed', 'canceled', 'error']:
                 return False
@@ -159,7 +177,7 @@ class WorkflowDAG(SimpleDAG):
 
         for node in self.nodes:
             obj = node['node_object']
-            if obj.do_not_run is False and obj.unified_job_template is None:
+            if obj.do_not_run is False and obj.unified_job_template is None and not self._is_eda_rulebook_node(obj):
                 failed_nodes.append(node)
             elif obj.job and obj.job.status in ['failed', 'canceled', 'error']:
                 failed_nodes.append(node)
@@ -203,7 +221,7 @@ class WorkflowDAG(SimpleDAG):
 
     def _are_all_nodes_dnr_decided(self, workflow_nodes):
         for n in workflow_nodes:
-            if n.do_not_run is False and not n.job and n.unified_job_template:
+            if self._node_waits_for_job_or_virtual_success(n):
                 return False
         return True
 
@@ -237,6 +255,8 @@ class WorkflowDAG(SimpleDAG):
                         return False
                 else:
                     return False
+            elif self._is_eda_rulebook_node(p):
+                return False
             elif not p.do_not_run and p.unified_job_template is None:
                 if node in (self.get_children(p, 'failure_nodes') + self.get_children(p, 'always_nodes')):
                     return False

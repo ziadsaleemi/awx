@@ -109,6 +109,10 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
     eda_event_source = models.CharField(max_length=512, blank=True, default='')
     eda_event_source_status = models.CharField(max_length=64, blank=True, default='')
 
+    @property
+    def is_eda_rulebook_node(self):
+        return self.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK
+
     def get_parent_nodes(self):
         '''Returns queryset containing all parents of this node'''
         success_parents = getattr(self, '%ss_success' % self.__class__.__name__.lower()).all()
@@ -343,6 +347,27 @@ class WorkflowJobNode(WorkflowNodeBase):
     def event_processing_finished(self):
         return True
 
+    def _build_parent_artifacts(self):
+        artifacts = {k: v for k, v in self.ancestor_artifacts.items() if k != 'job_slice'} if self.ancestor_artifacts else {}
+        for parent_node in self.get_parent_nodes():
+            artifacts.update(parent_node.ancestor_artifacts)
+            if parent_node.job:
+                artifacts.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
+        return artifacts
+
+    def mark_eda_rulebook_successful(self):
+        artifacts = self._build_parent_artifacts()
+        artifacts['awx_eda'] = {
+            'rulebook_name': self.eda_rulebook_name,
+            'activation_id': self.eda_activation_id,
+            'event_source': self.eda_event_source,
+            'event_source_status': self.eda_event_source_status,
+        }
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = 'successful'
+        self.save(update_fields=['ancestor_artifacts', 'bypassed_job_status'])
+        return self
+
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
 
@@ -399,13 +424,10 @@ class WorkflowJobNode(WorkflowNodeBase):
         # child workflows via seed_root_ancestor_artifacts to carry artifacts
         # from the parent workflow); exclude job_slice which is internal
         # metadata handled separately below
-        aa_dict = {k: v for k, v in self.ancestor_artifacts.items() if k != 'job_slice'} if self.ancestor_artifacts else {}
+        aa_dict = self._build_parent_artifacts()
         is_root_node = True
         for parent_node in self.get_parent_nodes():
             is_root_node = False
-            aa_dict.update(parent_node.ancestor_artifacts)
-            if parent_node.job:
-                aa_dict.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
         if aa_dict and not is_root_node:
             self.ancestor_artifacts = aa_dict
             self.save(update_fields=['ancestor_artifacts'])
@@ -755,7 +777,10 @@ class WorkflowJobTemplate(UnifiedJobTemplate, WorkflowJobOptions, SurveyJobTempl
         return not bool(self.variables_needed_to_start)
 
     def node_templates_missing(self):
-        return [node.pk for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True).all()]
+        return [
+            node.pk
+            for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True).exclude(node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK).all()
+        ]
 
     def node_prompts_rejected(self):
         node_list = []

@@ -6,6 +6,7 @@ from awx.api.versioning import reverse
 from awx.main.models.activity_stream import ActivityStream
 from awx.main.models.jobs import JobTemplate
 from awx.main.models.workflow import (
+    WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
     WorkflowApproval,
     WorkflowApprovalTemplate,
     WorkflowJob,
@@ -112,6 +113,34 @@ def test_create_eda_rulebook_node(workflow_job_template, post, admin_user):
     assert res.data['unified_job_template'] is None
     assert res.data['eda_rulebook_name'] == 'ops-alerts'
     assert res.data['summary_fields']['eda_rulebook']['event_source'] == 'webhook'
+
+
+@pytest.mark.django_db
+def test_launch_eda_rulebook_node_completes_as_virtual_success(post, admin_user, controlplane_instance_group):
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='ops-alerts',
+        eda_activation_id='activation-1',
+        eda_event_source='webhook',
+        eda_event_source_status='running',
+        identifier='ops-alerts',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ops-alerts')
+    assert node.bypassed_job_status == 'successful'
+    assert node.ancestor_artifacts['awx_eda']['rulebook_name'] == 'ops-alerts'
+
+    WorkflowManager().schedule()
+    workflow_job.refresh_from_db()
+    assert workflow_job.status == 'successful'
 
 
 @pytest.mark.django_db

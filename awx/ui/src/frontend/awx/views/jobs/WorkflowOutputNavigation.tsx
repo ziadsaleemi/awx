@@ -65,8 +65,10 @@ export function WorkflowOutputNavigation(props: WorkflowOutputNavigationProps) {
       setFilteredNodes(
         workflowNodes.filter(
           (node) =>
-            node.summary_fields?.job?.status &&
-            statuses[value].includes(node.summary_fields?.job?.status) &&
+            (node.summary_fields?.job?.status || node.summary_fields?.eda_rulebook?.status) &&
+            statuses[value].includes(
+              node.summary_fields?.job?.status || node.summary_fields?.eda_rulebook?.status || ''
+            ) &&
             node.job?.toString() !== id
         )
       );
@@ -120,29 +122,41 @@ export function WorkflowOutputNavigation(props: WorkflowOutputNavigationProps) {
       </SelectGroup>
       <SelectGroup label={t`Workflow nodes`} key="workflow-nodes" data-cy="workflow-nodes">
         <SelectList>
-          {filteredNodes.map((node: WorkflowJobNode) => (
-            <SelectOption
-              key={node.id}
-              to={
-                node.summary_fields.job?.type === 'terraform_job'
-                  ? getPageUrl(AwxRoute.TerraformJobOutput, {
-                      params: { job_id: node.summary_fields.job?.id },
-                    })
-                  : getPageUrl(AwxRoute.JobOutput, {
-                      params: {
-                        job_type: node.summary_fields.job?.type
-                          ? jobPaths[node.summary_fields.job?.type]
-                          : '',
-                        id: node.summary_fields.job?.id,
-                      },
-                    })
-              }
-              component={Link}
-              value={node.summary_fields?.job?.name}
-            >
-              {stringIsUUID(node.identifier) ? node.summary_fields?.job?.name : node.identifier}
-            </SelectOption>
-          ))}
+          {filteredNodes.map((node: WorkflowJobNode) => {
+            const label = stringIsUUID(node.identifier)
+              ? node.summary_fields?.job?.name || node.summary_fields?.eda_rulebook?.name
+              : node.identifier;
+            if (!node.summary_fields.job) {
+              return (
+                <SelectOption key={node.id} value={label}>
+                  {label}
+                </SelectOption>
+              );
+            }
+            return (
+              <SelectOption
+                key={node.id}
+                to={
+                  node.summary_fields.job?.type === 'terraform_job'
+                    ? getPageUrl(AwxRoute.TerraformJobOutput, {
+                        params: { job_id: node.summary_fields.job?.id },
+                      })
+                    : getPageUrl(AwxRoute.JobOutput, {
+                        params: {
+                          job_type: node.summary_fields.job?.type
+                            ? jobPaths[node.summary_fields.job?.type]
+                            : '',
+                          id: node.summary_fields.job?.id,
+                        },
+                      })
+                }
+                component={Link}
+                value={node.summary_fields?.job?.name}
+              >
+                {label}
+              </SelectOption>
+            );
+          })}
         </SelectList>
       </SelectGroup>
     </Select>

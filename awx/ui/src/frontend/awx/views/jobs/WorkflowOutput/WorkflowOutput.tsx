@@ -124,7 +124,8 @@ export const WorkflowOutput = (props: {
     const nodes = workflowNodes.map((n) => {
       const nodeId = n.id.toString();
       const nodeType = 'node';
-      const nodeName = n.summary_fields?.unified_job_template?.name || '';
+      const nodeName =
+        n.summary_fields?.unified_job_template?.name || n.summary_fields?.eda_rulebook?.name || '';
       const nodeLabel = getNodeLabel(nodeName, n.identifier) || t('Deleted');
 
       n.success_nodes.forEach((id) => {
@@ -140,7 +141,10 @@ export const WorkflowOutput = (props: {
       if (n?.summary_fields?.job?.elapsed) {
         time = secondsToHHMMSS(n?.summary_fields?.job?.elapsed);
       }
-      const status = (n.summary_fields.job?.status as NodeStatus) || undefined;
+      const status =
+        (n.summary_fields.job?.status as NodeStatus) ||
+        (n.summary_fields.eda_rulebook?.status as NodeStatus) ||
+        undefined;
       const node = {
         id: nodeId,
         type: status ? `${status}-node` : nodeType,

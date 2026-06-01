@@ -4672,6 +4672,11 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             'do_not_run',
             'bypassed_job_status',
             'identifier',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
         )
 
     def get_related(self, obj):
@@ -4691,6 +4696,14 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
         summary_fields = super(WorkflowJobNodeSerializer, self).get_summary_fields(obj)
         if isinstance(obj.job, WorkflowApproval):
             summary_fields['job']['timed_out'] = obj.job.timed_out
+        if obj.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            summary_fields['eda_rulebook'] = {
+                'name': obj.eda_rulebook_name,
+                'activation_id': obj.eda_activation_id,
+                'event_source': obj.eda_event_source,
+                'event_source_status': obj.eda_event_source_status,
+                'status': obj.bypassed_job_status or 'pending',
+            }
         return summary_fields
 
 
