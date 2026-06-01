@@ -4,11 +4,13 @@
  * Shows:
  *  - Slowest job templates (avg execution time)
  *  - Most failed hosts (from recent job events)
- *  - Capacity utilisation trend (execution node utilisation % from /api/v2/instances/)
+ *  - Current capacity and execution-load trend over a selected time window
  */
 
 import {
   CardBody,
+  Flex,
+  FlexItem,
   Progress,
   ProgressSize,
   Spinner,
@@ -18,9 +20,11 @@ import {
   TextContent,
   TextVariants,
 } from '@patternfly/react-core';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
+import { PageSingleSelect } from '../../../../framework/PageInputs/PageSingleSelect';
 import { useGetPageUrl } from '../../../../framework/PageNavigation/useGetPageUrl';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
@@ -41,8 +45,11 @@ interface InstancesResponse {
 interface UnifiedJob {
   unified_job_template?: { name: string };
   name?: string;
-  elapsed: number;
+  elapsed?: number;
   status: string;
+  created?: string;
+  finished?: string;
+  modified?: string;
 }
 
 interface UnifiedJobsResponse {
@@ -50,7 +57,159 @@ interface UnifiedJobsResponse {
   results: UnifiedJob[];
 }
 
-function usePerformanceData() {
+interface JobEvent {
+  event?: string;
+  failed?: boolean;
+  host_name?: string;
+  created?: string;
+  event_data?: {
+    host?: string;
+  };
+}
+
+interface JobEventsResponse {
+  count: number;
+  results: JobEvent[];
+}
+
+export type PerformanceWindow = 'day' | 'week' | 'month';
+
+const windowMs: Record<PerformanceWindow, number> = {
+  day: 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000,
+  month: 30 * 24 * 60 * 60 * 1000,
+};
+
+const failedHostEvents = new Set([
+  'runner_on_failed',
+  'runner_on_error',
+  'runner_on_unreachable',
+  'runner_item_on_failed',
+  'runner_on_async_failed',
+]);
+
+export function getWindowStart(now: Date, timeWindow: PerformanceWindow) {
+  return new Date(now.getTime() - windowMs[timeWindow]);
+}
+
+function getDateValue(value?: string) {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function getJobTime(job: UnifiedJob) {
+  return getDateValue(job.finished) ?? getDateValue(job.modified) ?? getDateValue(job.created);
+}
+
+function isInWindow(time: number | undefined, start: Date, now: Date) {
+  return time !== undefined && time >= start.getTime() && time <= now.getTime();
+}
+
+export function getExecutionNodes(instances: Instance[] = []) {
+  return instances.filter(
+    (node) => node.enabled && (node.node_type === 'execution' || node.node_type === 'hybrid')
+  );
+}
+
+export function getCapacitySummary(nodes: Instance[]) {
+  const capacity = nodes.reduce((total, node) => total + (node.capacity || 0), 0);
+  const consumed = nodes.reduce((total, node) => total + (node.consumed_capacity || 0), 0);
+  const percent = capacity > 0 ? Math.round((consumed / capacity) * 100) : 0;
+  return { capacity, consumed, percent };
+}
+
+export function getSlowestTemplates(jobs: UnifiedJob[], start: Date, now: Date) {
+  const templateAvgTimes: Record<string, { totalElapsed: number; count: number }> = {};
+
+  for (const job of jobs) {
+    if (job.status !== 'successful' || !isInWindow(getJobTime(job), start, now)) continue;
+    const elapsed = job.elapsed ?? 0;
+    if (elapsed <= 0) continue;
+    const name = job.unified_job_template?.name ?? job.name ?? 'Unknown';
+    if (!templateAvgTimes[name]) templateAvgTimes[name] = { totalElapsed: 0, count: 0 };
+    templateAvgTimes[name].totalElapsed += elapsed;
+    templateAvgTimes[name].count++;
+  }
+
+  return Object.entries(templateAvgTimes)
+    .map(([name, data]) => ({ name, avgSeconds: data.totalElapsed / data.count }))
+    .sort((a, b) => b.avgSeconds - a.avgSeconds)
+    .slice(0, 5);
+}
+
+function getEventTime(event: JobEvent) {
+  return getDateValue(event.created);
+}
+
+function getEventHost(event: JobEvent) {
+  return event.host_name || event.event_data?.host;
+}
+
+export function getFailedHosts(events: JobEvent[], start: Date, now: Date) {
+  const hostFailures: Record<string, { failures: number; lastSeen?: number }> = {};
+
+  for (const event of events) {
+    if (!event.failed && !failedHostEvents.has(event.event ?? '')) continue;
+    const time = getEventTime(event);
+    if (!isInWindow(time, start, now)) continue;
+    const host = getEventHost(event);
+    if (!host) continue;
+    if (!hostFailures[host]) hostFailures[host] = { failures: 0 };
+    hostFailures[host].failures++;
+    hostFailures[host].lastSeen = Math.max(hostFailures[host].lastSeen ?? 0, time ?? 0);
+  }
+
+  return Object.entries(hostFailures)
+    .map(([host, data]) => ({ host, ...data }))
+    .sort((a, b) => b.failures - a.failures || (b.lastSeen ?? 0) - (a.lastSeen ?? 0))
+    .slice(0, 5);
+}
+
+export function getRuntimeTrend(jobs: UnifiedJob[], timeWindow: PerformanceWindow, now: Date) {
+  const start = getWindowStart(now, timeWindow);
+  const bucketCount = 6;
+  const bucketSize = windowMs[timeWindow] / bucketCount;
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({
+    start: new Date(start.getTime() + bucketSize * index),
+    end: new Date(start.getTime() + bucketSize * (index + 1)),
+    totalElapsed: 0,
+    jobCount: 0,
+  }));
+
+  for (const job of jobs) {
+    const time = getJobTime(job);
+    if (!isInWindow(time, start, now)) continue;
+    const elapsed = job.elapsed ?? 0;
+    const index = Math.min(
+      bucketCount - 1,
+      Math.max(0, Math.floor(((time as number) - start.getTime()) / bucketSize))
+    );
+    buckets[index].totalElapsed += elapsed > 0 ? elapsed : 0;
+    buckets[index].jobCount++;
+  }
+
+  const firstHalf = buckets
+    .slice(0, bucketCount / 2)
+    .reduce((sum, bucket) => sum + bucket.totalElapsed, 0);
+  const secondHalf = buckets
+    .slice(bucketCount / 2)
+    .reduce((sum, bucket) => sum + bucket.totalElapsed, 0);
+  const percentChange =
+    firstHalf > 0
+      ? Math.round(((secondHalf - firstHalf) / firstHalf) * 100)
+      : secondHalf > 0
+        ? 100
+        : 0;
+  const direction = percentChange > 10 ? 'up' : percentChange < -10 ? 'down' : 'flat';
+
+  return { buckets, direction, percentChange, totalElapsed: firstHalf + secondHalf };
+}
+
+function usePerformanceData(timeWindow: PerformanceWindow) {
+  const now = new Date();
+  const windowStart = getWindowStart(now, timeWindow);
+
   const { data: instances, isLoading: instLoading } = useSWR<InstancesResponse>(
     awxAPI`/instances/?page_size=50`,
     (url: string) =>
@@ -60,52 +219,70 @@ function usePerformanceData() {
   );
 
   const { data: recentJobs, isLoading: jobsLoading } = useSWR<UnifiedJobsResponse>(
-    awxAPI`/unified_jobs/?status=successful&page_size=200&order_by=-elapsed`,
+    awxAPI`/unified_jobs/?page_size=200&order_by=-finished`,
     (url: string) =>
       fetch(url)
         .then((r) => r.json())
         .catch(() => ({ count: 0, results: [] }))
   );
 
-  // Compute slowest templates
-  const templateAvgTimes: Record<string, { totalElapsed: number; count: number }> = {};
-  if (recentJobs?.results) {
-    for (const job of recentJobs.results) {
-      const name = job.unified_job_template?.name ?? job.name ?? 'Unknown';
-      if (!templateAvgTimes[name]) templateAvgTimes[name] = { totalElapsed: 0, count: 0 };
-      templateAvgTimes[name].totalElapsed += job.elapsed ?? 0;
-      templateAvgTimes[name].count++;
-    }
-  }
-
-  const slowestTemplates = Object.entries(templateAvgTimes)
-    .map(([name, data]) => ({ name, avgSeconds: data.totalElapsed / data.count }))
-    .sort((a, b) => b.avgSeconds - a.avgSeconds)
-    .slice(0, 5);
-
-  // Execution nodes (filter to 'execution' or 'hybrid' node types)
-  const executionNodes = (instances?.results ?? []).filter(
-    (n) => n.enabled && (n.node_type === 'execution' || n.node_type === 'hybrid')
+  const { data: failedEvents, isLoading: eventsLoading } = useSWR<JobEventsResponse>(
+    awxAPI`/job_events/?page_size=200&order_by=-created`,
+    (url: string) =>
+      fetch(url)
+        .then((r) => r.json())
+        .catch(() => ({ count: 0, results: [] }))
   );
 
+  const jobs = recentJobs?.results ?? [];
+  const executionNodes = getExecutionNodes(instances?.results ?? []);
+
   return {
-    slowestTemplates,
+    capacitySummary: getCapacitySummary(executionNodes),
     executionNodes,
-    isLoading: instLoading || jobsLoading,
+    failedHosts: getFailedHosts(failedEvents?.results ?? [], windowStart, now),
+    runtimeTrend: getRuntimeTrend(jobs, timeWindow, now),
+    slowestTemplates: getSlowestTemplates(jobs, windowStart, now),
+    isLoading: instLoading || jobsLoading || eventsLoading,
   };
 }
 
-function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+function formatBucketLabel(date: Date, timeWindow: PerformanceWindow) {
+  if (timeWindow === 'day') {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric' });
+  }
+  return date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+}
+
 export function AwxPerformanceCard() {
   const { t } = useTranslation();
-  const { slowestTemplates, executionNodes, isLoading } = usePerformanceData();
+  const [timeWindow, setTimeWindow] = useState<PerformanceWindow | null>('week');
+  const activeWindow = timeWindow ?? 'week';
+  const {
+    capacitySummary,
+    executionNodes,
+    failedHosts,
+    runtimeTrend,
+    slowestTemplates,
+    isLoading,
+  } = usePerformanceData(activeWindow);
   const getPageUrl = useGetPageUrl();
+
+  const trendSummary =
+    runtimeTrend.direction === 'up'
+      ? t('Up {{change}}% vs earlier in this window', { change: runtimeTrend.percentChange })
+      : runtimeTrend.direction === 'down'
+        ? t('Down {{change}}% vs earlier in this window', {
+            change: Math.abs(runtimeTrend.percentChange),
+          })
+        : t('Flat vs earlier in this window');
 
   return (
     <PageDashboardCard
@@ -113,7 +290,20 @@ export function AwxPerformanceCard() {
       linkText={t('View instances')}
       to={getPageUrl(AwxRoute.Instances)}
       width="full"
-      height="md"
+      height="lg"
+      headerControls={
+        <PageSingleSelect<PerformanceWindow>
+          placeholder={t('Select window')}
+          value={timeWindow}
+          onSelect={setTimeWindow}
+          options={[
+            { label: t('Past 24 hours'), value: 'day' },
+            { label: t('Past week'), value: 'week' },
+            { label: t('Past month'), value: 'month' },
+          ]}
+          isRequired
+        />
+      }
     >
       <CardBody>
         {isLoading ? (
@@ -123,14 +313,23 @@ export function AwxPerformanceCard() {
             {/* Capacity utilisation */}
             {executionNodes.length > 0 && (
               <StackItem>
-                <TextContent style={{ marginBottom: 8 }}>
-                  <Text
-                    component={TextVariants.h4}
-                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
-                  >
-                    {t('Execution node capacity')}
-                  </Text>
-                </TextContent>
+                <Flex alignItems={{ default: 'alignItemsCenter' }}>
+                  <FlexItem grow={{ default: 'grow' }}>
+                    <TextContent style={{ marginBottom: 8 }}>
+                      <Text
+                        component={TextVariants.h4}
+                        style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+                      >
+                        {t('Execution node capacity')}
+                      </Text>
+                    </TextContent>
+                  </FlexItem>
+                  <FlexItem>
+                    <Text component={TextVariants.small}>
+                      {t('{{pct}}% used', { pct: capacitySummary.percent })}
+                    </Text>
+                  </FlexItem>
+                </Flex>
                 <Stack hasGutter>
                   {executionNodes.slice(0, 4).map((node) => {
                     const pct =
@@ -159,6 +358,44 @@ export function AwxPerformanceCard() {
                     );
                   })}
                 </Stack>
+              </StackItem>
+            )}
+
+            {/* Runtime trend */}
+            {runtimeTrend.totalElapsed > 0 && (
+              <StackItem>
+                <Flex alignItems={{ default: 'alignItemsCenter' }}>
+                  <FlexItem grow={{ default: 'grow' }}>
+                    <TextContent style={{ marginBottom: 8 }}>
+                      <Text
+                        component={TextVariants.h4}
+                        style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+                      >
+                        {t('Execution load trend')}
+                      </Text>
+                    </TextContent>
+                  </FlexItem>
+                  <FlexItem>
+                    <Text component={TextVariants.small}>{trendSummary}</Text>
+                  </FlexItem>
+                </Flex>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {runtimeTrend.buckets.map((bucket) => (
+                      <tr key={bucket.start.toISOString()}>
+                        <td style={{ padding: '3px 8px 3px 0', whiteSpace: 'nowrap' }}>
+                          {formatBucketLabel(bucket.start, activeWindow)}
+                        </td>
+                        <td style={{ padding: '3px 8px 3px 0' }}>
+                          {t('{{count}} jobs', { count: bucket.jobCount })}
+                        </td>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600 }}>
+                          {formatDuration(bucket.totalElapsed)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </StackItem>
             )}
 
@@ -210,18 +447,58 @@ export function AwxPerformanceCard() {
               </StackItem>
             )}
 
-            {slowestTemplates.length === 0 && executionNodes.length === 0 && (
+            {/* Most failed hosts */}
+            {failedHosts.length > 0 && (
               <StackItem>
-                <TextContent>
+                <TextContent style={{ marginBottom: 8 }}>
                   <Text
-                    component={TextVariants.small}
-                    style={{ color: 'var(--pf-v5-global--Color--200)' }}
+                    component={TextVariants.h4}
+                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
                   >
-                    {t('No performance data available yet. Run some jobs to see metrics here.')}
+                    {t('Most failed hosts')}
                   </Text>
                 </TextContent>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {failedHosts.map((host) => (
+                      <tr key={host.host}>
+                        <td
+                          style={{
+                            padding: '3px 8px 3px 0',
+                            maxWidth: 220,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={host.host}
+                        >
+                          {host.host}
+                        </td>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600 }}>
+                          {t('{{count}} failures', { count: host.failures })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </StackItem>
             )}
+
+            {slowestTemplates.length === 0 &&
+              executionNodes.length === 0 &&
+              failedHosts.length === 0 &&
+              runtimeTrend.totalElapsed === 0 && (
+                <StackItem>
+                  <TextContent>
+                    <Text
+                      component={TextVariants.small}
+                      style={{ color: 'var(--pf-v5-global--Color--200)' }}
+                    >
+                      {t('No performance data available yet. Run some jobs to see metrics here.')}
+                    </Text>
+                  </TextContent>
+                </StackItem>
+              )}
           </Stack>
         )}
       </CardBody>
