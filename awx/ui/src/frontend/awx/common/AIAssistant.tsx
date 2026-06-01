@@ -24,6 +24,17 @@ interface ChatMessage {
   content: string;
 }
 
+export const AI_ASSISTANT_CONTEXT_EVENT = 'awx-ai-assistant-context';
+
+export interface AIAssistantContextPayload {
+  prompt?: string;
+  source?: string;
+  page_kind?: string;
+  page_label?: string;
+  resource_id?: string;
+  [key: string]: unknown;
+}
+
 interface AISettingsResponse {
   enabled: boolean;
   provider: string;
@@ -120,11 +131,21 @@ function messageFromError(error: unknown, fallback: string) {
   return fallback;
 }
 
-function buildRouteContext() {
+export function openAIAssistantWithContext(context: AIAssistantContextPayload) {
   if (typeof window === 'undefined') {
-    return {};
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent<AIAssistantContextPayload>(AI_ASSISTANT_CONTEXT_EVENT, { detail: context })
+  );
+}
+
+function buildRouteContext(context?: Record<string, unknown> | null) {
+  if (typeof window === 'undefined') {
+    return context ?? {};
   }
   return {
+    ...(context ?? {}),
     path: window.location.pathname,
     search: window.location.search,
     hash: window.location.hash,
@@ -180,11 +201,28 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
   const [busy, setBusy] = useState<AssistantBusyState>(null);
   const [error, setError] = useState<string | null>(null);
   const [resourcePlan, setResourcePlan] = useState<AIResourceActionResponse | null>(null);
+  const [context, setContext] = useState<Record<string, unknown> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy, resourcePlan]);
+
+  useEffect(() => {
+    const handleContextOpen = (event: Event) => {
+      const detail = (event as CustomEvent<AIAssistantContextPayload>).detail ?? {};
+      const { prompt, ...nextContext } = detail;
+      setContext(nextContext);
+      setError(null);
+      setResourcePlan(null);
+      if (typeof prompt === 'string') {
+        setInput(prompt);
+      }
+    };
+
+    window.addEventListener(AI_ASSISTANT_CONTEXT_EVENT, handleContextOpen);
+    return () => window.removeEventListener(AI_ASSISTANT_CONTEXT_EVENT, handleContextOpen);
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const trimmed = input.trim();
@@ -228,7 +266,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
       >(awxAPI`/ai/resource_actions/`, {
         mode: 'preview',
         prompt: trimmed,
-        context: buildRouteContext(),
+        context: buildRouteContext(context),
       });
       setResourcePlan(resp);
     } catch (err: unknown) {
@@ -236,7 +274,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     } finally {
       setBusy(null);
     }
-  }, [busy, input, t]);
+  }, [busy, context, input, t]);
 
   const applyResourcePlan = useCallback(async () => {
     if (!resourcePlan || !resourcePlan.can_apply || busy) return;
@@ -255,7 +293,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
       >(awxAPI`/ai/resource_actions/`, {
         mode: 'apply',
         plan: resourcePlan.plan,
-        context: buildRouteContext(),
+        context: buildRouteContext(context),
       });
       setResourcePlan(resp);
     } catch (err: unknown) {
@@ -263,7 +301,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     } finally {
       setBusy(null);
     }
-  }, [busy, resourcePlan, t]);
+  }, [busy, context, resourcePlan, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -2,7 +2,14 @@ import { Brand, Button } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
 import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
-import { AIAssistantButton, AIAssistantPanel, useAIAssistantEnabled } from '../common/AIAssistant';
+import {
+  AI_ASSISTANT_CONTEXT_EVENT,
+  AIAssistantButton,
+  AIAssistantPanel,
+  openAIAssistantWithContext,
+  useAIAssistantEnabled,
+} from '../common/AIAssistant';
+import { ContextualAIAssistantButton } from '../common/ContextualAIAssistantButton';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageMasthead, useGetPageUrl, usePageNavigate } from '../../../framework';
@@ -46,6 +53,12 @@ export function AwxMasthead() {
     refreshActiveAwxUser?.();
   }, [refreshActiveAwxUser]);
 
+  useEffect(() => {
+    const openAssistant = () => setAiOpen(true);
+    window.addEventListener(AI_ASSISTANT_CONTEXT_EVENT, openAssistant);
+    return () => window.removeEventListener(AI_ASSISTANT_CONTEXT_EVENT, openAssistant);
+  }, []);
+
   const customLogoSrc =
     config?.custom_logo && config.custom_logo.startsWith('data:image/')
       ? config.custom_logo
@@ -59,87 +72,101 @@ export function AwxMasthead() {
 
   return (
     <>
-    {aiEnabled && <AIAssistantPanel isOpen={aiOpen} onClose={() => setAiOpen(false)} />}
-    <PageMasthead brand={brandElement}>
-      <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
-        <ToolbarItem style={{ marginLeft: 'auto' }}>
-          <PageRefreshIcon />
-        </ToolbarItem>
-        <ToolbarItem>
-          <AwxGlobalSearch />
-        </ToolbarItem>
-        {aiEnabled && (
-          <ToolbarItem>
-            <AIAssistantButton onClick={() => setAiOpen((o) => !o)} isActive={aiOpen} />
+      {aiEnabled && (
+        <>
+          <AIAssistantPanel isOpen={aiOpen} onClose={() => setAiOpen(false)} />
+          <ContextualAIAssistantButton isEnabled={aiEnabled} />
+        </>
+      )}
+      <PageMasthead brand={brandElement}>
+        <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
+          <ToolbarItem style={{ marginLeft: 'auto' }}>
+            <PageRefreshIcon />
           </ToolbarItem>
-        )}
-        <ToolbarItem>
-          <PageThemeSwitcher />
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageNotificationsIcon />
-        </ToolbarItem>
-        <ToolbarItem>
-          <Button
-            variant="plain"
-            aria-label={t('Activity Stream')}
-            title={t('Activity Stream')}
-            onClick={() => pageNavigate(AwxRoute.ActivityStream)}
-            data-cy="masthead-activity-stream"
-          >
-            <HistoryIcon />
-          </Button>
-        </ToolbarItem>
-        <ToolbarItem>
-          <AwxSystemUsageBar />
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageMastheadDropdown id="help-menu" icon={<QuestionCircleIcon />}>
-            <DropdownItem
-              id="documentation"
-              icon={<ExternalLinkAltIcon />}
-              component="a"
-              href={useGetDocsUrl(config, 'index')}
-              target="_blank"
-              data-cy="masthead-documentation"
+          <ToolbarItem>
+            <AwxGlobalSearch />
+          </ToolbarItem>
+          {aiEnabled && (
+            <ToolbarItem>
+              <AIAssistantButton
+                onClick={() => {
+                  if (aiOpen) {
+                    setAiOpen(false);
+                  } else {
+                    openAIAssistantWithContext({ source: 'masthead' });
+                  }
+                }}
+                isActive={aiOpen}
+              />
+            </ToolbarItem>
+          )}
+          <ToolbarItem>
+            <PageThemeSwitcher />
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageNotificationsIcon />
+          </ToolbarItem>
+          <ToolbarItem>
+            <Button
+              variant="plain"
+              aria-label={t('Activity Stream')}
+              title={t('Activity Stream')}
+              onClick={() => pageNavigate(AwxRoute.ActivityStream)}
+              data-cy="masthead-activity-stream"
             >
-              {t('Documentation')}
-            </DropdownItem>
-            <DropdownItem
-              id="about"
-              onClick={() => openAnsibleAboutModal({ brandImageSrc: '/assets/awx-logo.svg' })}
-              data-cy="masthead-about"
-            >
-              {t('About')}
-            </DropdownItem>
-          </PageMastheadDropdown>
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageMastheadDropdown
-            id="account-menu"
-            icon={
-              <Icon size="lg">
-                <UserCircleIcon />
-              </Icon>
-            }
-            label={activeAwxUser?.username}
-          >
-            <DropdownItem
-              id="user-details"
-              label={t('User details')}
-              onClick={() =>
-                pageNavigate(AwxRoute.UserDetails, { params: { id: activeAwxUser?.id } })
+              <HistoryIcon />
+            </Button>
+          </ToolbarItem>
+          <ToolbarItem>
+            <AwxSystemUsageBar />
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageMastheadDropdown id="help-menu" icon={<QuestionCircleIcon />}>
+              <DropdownItem
+                id="documentation"
+                icon={<ExternalLinkAltIcon />}
+                component="a"
+                href={useGetDocsUrl(config, 'index')}
+                target="_blank"
+                data-cy="masthead-documentation"
+              >
+                {t('Documentation')}
+              </DropdownItem>
+              <DropdownItem
+                id="about"
+                onClick={() => openAnsibleAboutModal({ brandImageSrc: '/assets/awx-logo.svg' })}
+                data-cy="masthead-about"
+              >
+                {t('About')}
+              </DropdownItem>
+            </PageMastheadDropdown>
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageMastheadDropdown
+              id="account-menu"
+              icon={
+                <Icon size="lg">
+                  <UserCircleIcon />
+                </Icon>
               }
+              label={activeAwxUser?.username}
             >
-              {t('User details')}
-            </DropdownItem>
-            <DropdownItem id="logout" label={t('Logout')} onClick={() => void logout()}>
-              {t('Logout')}
-            </DropdownItem>
-          </PageMastheadDropdown>
-        </ToolbarItem>
-      </ToolbarGroup>
-    </PageMasthead>
+              <DropdownItem
+                id="user-details"
+                label={t('User details')}
+                onClick={() =>
+                  pageNavigate(AwxRoute.UserDetails, { params: { id: activeAwxUser?.id } })
+                }
+              >
+                {t('User details')}
+              </DropdownItem>
+              <DropdownItem id="logout" label={t('Logout')} onClick={() => void logout()}>
+                {t('Logout')}
+              </DropdownItem>
+            </PageMastheadDropdown>
+          </ToolbarItem>
+        </ToolbarGroup>
+      </PageMasthead>
     </>
   );
 }
