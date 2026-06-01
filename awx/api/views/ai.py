@@ -13,11 +13,13 @@ from types import SimpleNamespace
 
 import requests
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, transaction
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -128,6 +130,10 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'job_templates': 'job_template',
     'project': 'project',
     'projects': 'project',
+    'permission_assignment': 'role_assignment',
+    'permission_assignments': 'role_assignment',
+    'role_assignment': 'role_assignment',
+    'role_assignments': 'role_assignment',
     'schedule': 'schedule',
     'schedules': 'schedule',
     'smart_inventory': 'smart_inventory',
@@ -211,6 +217,61 @@ _AI_CREDENTIAL_REFERENCE_TARGETS = {
         'serializer': JobTemplateSerializer,
         'audit_relation': 'job_template',
     },
+}
+
+_AI_ROLE_ASSIGNMENT_TARGET_ALIASES = {
+    'catalog': 'catalog_item',
+    'catalog_item': 'catalog_item',
+    'catalog_items': 'catalog_item',
+    'credential': 'credential',
+    'credentials': 'credential',
+    'inventory': 'inventory',
+    'inventories': 'inventory',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'organization': 'organization',
+    'organizations': 'organization',
+    'project': 'project',
+    'projects': 'project',
+    'team': 'team',
+    'teams': 'team',
+    'terraform_job_template': 'terraform_job_template',
+    'terraform_job_templates': 'terraform_job_template',
+    'terraform_template': 'terraform_job_template',
+    'terraform_templates': 'terraform_job_template',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_ROLE_ASSIGNMENT_TARGETS = {
+    'catalog_item': {'model': models.CatalogItem, 'audit_relation': 'catalog_item'},
+    'credential': {'model': models.Credential, 'audit_relation': 'credential'},
+    'inventory': {'model': models.Inventory, 'audit_relation': 'inventory'},
+    'job_template': {'model': models.JobTemplate, 'audit_relation': 'job_template'},
+    'organization': {'model': models.Organization, 'audit_relation': 'organization'},
+    'project': {'model': models.Project, 'audit_relation': 'project'},
+    'team': {'model': models.Team, 'audit_relation': 'team'},
+    'terraform_job_template': {'model': models.TerraformJobTemplate, 'audit_relation': 'terraform_job_template'},
+    'workflow_job_template': {'model': models.WorkflowJobTemplate, 'audit_relation': 'workflow_job_template'},
+}
+
+_AI_ROLE_FIELD_ALIASES = {
+    'admin': 'admin_role',
+    'administrator': 'admin_role',
+    'approve': 'approval_role',
+    'approval': 'approval_role',
+    'auditor': 'auditor_role',
+    'execute': 'execute_role',
+    'execution': 'execute_role',
+    'inventory_admin': 'inventory_admin_role',
+    'job_template_admin': 'job_template_admin_role',
+    'member': 'member_role',
+    'project_admin': 'project_admin_role',
+    'read': 'read_role',
+    'update': 'update_role',
+    'use': 'use_role',
+    'workflow_admin': 'workflow_admin_role',
 }
 
 _SENSITIVE_KEY_RE = re.compile(r'(password|secret|token|private[_-]?key|api[_-]?key|credential)', re.IGNORECASE)
@@ -902,6 +963,25 @@ def _normalize_credential_reference_target(target_type: str | None) -> str | Non
     return _AI_CREDENTIAL_REFERENCE_TARGET_ALIASES.get(normalized)
 
 
+def _normalize_role_assignment_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_ROLE_ASSIGNMENT_TARGET_ALIASES.get(normalized)
+
+
+def _normalize_role_field(role_field: str | None) -> str | None:
+    if not isinstance(role_field, str):
+        return None
+    normalized = role_field.strip().lower().replace('-', '_').replace(' ', '_')
+    if not normalized:
+        return None
+    normalized = _AI_ROLE_FIELD_ALIASES.get(normalized, normalized)
+    if not normalized.endswith('_role'):
+        normalized = f'{normalized}_role'
+    return normalized
+
+
 def _normalize_ai_plan(raw_plan) -> dict:
     if isinstance(raw_plan, list):
         plan = {'operations': raw_plan}
@@ -970,6 +1050,8 @@ def _ai_authoring_context(user) -> dict:
         'counts': _visible_awx_counts(user),
         'credentials': _limited_queryset_values(user, models.Credential, ('id', 'name', 'credential_type_id', 'organization_id'), limit=20),
         'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
+        'users': _limited_queryset_values(user, models.User, ('id', 'username', 'first_name', 'last_name'), limit=20),
+        'teams': _limited_queryset_values(user, models.Team, ('id', 'name', 'organization_id'), limit=20),
         'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
         'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
         'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'organization_id'), limit=20),
@@ -986,17 +1068,19 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
         'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, '
-        'inventory_source, job_template, workflow_job_template, schedule, catalog_item.\n'
+        'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment.\n'
         'Supported operation values: create, update, attach, detach. '
-        'Use attach/detach only for credential_reference operations.\n'
+        'Use attach/detach only for credential_reference and role_assignment operations.\n'
         'For credential_reference, data must include target_resource_type ("job_template" or "inventory_source"), '
         'target_id, and credential. These operations only link or unlink existing credentials and must never include credential secrets.\n'
+        'For role_assignment, data must include target_resource_type, target_id, role_field or role, and exactly one user/user_id or team/team_id. '
+        'Use existing users and teams from the supplied context. Common role values include admin, read, use, execute, update, member, and auditor.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
-        'Do not invent organization, project, inventory, workflow, or catalog item IDs. '
+        'Do not invent organization, project, inventory, workflow, user, team, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "..."}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -1074,6 +1158,44 @@ def _credential_reference_payload(operation: dict) -> dict:
     }
 
 
+def _role_assignment_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    raw_role = data.get('role')
+    raw_actor_type = data.get('actor_type') or operation.get('actor_type')
+    actor_type = str(raw_actor_type).strip().lower().replace('-', '_') if isinstance(raw_actor_type, str) else ''
+    actor_id = _positive_int(data.get('actor_id') or operation.get('actor_id'))
+    user_id = _positive_int(data.get('user') or data.get('user_id') or operation.get('user_id'))
+    team_id = _positive_int(data.get('team') or data.get('team_id') or operation.get('team_id'))
+
+    if actor_type == 'user' and actor_id and not user_id:
+        user_id = actor_id
+    if actor_type == 'team' and actor_id and not team_id:
+        team_id = actor_id
+
+    role_id = _positive_int(data.get('role_id') or operation.get('role_id') or raw_role)
+    return {
+        'target_resource_type': _normalize_role_assignment_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'role_id': role_id,
+        'role_field': _normalize_role_field(data.get('role_field') or data.get('role_name') or operation.get('role_field') or (None if role_id else raw_role)),
+        'user_id': user_id,
+        'team_id': team_id,
+    }
+
+
+def _validation_exception_detail(exc) -> dict:
+    if hasattr(exc, 'detail'):
+        detail = _json_safe(exc.detail)
+        return detail if isinstance(detail, dict) else {'detail': detail}
+    if hasattr(exc, 'message_dict'):
+        return _json_safe(exc.message_dict)
+    if hasattr(exc, 'messages'):
+        return {'detail': _json_safe(exc.messages)}
+    return {'detail': [str(exc)]}
+
+
 def _validate_credential_reference_relation(action: str, target_type: str, target, credential) -> dict | None:
     if action != 'attach':
         return None
@@ -1095,6 +1217,45 @@ def _validate_credential_reference_relation(action: str, target_type: str, targe
         return None
 
     return {'target_resource_type': [_('Unsupported credential reference target.')]}
+
+
+def _role_summary(role) -> dict:
+    summary = {
+        'id': role.pk,
+        'name': role.name,
+        'description': role.description,
+        'role_field': role.role_field,
+    }
+    content_object = role.content_object
+    if content_object is not None:
+        summary['resource_id'] = role.object_id
+        summary['resource_name'] = getattr(content_object, 'name', getattr(content_object, 'username', ''))
+        summary['resource_type'] = content_object._meta.model_name
+    return summary
+
+
+def _target_summary(resource_type: str, target) -> dict:
+    return {
+        'id': target.pk,
+        'name': getattr(target, 'name', getattr(target, 'username', '')),
+        'resource_type': resource_type,
+    }
+
+
+def _actor_summary(actor_type: str, actor) -> dict:
+    if actor_type == 'user':
+        return {
+            'id': actor.pk,
+            'type': 'user',
+            'username': actor.username,
+            'name': actor.get_full_name(),
+        }
+    return {
+        'id': actor.pk,
+        'type': 'team',
+        'name': actor.name,
+        'organization': actor.organization_id,
+    }
 
 
 def _validate_ai_credential_reference_operation(request, operation: dict) -> dict:
@@ -1176,6 +1337,146 @@ def _validate_ai_credential_reference_operation(request, operation: dict) -> dic
     return result
 
 
+def _validate_ai_role_assignment_operation(request, operation: dict) -> dict:
+    action = operation.get('operation')
+    payload = _role_assignment_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+        'role_id': payload['role_id'],
+        'role_field': payload['role_field'],
+        'user_id': payload['user_id'],
+        'team_id': payload['team_id'],
+    }
+
+    if action not in {'attach', 'detach'}:
+        result['errors'] = {'operation': [_('Role assignments only support attach and detach operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing role-assignment target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Role assignment operations must include target_id.')]}
+        return result
+    if not payload['role_id'] and not payload['role_field']:
+        result['errors'] = {'role_field': [_('Role assignment operations must include role_field or role_id.')]}
+        return result
+    if bool(payload['user_id']) == bool(payload['team_id']):
+        result['errors'] = {'actor': [_('Role assignment operations must include exactly one user or team.')]}
+        return result
+
+    target_config = _AI_ROLE_ASSIGNMENT_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    role = None
+    if payload['role_id']:
+        try:
+            role = models.Role.objects.get(pk=payload['role_id'])
+        except models.Role.DoesNotExist:
+            result['errors'] = {'role_id': [_('Role not found.')]}
+            return result
+        if role.content_object != target:
+            result['errors'] = {'role_id': [_('Role does not belong to the requested target object.')]}
+            return result
+        if payload['role_field'] and role.role_field != payload['role_field']:
+            result['errors'] = {'role_field': [_('role_field does not match the requested role_id.')]}
+            return result
+        payload['role_field'] = role.role_field
+        result['role_field'] = role.role_field
+    else:
+        role = getattr(target, payload['role_field'], None)
+        if not isinstance(role, models.Role):
+            result['errors'] = {'role_field': [_('Target object does not support this role field.')]}
+            return result
+
+    actor_type = 'user' if payload['user_id'] else 'team'
+    actor_model = models.User if actor_type == 'user' else models.Team
+    actor_id = payload['user_id'] or payload['team_id']
+    try:
+        actor = actor_model.objects.get(pk=actor_id)
+    except actor_model.DoesNotExist:
+        result['errors'] = {actor_type: [_('Role assignment actor not found.')]}
+        return result
+
+    if actor_type == 'team' and role.is_singleton():
+        result['errors'] = {'role': [_('You cannot grant system-level permissions to a team.')]}
+        return result
+    if actor_type == 'team' and isinstance(role.content_object, models.Organization) and role.role_field in {'member_role', 'admin_role'}:
+        result['errors'] = {'role': [_('You cannot assign an Organization participation role as a child role for a Team.')]}
+        return result
+
+    if action == 'attach':
+        content_object = role.content_object
+        if hasattr(content_object, 'validate_role_assignment'):
+            try:
+                content_object.validate_role_assignment(actor, role_definition=None, requesting_user=request.user)
+            except (DRFValidationError, DjangoValidationError) as exc:
+                result['errors'] = _validation_exception_detail(exc)
+                return result
+
+    relationship = 'members' if actor_type == 'user' else 'member_role.parents'
+    access_action = 'attach' if action == 'attach' else 'unattach'
+    permission_allowed = request.user.can_access(
+        models.Role,
+        access_action,
+        role,
+        actor,
+        relationship,
+        operation.get('data') or {},
+        skip_sub_obj_read_check=False,
+    )
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this role assignment operation.')]}
+        return result
+
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': 'role_assignment',
+        'object_id': payload['target_id'],
+        'target_resource_type': payload['target_resource_type'],
+        'role_id': role.pk,
+        'role_field': role.role_field,
+        'actor_type': actor_type,
+        'actor_id': actor.pk,
+    }
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['role_id'] = role.pk
+    result['actor_type'] = actor_type
+    result['actor_id'] = actor.pk
+    result['target'] = _target_summary(payload['target_resource_type'], target)
+    result['role'] = _role_summary(role)
+    result['actor'] = _actor_summary(actor_type, actor)
+    result['validated_data'] = _json_safe({**payload, 'role_id': role.pk, 'role_field': role.role_field, 'actor_type': actor_type, 'actor_id': actor.pk})
+    result['_role_assignment'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_role'] = role
+    result['_actor'] = actor
+    result['_actor_type'] = actor_type
+    return result
+
+
 def _validate_ai_operation(request, operation: dict) -> dict:
     resource_type = operation.get('resource_type')
     action = operation.get('operation')
@@ -1191,6 +1492,8 @@ def _validate_ai_operation(request, operation: dict) -> dict:
 
     if resource_type == 'credential_reference':
         return _validate_ai_credential_reference_operation(request, operation)
+    if resource_type == 'role_assignment':
+        return _validate_ai_role_assignment_operation(request, operation)
 
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
@@ -1287,9 +1590,45 @@ def _save_ai_credential_reference_operation(request, validation: dict) -> dict:
     return validation
 
 
+def _save_ai_role_assignment_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    role = validation['_role']
+    actor = validation['_actor']
+    actor_type = validation['_actor_type']
+
+    if actor_type == 'user':
+        if validation.get('operation') == 'attach':
+            role.members.add(actor)
+        else:
+            role.members.remove(actor)
+    elif validation.get('operation') == 'attach':
+        actor.member_role.children.add(role)
+    else:
+        actor.member_role.children.remove(role)
+
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['target'] = _target_summary(validation['target_resource_type'], target)
+    validation['role_id'] = role.pk
+    validation['role_field'] = role.role_field
+    validation['role'] = _role_summary(role)
+    validation['actor_type'] = actor_type
+    validation['actor_id'] = actor.pk
+    validation['actor'] = _actor_summary(actor_type, actor)
+    validation.pop('_role_assignment', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_role', None)
+    validation.pop('_actor', None)
+    validation.pop('_actor_type', None)
+    return validation
+
+
 def _save_ai_operation(request, validation: dict) -> dict:
     if validation.get('_credential_reference'):
         return _save_ai_credential_reference_operation(request, validation)
+    if validation.get('_role_assignment'):
+        return _save_ai_role_assignment_operation(request, validation)
 
     serializer = validation['_serializer']
     obj = serializer.save()
@@ -1320,6 +1659,12 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 'target_resource_type': operation.get('target_resource_type'),
                 'target_id': operation.get('target_id'),
                 'credential_id': operation.get('credential_id'),
+                'role_id': operation.get('role_id'),
+                'role_field': operation.get('role_field'),
+                'actor_type': operation.get('actor_type'),
+                'actor_id': operation.get('actor_id'),
+                'user_id': operation.get('user_id'),
+                'team_id': operation.get('team_id'),
                 'errors': _json_safe(operation.get('errors') or {}),
             }
         )
@@ -1357,6 +1702,29 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 getattr(entry, target_relation).add(target_id)
             if credential_id:
                 entry.credential.add(credential_id)
+            continue
+        if resource_type == 'role_assignment':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_ROLE_ASSIGNMENT_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            role_id = operation.get('role_id')
+            user_id = operation.get('user_id') if operation.get('actor_type') != 'team' else None
+            team_id = operation.get('team_id') if operation.get('actor_type') == 'team' else None
+            actor_id = operation.get('actor_id')
+            if operation.get('actor_type') == 'user' and not user_id:
+                user_id = actor_id
+            if operation.get('actor_type') == 'team' and not team_id:
+                team_id = actor_id
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
+            if role_id:
+                entry.role.add(role_id)
+            if user_id:
+                entry.user.add(user_id)
+            if team_id:
+                entry.team.add(team_id)
             continue
 
         object_id = operation.get('object_id')

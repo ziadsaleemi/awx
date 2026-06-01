@@ -459,6 +459,157 @@ def test_ai_resource_action_apply_rejects_missing_credential_reference_without_a
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_role_assignment_to_user_and_audits(post, admin_user, job_template, rando):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Grant execute access',
+                'operations': [
+                    {
+                        'id': 'grant-execute',
+                        'operation': 'attach',
+                        'resource_type': 'role_assignment',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'role': 'execute',
+                            'user': rando.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert rando in job_template.execute_role
+    assert response.data['operations'][0]['target_resource_type'] == 'job_template'
+    assert response.data['operations'][0]['target_id'] == job_template.pk
+    assert response.data['operations'][0]['role_field'] == 'execute_role'
+    assert response.data['operations'][0]['role_id'] == job_template.execute_role.pk
+    assert response.data['operations'][0]['actor_type'] == 'user'
+    assert response.data['operations'][0]['actor_id'] == rando.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][0]['resource_type'] == 'role_assignment'
+    assert changes['operations'][0]['operation'] == 'attach'
+    assert job_template in audit_entry.job_template.all()
+    assert job_template.execute_role in audit_entry.role.all()
+    assert rando in audit_entry.user.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_detaches_role_assignment_from_user(post, admin_user, job_template, rando):
+    job_template.execute_role.members.add(rando)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Revoke execute access',
+                'operations': [
+                    {
+                        'id': 'revoke-execute',
+                        'operation': 'detach',
+                        'resource_type': 'role_assignment',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'role_field': 'execute_role',
+                            'user_id': rando.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert rando not in job_template.execute_role
+    assert response.data['operations'][0]['role_field'] == 'execute_role'
+    assert response.data['operations'][0]['actor_id'] == rando.pk
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_role_assignment_to_team(post, admin_user, project, team):
+    team.organization = project.organization
+    team.save(update_fields=['organization'])
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Grant project use access',
+                'operations': [
+                    {
+                        'id': 'grant-project-use',
+                        'operation': 'attach',
+                        'resource_type': 'role_assignment',
+                        'data': {
+                            'target_resource_type': 'project',
+                            'target_id': project.pk,
+                            'role': 'use',
+                            'team': team.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert project.use_role in team.member_role.children.all()
+    assert response.data['operations'][0]['actor_type'] == 'team'
+    assert response.data['operations'][0]['role_field'] == 'use_role'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert project in audit_entry.project.all()
+    assert project.use_role in audit_entry.role.all()
+    assert team in audit_entry.team.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_role_assignment_without_target_admin(post, rando, job_template):
+    job_template.read_role.members.add(rando)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'grant-self-execute',
+                        'operation': 'attach',
+                        'resource_type': 'role_assignment',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'role': 'execute',
+                            'user': rando.pk,
+                        },
+                    }
+                ]
+            },
+        },
+        user=rando,
+        expect=400,
+    )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'permission' in response.data['operations'][0]['errors']
+    assert rando not in job_template.execute_role
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_rejects_rbac_failure(post, rando, organization):
     response = post(
         reverse('api:ai_resource_actions'),
