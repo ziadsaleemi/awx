@@ -331,6 +331,7 @@ Code review against the completed tracker found these remaining implementation g
 | AP7 | **AI inventory builder did not save inventory structure** — G4a claimed natural-language output created a structured AWX inventory preview before saving, but the UI only inserted generated INI text into the `variables` YAML editor; no groups, hosts, child groups, or generated variable records were applied through AWX inventory endpoints | Stub / Approximation | High | ✅ |
 | AP8 | **Cloud resource inventory mapping was missing** — G4b claimed pulled cloud resources were run through an AI mapping step to suggest AWX inventory structure, but provider state only stored raw resource payloads and the cloud pages had no inventory suggestion or create-inventory path | Stub / Approximation | High | ✅ |
 | AP9 | **Automation Insights retried AI chat indefinitely** — G2b claimed dashboard AI recommendations were complete, but provider failures or rate-limit responses left the summary empty and caused the card to re-post to `/api/v2/ai/chat/` on repeated renders until the backend returned 429/502 storms | Implementation Bug | High | ✅ |
+| AP10 | **Overview console noise from automatic AI insights and chart tooltip** — Overview no longer auto-posts AI insight generation on page load, avoiding background `429`/`502` console noise when the provider is unavailable or rate-limited; the job activity chart disables the PatternFly cursor tooltip path that emits the React `defaultProps` warning in development | Implementation Bug | High | ✅ |
 
 ## Notes
 

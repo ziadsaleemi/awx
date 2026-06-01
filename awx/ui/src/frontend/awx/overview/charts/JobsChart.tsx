@@ -107,6 +107,7 @@ export function JobsChart(props: {
         },
       ]}
       height={props.height}
+      showTooltip={false}
     />
   );
 }

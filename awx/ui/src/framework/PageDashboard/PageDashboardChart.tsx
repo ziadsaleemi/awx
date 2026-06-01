@@ -7,6 +7,7 @@ import {
   ChartLine,
   ChartScatter,
   ChartStack,
+  ChartVoronoiContainer,
   ChartVoronoiContainerProps,
   createContainer,
 } from '@patternfly/react-charts';
@@ -52,12 +53,16 @@ export function PageDashboardChart(props: {
   /** show item count in legend */
   showLegendCount?: boolean;
 
+  /** disables chart hover tooltip when a chart dependency emits noisy dev warnings */
+  showTooltip?: boolean;
+
   height?: number;
 
   /** Called when the user clicks a data point; receives the x-axis label (date string). */
   onPointClick?: (label: string) => void;
 }) {
   const { allowZero, xLabel, yLabel, minDomain, onlyIntegerTicks, onPointClick } = props;
+  const showTooltip = props.showTooltip !== false;
   let { groups } = props;
   groups = allowZero
     ? groups
@@ -157,20 +162,26 @@ export function PageDashboardChart(props: {
                 minDomain={minDomain}
                 maxDomain={{ y: maxDomainY }}
                 containerComponent={
-                  <CursorVoronoiContainer
-                    cursorDimension="x"
-                    labels={(point: { datum: { y: string | number } }) => point.datum.y.toString()}
-                    labelComponent={
-                      <ChartLegendTooltip
-                        // title={(datum: { x: number | string }) => datum.x}
-                        legendData={legendData}
-                        cornerRadius={8}
-                      />
-                    }
-                    mouseFollowTooltips
-                    voronoiDimension="x"
-                    voronoiPadding={50}
-                  />
+                  showTooltip ? (
+                    <CursorVoronoiContainer
+                      cursorDimension="x"
+                      labels={(point: { datum: { y: string | number } }) =>
+                        point.datum.y.toString()
+                      }
+                      labelComponent={
+                        <ChartLegendTooltip
+                          // title={(datum: { x: number | string }) => datum.x}
+                          legendData={legendData}
+                          cornerRadius={8}
+                        />
+                      }
+                      mouseFollowTooltips
+                      voronoiDimension="x"
+                      voronoiPadding={50}
+                    />
+                  ) : (
+                    <ChartVoronoiContainer voronoiDimension="x" voronoiPadding={50} />
+                  )
                 }
               >
                 <ChartAxis fixLabelOverlap />
