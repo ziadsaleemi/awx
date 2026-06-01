@@ -118,6 +118,8 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'catalog_items': 'catalog_item',
     'constructed_inventory': 'constructed_inventory',
     'constructed_inventories': 'constructed_inventory',
+    'credential_reference': 'credential_reference',
+    'credential_references': 'credential_reference',
     'inventory': 'inventory',
     'inventories': 'inventory',
     'inventory_source': 'inventory_source',
@@ -133,6 +135,11 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'workflow': 'workflow_job_template',
     'workflow_job_template': 'workflow_job_template',
     'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_OPERATION_ALIASES = {
+    'associate': 'attach',
+    'disassociate': 'detach',
 }
 
 _AI_RESOURCE_TYPES = {
@@ -183,6 +190,26 @@ _AI_RESOURCE_TYPES = {
         'model': models.WorkflowJobTemplate,
         'serializer': WorkflowJobTemplateSerializer,
         'audit_relation': 'workflow_job_template',
+    },
+}
+
+_AI_CREDENTIAL_REFERENCE_TARGET_ALIASES = {
+    'inventory_source': 'inventory_source',
+    'inventory_sources': 'inventory_source',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+}
+
+_AI_CREDENTIAL_REFERENCE_TARGETS = {
+    'inventory_source': {
+        'model': models.InventorySource,
+        'serializer': InventorySourceSerializer,
+        'audit_relation': 'inventory_source',
+    },
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
     },
 }
 
@@ -773,6 +800,7 @@ def _visible_host_count(user) -> int:
 def _visible_awx_counts(user) -> dict:
     return {
         'hosts': _visible_host_count(user),
+        'credentials': get_user_queryset(user, models.Credential).distinct().count(),
         'inventories': get_user_queryset(user, models.Inventory).distinct().count(),
         'inventory_sources': get_user_queryset(user, models.InventorySource).distinct().count(),
         'projects': get_user_queryset(user, models.Project).distinct().count(),
@@ -818,6 +846,7 @@ def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
         '- Counts are filtered by the requester\'s AWX RBAC permissions.\n'
         '- Host count excludes constructed-inventory synthetic hosts, matching the dashboard.\n'
         f"- Hosts visible: {counts['hosts']}\n"
+        f"- Credentials visible: {counts['credentials']}\n"
         f"- Inventories visible: {counts['inventories']}\n"
         f"- Inventory sources visible: {counts['inventory_sources']}\n"
         f"- Projects visible: {counts['projects']}\n"
@@ -866,6 +895,13 @@ def _normalize_resource_type(resource_type: str | None) -> str | None:
     return _AI_RESOURCE_TYPE_ALIASES.get(normalized)
 
 
+def _normalize_credential_reference_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_CREDENTIAL_REFERENCE_TARGET_ALIASES.get(normalized)
+
+
 def _normalize_ai_plan(raw_plan) -> dict:
     if isinstance(raw_plan, list):
         plan = {'operations': raw_plan}
@@ -886,7 +922,8 @@ def _normalize_ai_plan(raw_plan) -> dict:
             raise ValueError(_('Each AI resource plan operation must be an object.'))
         normalized = dict(operation)
         normalized['id'] = str(normalized.get('id') or f'op-{index}')
-        normalized['operation'] = str(normalized.get('operation') or normalized.get('action') or 'create').strip().lower()
+        operation_name = str(normalized.get('operation') or normalized.get('action') or 'create').strip().lower()
+        normalized['operation'] = _AI_OPERATION_ALIASES.get(operation_name, operation_name)
         normalized['resource_type'] = _normalize_resource_type(normalized.get('resource_type') or normalized.get('resource') or normalized.get('type'))
         normalized['data'] = normalized.get('data') if isinstance(normalized.get('data'), dict) else {}
         normalized_operations.append(normalized)
@@ -931,6 +968,7 @@ def _limited_queryset_values(user, model, fields, limit=15):
 def _ai_authoring_context(user) -> dict:
     return {
         'counts': _visible_awx_counts(user),
+        'credentials': _limited_queryset_values(user, models.Credential, ('id', 'name', 'credential_type_id', 'organization_id'), limit=20),
         'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
         'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
         'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
@@ -947,15 +985,18 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
     return (
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
-        'Supported resource_type values: inventory, smart_inventory, constructed_inventory, project, '
+        'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, '
         'inventory_source, job_template, workflow_job_template, schedule, catalog_item.\n'
-        'Supported operation values: create, update.\n'
+        'Supported operation values: create, update, attach, detach. '
+        'Use attach/detach only for credential_reference operations.\n'
+        'For credential_reference, data must include target_resource_type ("job_template" or "inventory_source"), '
+        'target_id, and credential. These operations only link or unlink existing credentials and must never include credential secrets.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
         'Do not invent organization, project, inventory, workflow, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update", "resource_type": "inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "..."}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -1014,6 +1055,127 @@ def _operation_object_id(operation: dict) -> int | None:
         return None
 
 
+def _positive_int(value) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _credential_reference_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    return {
+        'target_resource_type': _normalize_credential_reference_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'credential_id': _positive_int(data.get('credential') or data.get('credential_id') or operation.get('credential_id')),
+    }
+
+
+def _validate_credential_reference_relation(action: str, target_type: str, target, credential) -> dict | None:
+    if action != 'attach':
+        return None
+
+    if target_type == 'job_template':
+        if credential.unique_hash() in [cred.unique_hash() for cred in target.credentials.all()]:
+            return {'error': _('Cannot assign multiple {credential_type} credentials.').format(credential_type=credential.unique_hash(display=True))}
+        kind = credential.credential_type.kind
+        if kind not in ('ssh', 'vault', 'cloud', 'net', 'kubernetes'):
+            return {'error': _('Cannot assign a Credential of kind `{}`.').format(kind)}
+        return None
+
+    if target_type == 'inventory_source':
+        if target.credentials.exists():
+            return {'msg': _('Source already has credential assigned.')}
+        error = models.InventorySource.cloud_credential_validation(target.source, credential)
+        if error:
+            return {'msg': error}
+        return None
+
+    return {'target_resource_type': [_('Unsupported credential reference target.')]}
+
+
+def _validate_ai_credential_reference_operation(request, operation: dict) -> dict:
+    action = operation.get('operation')
+    payload = _credential_reference_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+        'credential_id': payload['credential_id'],
+    }
+
+    if action not in {'attach', 'detach'}:
+        result['errors'] = {'operation': [_('Credential references only support attach and detach operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing credential reference target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Credential reference operations must include target_id.')]}
+        return result
+    if not payload['credential_id']:
+        result['errors'] = {'credential': [_('Credential reference operations must include credential.')]}
+        return result
+
+    target_config = _AI_CREDENTIAL_REFERENCE_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    try:
+        credential = models.Credential.objects.get(pk=payload['credential_id'])
+    except models.Credential.DoesNotExist:
+        result['errors'] = {'credential': [_('Credential not found.')]}
+        return result
+
+    access_action = 'attach' if action == 'attach' else 'unattach'
+    permission_allowed = request.user.can_access(target_model, access_action, target, credential, 'credentials', operation.get('data') or {})
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this credential reference operation.')]}
+        return result
+
+    relation_errors = _validate_credential_reference_relation(action, payload['target_resource_type'], target, credential)
+    if relation_errors is not None:
+        result['errors'] = _json_safe(relation_errors)
+        return result
+
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': 'credential_reference',
+        'object_id': payload['target_id'],
+        'target_resource_type': payload['target_resource_type'],
+        'credential_id': payload['credential_id'],
+    }
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['validated_data'] = _json_safe(payload)
+    result['_credential_reference'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_credential'] = credential
+    return result
+
+
 def _validate_ai_operation(request, operation: dict) -> dict:
     resource_type = operation.get('resource_type')
     action = operation.get('operation')
@@ -1026,6 +1188,9 @@ def _validate_ai_operation(request, operation: dict) -> dict:
         'warnings': [],
         'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
     }
+
+    if resource_type == 'credential_reference':
+        return _validate_ai_credential_reference_operation(request, operation)
 
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
@@ -1093,7 +1258,39 @@ def _serialize_ai_resource(request, serializer_class, obj) -> dict:
     return _json_safe(serializer_class(instance=obj, context=_serializer_context(request)).data)
 
 
+def _credential_summary(credential) -> dict:
+    return {
+        'id': credential.pk,
+        'name': credential.name,
+        'credential_type': credential.credential_type_id,
+        'kind': credential.credential_type.kind,
+    }
+
+
+def _save_ai_credential_reference_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    credential = validation['_credential']
+    if validation.get('operation') == 'attach':
+        target.credentials.add(credential)
+    else:
+        target.credentials.remove(credential)
+
+    validation['object'] = _serialize_ai_resource(request, validation['_target_config']['serializer'], target)
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['credential_id'] = credential.pk
+    validation['credential'] = _credential_summary(credential)
+    validation.pop('_credential_reference', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_credential', None)
+    return validation
+
+
 def _save_ai_operation(request, validation: dict) -> dict:
+    if validation.get('_credential_reference'):
+        return _save_ai_credential_reference_operation(request, validation)
+
     serializer = validation['_serializer']
     obj = serializer.save()
     model = validation['_model']
@@ -1120,6 +1317,9 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 'resource_type': operation.get('resource_type'),
                 'valid': operation.get('valid'),
                 'object_id': operation.get('object_id'),
+                'target_resource_type': operation.get('target_resource_type'),
+                'target_id': operation.get('target_id'),
+                'credential_id': operation.get('credential_id'),
                 'errors': _json_safe(operation.get('errors') or {}),
             }
         )
@@ -1146,6 +1346,19 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
 
     for operation in operations:
         resource_type = operation.get('resource_type')
+        if resource_type == 'credential_reference':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_CREDENTIAL_REFERENCE_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            credential_id = operation.get('credential_id')
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
+            if credential_id:
+                entry.credential.add(credential_id)
+            continue
+
         object_id = operation.get('object_id')
         resource_config = _AI_RESOURCE_TYPES.get(resource_type)
         relation = resource_config and resource_config.get('audit_relation')

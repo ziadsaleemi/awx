@@ -7,7 +7,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
-from awx.main.models import ActivityStream, Host, Inventory, InventorySource, JobTemplate, Schedule
+from awx.main.models import ActivityStream, Credential, CredentialType, Host, Inventory, InventorySource, JobTemplate, Schedule
 
 
 class FakeJSONResponse:
@@ -278,6 +278,184 @@ def test_ai_resource_action_apply_creates_schedule_and_audits_relation(post, adm
     assert changes['mode'] == 'apply'
     assert changes['operations'][0]['resource_type'] == 'schedule'
     assert schedule in audit_entry.schedule.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_job_template_credential_and_audits_relation(post, admin_user, job_template, machine_credential):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Attach credential',
+                'operations': [
+                    {
+                        'id': 'attach-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert list(job_template.credentials.values_list('pk', flat=True)) == [machine_credential.pk]
+    assert response.data['operations'][0]['target_resource_type'] == 'job_template'
+    assert response.data['operations'][0]['target_id'] == job_template.pk
+    assert response.data['operations'][0]['credential_id'] == machine_credential.pk
+    assert response.data['operations'][0]['credential']['kind'] == 'ssh'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][0]['resource_type'] == 'credential_reference'
+    assert changes['operations'][0]['operation'] == 'attach'
+    assert job_template in audit_entry.job_template.all()
+    assert machine_credential in audit_entry.credential.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_detaches_job_template_credential(post, admin_user, job_template, machine_credential):
+    job_template.credentials.add(machine_credential)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Detach credential',
+                'operations': [
+                    {
+                        'id': 'detach-credential',
+                        'operation': 'detach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert not job_template.credentials.filter(pk=machine_credential.pk).exists()
+    assert response.data['operations'][0]['target_id'] == job_template.pk
+    assert response.data['operations'][0]['credential_id'] == machine_credential.pk
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_inventory_source_credential(post, admin_user, organization, inventory):
+    credential_type = CredentialType.defaults['aws']()
+    credential_type.save()
+    credential = Credential.objects.create(credential_type=credential_type, name='AI AWS Credential', organization=organization)
+    inventory_source = InventorySource.objects.create(name='AI EC2 Inventory Source', source='ec2', inventory=inventory)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Attach inventory source credential',
+                'operations': [
+                    {
+                        'id': 'attach-inventory-source-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'inventory_source',
+                            'target_id': inventory_source.pk,
+                            'credential': credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert list(inventory_source.credentials.values_list('pk', flat=True)) == [credential.pk]
+    assert response.data['operations'][0]['target_resource_type'] == 'inventory_source'
+    assert response.data['operations'][0]['credential']['kind'] == 'cloud'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert inventory_source in audit_entry.inventory_source.all()
+    assert credential in audit_entry.credential.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_credential_reference_without_use_permission(post, rando, job_template, machine_credential):
+    job_template.admin_role.members.add(rando)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'attach-forbidden-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ]
+            },
+        },
+        user=rando,
+        expect=400,
+    )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'permission' in response.data['operations'][0]['errors']
+    assert not job_template.credentials.filter(pk=machine_credential.pk).exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_missing_credential_reference_without_audit_relation_crash(post, admin_user, job_template):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'missing-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'credential': 999999,
+                        },
+                    }
+                ]
+            },
+        },
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'credential' in response.data['operations'][0]['errors']
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['is_error'] is True
+    assert audit_entry.credential.count() == 0
 
 
 @pytest.mark.django_db
