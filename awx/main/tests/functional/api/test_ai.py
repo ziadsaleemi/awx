@@ -7,7 +7,18 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
-from awx.main.models import ActivityStream, Credential, CredentialType, Host, Inventory, InventorySource, JobTemplate, Schedule, WorkflowJobTemplate
+from awx.main.models import (
+    ActivityStream,
+    Credential,
+    CredentialType,
+    Host,
+    Inventory,
+    InventorySource,
+    JobTemplate,
+    Schedule,
+    WorkflowJobTemplate,
+    WorkflowJobTemplateNode,
+)
 
 
 class FakeJSONResponse:
@@ -564,6 +575,132 @@ def test_ai_resource_action_apply_attaches_inventory_source_credential(post, adm
     audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
     assert inventory_source in audit_entry.inventory_source.all()
     assert credential in audit_entry.credential.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_schedule_prompt_credential(post, admin_user, project, inventory, machine_credential):
+    job_template = JobTemplate.objects.create(
+        name='AI Schedule Prompt JT',
+        project=project,
+        playbook='helloworld.yml',
+        inventory=inventory,
+        ask_credential_on_launch=True,
+    )
+    schedule = Schedule.objects.create(
+        name='AI Prompted Schedule',
+        unified_job_template=job_template,
+        rrule='DTSTART:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1',
+    )
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Attach schedule credential prompt',
+                'operations': [
+                    {
+                        'id': 'attach-schedule-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'schedule',
+                            'target_id': schedule.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert list(schedule.credentials.values_list('pk', flat=True)) == [machine_credential.pk]
+    assert response.data['operations'][0]['target_resource_type'] == 'schedule'
+    assert response.data['operations'][0]['target_id'] == schedule.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][0]['resource_type'] == 'credential_reference'
+    assert schedule in audit_entry.schedule.all()
+    assert machine_credential in audit_entry.credential.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_attaches_workflow_node_prompt_credential(post, admin_user, workflow_job_template, job_template, machine_credential):
+    job_template.ask_credential_on_launch = True
+    job_template.save(update_fields=['ask_credential_on_launch'])
+    node = WorkflowJobTemplateNode.objects.create(workflow_job_template=workflow_job_template, unified_job_template=job_template)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Attach node credential prompt',
+                'operations': [
+                    {
+                        'id': 'attach-node-credential',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'workflow_job_template_node',
+                            'target_id': node.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert list(node.credentials.values_list('pk', flat=True)) == [machine_credential.pk]
+    assert response.data['operations'][0]['target_resource_type'] == 'workflow_job_template_node'
+    assert response.data['operations'][0]['target_id'] == node.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert node in audit_entry.workflow_job_template_node.all()
+    assert machine_credential in audit_entry.credential.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_schedule_credential_when_template_not_prompted(post, admin_user, project, inventory, machine_credential):
+    job_template = JobTemplate.objects.create(name='AI Schedule No Prompt JT', project=project, playbook='helloworld.yml', inventory=inventory)
+    schedule = Schedule.objects.create(
+        name='AI No Prompt Schedule',
+        unified_job_template=job_template,
+        rrule='DTSTART:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1',
+    )
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'attach-schedule-credential-blocked',
+                        'operation': 'attach',
+                        'resource_type': 'credential_reference',
+                        'data': {
+                            'target_resource_type': 'schedule',
+                            'target_id': schedule.pk,
+                            'credential': machine_credential.pk,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'not configured to accept credentials on launch' in response.data['operations'][0]['errors']['msg']
+    assert not schedule.credentials.filter(pk=machine_credential.pk).exists()
 
 
 @pytest.mark.django_db

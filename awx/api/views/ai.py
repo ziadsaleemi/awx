@@ -37,6 +37,7 @@ from awx.api.serializers import (
     ProjectSerializer,
     ScheduleSerializer,
     TerraformJobTemplateSerializer,
+    WorkflowJobTemplateNodeDetailSerializer,
     WorkflowJobTemplateSerializer,
 )
 from awx.api.views.opa import check_opa_policy
@@ -225,6 +226,14 @@ _AI_CREDENTIAL_REFERENCE_TARGET_ALIASES = {
     'inventory_sources': 'inventory_source',
     'job_template': 'job_template',
     'job_templates': 'job_template',
+    'schedule': 'schedule',
+    'schedules': 'schedule',
+    'workflow_job_template_node': 'workflow_job_template_node',
+    'workflow_job_template_nodes': 'workflow_job_template_node',
+    'workflow_node': 'workflow_job_template_node',
+    'workflow_nodes': 'workflow_job_template_node',
+    'workflow_template_node': 'workflow_job_template_node',
+    'workflow_template_nodes': 'workflow_job_template_node',
 }
 
 _AI_CREDENTIAL_REFERENCE_TARGETS = {
@@ -237,6 +246,16 @@ _AI_CREDENTIAL_REFERENCE_TARGETS = {
         'model': models.JobTemplate,
         'serializer': JobTemplateSerializer,
         'audit_relation': 'job_template',
+    },
+    'schedule': {
+        'model': models.Schedule,
+        'serializer': ScheduleSerializer,
+        'audit_relation': 'schedule',
+    },
+    'workflow_job_template_node': {
+        'model': models.WorkflowJobTemplateNode,
+        'serializer': WorkflowJobTemplateNodeDetailSerializer,
+        'audit_relation': 'workflow_job_template_node',
     },
 }
 
@@ -1503,6 +1522,12 @@ def _ai_authoring_context(user) -> dict:
         'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
         'terraform_job_templates': _limited_queryset_values(user, models.TerraformJobTemplate, ('id', 'name', 'project_id', 'target_inventory_id'), limit=20),
         'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
+        'workflow_job_template_nodes': _limited_queryset_values(
+            user,
+            models.WorkflowJobTemplateNode,
+            ('id', 'workflow_job_template_id', 'unified_job_template_id', 'identifier'),
+            limit=20,
+        ),
         'schedules': _limited_queryset_values(user, models.Schedule, ('id', 'name', 'enabled', 'unified_job_template_id'), limit=20),
         'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
     }
@@ -1522,8 +1547,10 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'For constructed_inventory, data must include organization and may include input_inventories as an array of existing inventory IDs plus '
         'source_vars as a YAML or JSON object for the constructed inventory source. Constructed inventory plans are validated and previewed '
         'against visible input inventories, source hosts, and source groups before save.\n'
-        'For credential_reference, data must include target_resource_type ("job_template" or "inventory_source"), '
-        'target_id, and credential. These operations only link or unlink existing credentials and must never include credential secrets.\n'
+        'For credential_reference, data must include target_resource_type ("job_template", "inventory_source", "schedule", or '
+        '"workflow_job_template_node"), target_id, and credential. These operations only link or unlink existing credentials and must never '
+        'include credential secrets. Schedule and workflow-node credential references are saved launch prompts and require the related template '
+        'to ask for credentials on launch.\n'
         'For role_assignment, data must include target_resource_type, target_id, role_field or role, and exactly one user/user_id or team/team_id. '
         'Use existing users and teams from the supplied context. Common role values include admin, read, use, execute, update, member, and auditor.\n'
         'For survey_spec, data must include target_resource_type ("job_template", "workflow_job_template", or "terraform_job_template"), target_id, '
@@ -2051,6 +2078,29 @@ def _validation_exception_detail(exc) -> dict:
 
 def _validate_credential_reference_relation(action: str, target_type: str, target, credential) -> dict | None:
     if action != 'attach':
+        return None
+
+    if target_type in {'schedule', 'workflow_job_template_node'}:
+        if not target.unified_job_template:
+            return {'msg': _('Cannot assign credential when related template is null.')}
+
+        ask_mapping = target.unified_job_template.get_ask_mapping()
+        if 'credentials' not in ask_mapping:
+            return {'msg': _('Related template cannot accept credentials on launch.')}
+        if credential.passwords_needed:
+            return {'msg': _('Credential that requires user input on launch cannot be used in saved launch configuration.')}
+
+        ask_field_name = ask_mapping['credentials']
+        if not getattr(target.unified_job_template, ask_field_name):
+            return {'msg': _('Related template is not configured to accept credentials on launch.')}
+        if credential.unique_hash() in [cred.unique_hash() for cred in target.credentials.all()]:
+            return {
+                'msg': _('This launch configuration already provides a {credential_type} credential.').format(
+                    credential_type=credential.unique_hash(display=True)
+                )
+            }
+        if credential.pk in target.unified_job_template.credentials.values_list('pk', flat=True):
+            return {'msg': _('Related template already uses {credential_type} credential.').format(credential_type=credential.name)}
         return None
 
     if target_type == 'job_template':
