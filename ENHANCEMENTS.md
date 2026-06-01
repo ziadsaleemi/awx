@@ -34,7 +34,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 |---|-------------|----------|--------|
 | 1 | **Collapsible sidebar** — icon-only mode to save horizontal space on smaller screens | Medium | ✅ |
 | 2 | **Dashboard card drag-to-reorder** — persist custom card order per user | Low | ✅ |
-| 3 | **Dark/light mode persistence** — store theme in user profile (server-side) so it survives browser changes | Medium | ✅ |
+| 3 | **Dark/light mode persistence** — store theme in user profile (server-side) so it survives browser changes | Medium | 🔄 |
 | 4 | **Job Activity card drill-down** — clicking a date point navigates to the jobs list filtered to that day | Medium | ✅ |
 | 5 | **Global search (Cmd+K)** — command palette to search jobs, templates, inventories by name | High | ✅ |
 
@@ -50,9 +50,9 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 
 | # | Enhancement | Priority | Status |
 |---|-------------|----------|--------|
-| 9  | **Virtual scrolling for large lists** — use PatternFly `VirtualizedTable` for job/host lists with thousands of rows | High | ✅ |
+| 9  | **Virtual scrolling for large lists** — use PatternFly `VirtualizedTable` for job/host lists with thousands of rows | High | ⬜ |
 | 10 | **WebSocket-driven dashboard refresh** — replace 30s polling with real-time AWX WebSocket event stream | Medium | ✅ |
-| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | ✅ |
+| 11 | **Prefetch navigation data** — preload sidebar resource counts (hosts, inventories, etc.) on app load | Low | 🔄 |
 
 ### Operations
 
@@ -191,7 +191,7 @@ Each credential type is a `CredentialType` fixture/data migration with `inputs` 
 | E25 | **Catalog browse provider logos** — show actual, borderless cloud provider logos (DigitalOcean, Azure, AWS, VMware, GCP, Proxmox) on catalog cards instead of circular abbreviations | Medium | ✅ |
 | E26 | **Inventory/group targeting moved to provider Fields tabs** — Target inventory (dropdown) and Target group (text input) moved from the Cloud providers tab into each provider's dedicated Fields tab in the Catalog Item edit form; values are loaded from the linked TFT node and immediately PATCHed on change | Medium | ✅ |
 | E27 | **Provisioning history workflow topology view** — expanded row in the provisioning history table now renders a full PatternFly `@patternfly/react-topology` Dagre graph matching the AWX workflow visualizer: same node styles/icons/status colors, "Run on success / failure / always" edge labels, zoom-in/out/fit control bar, and clickable nodes that navigate to the job output page | High | ✅ |
-| E28 | **Azure + DigitalOcean workflow surveys and deprovision workflows** — added surveys (survey_enabled=True) to TFT 29 (Provision Azure VM: vm_name, resource_group_name, vnet_name, subnet_name, vm_size, admin_username) and WJT 33 (Azure VM Provision Workflow); created TFT 35 (Deprovision Azure VM, op=destroy) + WJT 36 (Azure VM Deprovision Workflow) with 4-field survey; added surveys to TFT 30 (Provision DigitalOcean Droplet: droplet_name, do_region, do_droplet_size, do_image, do_ssh_key_name) and WJT 34 (DigitalOcean VM Provision Workflow); created TFT 37 (Deprovision DigitalOcean Droplet, op=destroy) + WJT 38 (DigitalOcean VM Deprovision Workflow) with droplet_name survey | High | ✅ |
+| E28 | **Azure + DigitalOcean workflow surveys and deprovision workflows** — added surveys (survey_enabled=True) to TFT 29 (Provision Azure VM: vm_name, resource_group_name, vnet_name, subnet_name, vm_size, admin_username) and WJT 33 (Azure VM Provision Workflow); created TFT 35 (Deprovision Azure VM, op=destroy) + WJT 36 (Azure VM Deprovision Workflow) with 4-field survey; added surveys to TFT 30 (Provision DigitalOcean Droplet: droplet_name, do_region, do_droplet_size, do_image, do_ssh_key_name) and WJT 34 (DigitalOcean VM Provision Workflow); created TFT 37 (Deprovision DigitalOcean Droplet, op=destroy) + WJT 38 (DigitalOcean VM Deprovision Workflow) with droplet_name survey | High | 🔄 |
 | E29 | **Cloud provider table UX improvements** — verbose/wide columns moved to expandable rows across all three provider pages (Azure: URN/ID on VMImages, GPU/MaxDisks/MaxNICs/Premium SSD/Accel.Net/Zones/Ultra SSD on VMSizes, SKU on Storage, Size on VMs; Proxmox: Type/Uptime on Templates; VMware: ID on VMs/Hosts/Networks/Datacenters, DatastoreID on Datastores); per-row Switch toggles replaced with compact `Allowed`/`Denied` Label badges; toolbar bulk-action buttons ("Allow selected" / "Deny selected") added to catalog-control tabs (Azure: Locations/VMImages/VMSizes; Proxmox: Templates; VMware: Datastores/Networks) using `PageActionSelection.Multiple` to enable row checkboxes | High | ✅ |
 | E30 | **Deployment TTL / Auto-expiry** — `CatalogItem.default_lease_minutes` sets a default lease on every new deployment; `CatalogItem.require_lease` forces deployers to supply a TTL; `CatalogDeployment.expires_at` + `auto_deprovision` track the lease; a periodic system task scans for expired active deployments and fires the deprovision workflow; deploy form Step 2 gains an optional TTL picker (preset buttons: 2 h / 8 h / 24 h / 7 d + custom date); My Deployments table shows a colour-coded countdown badge (green > 4 h, yellow ≤ 4 h, red ≤ 1 h) | High | ✅ |
 
@@ -254,16 +254,16 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 | # | Task | Priority | Status |
 |---|------|----------|--------|
 | G2a | **ROI / value measurement dashboards** — compute and display automation ROI (hours saved, cost avoidance) based on job runtimes and configurable host/hour values | Medium | ✅ |
-| G2b | **Real-time actionable insights** — AI-driven anomaly detection on job failure rates, execution times, and inventory drift; surface recommendations in the dashboard | Medium | ✅ |
-| G2c | **Performance metrics panels** — expanded dashboard cards for capacity utilisation trends, slowest templates, and most-failed hosts over configurable time windows | Medium | ✅ |
+| G2b | **Real-time actionable insights** — AI-driven anomaly detection on job failure rates, execution times, and inventory drift; surface recommendations in the dashboard | Medium | 🔄 |
+| G2c | **Performance metrics panels** — expanded dashboard cards for capacity utilisation trends, slowest templates, and most-failed hosts over configurable time windows | Medium | 🔄 |
 
 ### G3 — MCP Server (Model Context Protocol)
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
 | G3a | **MCP server endpoint** — expose AWX resources (job templates, inventories, credentials, deployments) via the Model Context Protocol so external AI agents can discover and invoke automation without custom integrations | High | ✅ |
-| G3b | **RAG policy injection** — pipeline to embed organisation policies and best-practice docs into a vector store; MCP server retrieves relevant context and injects it into AI agent prompts before execution | Medium | ✅ |
-| G3c | **MCP auth + audit** — OAuth2 token scoping for MCP clients; every MCP-initiated action logged to the Activity Stream with `triggered_by: mcp_agent` | High | ✅ |
+| G3b | **RAG policy injection** — pipeline to embed organisation policies and best-practice docs into a vector store; MCP server retrieves relevant context and injects it into AI agent prompts before execution | Medium | 🔄 |
+| G3c | **MCP auth + audit** — OAuth2 token scoping for MCP clients; every MCP-initiated action logged to the Activity Stream with `triggered_by: mcp_agent` | High | 🔄 |
 
 ### G4 — AI-Assisted Inventory Generation
 
@@ -284,9 +284,9 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | ✅ |
-| G6b | **Policy management UI** — Settings section to upload/edit Rego policy bundles; test panel to evaluate a sample launch request against current policies | Medium | ✅ |
-| G6c | **AI-action guardrails** — OPA policies specifically scoped to MCP/AI-initiated actions; e.g. block AI agents from launching destructive jobs without a human-approval workflow node | High | ✅ |
+| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | 🔄 |
+| G6b | **Policy management UI** — Settings section to upload/edit Rego policy bundles; test panel to evaluate a sample launch request against current policies | Medium | 🔄 |
+| G6c | **AI-action guardrails** — OPA policies specifically scoped to MCP/AI-initiated actions; e.g. block AI agents from launching destructive jobs without a human-approval workflow node | High | 🔄 |
 
 ---
 
@@ -357,6 +357,14 @@ Code review against the completed tracker found these remaining implementation g
 | AP16 | **AI inventory coverage is narrow** — natural-language inventory save parity works for normal static inventories only; smart inventory filters and constructed inventory source variables still need AI generation, validation, preview, and save coverage | Stub / Approximation | High | ⬜ |
 | AP17 | **AI features are not consistently contextual across the app** — the masthead assistant is globally available, but contextual AI controls exist only in selected template/inventory/cloud/workflow surfaces and do not receive normalized route/resource context across all create/edit/detail pages | Documentation Drift | High | ⬜ |
 | AP18 | **MCP is mostly read/launch, not authoring** — MCP exposes list/get and job launch tools with guardrails, but it does not expose safe create/update tools for AI-generated projects, playbooks, roles, inventories, smart inventories, catalog items, or workflows | Stub / Approximation | High | ⬜ |
+| AP19 | **Theme persistence is not server-side** — row 3 claimed theme storage in the user profile, but `PageSettingsProvider` persists preferences in browser `localStorage` under `user-preferences` / `user-preferences-{id}`; changing browser or device loses the setting | Documentation Drift | Medium | 🔄 |
+| AP20 | **VirtualizedTable is not implemented** — row 9 claimed PatternFly `VirtualizedTable` for large job/host lists, but the UI has no `VirtualizedTable` usage in `awx/ui/src`; large lists still rely on the existing paginated table path | Stub / Approximation | High | ⬜ |
+| AP21 | **Navigation count prefetch is partial** — row 11 claimed sidebar resource-count prefetch, but `useAwxPrefetch()` only warms `/dashboard/`, `/instances/?page_size=50`, and `/config/`; it does not preload hosts, inventories, templates, or sidebar count data | Documentation Drift | Low | 🔄 |
+| AP22 | **Azure/DigitalOcean workflow survey IDs are environment-local** — E28 refers to concrete TFT/WJT IDs and surveys, but the repository contains Terraform example directories only; no migration, fixture, or management command creates those Azure/DigitalOcean provision/deprovision workflow templates reproducibly | Environment / Setup Issue | High | 🔄 |
+| AP23 | **Automation insights remain job-statistics only** — G2b now avoids runaway AI calls, but the card still analyzes recent unified jobs and top failing templates only; it does not perform inventory drift detection, execution-time anomaly detection, or true real-time recommendation generation | Stub / Approximation | High | 🔄 |
+| AP24 | **Performance metrics do not include trends or failed-host analysis** — G2c displays current execution node capacity and slowest successful templates, but it does not calculate capacity trends over time or most-failed hosts from job events | Stub / Approximation | Medium | 🔄 |
+| AP25 | **MCP policy context is not vector-backed RAG and auth scoping is still generic** — G3b/G3c are partially complete through `MCP_POLICY_CONTEXT`, token-style ranking, and Activity Stream audit, but there is no embedding/vector-store pipeline and no MCP-specific OAuth2 scope model beyond normal authenticated AWX access | Stub / Approximation | High | 🔄 |
+| AP26 | **OPA guardrail scope is narrower than the completed claim** — OPA settings, REST evaluation, standard job execution policy checks, and MCP launch guardrails exist, but there is no middleware before every launch type, no upload/edit Rego bundle UI, and no human-approval/destructive-action enforcement path for future AI workflow nodes | Stub / Approximation | High | 🔄 |
 
 ## Notes
 
