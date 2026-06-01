@@ -9,6 +9,7 @@ import urllib.parse
 from base64 import urlsafe_b64decode
 from collections import defaultdict
 from datetime import timedelta, timezone
+from types import SimpleNamespace
 
 import requests
 from django.conf import settings
@@ -29,8 +30,10 @@ from awx.api.serializers import (
     CatalogItemSerializer,
     ConstructedInventorySerializer,
     InventorySerializer,
+    InventorySourceSerializer,
     JobTemplateSerializer,
     ProjectSerializer,
+    ScheduleSerializer,
     WorkflowJobTemplateSerializer,
 )
 from awx.api.views.opa import check_opa_policy
@@ -117,10 +120,14 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'constructed_inventories': 'constructed_inventory',
     'inventory': 'inventory',
     'inventories': 'inventory',
+    'inventory_source': 'inventory_source',
+    'inventory_sources': 'inventory_source',
     'job_template': 'job_template',
     'job_templates': 'job_template',
     'project': 'project',
     'projects': 'project',
+    'schedule': 'schedule',
+    'schedules': 'schedule',
     'smart_inventory': 'smart_inventory',
     'smart_inventories': 'smart_inventory',
     'workflow': 'workflow_job_template',
@@ -146,6 +153,11 @@ _AI_RESOURCE_TYPES = {
         'audit_relation': 'inventory',
         'default_data': {'kind': ''},
     },
+    'inventory_source': {
+        'model': models.InventorySource,
+        'serializer': InventorySourceSerializer,
+        'audit_relation': 'inventory_source',
+    },
     'job_template': {
         'model': models.JobTemplate,
         'serializer': JobTemplateSerializer,
@@ -155,6 +167,11 @@ _AI_RESOURCE_TYPES = {
         'model': models.Project,
         'serializer': ProjectSerializer,
         'audit_relation': 'project',
+    },
+    'schedule': {
+        'model': models.Schedule,
+        'serializer': ScheduleSerializer,
+        'audit_relation': 'schedule',
     },
     'smart_inventory': {
         'model': models.Inventory,
@@ -757,9 +774,11 @@ def _visible_awx_counts(user) -> dict:
     return {
         'hosts': _visible_host_count(user),
         'inventories': get_user_queryset(user, models.Inventory).distinct().count(),
+        'inventory_sources': get_user_queryset(user, models.InventorySource).distinct().count(),
         'projects': get_user_queryset(user, models.Project).distinct().count(),
         'job_templates': get_user_queryset(user, models.JobTemplate).distinct().count(),
         'workflow_job_templates': get_user_queryset(user, models.WorkflowJobTemplate).distinct().count(),
+        'schedules': get_user_queryset(user, models.Schedule).distinct().count(),
         'catalog_items': get_user_queryset(user, models.CatalogItem).distinct().count(),
     }
 
@@ -800,9 +819,11 @@ def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
         '- Host count excludes constructed-inventory synthetic hosts, matching the dashboard.\n'
         f"- Hosts visible: {counts['hosts']}\n"
         f"- Inventories visible: {counts['inventories']}\n"
+        f"- Inventory sources visible: {counts['inventory_sources']}\n"
         f"- Projects visible: {counts['projects']}\n"
         f"- Job templates visible: {counts['job_templates']}\n"
         f"- Workflow job templates visible: {counts['workflow_job_templates']}\n"
+        f"- Schedules visible: {counts['schedules']}\n"
         f"- Catalog items visible: {counts['catalog_items']}\n"
         'Use this live context when answering direct questions about this AWX instance. '
         'Do not say you cannot see the AWX instance when the answer is present in this context.'
@@ -912,9 +933,11 @@ def _ai_authoring_context(user) -> dict:
         'counts': _visible_awx_counts(user),
         'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
         'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
+        'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
         'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'organization_id'), limit=20),
         'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
         'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
+        'schedules': _limited_queryset_values(user, models.Schedule, ('id', 'name', 'enabled', 'unified_job_template_id'), limit=20),
         'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
     }
 
@@ -925,14 +948,14 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
         'Supported resource_type values: inventory, smart_inventory, constructed_inventory, project, '
-        'job_template, workflow_job_template, catalog_item.\n'
+        'inventory_source, job_template, workflow_job_template, schedule, catalog_item.\n'
         'Supported operation values: create, update.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
         'Do not invent organization, project, inventory, workflow, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update", "resource_type": "inventory|smart_inventory|constructed_inventory|project|job_template|workflow_job_template|catalog_item", '
+        '{"id": "stable id", "operation": "create|update", "resource_type": "inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "..."}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -970,7 +993,7 @@ def _ai_provider_plan_from_prompt(request, prompt: str, context: dict) -> tuple[
 
 
 def _serializer_context(request):
-    return {'request': request, 'view': None}
+    return {'request': request, 'view': SimpleNamespace(kwargs={}, request=request)}
 
 
 def _operation_payload(operation: dict, resource_config: dict) -> dict:

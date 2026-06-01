@@ -7,7 +7,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
-from awx.main.models import ActivityStream, Host, Inventory
+from awx.main.models import ActivityStream, Host, Inventory, InventorySource, JobTemplate, Schedule
 
 
 class FakeJSONResponse:
@@ -194,6 +194,90 @@ def test_ai_resource_action_apply_creates_inventory_and_audits_relation(post, ad
     assert changes['mode'] == 'apply'
     assert changes['operations'][0]['object_id'] == inventory.pk
     assert inventory in audit_entry.inventory.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_creates_inventory_source_and_audits_relation(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Source Inventory', organization=organization)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Create inventory source',
+                'operations': [
+                    {
+                        'id': 'create-inventory-source',
+                        'operation': 'create',
+                        'resource_type': 'inventory_source',
+                        'data': {
+                            'name': 'AI EC2 Source',
+                            'inventory': inventory.pk,
+                            'source': 'ec2',
+                            'update_on_launch': False,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    inventory_source = InventorySource.objects.get(name='AI EC2 Source')
+    assert inventory_source.inventory == inventory
+    assert inventory_source.source == 'ec2'
+    assert response.data['operations'][0]['object_id'] == inventory_source.pk
+    assert response.data['operations'][0]['object']['name'] == 'AI EC2 Source'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['mode'] == 'apply'
+    assert changes['operations'][0]['resource_type'] == 'inventory_source'
+    assert inventory_source in audit_entry.inventory_source.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_creates_schedule_and_audits_relation(post, admin_user, project, inventory):
+    job_template = JobTemplate.objects.create(name='AI Schedule JT', project=project, playbook='helloworld.yml', inventory=inventory)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Create schedule',
+                'operations': [
+                    {
+                        'id': 'create-schedule',
+                        'operation': 'create',
+                        'resource_type': 'schedule',
+                        'data': {
+                            'name': 'AI Daily Schedule',
+                            'rrule': 'DTSTART:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1',
+                            'unified_job_template': job_template.pk,
+                            'enabled': True,
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    schedule = Schedule.objects.get(name='AI Daily Schedule')
+    assert schedule.unified_job_template == job_template
+    assert schedule.enabled is True
+    assert response.data['operations'][0]['object_id'] == schedule.pk
+    assert response.data['operations'][0]['object']['name'] == 'AI Daily Schedule'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['mode'] == 'apply'
+    assert changes['operations'][0]['resource_type'] == 'schedule'
+    assert schedule in audit_entry.schedule.all()
 
 
 @pytest.mark.django_db
