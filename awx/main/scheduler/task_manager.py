@@ -236,8 +236,8 @@ class WorkflowManager(TaskBase):
                     logger.debug('No nodes to spawn for %s', workflow_job.log_format)
                 for spawn_node in spawn_nodes:
                     if spawn_node.is_eda_rulebook_node:
-                        spawn_node.mark_eda_rulebook_successful()
-                        logger.info('Marked EDA rulebook node %s successful in %s.', spawn_node.pk, workflow_job.log_format)
+                        spawn_node.sync_eda_rulebook_activation()
+                        logger.info('Marked EDA rulebook node %s %s in %s.', spawn_node.pk, spawn_node.bypassed_job_status, workflow_job.log_format)
                         ScheduleWorkflowManager().schedule()
                         continue
                     if spawn_node.unified_job_template is None:

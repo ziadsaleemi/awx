@@ -179,13 +179,18 @@ class WorkflowDAG(SimpleDAG):
             obj = node['node_object']
             if obj.do_not_run is False and obj.unified_job_template is None and not self._is_eda_rulebook_node(obj):
                 failed_nodes.append(node)
+            elif obj.bypassed_job_status in ['failed', 'canceled', 'error']:
+                failed_nodes.append(node)
             elif obj.job and obj.job.status in ['failed', 'canceled', 'error']:
                 failed_nodes.append(node)
 
         for node in failed_nodes:
             obj = node['node_object']
             if (len(self.get_children(obj, 'failure_nodes')) + len(self.get_children(obj, 'always_nodes'))) == 0:
-                if obj.unified_job_template is None:
+                if obj.bypassed_job_status:
+                    res = True
+                    failed_path_nodes_id_status.append((str(obj.id), obj.bypassed_job_status))
+                elif obj.unified_job_template is None:
                     res = True
                     failed_unified_job_template_node_ids.append(str(obj.id))
                 else:

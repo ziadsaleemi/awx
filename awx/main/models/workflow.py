@@ -45,6 +45,7 @@ from awx.main.models.jobs import LaunchTimeConfigBase, LaunchTimeConfig, JobTemp
 from awx.main.models.credential import Credential
 from awx.main.redact import REPLACE_STR
 from awx.main.utils import ScheduleWorkflowManager, NullablePromptPseudoField
+from awx.main.utils.eda import EDAControllerClient, EDAControllerError, workflow_status_from_activation_status
 
 __all__ = [
     'WorkflowJobTemplate',
@@ -355,18 +356,50 @@ class WorkflowJobNode(WorkflowNodeBase):
                 artifacts.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
         return artifacts
 
-    def mark_eda_rulebook_successful(self):
+    def sync_eda_rulebook_activation(self):
         artifacts = self._build_parent_artifacts()
+        activation = None
+        controller_status = 'not_configured'
+        controller_error = ''
+        activation_status = self.eda_event_source_status or 'planned'
+        source = 'virtual'
+
+        client = EDAControllerClient()
+        if client.is_configured:
+            source = 'eda_controller'
+            try:
+                activation = client.find_activation(self.eda_activation_id, self.eda_rulebook_name)
+                if activation:
+                    controller_status = 'ok'
+                    activation_status = activation.get('status') or activation_status
+                else:
+                    controller_status = 'not_found'
+                    activation_status = 'not_found'
+            except EDAControllerError as exc:
+                controller_status = exc.status
+                controller_error = str(exc)
+                activation_status = exc.status
+
+        workflow_status = workflow_status_from_activation_status(activation_status)
         artifacts['awx_eda'] = {
             'rulebook_name': self.eda_rulebook_name,
             'activation_id': self.eda_activation_id,
             'event_source': self.eda_event_source,
-            'event_source_status': self.eda_event_source_status,
+            'event_source_status': activation_status,
+            'controller_status': controller_status,
+            'controller_error': controller_error,
+            'source': source,
         }
+        if activation:
+            artifacts['awx_eda']['activation'] = activation
         self.ancestor_artifacts = artifacts
-        self.bypassed_job_status = 'successful'
-        self.save(update_fields=['ancestor_artifacts', 'bypassed_job_status'])
+        self.eda_event_source_status = activation_status
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'eda_event_source_status', 'bypassed_job_status'])
         return self
+
+    def mark_eda_rulebook_successful(self):
+        return self.sync_eda_rulebook_activation()
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)

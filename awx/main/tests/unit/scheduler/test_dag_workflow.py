@@ -602,6 +602,22 @@ class TestBFSNodesToRun:
             ),
         )
 
+    def test_failed_eda_node_without_error_path_fails_workflow(self, wf_node_generator):
+        g = WorkflowDAG()
+        eda_node = wf_node_generator(unified_job_template=None, node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK, bypassed_job_status='failed')
+        g.add_node(eda_node)
+
+        assert g.is_workflow_done() is True
+        assert g.has_workflow_failed() == (
+            True,
+            smart_str(
+                _(
+                    "No error handling path for workflow job node(s) [{node_status}]. Workflow job "
+                    "node(s) missing unified job template and error handling path [{no_ufjt}]."
+                ).format(node_status=f"({eda_node.id},failed)", no_ufjt='')
+            ),
+        )
+
 
 @pytest.mark.xfail(reason="Run manually to re-generate doc images")
 class TestDocsExample:

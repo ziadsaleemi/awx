@@ -227,6 +227,50 @@ register(
 )
 
 register(
+    'EDA_AUTH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('EDA Controller API token'),
+    help_text=_('Bearer token used to read Event-Driven Ansible Controller activations.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify EDA Controller SSL'),
+    help_text=_('Verify TLS certificates when AWX connects to Event-Driven Ansible Controller.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=5,
+    min_value=1,
+    label=_('EDA Controller request timeout'),
+    help_text=_('Maximum seconds to wait when AWX requests Event-Driven Ansible Controller activation data.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATIONS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/',
+    allow_blank=False,
+    label=_('EDA activations API path'),
+    help_text=_('Relative API path used to list Event-Driven Ansible Controller rulebook activations.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
     'AWX_ANALYTICS_CANDLEPIN_CA',
     field_class=fields.CharField,
     default='/etc/rhsm/ca/redhat-uep.pem',

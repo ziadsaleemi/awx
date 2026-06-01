@@ -146,7 +146,7 @@ Schema:
 }
 Use only available AWX template ids/names from context for executable nodes.
 Use workflow_approval for human gates.
-Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX can persist these nodes but runtime launch/status handling is not available yet.
+Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX persists these nodes and syncs activation status from the configured EDA Controller at runtime.
 Use ai_task only when user explicitly asks for runtime AI behavior; these are preview-only until AWX persistence supports them.
 List at most 8 nodes.`;
 
