@@ -117,6 +117,78 @@ describe('WorkflowVisualizer', () => {
     cy.get('svg[data-cy="workflow-visualizer-toolbar-collapse"]').should('not.exist');
   });
 
+  it('Should preview and apply an AI workflow plan to the visualizer', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: {
+        count: 1,
+        next: null,
+        previous: null,
+        results: [
+          {
+            id: 12002,
+            name: 'Deploy App',
+            description: 'Deploys application',
+            type: 'job_template',
+          },
+        ],
+      },
+    }).as('unifiedJobTemplates');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'Deploy with approval',
+            summary: 'Deploy app, then require human approval.',
+            nodes: [
+              {
+                id: 'deploy',
+                name: 'Deploy App',
+                type: 'job',
+                template_id: 12002,
+                description: 'Run deployment job.',
+                run: 'root',
+              },
+              {
+                id: 'approval',
+                name: 'Approve production',
+                type: 'workflow_approval',
+                description: 'Human gate before production.',
+                after: 'deploy',
+                run: 'success',
+              },
+            ],
+            edges: [{ source: 'deploy', target: 'approval', status: 'success' }],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('Deploy app then approve production');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Deploy with approval');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.get('[data-id="8-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.get('[data-id="7-ai-unsavedNode-8-ai-unsavedNode"]').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').should('be.visible');
+  });
+
   it('Should toggle the expand collapse button in the toolbar', () => {
     cy.mount(<WorkflowVisualizer />);
     cy.get('button[data-cy="workflow-visualizer-toolbar-expand-collapse"]').click();

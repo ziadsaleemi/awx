@@ -100,7 +100,7 @@ export function ContextualAIAssistantButton(props: { isEnabled: boolean }) {
         data-cy="contextual-ai-assistant"
         style={{
           position: 'fixed',
-          top: 96,
+          bottom: 24,
           right: 16,
           zIndex: 500,
           boxShadow: 'var(--pf-v5-global--BoxShadow--md)',
