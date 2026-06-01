@@ -141,6 +141,13 @@ describe('WorkflowVisualizer', () => {
         ],
       },
     }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: false,
+        status: 'not_configured',
+        controller_url: '',
+      },
+    }).as('edaStatus');
     cy.intercept('POST', '/api/v2/ai/chat/', {
       body: {
         message: {
@@ -178,6 +185,7 @@ describe('WorkflowVisualizer', () => {
     cy.get('[data-cy="ai-workflow-description"]').type('Deploy app then approve production');
     cy.get('[data-cy="ai-workflow-generate"]').click();
     cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
     cy.wait('@aiWorkflowChat');
     cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Deploy with approval');
     cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
@@ -187,6 +195,81 @@ describe('WorkflowVisualizer', () => {
     cy.get('[data-id="8-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
     cy.get('[data-id="7-ai-unsavedNode-8-ai-unsavedNode"]').should('be.visible');
     cy.contains('button:not(:disabled):not(:hidden)', 'Save').should('be.visible');
+  });
+
+  it('Should show EDA workflow plans as blocked until persisted node support exists', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: { count: 0, next: null, previous: null, results: [] },
+    }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: true,
+        status: 'configured',
+        controller_url: 'https://eda.example.test',
+      },
+    }).as('edaStatus');
+    cy.intercept('GET', '/api/v2/eda/activations/?*', {
+      body: {
+        count: 1,
+        next: null,
+        previous: null,
+        results: [
+          {
+            id: 77,
+            name: 'Restart web on alert',
+            status: 'running',
+            rulebook: 'ops-alerts',
+            event_source: 'webhook',
+          },
+        ],
+      },
+    }).as('edaActivations');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'Event driven restart',
+            summary: 'Use EDA to react to alerts.',
+            nodes: [
+              {
+                id: 'alert',
+                name: 'Restart web on alert',
+                type: 'eda_rulebook',
+                description: 'Rulebook activation listens for alert webhook events.',
+                run: 'root',
+              },
+            ],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('React to EDA alert webhook');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
+    cy.wait('@edaActivations');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-eda-status"]').should('contain.text', 'https://eda.example.test');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Event driven restart');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Blocked');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should(
+      'contain.text',
+      'workflow persistence and launch/status handling are not implemented yet'
+    );
+    cy.get('[data-cy="ai-workflow-apply"]').should('be.disabled');
   });
 
   it('Should toggle the expand collapse button in the toolbar', () => {

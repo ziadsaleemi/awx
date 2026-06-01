@@ -80,6 +80,20 @@ interface UnifiedJobTemplateSummary {
   unified_job_type?: UnifiedJobType;
 }
 
+interface EDAStatusResponse {
+  configured: boolean;
+  status: string;
+  controller_url: string;
+}
+
+interface EDAActivationSummary {
+  id: number;
+  name: string;
+  status: string;
+  rulebook?: string;
+  event_source?: string;
+}
+
 interface ResolvedWorkflowPlanNode {
   planNode: AIWorkflowPlanNode;
   key: string;
@@ -213,7 +227,8 @@ function extractWorkflowPlan(raw: string): AIWorkflowPlan {
 
 function resolveWorkflowPlan(
   plan: AIWorkflowPlan,
-  templates: UnifiedJobTemplateSummary[]
+  templates: UnifiedJobTemplateSummary[],
+  edaStatus?: EDAStatusResponse | null
 ): ResolvedWorkflowPlan {
   const nodeKeys = new Map<AIWorkflowPlanNode, string>();
   const keySet = new Set<string>();
@@ -235,13 +250,27 @@ function resolveWorkflowPlan(
       };
     }
 
-    if (nodeType === 'eda_rulebook' || nodeType === 'ai_task') {
+    if (nodeType === 'eda_rulebook') {
+      const reason = edaStatus?.configured
+        ? 'EDA rulebook node can be planned from the configured controller, but AWX workflow persistence and launch/status handling are not implemented yet.'
+        : 'EDA Controller is not configured. Set Administration > Settings > EDA before using rulebook activation nodes.';
       return {
         planNode,
         key,
         nodeType,
         valid: false,
-        error: `${nodeType} nodes are preview-only until AWX workflow persistence supports them.`,
+        error: reason,
+      };
+    }
+
+    if (nodeType === 'ai_task') {
+      return {
+        planNode,
+        key,
+        nodeType,
+        valid: false,
+        error:
+          'AI task nodes are preview-only until AWX workflow persistence and runtime execution support them.',
       };
     }
 
@@ -349,6 +378,7 @@ export function AIWorkflowSuggester() {
   const [isOpen, setIsOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [resolvedPlan, setResolvedPlan] = useState<ResolvedWorkflowPlan | null>(null);
+  const [edaStatus, setEdaStatus] = useState<EDAStatusResponse | null>(null);
   const [rawSuggestion, setRawSuggestion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [didApply, setDidApply] = useState(false);
@@ -373,20 +403,40 @@ export function AIWorkflowSuggester() {
     return response.results;
   };
 
+  const fetchEDAContext = async () => {
+    const status = await requestGet<EDAStatusResponse>(awxAPI`/eda/status/`).catch(() => null);
+    const activations = status?.configured
+      ? await requestGet<AwxItemsResponse<EDAActivationSummary>>(
+          awxAPI`/eda/activations/?page_size=20`
+        ).catch(() => ({ count: 0, next: null, previous: null, results: [] }))
+      : { count: 0, next: null, previous: null, results: [] };
+    return { status, activations: activations.results };
+  };
+
   const handleGenerate = async () => {
     if (!description.trim()) return;
     setIsLoading(true);
     setDidApply(false);
     setError(null);
     setResolvedPlan(null);
+    setEdaStatus(null);
     setRawSuggestion('');
     try {
-      const templates = await fetchTemplates();
+      const [templates, edaContext] = await Promise.all([fetchTemplates(), fetchEDAContext()]);
+      setEdaStatus(edaContext.status);
       const templateContext = templates
         .map((template) => {
           const nodeType = inferTemplateNodeType(template);
           return `${template.id}: ${template.name} [${nodeType || template.type || 'unknown'}]`;
         })
+        .join('\n');
+      const edaActivationContext = edaContext.activations
+        .map(
+          (activation) =>
+            `${activation.id}: ${activation.name} [${activation.status}] rulebook=${activation.rulebook || 'unknown'} source=${
+              activation.event_source || 'unknown'
+            }`
+        )
         .join('\n');
       const state = controller.getState<ControllerState>();
       const resp = await postRequest<
@@ -400,6 +450,8 @@ export function AIWorkflowSuggester() {
               `Workflow template: ${state.workflowTemplate?.name || 'current workflow'}`,
               `Existing visualizer nodes: ${existingNodes.join(', ') || 'none'}`,
               `Available AWX templates:\n${templateContext || 'none'}`,
+              `EDA controller: ${edaContext.status?.configured ? `configured at ${edaContext.status.controller_url}` : 'not configured'}`,
+              `Recent EDA activations:\n${edaActivationContext || 'none'}`,
               `User request:\n${description.trim()}`,
             ].join('\n\n'),
           },
@@ -407,7 +459,9 @@ export function AIWorkflowSuggester() {
         system_override: SYSTEM_PROMPT,
       });
       setRawSuggestion(resp.message.content);
-      setResolvedPlan(resolveWorkflowPlan(extractWorkflowPlan(resp.message.content), templates));
+      setResolvedPlan(
+        resolveWorkflowPlan(extractWorkflowPlan(resp.message.content), templates, edaContext.status)
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('Failed to generate workflow plan.');
       setError(message);
@@ -497,6 +551,7 @@ export function AIWorkflowSuggester() {
     setIsOpen(false);
     setDescription('');
     setResolvedPlan(null);
+    setEdaStatus(null);
     setRawSuggestion('');
     setDidApply(false);
     setError(null);
@@ -579,6 +634,21 @@ export function AIWorkflowSuggester() {
                 isInline
                 variant="success"
                 title={t('Plan added to the visualizer. Review the graph, then save the workflow.')}
+              />
+            </StackItem>
+          )}
+
+          {edaStatus && (
+            <StackItem>
+              <Alert
+                isInline
+                variant={edaStatus.configured ? 'info' : 'warning'}
+                title={
+                  edaStatus.configured
+                    ? t('EDA Controller configured at {{url}}', { url: edaStatus.controller_url })
+                    : t('EDA Controller not configured')
+                }
+                data-cy="ai-workflow-eda-status"
               />
             </StackItem>
           )}

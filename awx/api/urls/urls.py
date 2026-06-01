@@ -82,6 +82,7 @@ from .receptor_address import urls as receptor_address_urls
 from .terraform_job_template import terraform_job_template_urls, terraform_job_urls
 from .catalog import catalog_item_urls, catalog_deployment_urls, catalog_cloud_urls
 from .ai import ai_urls
+from .eda import eda_urls
 from .mcp import mcp_urls
 from .opa import opa_urls
 from .marketplace import marketplace_urls
@@ -157,6 +158,7 @@ v2_urls = [
     re_path(r'^catalog_deployments/', include(catalog_deployment_urls)),
     re_path(r'^catalog_cloud/', include(catalog_cloud_urls)),
     re_path(r'^ai/', include(ai_urls)),
+    re_path(r'^eda/', include(eda_urls)),
     re_path(r'^mcp/', include(mcp_urls)),
     re_path(r'^opa/', include(opa_urls)),
     re_path(r'^marketplace/', include(marketplace_urls)),
