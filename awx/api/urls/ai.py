@@ -5,6 +5,7 @@ from django.urls import re_path
 
 from awx.api.views.ai import (
     AIChatView,
+    AIResourceActionView,
     AISettingsView,
     OpenAICodexDefaultModelView,
     OpenAICodexDeviceCodePollView,
@@ -15,6 +16,7 @@ from awx.api.views.ai import (
 
 ai_urls = [
     re_path(r'^chat/$', AIChatView.as_view(), name='ai_chat'),
+    re_path(r'^resource_actions/$', AIResourceActionView.as_view(), name='ai_resource_actions'),
     re_path(r'^settings/$', AISettingsView.as_view(), name='ai_settings'),
     re_path(r'^openai_codex/device_code/start/$', OpenAICodexDeviceCodeStartView.as_view(), name='ai_openai_codex_device_code_start'),
     re_path(r'^openai_codex/device_code/poll/$', OpenAICodexDeviceCodePollView.as_view(), name='ai_openai_codex_device_code_poll'),

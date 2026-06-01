@@ -7,7 +7,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
-from awx.main.models import Host, Inventory
+from awx.main.models import ActivityStream, Host, Inventory
 
 
 class FakeJSONResponse:
@@ -38,6 +38,12 @@ def _jwt(payload):
         return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
 
     return f'{encode({"alg": "none"})}.{encode(payload)}.'
+
+
+def _activity_changes(entry):
+    if isinstance(entry.changes, dict):
+        return entry.changes
+    return json.loads(entry.changes)
 
 
 @pytest.mark.django_db
@@ -115,6 +121,145 @@ def test_ai_chat_answers_visible_host_count_without_provider(post, admin_user, o
     assert response.data['message']['content'] == 'There are 2 hosts visible to you in AWX.'
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_preview_validates_inventory_without_saving(post, admin_user, organization):
+    before_count = Inventory.objects.count()
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'preview',
+            'plan': {
+                'name': 'Create test inventory',
+                'operations': [
+                    {
+                        'id': 'create-inventory',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Preview Inventory', 'organization': organization.pk},
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['mode'] == 'preview'
+    assert response.data['can_apply'] is True
+    assert response.data['operations'][0]['valid'] is True
+    assert response.data['operations'][0]['validated_data']['organization'] == organization.pk
+    assert Inventory.objects.count() == before_count
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert audit_entry.actor == admin_user
+    assert audit_entry.object1 == 'ai_resource_action'
+    assert changes['source'] == 'ai_resource_action'
+    assert changes['mode'] == 'preview'
+    assert changes['operation_count'] == 1
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_creates_inventory_and_audits_relation(post, admin_user, organization):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Create applied inventory',
+                'operations': [
+                    {
+                        'id': 'create-inventory',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Applied Inventory', 'organization': organization.pk},
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    inventory = Inventory.objects.get(name='AI Applied Inventory')
+    assert inventory.organization == organization
+    assert response.data['operations'][0]['object_id'] == inventory.pk
+    assert response.data['operations'][0]['object']['name'] == 'AI Applied Inventory'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['mode'] == 'apply'
+    assert changes['operations'][0]['object_id'] == inventory.pk
+    assert inventory in audit_entry.inventory.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_rbac_failure(post, rando, organization):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'create-inventory',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'Forbidden AI Inventory', 'organization': organization.pk},
+                    }
+                ]
+            },
+        },
+        user=rando,
+        expect=400,
+    )
+
+    assert response.data['can_apply'] is False
+    assert response.data['operations'][0]['valid'] is False
+    assert 'permission' in response.data['operations'][0]['errors']
+    assert not Inventory.objects.filter(name='Forbidden AI Inventory').exists()
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert audit_entry.actor == rando
+    assert changes['is_error'] is True
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_resource_action_prompt_generates_typed_plan(post, admin_user, organization):
+    generated_plan = {
+        'name': 'Generated inventory',
+        'operations': [
+            {
+                'id': 'generated-inventory',
+                'operation': 'create',
+                'resource_type': 'smart_inventory',
+                'data': {
+                    'name': 'AI Generated Smart Inventory',
+                    'organization': organization.pk,
+                    'host_filter': 'name__icontains=web',
+                },
+            }
+        ],
+    }
+
+    with mock.patch('awx.api.views.ai._call_ai_provider', return_value=json.dumps(generated_plan)) as call_provider:
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={'mode': 'preview', 'prompt': 'Create a smart inventory for web hosts.'},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['generated'] is True
+    assert response.data['can_apply'] is True
+    assert response.data['operations'][0]['resource_type'] == 'smart_inventory'
+    assert response.data['operations'][0]['data']['kind'] == 'smart'
+    call_provider.assert_called_once()
 
 
 @pytest.mark.django_db

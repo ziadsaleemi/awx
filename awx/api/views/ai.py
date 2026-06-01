@@ -12,7 +12,7 @@ from datetime import timedelta, timezone
 
 import requests
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
@@ -22,10 +22,22 @@ from rest_framework.views import APIView
 
 from rest_framework.permissions import IsAuthenticated
 
+from ansible_base.rbac.permission_registry import permission_registry
+
 from awx.api.permissions import IsSystemAdmin
+from awx.api.serializers import (
+    CatalogItemSerializer,
+    ConstructedInventorySerializer,
+    InventorySerializer,
+    JobTemplateSerializer,
+    ProjectSerializer,
+    WorkflowJobTemplateSerializer,
+)
+from awx.api.views.opa import check_opa_policy
 from awx.conf.models import Setting
 from awx.main import models
 from awx.main.access import get_user_queryset
+from awx.main.models.rbac import give_creator_permissions
 from awx.main.tasks.system import clear_setting_cache
 
 logger = logging.getLogger('awx.api.views.ai')
@@ -96,6 +108,68 @@ _PROVIDER_DEFAULTS = {
         'model': 'gpt-5.2',
     },
 }
+
+_AI_RESOURCE_TYPE_ALIASES = {
+    'catalog': 'catalog_item',
+    'catalog_item': 'catalog_item',
+    'catalog_items': 'catalog_item',
+    'constructed_inventory': 'constructed_inventory',
+    'constructed_inventories': 'constructed_inventory',
+    'inventory': 'inventory',
+    'inventories': 'inventory',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'project': 'project',
+    'projects': 'project',
+    'smart_inventory': 'smart_inventory',
+    'smart_inventories': 'smart_inventory',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_RESOURCE_TYPES = {
+    'catalog_item': {
+        'model': models.CatalogItem,
+        'serializer': CatalogItemSerializer,
+        'audit_relation': 'catalog_item',
+    },
+    'constructed_inventory': {
+        'model': models.Inventory,
+        'serializer': ConstructedInventorySerializer,
+        'audit_relation': 'inventory',
+        'forced_data': {'kind': 'constructed'},
+    },
+    'inventory': {
+        'model': models.Inventory,
+        'serializer': InventorySerializer,
+        'audit_relation': 'inventory',
+        'default_data': {'kind': ''},
+    },
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
+    },
+    'project': {
+        'model': models.Project,
+        'serializer': ProjectSerializer,
+        'audit_relation': 'project',
+    },
+    'smart_inventory': {
+        'model': models.Inventory,
+        'serializer': InventorySerializer,
+        'audit_relation': 'inventory',
+        'forced_data': {'kind': 'smart'},
+    },
+    'workflow_job_template': {
+        'model': models.WorkflowJobTemplate,
+        'serializer': WorkflowJobTemplateSerializer,
+        'audit_relation': 'workflow_job_template',
+    },
+}
+
+_SENSITIVE_KEY_RE = re.compile(r'(password|secret|token|private[_-]?key|api[_-]?key|credential)', re.IGNORECASE)
 
 
 class DeviceAuthError(Exception):
@@ -734,6 +808,407 @@ def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
         'Do not say you cannot see the AWX instance when the answer is present in this context.'
     )
     return f'{system_prompt}{context}'
+
+
+def _json_safe(value):
+    if hasattr(value, 'pk') and hasattr(value, '_meta'):
+        return value.pk
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    try:
+        json.dumps(value)
+    except TypeError:
+        return str(value)
+    return value
+
+
+def _redact_sensitive(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, child in value.items():
+            if _SENSITIVE_KEY_RE.search(str(key)):
+                redacted[key] = '$encrypted$'
+            else:
+                redacted[key] = _redact_sensitive(child)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive(child) for child in value]
+    return value
+
+
+def _normalize_resource_type(resource_type: str | None) -> str | None:
+    if not isinstance(resource_type, str):
+        return None
+    normalized = resource_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_RESOURCE_TYPE_ALIASES.get(normalized)
+
+
+def _normalize_ai_plan(raw_plan) -> dict:
+    if isinstance(raw_plan, list):
+        plan = {'operations': raw_plan}
+    elif isinstance(raw_plan, dict):
+        plan = dict(raw_plan)
+    else:
+        raise ValueError(_('AI resource plan must be a JSON object or an array of operations.'))
+
+    operations = plan.get('operations', plan.get('actions'))
+    if not isinstance(operations, list) or not operations:
+        raise ValueError(_('AI resource plan must include a non-empty operations array.'))
+    if len(operations) > 20:
+        raise ValueError(_('AI resource plan can include at most 20 operations.'))
+
+    normalized_operations = []
+    for index, operation in enumerate(operations, start=1):
+        if not isinstance(operation, dict):
+            raise ValueError(_('Each AI resource plan operation must be an object.'))
+        normalized = dict(operation)
+        normalized['id'] = str(normalized.get('id') or f'op-{index}')
+        normalized['operation'] = str(normalized.get('operation') or normalized.get('action') or 'create').strip().lower()
+        normalized['resource_type'] = _normalize_resource_type(normalized.get('resource_type') or normalized.get('resource') or normalized.get('type'))
+        normalized['data'] = normalized.get('data') if isinstance(normalized.get('data'), dict) else {}
+        normalized_operations.append(normalized)
+
+    plan['operations'] = normalized_operations
+    plan.pop('actions', None)
+    return plan
+
+
+def _extract_json_plan(content: str) -> dict:
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(_('The AI provider did not return a resource plan.'))
+
+    text = content.strip()
+    code_fence = re.search(r'```(?:json)?\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+    if code_fence:
+        text = code_fence.group(1).strip()
+
+    try:
+        return _normalize_ai_plan(json.loads(text))
+    except (json.JSONDecodeError, ValueError):
+        start_positions = [position for position in (text.find('{'), text.find('[')) if position >= 0]
+        if not start_positions:
+            raise ValueError(_('The AI provider response did not contain JSON.'))
+        start = min(start_positions)
+        end = max(text.rfind('}'), text.rfind(']'))
+        if end <= start:
+            raise ValueError(_('The AI provider response did not contain a complete JSON plan.'))
+        return _normalize_ai_plan(json.loads(text[start : end + 1]))
+
+
+def _limited_queryset_values(user, model, fields, limit=15):
+    rows = []
+    for obj in get_user_queryset(user, model).order_by('id')[:limit]:
+        row = {}
+        for field in fields:
+            row[field] = getattr(obj, field, None)
+        rows.append(row)
+    return rows
+
+
+def _ai_authoring_context(user) -> dict:
+    return {
+        'counts': _visible_awx_counts(user),
+        'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
+        'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
+        'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'organization_id'), limit=20),
+        'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
+        'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
+        'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
+    }
+
+
+def _ai_resource_plan_system_prompt(user, context: dict) -> str:
+    authoring_context = _ai_authoring_context(user)
+    return (
+        'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
+        'Return only JSON. Do not include markdown fences or prose.\n\n'
+        'Supported resource_type values: inventory, smart_inventory, constructed_inventory, project, '
+        'job_template, workflow_job_template, catalog_item.\n'
+        'Supported operation values: create, update.\n'
+        'Use existing numeric IDs from the supplied AWX context for related objects. '
+        'Do not invent organization, project, inventory, workflow, or catalog item IDs. '
+        'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
+        'Schema:\n'
+        '{"name": "short plan name", "description": "short summary", "operations": ['
+        '{"id": "stable id", "operation": "create|update", "resource_type": "inventory|smart_inventory|constructed_inventory|project|job_template|workflow_job_template|catalog_item", '
+        '"object_id": 123, "data": {"name": "..."}}]}\n\n'
+        f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
+        f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
+    )
+
+
+def _ai_provider_plan_from_prompt(request, prompt: str, context: dict) -> tuple[dict, str, str]:
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIProviderError(
+            _('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        raise AIProviderError(_('Rate limit exceeded. Please wait before sending another message.'), status.HTTP_429_TOO_MANY_REQUESTS)
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIProviderError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'), status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    content = _call_ai_provider(
+        provider,
+        model,
+        [{'role': 'user', 'content': prompt}],
+        min(getattr(settings, 'AI_MAX_TOKENS', 2048), 4096),
+        _ai_resource_plan_system_prompt(request.user, context),
+        api_key,
+        getattr(settings, 'AI_API_URL', ''),
+    )
+    return _extract_json_plan(content), provider, model
+
+
+def _serializer_context(request):
+    return {'request': request, 'view': None}
+
+
+def _operation_payload(operation: dict, resource_config: dict) -> dict:
+    data = {}
+    data.update(resource_config.get('default_data') or {})
+    data.update(operation.get('data') or {})
+    data.update(resource_config.get('forced_data') or {})
+    return data
+
+
+def _operation_object_id(operation: dict) -> int | None:
+    raw_id = operation.get('object_id', operation.get('id') if operation.get('operation') == 'update' else None)
+    if raw_id is None:
+        raw_id = operation.get('pk')
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_ai_operation(request, operation: dict) -> dict:
+    resource_type = operation.get('resource_type')
+    action = operation.get('operation')
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': resource_type,
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+    }
+
+    if resource_type not in _AI_RESOURCE_TYPES:
+        result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
+        return result
+    if action not in {'create', 'update'}:
+        result['errors'] = {'operation': [_('Unsupported AI resource operation.')]}
+        return result
+
+    resource_config = _AI_RESOURCE_TYPES[resource_type]
+    model = resource_config['model']
+    serializer_class = resource_config['serializer']
+    data = _operation_payload(operation, resource_config)
+    result['data'] = _redact_sensitive(_json_safe(data))
+
+    instance = None
+    object_id = _operation_object_id(operation)
+    if action == 'update':
+        if object_id is None:
+            result['errors'] = {'object_id': [_('Update operations must include object_id.')]}
+            return result
+        try:
+            instance = model.objects.get(pk=object_id)
+        except model.DoesNotExist:
+            result['errors'] = {'object_id': [_('Object not found.')]}
+            return result
+        if not request.user.can_access(model, 'read', instance):
+            result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
+            return result
+
+    serializer = serializer_class(instance=instance, data=data, partial=(action == 'update'), context=_serializer_context(request))
+    if not serializer.is_valid():
+        result['errors'] = _json_safe(serializer.errors)
+        return result
+
+    permission_allowed = (
+        request.user.can_access(model, 'add', serializer.validated_data)
+        if action == 'create'
+        else request.user.can_access(model, 'change', instance, serializer.validated_data)
+    )
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this operation.')]}
+        return result
+
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': resource_type,
+        'object_id': object_id,
+        'data': _redact_sensitive(_json_safe(data)),
+    }
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['_serializer'] = serializer
+    result['_model'] = model
+    result['_resource_config'] = resource_config
+    result['validated_data'] = _redact_sensitive(_json_safe(serializer.validated_data))
+    return result
+
+
+def _serialize_ai_resource(request, serializer_class, obj) -> dict:
+    return _json_safe(serializer_class(instance=obj, context=_serializer_context(request)).data)
+
+
+def _save_ai_operation(request, validation: dict) -> dict:
+    serializer = validation['_serializer']
+    obj = serializer.save()
+    model = validation['_model']
+    if validation.get('operation') == 'create' and model in permission_registry.all_registered_models and request.user:
+        give_creator_permissions(request.user, obj)
+
+    validation['object'] = _serialize_ai_resource(request, validation['_resource_config']['serializer'], obj)
+    validation['object_id'] = obj.pk
+    validation.pop('_serializer', None)
+    validation.pop('_model', None)
+    validation.pop('_resource_config', None)
+    return validation
+
+
+def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, provider: str = '', model: str = ''):
+    safe_operations = []
+    is_error = False
+    for operation in operations:
+        is_error = is_error or not operation.get('valid')
+        safe_operations.append(
+            {
+                'id': operation.get('id'),
+                'operation': operation.get('operation'),
+                'resource_type': operation.get('resource_type'),
+                'valid': operation.get('valid'),
+                'object_id': operation.get('object_id'),
+                'errors': _json_safe(operation.get('errors') or {}),
+            }
+        )
+
+    changes = {
+        'triggered_by': 'ai_assistant',
+        'source': 'ai_resource_action',
+        'mode': mode,
+        'provider': provider,
+        'model': model,
+        'plan_name': plan.get('name', ''),
+        'operation_count': len(operations),
+        'is_error': is_error,
+        'operations': safe_operations,
+    }
+    entry = models.ActivityStream.objects.create(
+        operation='create',
+        object1='ai_resource_action',
+        object2=mode,
+        changes=json.dumps(_redact_sensitive(_json_safe(changes))),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+
+    for operation in operations:
+        resource_type = operation.get('resource_type')
+        object_id = operation.get('object_id')
+        resource_config = _AI_RESOURCE_TYPES.get(resource_type)
+        relation = resource_config and resource_config.get('audit_relation')
+        if relation and object_id and hasattr(entry, relation):
+            getattr(entry, relation).add(object_id)
+
+    return entry
+
+
+def _public_ai_operation_result(operation: dict) -> dict:
+    return {key: value for key, value in operation.items() if not key.startswith('_')}
+
+
+class AIResourceActionView(APIView):
+    """
+    POST /api/v2/ai/resource_actions/
+
+    Turns a natural-language request or supplied JSON plan into validated AWX
+    resource operations. Preview validates without saving. Apply requires
+    explicit mode="apply" or apply=true and reuses existing serializers, RBAC,
+    Activity Stream, and OPA guardrails.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        if not isinstance(request.data, dict):
+            return Response({'detail': _('Request body must be a JSON object.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        mode = str(request.data.get('mode') or ('apply' if request.data.get('apply') else 'preview')).strip().lower()
+        if mode not in {'preview', 'apply'}:
+            return Response({'detail': _('mode must be "preview" or "apply".')}, status=status.HTTP_400_BAD_REQUEST)
+
+        context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
+        provider = ''
+        model = ''
+        generated = False
+
+        try:
+            if request.data.get('plan') is not None:
+                plan = _normalize_ai_plan(request.data.get('plan'))
+            else:
+                prompt = request.data.get('prompt')
+                if not isinstance(prompt, str) or not prompt.strip():
+                    return Response({'detail': _('Provide either a plan object or a non-empty prompt.')}, status=status.HTTP_400_BAD_REQUEST)
+                plan, provider, model = _ai_provider_plan_from_prompt(request, prompt.strip(), context)
+                generated = True
+        except AIProviderError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        operations = [_validate_ai_operation(request, operation) for operation in plan['operations']]
+        can_apply = all(operation.get('valid') for operation in operations)
+        if mode == 'apply' and not can_apply:
+            audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model)
+            return Response(
+                {
+                    'mode': mode,
+                    'generated': generated,
+                    'plan': _redact_sensitive(_json_safe(plan)),
+                    'operations': [_public_ai_operation_result(operation) for operation in operations],
+                    'can_apply': False,
+                    'audit': {'activity_stream_id': audit_entry.pk},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if mode == 'apply':
+            with transaction.atomic():
+                operations = [_save_ai_operation(request, operation) for operation in operations]
+
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)
+
+        return Response(
+            {
+                'mode': mode,
+                'generated': generated,
+                'plan': _redact_sensitive(_json_safe(plan)),
+                'operations': public_operations,
+                'can_apply': can_apply,
+                'audit': {'activity_stream_id': audit_entry.pk},
+            },
+            status=status.HTTP_200_OK if mode == 'preview' else status.HTTP_201_CREATED,
+        )
 
 
 class AIChatView(APIView):
