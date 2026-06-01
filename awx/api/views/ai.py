@@ -44,6 +44,8 @@ from awx.main import models
 from awx.main.access import get_user_queryset
 from awx.main.models.rbac import give_creator_permissions
 from awx.main.tasks.system import clear_setting_cache
+from awx.main.utils import parse_yaml_or_json
+from awx.main.utils.filters import SmartFilter
 
 logger = logging.getLogger('awx.api.views.ai')
 
@@ -70,6 +72,14 @@ _OPENAI_MODEL_EXCLUDE_TOKENS = (
 )
 _AI_CONTEXT_LIST_LIMIT = 25
 _AI_DIRECT_LIST_LIMIT = 200
+_AI_RESOURCE_PREVIEW_LIMIT = 10
+
+_CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
+    'input_inventories',
+    'input_inventory_ids',
+    'source_inventories',
+    'source_inventory_ids',
+)
 
 # ChatGPT device-login OAuth tokens do not reliably expose /v1/models.
 # Keep this aligned with the ChatGPT Codex backend models used by the reference app.
@@ -1415,6 +1425,8 @@ def _limited_queryset_values(user, model, fields, limit=15):
 def _ai_authoring_context(user) -> dict:
     return {
         'counts': _visible_awx_counts(user),
+        'hosts': _visible_resource_rows(user, _visible_resource_spec_by_key('hosts'), limit=20),
+        'groups': _visible_resource_rows(user, _visible_resource_spec_by_key('groups'), limit=20),
         'credentials': _limited_queryset_values(user, models.Credential, ('id', 'name', 'credential_type_id', 'organization_id'), limit=20),
         'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
         'users': _limited_queryset_values(user, models.User, ('id', 'username', 'first_name', 'last_name'), limit=20),
@@ -1438,6 +1450,11 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment.\n'
         'Supported operation values: create, update, attach, detach. '
         'Use attach/detach only for credential_reference and role_assignment operations.\n'
+        'For smart_inventory, data must include organization and a valid AWX host_filter expression, for example '
+        '"name__icontains=web" or "groups__name=webservers". Smart inventory plans are previewed against visible hosts and groups before save.\n'
+        'For constructed_inventory, data must include organization and may include input_inventories as an array of existing inventory IDs plus '
+        'source_vars as a YAML or JSON object for the constructed inventory source. Constructed inventory plans are validated and previewed '
+        'against visible input inventories, source hosts, and source groups before save.\n'
         'For credential_reference, data must include target_resource_type ("job_template" or "inventory_source"), '
         'target_id, and credential. These operations only link or unlink existing credentials and must never include credential secrets.\n'
         'For role_assignment, data must include target_resource_type, target_id, role_field or role, and exactly one user/user_id or team/team_id. '
@@ -1494,6 +1511,167 @@ def _operation_payload(operation: dict, resource_config: dict) -> dict:
     data.update(operation.get('data') or {})
     data.update(resource_config.get('forced_data') or {})
     return data
+
+
+def _coerce_positive_int_list(value) -> tuple[list[int] | None, list]:
+    if value is None:
+        return None, []
+    if isinstance(value, (str, int)):
+        raw_values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        return [], [value]
+
+    ids = []
+    invalid = []
+    seen = set()
+    for raw_value in raw_values:
+        value_for_parse = raw_value.get('id', raw_value.get('pk')) if isinstance(raw_value, dict) else raw_value
+        parsed = _positive_int(value_for_parse)
+        if not parsed:
+            invalid.append(raw_value)
+            continue
+        if parsed in seen:
+            continue
+        ids.append(parsed)
+        seen.add(parsed)
+    return ids, invalid
+
+
+def _pop_constructed_input_inventory_ids(data: dict) -> tuple[list[int] | None, list]:
+    for field in _CONSTRUCTED_INPUT_INVENTORY_FIELDS:
+        if field in data:
+            return _coerce_positive_int_list(data.pop(field))
+    return None, []
+
+
+def _operation_organization_id(data: dict, validated_data: dict, instance=None) -> int | None:
+    organization = validated_data.get('organization') or data.get('organization')
+    if organization is None and instance is not None:
+        return instance.organization_id
+    if hasattr(organization, 'pk'):
+        return organization.pk
+    return _positive_int(organization)
+
+
+def _host_preview_row(host) -> dict:
+    return {'id': host.pk, 'name': host.name, 'inventory': _related_context(host.inventory), 'enabled': host.enabled}
+
+
+def _group_preview_row(group) -> dict:
+    return {'id': group.pk, 'name': group.name, 'inventory': _related_context(group.inventory)}
+
+
+def _inventory_preview_row(inventory) -> dict:
+    return {'id': inventory.pk, 'name': inventory.name, 'kind': inventory.kind, 'organization': _related_context(inventory.organization)}
+
+
+def _source_vars_preview(source_vars) -> tuple[dict, dict | None]:
+    try:
+        parsed = parse_yaml_or_json(source_vars or '', silent_failure=False)
+    except Exception as exc:
+        return {}, {'source_vars': [str(exc)]}
+    return parsed, None
+
+
+def _validate_constructed_input_inventories(request, input_inventory_ids: list[int] | None, organization_id: int | None, instance=None) -> tuple[list, dict]:
+    if input_inventory_ids is None:
+        if instance is None:
+            return [], {}
+        input_inventory_ids = list(instance.input_inventories.values_list('pk', flat=True))
+
+    if not input_inventory_ids:
+        return [], {}
+
+    visible = get_user_queryset(request.user, models.Inventory).filter(pk__in=input_inventory_ids).select_related('organization')
+    inventory_by_id = {inventory.pk: inventory for inventory in visible}
+    errors = {}
+    missing_ids = [inventory_id for inventory_id in input_inventory_ids if inventory_id not in inventory_by_id]
+    if missing_ids:
+        errors['input_inventories'] = [_('Input inventories were not found or are not accessible: {}.').format(', '.join(str(value) for value in missing_ids))]
+
+    constructed_ids = [inventory.pk for inventory in inventory_by_id.values() if inventory.kind == 'constructed']
+    if constructed_ids:
+        errors.setdefault('input_inventories', []).append(
+            _('Constructed inventories cannot be used as input inventories: {}.').format(', '.join(str(value) for value in constructed_ids))
+        )
+
+    if organization_id:
+        cross_org_ids = [inventory.pk for inventory in inventory_by_id.values() if inventory.organization_id and inventory.organization_id != organization_id]
+        if cross_org_ids:
+            errors.setdefault('input_inventories', []).append(
+                _('Input inventories must belong to the constructed inventory organization: {}.').format(', '.join(str(value) for value in cross_org_ids))
+            )
+
+    ordered = [inventory_by_id[inventory_id] for inventory_id in input_inventory_ids if inventory_id in inventory_by_id]
+    return ordered, errors
+
+
+def _smart_inventory_preview(request, data: dict, validated_data: dict, instance=None) -> dict | None:
+    host_filter = validated_data.get('host_filter') or data.get('host_filter') or (instance.host_filter if instance is not None else None)
+    if not host_filter:
+        return None
+
+    organization_id = _operation_organization_id(data, validated_data, instance)
+    filter_qs = SmartFilter.query_from_string(host_filter)
+    host_qs = _visible_hosts_queryset(request.user).filter(pk__in=filter_qs.values('pk'))
+    if organization_id:
+        host_qs = host_qs.filter(inventory__organization_id=organization_id)
+    host_qs = host_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    host_count = host_qs.count()
+    hosts = [_host_preview_row(host) for host in host_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    group_qs = get_user_queryset(request.user, models.Group).filter(hosts__in=host_qs).exclude(inventory__kind='constructed')
+    if organization_id:
+        group_qs = group_qs.filter(inventory__organization_id=organization_id)
+    group_qs = group_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    group_count = group_qs.count()
+    groups = [_group_preview_row(group) for group in group_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    return {
+        'type': 'smart_inventory',
+        'host_filter': host_filter,
+        'organization': organization_id,
+        'matched_hosts_count': host_count,
+        'matched_hosts': hosts,
+        'matched_groups_count': group_count,
+        'matched_groups': groups,
+        'truncated': host_count > len(hosts) or group_count > len(groups),
+    }
+
+
+def _constructed_inventory_preview(request, data: dict, validated_data: dict, input_inventories: list, source_vars, instance=None) -> dict:
+    parsed_source_vars = _source_vars_preview(source_vars)[0]
+    input_inventory_ids = [inventory.pk for inventory in input_inventories]
+    organization_id = _operation_organization_id(data, validated_data, instance)
+
+    host_qs = _visible_hosts_queryset(request.user).filter(inventory_id__in=input_inventory_ids)
+    group_qs = get_user_queryset(request.user, models.Group).filter(inventory_id__in=input_inventory_ids).exclude(inventory__kind='constructed')
+    if organization_id:
+        host_qs = host_qs.filter(inventory__organization_id=organization_id)
+        group_qs = group_qs.filter(inventory__organization_id=organization_id)
+
+    host_qs = host_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    group_qs = group_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    host_count = host_qs.count()
+    group_count = group_qs.count()
+    hosts = [_host_preview_row(host) for host in host_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+    groups = [_group_preview_row(group) for group in group_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    return {
+        'type': 'constructed_inventory',
+        'organization': organization_id,
+        'input_inventories_count': len(input_inventories),
+        'input_inventories': [_inventory_preview_row(inventory) for inventory in input_inventories],
+        'source_hosts_count': host_count,
+        'source_hosts': hosts,
+        'source_groups_count': group_count,
+        'source_groups': groups,
+        'source_vars_keys': [str(key) for key in parsed_source_vars.keys()],
+        'source_vars': _redact_sensitive(_json_safe(parsed_source_vars)),
+        'truncated': host_count > len(hosts) or group_count > len(groups),
+    }
 
 
 def _operation_object_id(operation: dict) -> int | None:
@@ -1874,6 +2052,10 @@ def _validate_ai_operation(request, operation: dict) -> dict:
     serializer_class = resource_config['serializer']
     data = _operation_payload(operation, resource_config)
     result['data'] = _redact_sensitive(_json_safe(data))
+    serializer_data = dict(data)
+    constructed_input_inventory_ids = None
+    constructed_input_inventories = None
+    constructed_source_vars = None
 
     instance = None
     object_id = _operation_object_id(operation)
@@ -1890,10 +2072,34 @@ def _validate_ai_operation(request, operation: dict) -> dict:
             result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
             return result
 
-    serializer = serializer_class(instance=instance, data=data, partial=(action == 'update'), context=_serializer_context(request))
+    if resource_type == 'constructed_inventory':
+        constructed_input_inventory_ids, invalid_input_inventory_values = _pop_constructed_input_inventory_ids(serializer_data)
+        if invalid_input_inventory_values:
+            result['errors'] = {'input_inventories': [_('Input inventories must be a list of positive integer IDs.')]}
+            return result
+
+        constructed_source_vars = serializer_data.get('source_vars')
+        if constructed_source_vars is None and instance is not None:
+            inv_src = instance.inventory_sources.first()
+            constructed_source_vars = inv_src.source_vars if inv_src is not None else ''
+        source_vars_error = _source_vars_preview(constructed_source_vars)[1]
+        if source_vars_error:
+            result['errors'] = source_vars_error
+            return result
+
+    serializer = serializer_class(instance=instance, data=serializer_data, partial=(action == 'update'), context=_serializer_context(request))
     if not serializer.is_valid():
         result['errors'] = _json_safe(serializer.errors)
         return result
+
+    if resource_type == 'constructed_inventory':
+        organization_id = _operation_organization_id(serializer_data, serializer.validated_data, instance)
+        constructed_input_inventories, input_inventory_errors = _validate_constructed_input_inventories(
+            request, constructed_input_inventory_ids, organization_id, instance=instance
+        )
+        if input_inventory_errors:
+            result['errors'] = input_inventory_errors
+            return result
 
     permission_allowed = (
         request.user.can_access(model, 'add', serializer.validated_data)
@@ -1921,6 +2127,21 @@ def _validate_ai_operation(request, operation: dict) -> dict:
     result['_model'] = model
     result['_resource_config'] = resource_config
     result['validated_data'] = _redact_sensitive(_json_safe(serializer.validated_data))
+    if resource_type == 'smart_inventory':
+        result['preview'] = _smart_inventory_preview(request, serializer_data, serializer.validated_data, instance=instance)
+    if resource_type == 'constructed_inventory':
+        if constructed_input_inventory_ids is not None:
+            result['_constructed_input_inventories'] = constructed_input_inventories
+            result['input_inventory_ids'] = [inventory.pk for inventory in constructed_input_inventories]
+            result['validated_data']['input_inventories'] = [inventory.pk for inventory in constructed_input_inventories]
+        result['preview'] = _constructed_inventory_preview(
+            request,
+            serializer_data,
+            serializer.validated_data,
+            constructed_input_inventories or [],
+            constructed_source_vars,
+            instance=instance,
+        )
     return result
 
 
@@ -1999,6 +2220,12 @@ def _save_ai_operation(request, validation: dict) -> dict:
 
     serializer = validation['_serializer']
     obj = serializer.save()
+    constructed_input_inventories = validation.get('_constructed_input_inventories')
+    if constructed_input_inventories is not None:
+        obj.input_inventories.clear()
+        if constructed_input_inventories:
+            obj.input_inventories.add(*constructed_input_inventories)
+
     model = validation['_model']
     if validation.get('operation') == 'create' and model in permission_registry.all_registered_models and request.user:
         give_creator_permissions(request.user, obj)
@@ -2008,6 +2235,7 @@ def _save_ai_operation(request, validation: dict) -> dict:
     validation.pop('_serializer', None)
     validation.pop('_model', None)
     validation.pop('_resource_config', None)
+    validation.pop('_constructed_input_inventories', None)
     return validation
 
 

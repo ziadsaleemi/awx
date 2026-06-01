@@ -230,6 +230,112 @@ def test_ai_resource_action_preview_validates_inventory_without_saving(post, adm
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_preview_smart_inventory_includes_matching_hosts_and_groups(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Source Inventory', organization=organization)
+    web_host = inventory.hosts.create(name='web01')
+    inventory.hosts.create(name='db01')
+    web_group = inventory.groups.create(name='webservers')
+    web_group.hosts.add(web_host)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'preview',
+            'plan': {
+                'name': 'Create smart inventory',
+                'operations': [
+                    {
+                        'id': 'create-smart-inventory',
+                        'operation': 'create',
+                        'resource_type': 'smart_inventory',
+                        'data': {
+                            'name': 'AI Smart Web Inventory',
+                            'organization': organization.pk,
+                            'host_filter': 'name__icontains=web',
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    operation = response.data['operations'][0]
+    assert operation['valid'] is True
+    assert operation['data']['kind'] == 'smart'
+    assert operation['preview']['type'] == 'smart_inventory'
+    assert operation['preview']['matched_hosts_count'] == 1
+    assert operation['preview']['matched_hosts'][0]['name'] == 'web01'
+    assert operation['preview']['matched_groups_count'] == 1
+    assert operation['preview']['matched_groups'][0]['name'] == 'webservers'
+    assert not Inventory.objects.filter(name='AI Smart Web Inventory').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_constructed_inventory_saves_inputs_and_source_vars(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Constructed Source', organization=organization)
+    web_host = inventory.hosts.create(name='web01')
+    web_group = inventory.groups.create(name='webservers')
+    web_group.hosts.add(web_host)
+    source_vars = '\n'.join(
+        [
+            'plugin: constructed',
+            'strict: false',
+            'compose:',
+            '  ansible_host: public_ip',
+            'secret_token: should-not-leak',
+        ]
+    )
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Create constructed inventory',
+                'operations': [
+                    {
+                        'id': 'create-constructed-inventory',
+                        'operation': 'create',
+                        'resource_type': 'constructed_inventory',
+                        'data': {
+                            'name': 'AI Constructed Inventory',
+                            'organization': organization.pk,
+                            'input_inventories': [inventory.pk],
+                            'source_vars': source_vars,
+                            'limit': 'web*',
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    constructed_inventory = Inventory.objects.get(name='AI Constructed Inventory')
+    assert constructed_inventory.kind == 'constructed'
+    assert list(constructed_inventory.input_inventories.values_list('pk', flat=True)) == [inventory.pk]
+    constructed_source = constructed_inventory.inventory_sources.first()
+    assert constructed_source.source == 'constructed'
+    assert constructed_source.source_vars == source_vars
+    assert constructed_source.limit == 'web*'
+
+    operation = response.data['operations'][0]
+    assert operation['valid'] is True
+    assert operation['input_inventory_ids'] == [inventory.pk]
+    assert operation['preview']['type'] == 'constructed_inventory'
+    assert operation['preview']['input_inventories'][0]['name'] == 'AI Constructed Source'
+    assert operation['preview']['source_hosts_count'] == 1
+    assert operation['preview']['source_hosts'][0]['name'] == 'web01'
+    assert operation['preview']['source_groups_count'] == 1
+    assert operation['preview']['source_groups'][0]['name'] == 'webservers'
+    assert operation['preview']['source_vars']['secret_token'] == '$encrypted$'
+    assert 'compose' in operation['preview']['source_vars_keys']
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_creates_inventory_and_audits_relation(post, admin_user, organization):
     response = post(
         reverse('api:ai_resource_actions'),
@@ -711,6 +817,8 @@ def test_ai_resource_action_apply_rejects_rbac_failure(post, rando, organization
 @pytest.mark.django_db
 @override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
 def test_ai_resource_action_prompt_generates_typed_plan(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Prompt Source Inventory', organization=organization)
+    inventory.hosts.create(name='web01')
     generated_plan = {
         'name': 'Generated inventory',
         'operations': [
@@ -739,6 +847,11 @@ def test_ai_resource_action_prompt_generates_typed_plan(post, admin_user, organi
     assert response.data['can_apply'] is True
     assert response.data['operations'][0]['resource_type'] == 'smart_inventory'
     assert response.data['operations'][0]['data']['kind'] == 'smart'
+    assert response.data['operations'][0]['preview']['matched_hosts_count'] == 1
+    system_prompt = call_provider.call_args.args[4]
+    assert 'For smart_inventory' in system_prompt
+    assert 'For constructed_inventory' in system_prompt
+    assert '"hosts"' in system_prompt
     call_provider.assert_called_once()
 
 

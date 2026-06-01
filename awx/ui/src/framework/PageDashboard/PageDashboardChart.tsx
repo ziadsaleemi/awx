@@ -2,22 +2,14 @@ import {
   Chart,
   ChartArea,
   ChartAxis,
-  ChartCursorContainerProps,
-  ChartLegendTooltip,
   ChartLine,
   ChartScatter,
   ChartStack,
-  ChartVoronoiContainerProps,
-  createContainer,
 } from '@patternfly/react-charts';
 import { useMemo } from 'react';
 import { PageChartContainer } from './PageChartContainer';
 import { PageChartLegend } from './PageChartLegend';
 import './PageDashboardChart.css';
-
-const CursorVoronoiContainer = createContainer('voronoi', 'cursor') as React.FunctionComponent<
-  ChartVoronoiContainerProps & ChartCursorContainerProps
->;
 
 export function PageDashboardChart(props: {
   id?: string;
@@ -52,16 +44,12 @@ export function PageDashboardChart(props: {
   /** show item count in legend */
   showLegendCount?: boolean;
 
-  /** disables chart hover tooltip when a chart dependency emits noisy dev warnings */
-  showTooltip?: boolean;
-
   height?: number;
 
   /** Called when the user clicks a data point; receives the x-axis label (date string). */
   onPointClick?: (label: string) => void;
 }) {
   const { allowZero, xLabel, yLabel, minDomain, onlyIntegerTicks, onPointClick } = props;
-  const showTooltip = props.showTooltip !== false;
   let { groups } = props;
   groups = allowZero
     ? groups
@@ -71,16 +59,6 @@ export function PageDashboardChart(props: {
         }
         return false;
       });
-  const legendData = groups
-    .filter((group) => !!group.label)
-    .map((group, index) => {
-      return {
-        childName: `${index}`, // Sync tooltip legend with the series associated with given chart name
-        name: group.label,
-        symbol: { fill: group.color, type: 'square' },
-      };
-    });
-
   const legend = groups
     .filter((group) => !!group.label)
     .map((group) => ({
@@ -129,23 +107,6 @@ export function PageDashboardChart(props: {
     left: (props.padding?.left ?? 12) + Math.round(maxDomainY).toString().length * 9.5 + 16,
     right: (props.padding?.right ?? 0) + 16,
   };
-  const chartContainerComponent = showTooltip ? (
-    <CursorVoronoiContainer
-      cursorDimension="x"
-      labels={(point: { datum: { y: string | number } }) => point.datum.y.toString()}
-      labelComponent={
-        <ChartLegendTooltip
-          // title={(datum: { x: number | string }) => datum.x}
-          legendData={legendData}
-          cornerRadius={8}
-        />
-      }
-      mouseFollowTooltips
-      voronoiDimension="x"
-      voronoiPadding={50}
-    />
-  ) : undefined;
-
   return (
     <div
       style={{
@@ -176,7 +137,6 @@ export function PageDashboardChart(props: {
                 width={size.width}
                 minDomain={minDomain}
                 maxDomain={{ y: maxDomainY }}
-                containerComponent={chartContainerComponent}
               >
                 <ChartAxis fixLabelOverlap />
                 <ChartAxis

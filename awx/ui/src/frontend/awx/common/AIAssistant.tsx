@@ -46,6 +46,7 @@ interface AIResourceOperation {
   warnings?: string[];
   data?: Record<string, unknown>;
   validated_data?: Record<string, unknown>;
+  preview?: Record<string, unknown>;
   object_id?: number;
   object?: Record<string, unknown>;
 }
@@ -437,25 +438,52 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                       <Badge isRead>{operation.valid ? t('Valid') : t('Blocked')}</Badge>
                     </div>
                     {operation.valid ? (
-                      <pre
-                        style={{
-                          margin: 0,
-                          maxHeight: 160,
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          fontSize: 12,
-                          background: 'var(--pf-v5-global--BackgroundColor--300)',
-                          padding: 8,
-                          borderRadius: 4,
-                        }}
-                      >
-                        {JSON.stringify(
-                          operation.object ?? operation.validated_data ?? operation.data,
-                          null,
-                          2
-                        )}
-                      </pre>
+                      <>
+                        <pre
+                          style={{
+                            margin: 0,
+                            maxHeight: 160,
+                            overflow: 'auto',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            fontSize: 12,
+                            background: 'var(--pf-v5-global--BackgroundColor--300)',
+                            padding: 8,
+                            borderRadius: 4,
+                          }}
+                        >
+                          {JSON.stringify(
+                            operation.object ?? operation.validated_data ?? operation.data,
+                            null,
+                            2
+                          )}
+                        </pre>
+                        {operation.preview ? (
+                          <>
+                            <Text
+                              component={TextVariants.small}
+                              style={{ display: 'block', fontWeight: 600, marginTop: 8 }}
+                            >
+                              {t('Preview details')}
+                            </Text>
+                            <pre
+                              style={{
+                                margin: '4px 0 0',
+                                maxHeight: 180,
+                                overflow: 'auto',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                fontSize: 12,
+                                background: 'var(--pf-v5-global--BackgroundColor--300)',
+                                padding: 8,
+                                borderRadius: 4,
+                              }}
+                            >
+                              {JSON.stringify(operation.preview, null, 2)}
+                            </pre>
+                          </>
+                        ) : null}
+                      </>
                     ) : (
                       <Alert isInline variant="danger" title={t('Operation cannot be applied')}>
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
