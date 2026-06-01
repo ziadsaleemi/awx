@@ -1,5 +1,6 @@
 import { requestGet, postRequest, requestPatch, requestDelete } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
+import type { GeneratedInventoryPlan } from '../inventories/GeneratedInventory';
 
 /**
  * Dispatch this custom event after any connection change so that other
@@ -388,6 +389,20 @@ export interface ApiCloudProviderState {
   provider_settings: CloudProviderSettingsState | null;
 }
 
+export interface CloudInventorySuggestionResponse {
+  provider: string;
+  organization: number | null;
+  connection_id: number | null;
+  pulled_at: string | null;
+  resource_counts: Record<string, number>;
+  resource_count: number;
+  ai_used: boolean;
+  ai_status: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  suggestion: GeneratedInventoryPlan;
+}
+
 function apiConnectionToEntry(conn: ApiCloudConnection): CloudConnectionEntry {
   return {
     id: String(conn.id),
@@ -531,6 +546,40 @@ export async function patchProviderState(
   } catch {
     return null;
   }
+}
+
+export function getProviderInventorySuggestionsUrl(
+  providerId: string,
+  organizationId?: number | null
+): string {
+  const url = awxAPI`/catalog_cloud/provider_state/${providerId}/inventory_suggestions/`;
+  if (organizationId !== undefined && organizationId !== null) {
+    return `${url}?organization=${organizationId}`;
+  }
+  return url;
+}
+
+export async function suggestCloudInventory(
+  providerId: string,
+  options: {
+    organizationId?: number | null;
+    connectionId?: string | number | null;
+    sampleLimit?: number;
+  } = {}
+): Promise<CloudInventorySuggestionResponse> {
+  const payload: Record<string, unknown> = {
+    sample_limit: options.sampleLimit ?? 75,
+  };
+  if (options.organizationId !== undefined && options.organizationId !== null) {
+    payload.organization = options.organizationId;
+  }
+  if (options.connectionId !== undefined && options.connectionId !== null) {
+    payload.connection_id = options.connectionId;
+  }
+  return postRequest<CloudInventorySuggestionResponse, typeof payload>(
+    getProviderInventorySuggestionsUrl(providerId, options.organizationId),
+    payload
+  );
 }
 
 // ── DigitalOcean admin allow-list settings ────────────────────────────────────

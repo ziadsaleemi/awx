@@ -49,6 +49,7 @@ import {
 import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import { getCloudProviderLabel } from './cloudProviders';
 import { ConnectionModal } from './CloudConnections';
+import { CloudInventoryMapping } from './CloudInventoryMapping';
 import { AzureProviderSettings } from './AzureProviderSettings';
 import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
 import { VmwareProviderSettings } from './VmwareProviderSettings';
@@ -981,6 +982,15 @@ function DefaultProviderSettings(props: { provider: string }) {
             vpcs={data?.vpcs ?? []}
             enabledVpcs={enabledVpcs}
             onToggleVpc={onToggleVpc}
+          />
+        </PageTab>
+        <PageTab label={t('Inventory mapping')}>
+          <CloudInventoryMapping
+            providerId={props.provider}
+            providerLabel={providerLabel}
+            organizationId={organizationId}
+            connectionId={connectedEntry?.id}
+            isDisabled={!data || !isConnected}
           />
         </PageTab>
       </PageTabs>

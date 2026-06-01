@@ -104,6 +104,11 @@ from awx.main.utils import (
     ignore_inventory_computed_fields,
 )
 from awx.main.utils.catalog import catalog_related_object_matches_item_org, collect_catalog_deployment_saved_vars
+from awx.main.utils.cloud_inventory import (
+    build_cloud_inventory_suggestion,
+    count_inventory_plan_hosts,
+    parse_inventory_source,
+)
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
 from awx.main.utils.plugins import compute_cloud_inventory_sources
@@ -6119,6 +6124,174 @@ class CloudProviderStateDetail(GenericAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save(provider_id=provider_id, organization=organization)
         return Response(serializer.data)
+
+
+_CLOUD_INVENTORY_AI_SYSTEM_PROMPT = """You are an AWX inventory generation expert.
+Convert cloud provider resource metadata into a valid Ansible inventory in INI format.
+Group resources by provider, location, resource group, cluster, node, and status when useful.
+Use safe group names and safe variable names.
+Never include secrets, credentials, tokens, or API keys.
+Output only raw INI content. Do not include markdown fences or explanatory prose."""
+
+
+def _strip_ai_inventory_fences(text):
+    return re.sub(r'\n?```\s*$', '', re.sub(r'^```(?:ini|ansible|yaml)?\n?', '', text or '', flags=re.IGNORECASE)).strip()
+
+
+def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_source):
+    if not getattr(settings, 'AI_ENABLED', False):
+        return None, 'disabled', None, None
+
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if not api_key:
+        return None, 'not_configured', None, None
+
+    try:
+        from awx.api.views.ai import _PROVIDER_DEFAULTS, _build_headers, _build_request_payload, _build_url, _check_rate_limit
+    except Exception:
+        logger.exception('Could not load AI proxy helpers for cloud inventory mapping.')
+        return None, 'unavailable', None, None
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        return None, 'rate_limited', None, None
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    base_url = getattr(settings, 'AI_API_URL', '')
+    max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
+
+    resource_sample = [
+        {
+            'kind': resource.get('kind'),
+            'name': resource.get('name'),
+            'groups': resource.get('groups'),
+            'variables': resource.get('variables'),
+        }
+        for resource in resources
+    ]
+    messages = [
+        {
+            'role': 'user',
+            'content': json.dumps(
+                {
+                    'provider': provider_id,
+                    'resources': resource_sample,
+                    'fallback_inventory': deterministic_source,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+        }
+    ]
+    url = _build_url(provider, base_url, model)
+    headers = _build_headers(provider, api_key)
+    payload = _build_request_payload(provider, model, messages, max_tokens, _CLOUD_INVENTORY_AI_SYSTEM_PROMPT)
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    except requests.exceptions.Timeout:
+        return None, 'timeout', provider, model
+    except requests.exceptions.RequestException as exc:
+        logger.warning('Cloud inventory AI mapping request failed: %s', exc)
+        return None, 'provider_unreachable', provider, model
+
+    if not resp.ok:
+        logger.warning('Cloud inventory AI mapping provider returned %d: %s', resp.status_code, resp.text[:500])
+        return None, 'provider_error', provider, model
+
+    try:
+        data = resp.json()
+        if provider == 'watsonx':
+            content = data['results'][0]['generated_text']
+        else:
+            content = data['choices'][0]['message']['content']
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        logger.warning('Could not parse cloud inventory AI mapping response: %s', exc)
+        return None, 'invalid_response', provider, model
+
+    source = _strip_ai_inventory_fences(content)
+    plan = parse_inventory_source(source)
+    if count_inventory_plan_hosts(plan) == 0 and not plan.get('groups'):
+        return None, 'empty_response', provider, model
+    return plan, 'used', provider, model
+
+
+class CloudProviderInventorySuggestions(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/provider_state/<provider_id>/inventory_suggestions/
+
+    Builds an AWX static-inventory suggestion from org-scoped pulled cloud
+    provider state. When the AI assistant is configured, the deterministic
+    inventory is refined through the configured model provider; otherwise the
+    deterministic plan is returned.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, provider_id, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to map cloud resources to inventory.'))
+
+        connection = None
+        raw_connection_id = request.data.get('connection_id') or request.query_params.get('connection_id')
+        if raw_connection_id not in (None, ''):
+            connection = _resolve_cloud_connection(request, provider_id)
+            if _get_request_organization_id(request) not in (None, ''):
+                _resolve_cloud_organization(request)
+            organization = connection.organization
+            connection_id = str(connection.pk)
+        else:
+            organization = _resolve_cloud_organization(request)
+            connection_id = None
+
+        state = models.CloudProviderState.objects.filter(provider_id=provider_id, organization=organization).first()
+        if state is None or not state.provider_data:
+            return Response(
+                {'detail': _('Pull provider data before requesting inventory suggestions.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sample_limit = request.data.get('sample_limit') or request.query_params.get('sample_limit') or 50
+        deterministic_plan, resource_counts, resources = build_cloud_inventory_suggestion(
+            provider_id,
+            state.provider_data,
+            organization_id=organization.pk if organization else None,
+            connection_id=connection_id,
+            sample_limit=sample_limit,
+        )
+        if count_inventory_plan_hosts(deterministic_plan) == 0:
+            return Response(
+                {'detail': _('No mappable cloud resources were found in provider state.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ai_plan, ai_status, ai_provider, ai_model = _call_cloud_inventory_ai(
+            request,
+            provider_id,
+            resources,
+            deterministic_plan['source'],
+        )
+        suggestion = ai_plan or deterministic_plan
+
+        return Response(
+            {
+                'provider': provider_id,
+                'organization': organization.pk if organization else None,
+                'connection_id': int(connection_id) if connection_id else None,
+                'pulled_at': state.pulled_at.isoformat() if state.pulled_at else None,
+                'resource_counts': resource_counts,
+                'resource_count': sum(resource_counts.values()),
+                'ai_used': ai_status == 'used',
+                'ai_status': ai_status,
+                'ai_provider': ai_provider,
+                'ai_model': ai_model,
+                'suggestion': suggestion,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class CatalogDigitalOceanConnectorValidate(GenericAPIView):

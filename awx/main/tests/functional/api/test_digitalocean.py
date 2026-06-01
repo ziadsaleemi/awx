@@ -228,10 +228,7 @@ def _credential_type(namespace, inputs):
         namespace=namespace,
         kind='cloud',
         inputs={
-            'fields': [
-                {'id': field, 'label': field, 'type': 'boolean' if isinstance(value, bool) else 'string'}
-                for field, value in inputs.items()
-            ],
+            'fields': [{'id': field, 'label': field, 'type': 'boolean' if isinstance(value, bool) else 'string'} for field, value in inputs.items()],
             'required': list(inputs.keys()),
         },
         injectors={},
@@ -314,9 +311,7 @@ def test_do_catalog_item_deploy_missing_tft_returns_400(post, admin_user, organi
 
 
 @pytest.mark.django_db
-def test_do_catalog_item_deploy_unknown_provider_falls_back_to_default(
-    post, admin_user, multi_cloud_catalog_item, other_terraform_job_template
-):
+def test_do_catalog_item_deploy_unknown_provider_falls_back_to_default(post, admin_user, multi_cloud_catalog_item, other_terraform_job_template):
     """target_provider not in cloud_backends falls back to terraform_job_template."""
     post(
         reverse('api:catalog_item_deploy', kwargs={'pk': multi_cloud_catalog_item.pk}),
@@ -335,9 +330,7 @@ def test_do_catalog_item_deploy_unknown_provider_falls_back_to_default(
 
 
 @pytest.mark.django_db
-def test_do_catalog_item_deploy_no_provider_uses_default_tft(
-    post, admin_user, multi_cloud_catalog_item, other_terraform_job_template
-):
+def test_do_catalog_item_deploy_no_provider_uses_default_tft(post, admin_user, multi_cloud_catalog_item, other_terraform_job_template):
     """No target_provider in POST body uses the default terraform_job_template."""
     post(
         reverse('api:catalog_item_deploy', kwargs={'pk': multi_cloud_catalog_item.pk}),
@@ -525,6 +518,118 @@ def test_provider_state_org_admin_patch_updates_only_scoped_row(patch, rando, or
     assert response.data['organization'] == organization.pk
     state.refresh_from_db()
     assert state.admin_settings['allowedImageIds'] == [303]
+
+
+@pytest.mark.django_db
+def test_provider_state_inventory_suggestions_from_pulled_data(post, admin_user, do_provider_state):
+    """Provider-state inventory suggestions map pulled resource metadata to groups and hosts."""
+    url = reverse('api:catalog_cloud_provider_inventory_suggestions', kwargs={'provider_id': 'digitalocean'})
+    response = post(url, {'sample_limit': 20}, admin_user, expect=200)
+
+    assert response.data['provider'] == 'digitalocean'
+    assert response.data['ai_used'] is False
+    assert response.data['resource_counts']['image'] == 2
+    assert response.data['resource_counts']['region'] == 2
+    assert response.data['resource_counts']['vpc'] == 1
+
+    suggestion = response.data['suggestion']
+    group_names = {group['name'] for group in suggestion['groups']}
+    host_names = {host['name'] for host in suggestion['hosts']}
+    assert 'cloud_digitalocean' in group_names
+    assert 'digitalocean_images' in group_names
+    assert 'digitalocean_region_nyc3' in group_names
+    assert 'image_Ubuntu_22.04_x64' in host_names
+    assert 'vpc_default-nyc3' in host_names
+    assert 'DIGITALOCEAN_TOKEN' not in suggestion['source']
+
+
+@pytest.mark.django_db
+def test_provider_state_inventory_suggestions_are_org_scoped(post, rando, organization):
+    """Org admins can request suggestions only from their own provider state row."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    own_state = CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data=DO_PROVIDER_DATA,
+    )
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        provider_data={
+            'images': [],
+            'pricing': [],
+            'regions': [{'slug': 'fra1', 'name': 'Frankfurt 1'}],
+            'vpcs': [],
+        },
+    )
+
+    url = reverse('api:catalog_cloud_provider_inventory_suggestions', kwargs={'provider_id': 'digitalocean'})
+    response = post(f'{url}?organization={organization.pk}', {'sample_limit': 20}, rando, expect=200)
+    assert response.data['organization'] == own_state.organization_id
+    assert 'digitalocean_region_nyc3' in response.data['suggestion']['source']
+    assert 'fra1' not in response.data['suggestion']['source']
+
+    post(f'{url}?organization={other_org.pk}', {'sample_limit': 20}, rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_provider_state_inventory_suggestions_scope_by_connection(post, rando, organization):
+    """Connection-scoped suggestions reject foreign connections and map only selected connection data."""
+    other_org = Organization.objects.create(name='Other Org')
+    organization.admin_role.members.add(rando)
+    own_connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Own Proxmox',
+        status='connected',
+        organization=organization,
+    )
+    other_connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Other Proxmox',
+        status='connected',
+        organization=other_org,
+    )
+    CloudProviderState.objects.create(
+        provider_id='proxmox',
+        organization=organization,
+        provider_data={
+            str(own_connection.pk): {
+                'nodes': [{'node': 'pve-a', 'status': 'online', 'type': 'node'}],
+                'vms': [{'vmid': 101, 'name': 'web-01', 'status': 'running', 'node': 'pve-a'}],
+                'containers': [],
+                'templates': [],
+                'storage': [],
+                'networks': [],
+            },
+            str(other_connection.pk): {
+                'nodes': [{'node': 'pve-b', 'status': 'online', 'type': 'node'}],
+                'vms': [{'vmid': 202, 'name': 'foreign-vm', 'status': 'running', 'node': 'pve-b'}],
+                'containers': [],
+                'templates': [],
+                'storage': [],
+                'networks': [],
+            },
+        },
+    )
+
+    url = reverse('api:catalog_cloud_provider_inventory_suggestions', kwargs={'provider_id': 'proxmox'})
+    response = post(
+        f'{url}?organization={organization.pk}',
+        {'connection_id': own_connection.pk, 'sample_limit': 20},
+        rando,
+        expect=200,
+    )
+    assert response.data['connection_id'] == own_connection.pk
+    assert 'vm_web-01' in response.data['suggestion']['source']
+    assert 'foreign-vm' not in response.data['suggestion']['source']
+
+    post(
+        f'{url}?organization={organization.pk}',
+        {'connection_id': other_connection.pk, 'sample_limit': 20},
+        rando,
+        expect=403,
+    )
 
 
 # ---------------------------------------------------------------------------

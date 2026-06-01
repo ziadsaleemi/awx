@@ -85,10 +85,10 @@ export function PageNotificationsProvider(props: { children: ReactNode }) {
   );
 }
 
-export function PageNotificationsDrawer(props: { children: ReactNode }) {
+export function PageNotificationsContent() {
   const { t } = useTranslation();
 
-  const { notificationsDrawerOpen, setNotificationsDrawerOpen } = usePageNotifications();
+  const { setNotificationsDrawerOpen } = usePageNotifications();
   const drawerRef = useRef<HTMLSpanElement>(null);
 
   function onCloseClick() {
@@ -99,22 +99,30 @@ export function PageNotificationsDrawer(props: { children: ReactNode }) {
   const { notificationGroups } = usePageNotifications();
 
   return (
+    <NotificationDrawer data-cy="notifications-drawer">
+      <NotificationDrawerHeader title={t('Notifications')}>
+        <DrawerCloseButton onClick={onCloseClick} />
+      </NotificationDrawerHeader>
+      <NotificationDrawerBody>
+        <NotificationDrawerGroupList>
+          {Object.values(notificationGroups).map((group, index) => (
+            <PageNotificationGroup key={index} group={group} />
+          ))}
+        </NotificationDrawerGroupList>
+      </NotificationDrawerBody>
+    </NotificationDrawer>
+  );
+}
+
+export function PageNotificationsDrawer(props: { children: ReactNode }) {
+  const { notificationsDrawerOpen, setNotificationsDrawerOpen } = usePageNotifications();
+
+  return (
     <Drawer isExpanded={notificationsDrawerOpen} onExpand={() => setNotificationsDrawerOpen(true)}>
       <DrawerContent
         panelContent={
           <DrawerPanelContent>
-            <NotificationDrawer data-cy="notifications-drawer">
-              <NotificationDrawerHeader title={t('Notifications')}>
-                <DrawerCloseButton onClick={onCloseClick} />
-              </NotificationDrawerHeader>
-              <NotificationDrawerBody>
-                <NotificationDrawerGroupList>
-                  {Object.values(notificationGroups).map((group, index) => (
-                    <PageNotificationGroup key={index} group={group} />
-                  ))}
-                </NotificationDrawerGroupList>
-              </NotificationDrawerBody>
-            </NotificationDrawer>
+            <PageNotificationsContent />
           </DrawerPanelContent>
         }
       >

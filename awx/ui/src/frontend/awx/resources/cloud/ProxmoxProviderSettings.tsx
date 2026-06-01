@@ -63,6 +63,7 @@ import {
 } from './cloudConnectionStore';
 import ProxmoxLogo from '../../../assets/proxmox.svg';
 import { ConnectionModal } from './CloudConnections';
+import { CloudInventoryMapping } from './CloudInventoryMapping';
 import { useCloudOrganization } from './useCloudOrganization';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -1684,6 +1685,15 @@ export function ProxmoxProviderSettings() {
               templates={activeData.templates ?? []}
               adminSettings={adminSettings}
               onToggle={(name, allowed) => void onToggleTemplate(name, allowed)}
+            />
+          </PageTab>
+          <PageTab label={t('Inventory mapping')}>
+            <CloudInventoryMapping
+              providerId="proxmox"
+              providerLabel={t('Proxmox VE')}
+              organizationId={organizationId}
+              connectionId={selectedConnectorId === 'all' ? null : selectedConnectorId}
+              isDisabled={Object.keys(connectionDataMap).length === 0}
             />
           </PageTab>
         </PageTabs>

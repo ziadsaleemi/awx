@@ -1,10 +1,6 @@
 import {
   ActionGroup,
   Button,
-  Drawer,
-  DrawerContent,
-  DrawerContentBody,
-  DrawerPanelContent,
   Icon,
   Spinner,
   Text,
@@ -83,9 +79,12 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     setError(null);
 
     try {
-      const resp = await postRequest<AIChatResponse, { messages: ChatMessage[] }>(awxAPI`/ai/chat/`, {
-        messages: nextMessages,
-      });
+      const resp = await postRequest<AIChatResponse, { messages: ChatMessage[] }>(
+        awxAPI`/ai/chat/`,
+        {
+          messages: nextMessages,
+        }
+      );
       setMessages((prev) => [...prev, resp.message]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('An unexpected error occurred.');
@@ -105,8 +104,27 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     [sendMessage]
   );
 
-  const panelContent = (
-    <DrawerPanelContent widths={{ default: 'width_33' }} style={{ minWidth: 360 }}>
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-label={t('AI Assistant')}
+      aria-modal="false"
+      style={{
+        position: 'fixed',
+        top: 72,
+        right: 0,
+        bottom: 0,
+        width: 'min(420px, calc(100vw - 24px))',
+        zIndex: 600,
+        backgroundColor: 'var(--pf-v5-global--BackgroundColor--100)',
+        borderLeft: '1px solid var(--pf-v5-global--BorderColor--100)',
+        boxShadow: 'var(--pf-v5-global--BoxShadow--lg)',
+      }}
+    >
       <div
         style={{
           display: 'flex',
@@ -144,7 +162,9 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           {messages.length === 0 && !loading && (
             <TextContent style={{ color: 'var(--pf-v5-global--Color--200)', marginTop: 16 }}>
               <Text component={TextVariants.small}>
-                {t('Ask anything about AWX — job templates, inventories, Terraform, catalog items, and more.')}
+                {t(
+                  'Ask anything about AWX — job templates, inventories, Terraform, catalog items, and more.'
+                )}
               </Text>
             </TextContent>
           )}
@@ -155,7 +175,10 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
               style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '85%',
-                background: msg.role === 'user' ? 'var(--pf-v5-global--primary-color--100)' : 'var(--pf-v5-global--BackgroundColor--200)',
+                background:
+                  msg.role === 'user'
+                    ? 'var(--pf-v5-global--primary-color--100)'
+                    : 'var(--pf-v5-global--BackgroundColor--200)',
                 color: msg.role === 'user' ? '#fff' : 'inherit',
                 borderRadius: 8,
                 padding: '8px 12px',
@@ -229,15 +252,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           </ActionGroup>
         </div>
       </div>
-    </DrawerPanelContent>
-  );
-
-  return (
-    <Drawer isExpanded={isOpen} position="right" isInline={false}>
-      <DrawerContent panelContent={panelContent}>
-        <DrawerContentBody />
-      </DrawerContent>
-    </Drawer>
+    </div>
   );
 }
 

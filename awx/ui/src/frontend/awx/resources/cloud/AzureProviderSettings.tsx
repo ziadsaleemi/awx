@@ -74,6 +74,7 @@ import {
   removeCloudConnectionApi,
   updateCloudConnectionApi,
 } from './cloudConnectionStore';
+import { CloudInventoryMapping } from './CloudInventoryMapping';
 import { useCloudOrganization } from './useCloudOrganization';
 // ─── styled ──────────────────────────────────────────────────────────────────
 
@@ -2228,6 +2229,15 @@ export function AzureProviderSettings() {
               vmSizes={activeData.vm_sizes}
               adminSettings={adminSettings}
               onToggle={(name, allowed) => void onToggleVMSize(name, allowed)}
+            />
+          </PageTab>
+          <PageTab label={t('Inventory mapping')}>
+            <CloudInventoryMapping
+              providerId="azure"
+              providerLabel={t('Microsoft Azure')}
+              organizationId={organizationId}
+              connectionId={selectedConnectorId === 'all' ? null : selectedConnectorId}
+              isDisabled={Object.keys(connectionDataMap).length === 0}
             />
           </PageTab>
         </PageTabs>

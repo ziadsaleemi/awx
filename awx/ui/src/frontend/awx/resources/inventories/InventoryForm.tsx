@@ -1,5 +1,5 @@
 import { Trans, useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import {
   LoadingPage,
   PageFormCheckbox,
@@ -54,6 +54,12 @@ export type InventoryCreate = Inventory & {
   aiGeneratedInventory?: GeneratedInventoryPlan;
 };
 
+interface CreateInventoryLocationState {
+  cloudInventorySuggestion?: GeneratedInventoryPlan;
+  cloudInventoryName?: string;
+  cloudInventoryDescription?: string;
+}
+
 const kinds: { [key: string]: string } = {
   '': 'inventory',
   smart: 'smart_inventory',
@@ -63,6 +69,8 @@ const kinds: { [key: string]: string } = {
 export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'smart' }) {
   const { t } = useTranslation();
   const { inventoryKind } = props;
+  const location = useLocation();
+  const routeState = location.state as CreateInventoryLocationState | null;
   const pageNavigate = usePageNavigate();
   const postRequest = usePostRequest<Inventory, Inventory>();
 
@@ -139,12 +147,13 @@ export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'sm
           }
         : {
             kind: inventoryKind,
-            name: '',
-            description: '',
+            name: routeState?.cloudInventoryName ?? '',
+            description: routeState?.cloudInventoryDescription ?? '',
             instanceGroups: [],
             labels: [],
             variables: '---\n',
             prevent_instance_group_fallback: false,
+            aiGeneratedInventory: routeState?.cloudInventorySuggestion,
           };
 
   return (

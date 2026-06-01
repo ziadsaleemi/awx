@@ -61,6 +61,7 @@ import {
 } from './cloudConnectionStore';
 import VmwareLogo from '../../../assets/vmware.svg';
 import { ConnectionModal } from './CloudConnections';
+import { CloudInventoryMapping } from './CloudInventoryMapping';
 import { useCloudOrganization } from './useCloudOrganization';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -1181,6 +1182,15 @@ export function VmwareProviderSettings() {
             }
           >
             <DatacentersTab datacenters={activeData.datacenters} clusters={activeData.clusters} />
+          </PageTab>
+          <PageTab label={t('Inventory mapping')}>
+            <CloudInventoryMapping
+              providerId="vmware"
+              providerLabel={t('VMware vSphere')}
+              organizationId={organizationId}
+              connectionId={selectedConnectorId === 'all' ? null : selectedConnectorId}
+              isDisabled={Object.keys(connectionDataMap).length === 0}
+            />
           </PageTab>
         </PageTabs>
       )}

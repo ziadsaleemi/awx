@@ -21,6 +21,7 @@ from awx.api.views import (
     CatalogAzurePullResources,
     CloudProviderConnectionList,
     CloudProviderConnectionDetail,
+    CloudProviderInventorySuggestions,
     CloudProviderStateDetail,
 )
 
@@ -55,6 +56,11 @@ catalog_cloud_urls = [
         r'^provider_state/(?P<provider_id>[a-z0-9_-]+)/$',
         CloudProviderStateDetail.as_view(),
         name='catalog_cloud_provider_state_detail',
+    ),
+    re_path(
+        r'^provider_state/(?P<provider_id>[a-z0-9_-]+)/inventory_suggestions/$',
+        CloudProviderInventorySuggestions.as_view(),
+        name='catalog_cloud_provider_inventory_suggestions',
     ),
     re_path(
         r'^connectors/digitalocean/validate/$',
