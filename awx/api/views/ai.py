@@ -5,6 +5,7 @@ import json
 import time
 import logging
 import re
+import shutil
 import urllib.parse
 from base64 import urlsafe_b64decode
 from collections import defaultdict
@@ -17,6 +18,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, transaction
 from django.utils.dateparse import parse_datetime
+from django.utils.text import slugify
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
@@ -81,6 +83,8 @@ _AI_RESOURCE_PREVIEW_LIMIT = 10
 _AI_PROJECT_FILE_MAX_BYTES = 256 * 1024
 _AI_PROJECT_FILE_ALLOWED_SUFFIXES = {'.cfg', '.ini', '.j2', '.json', '.md', '.toml', '.txt', '.yaml', '.yml'}
 _AI_PROJECT_FILE_BLOCKED_PARTS = {'.git', '.hg', '.svn', '__pycache__'}
+_AI_PROJECT_LOCAL_PATH_MAX_LENGTH = 128
+_AI_PROJECT_WORKSPACE_FLAGS = ('create_local_path', 'create_workspace', 'create_project_workspace')
 
 _CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
     'input_inventories',
@@ -393,6 +397,12 @@ class AIProviderError(Exception):
         self.detail = detail
         self.status_code = status_code
         super().__init__(str(detail))
+
+
+class AIResourceActionApplyError(Exception):
+    def __init__(self, operations):
+        self.operations = operations
+        super().__init__('AI resource action apply failed validation.')
 
 
 def _check_rate_limit(user_id: int, limit: int) -> bool:
@@ -1569,7 +1579,9 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'and either survey_spec or questions. Use update/create to replace the survey, or set merge=true to add/update questions by variable. '
         'Survey question types must be text, textarea, password, multiplechoice, multiselect, integer, or float. '
         'Never put secrets in survey defaults.\n'
-        'For project_file, data must include an existing manual project ID, relative path, and UTF-8 text content. '
+        'To create a new manual project workspace, use resource_type "project" with scm_type "", create_local_path true, organization, '
+        'name, and optionally local_path. Later operations in the same plan may reference it with project_ref set to the project operation id.\n'
+        'For project_file, data must include an existing manual project ID or project_ref, relative path, and UTF-8 text content. '
         'Use it to author playbooks, roles, defaults, vars, handlers, templates, meta, README, and ansible.cfg files inside a project before '
         'creating or updating job templates that reference those playbooks. Do not target SCM-backed projects or hidden/source-control paths.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
@@ -1578,7 +1590,7 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
         '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
-        '"object_id": 123, "data": {"name": "..."}}]}\n\n'
+        '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id"}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
     )
@@ -1785,6 +1797,181 @@ def _constructed_inventory_preview(request, data: dict, validated_data: dict, in
         'source_vars': _redact_sensitive(_json_safe(parsed_source_vars)),
         'truncated': host_count > len(hosts) or group_count > len(groups),
     }
+
+
+def _is_ai_project_workspace_requested(data: dict) -> bool:
+    return any(_coerce_ai_bool(data.get(flag), default=False) for flag in _AI_PROJECT_WORKSPACE_FLAGS)
+
+
+def _pop_ai_project_workspace_fields(data: dict):
+    for key in (*_AI_PROJECT_WORKSPACE_FLAGS, 'project_ref', 'project_operation_id'):
+        data.pop(key, None)
+
+
+def _normalize_ai_project_local_path(data: dict) -> tuple[str | None, str | None]:
+    raw_local_path = data.get('local_path') or data.get('workspace') or data.get('workspace_name')
+    if raw_local_path in (None, ''):
+        base = slugify(str(data.get('name') or 'project')).strip('-') or 'project'
+        raw_local_path = f'ai-{base}'
+    if not isinstance(raw_local_path, str):
+        return None, _('Project local_path must be a string.')
+
+    local_path = raw_local_path.strip()
+    local_path = local_path.replace('\\', '/')
+    path = PurePosixPath(local_path)
+    if path.is_absolute() or len(path.parts) != 1:
+        return None, _('Project local_path must be a single relative directory name.')
+    local_path = path.name
+    if not local_path or local_path.startswith(('.', '_')):
+        return None, _('Project local_path cannot be empty, hidden, or AWX-reserved.')
+    if len(local_path) > _AI_PROJECT_LOCAL_PATH_MAX_LENGTH:
+        return None, _('Project local_path exceeds the AI workspace length limit.')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', local_path):
+        return None, _('Project local_path can only contain letters, numbers, dots, underscores, or hyphens.')
+    return local_path, None
+
+
+def _unique_ai_project_local_path(local_path: str) -> str:
+    root = Path(settings.PROJECTS_ROOT).resolve(strict=False)
+    candidate = local_path
+    for index in range(2, 101):
+        if not models.Project.objects.filter(local_path=candidate).exists() and not (root / candidate).exists():
+            return candidate
+        suffix = f'-{index}'
+        candidate = f'{local_path[: _AI_PROJECT_LOCAL_PATH_MAX_LENGTH - len(suffix)]}{suffix}'
+    return local_path
+
+
+def _resolve_ai_project_workspace_path(local_path: str) -> tuple[Path | None, Path | None, str | None]:
+    root_path = Path(settings.PROJECTS_ROOT).resolve(strict=False)
+    workspace_path = (root_path / local_path).resolve(strict=False)
+    try:
+        workspace_path.relative_to(root_path)
+    except ValueError:
+        return None, None, _('Project local_path escapes PROJECTS_ROOT.')
+    return root_path, workspace_path, None
+
+
+def _prepare_ai_project_workspace(serializer_data: dict, result: dict, context: dict | None) -> bool:
+    should_create_workspace = _is_ai_project_workspace_requested(serializer_data)
+    if not should_create_workspace:
+        _pop_ai_project_workspace_fields(serializer_data)
+        return True
+
+    serializer_data['scm_type'] = ''
+    local_path, local_path_error = _normalize_ai_project_local_path(serializer_data)
+    if local_path_error:
+        result['errors'] = {'local_path': [local_path_error]}
+        return False
+    if not serializer_data.get('local_path'):
+        local_path = _unique_ai_project_local_path(local_path)
+    elif models.Project.objects.filter(local_path=local_path).exists():
+        result['errors'] = {'local_path': [_('This path is already being used by another manual project.')]}
+        return False
+
+    root_path, workspace_path, workspace_error = _resolve_ai_project_workspace_path(local_path)
+    if workspace_error:
+        result['errors'] = {'local_path': [workspace_error]}
+        return False
+    if workspace_path.exists():
+        result['errors'] = {'local_path': [_('AI project workspace path already exists.')]}
+        return False
+
+    serializer_data['local_path'] = local_path
+    _pop_ai_project_workspace_fields(serializer_data)
+
+    if context is not None:
+        try:
+            root_path.mkdir(parents=True, exist_ok=True)
+            workspace_path.mkdir()
+        except OSError as exc:
+            result['errors'] = {'local_path': [_('Could not create AI project workspace: {}').format(exc)]}
+            return False
+        context.setdefault('workspace_rollbacks', []).append({'path': workspace_path})
+        result.setdefault('preview', {})['created_workspace'] = local_path
+    return True
+
+
+def _rollback_ai_project_workspaces(context: dict | None):
+    if not context:
+        return
+    for rollback in reversed(context.get('workspace_rollbacks') or []):
+        workspace_path = rollback.get('path')
+        if not workspace_path:
+            continue
+        try:
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+        except OSError:
+            logger.warning('Could not roll back AI-created project workspace %s', workspace_path, exc_info=True)
+
+
+def _extract_ai_reference(value, allow_plain=False) -> str | None:
+    if isinstance(value, dict):
+        value = value.get('ref') or value.get('$ref') or value.get('operation_id')
+        allow_plain = True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('$'):
+            stripped = stripped[1:]
+            return stripped or None
+        if allow_plain:
+            return stripped or None
+    return None
+
+
+def _resolve_ai_operation_references(operation: dict, references: dict) -> tuple[dict, dict]:
+    resolved = dict(operation)
+    data = dict(resolved.get('data') or {})
+    errors = {}
+
+    project_ref = (
+        data.pop('project_ref', None)
+        or data.pop('project_operation_id', None)
+        or resolved.pop('project_ref', None)
+        or _extract_ai_reference(data.get('project'))
+    )
+    project_ref = _extract_ai_reference(project_ref, allow_plain=True)
+    if project_ref:
+        referenced_operation = references.get(project_ref)
+        if not referenced_operation:
+            errors['project_ref'] = [_('Referenced project operation was not found or has not been applied yet.')]
+        elif referenced_operation.get('resource_type') != 'project':
+            errors['project_ref'] = [_('project_ref must reference a project operation.')]
+        else:
+            data['project'] = referenced_operation.get('object_id')
+            resolved['_resolved_refs'] = {'project': project_ref}
+
+    resolved['data'] = data
+    return resolved, errors
+
+
+def _reference_error_ai_operation(operation: dict, errors: dict) -> dict:
+    return {
+        'id': operation.get('id'),
+        'operation': operation.get('operation'),
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': errors,
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+    }
+
+
+def _record_ai_operation_reference(references: dict, source_operation: dict, saved_operation: dict):
+    reference_id = source_operation.get('id')
+    if reference_id and saved_operation.get('valid') and saved_operation.get('object_id'):
+        references[str(reference_id)] = saved_operation
+
+
+def _scrub_ai_rolled_back_apply_operations(operations: list):
+    for operation in operations:
+        if operation.get('operation') == 'create':
+            operation.pop('object', None)
+            operation.pop('object_id', None)
+        if operation.get('resource_type') == 'project_file':
+            operation.pop('project_id', None)
+            operation.pop('target', None)
 
 
 def _project_file_payload(operation: dict) -> dict:
@@ -2650,7 +2837,7 @@ def _validate_ai_survey_spec_operation(request, operation: dict) -> dict:
     return result
 
 
-def _validate_ai_operation(request, operation: dict) -> dict:
+def _validate_ai_operation(request, operation: dict, context: dict | None = None) -> dict:
     resource_type = operation.get('resource_type')
     action = operation.get('operation')
     result = {
@@ -2683,7 +2870,6 @@ def _validate_ai_operation(request, operation: dict) -> dict:
     model = resource_config['model']
     serializer_class = resource_config['serializer']
     data = _operation_payload(operation, resource_config)
-    result['data'] = _redact_sensitive(_json_safe(data))
     serializer_data = dict(data)
     constructed_input_inventory_ids = None
     constructed_input_inventories = None
@@ -2703,6 +2889,14 @@ def _validate_ai_operation(request, operation: dict) -> dict:
         if not request.user.can_access(model, 'read', instance):
             result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
             return result
+
+    if resource_type == 'project' and action == 'create':
+        if not _prepare_ai_project_workspace(serializer_data, result, context):
+            result['data'] = _redact_sensitive(_json_safe(serializer_data))
+            return result
+    else:
+        _pop_ai_project_workspace_fields(serializer_data)
+    result['data'] = _redact_sensitive(_json_safe(serializer_data))
 
     if resource_type == 'constructed_inventory':
         constructed_input_inventory_ids, invalid_input_inventory_values = _pop_constructed_input_inventory_ids(serializer_data)
@@ -2748,7 +2942,7 @@ def _validate_ai_operation(request, operation: dict) -> dict:
         'operation': action,
         'resource_type': resource_type,
         'object_id': object_id,
-        'data': _redact_sensitive(_json_safe(data)),
+        'data': _redact_sensitive(_json_safe(serializer_data)),
     }
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
@@ -3079,6 +3273,98 @@ def _public_ai_operation_result(operation: dict) -> dict:
     return {key: value for key, value in operation.items() if not key.startswith('_')}
 
 
+def _ai_plan_uses_operation_references(operations: list) -> bool:
+    for operation in operations:
+        data = operation.get('data') if isinstance(operation.get('data'), dict) else {}
+        if data.get('project_ref') or data.get('project_operation_id') or operation.get('project_ref') or _extract_ai_reference(data.get('project')):
+            return True
+    return False
+
+
+def _validate_ai_operations_for_preview(request, operations: list) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': []}
+    try:
+        return [_validate_ai_operation(request, operation, context=context) for operation in operations]
+    finally:
+        _rollback_ai_project_workspaces(context)
+
+
+def _simulate_ai_operations_for_preview(request, operations: list) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': []}
+    references = {}
+    validated_operations = []
+    try:
+        with transaction.atomic():
+            for source_operation in operations:
+                resolved_operation, reference_errors = _resolve_ai_operation_references(source_operation, references)
+                if reference_errors:
+                    validated_operations.append(_reference_error_ai_operation(source_operation, reference_errors))
+                    break
+
+                validation = _validate_ai_operation(request, resolved_operation, context=context)
+                validated_operations.append(validation)
+                if not validation.get('valid'):
+                    break
+                if validation.get('_project_file'):
+                    _apply_ai_project_file_operation(validation)
+                    if not validation.get('valid'):
+                        break
+                saved_operation = _save_ai_operation(request, validation)
+                validated_operations[-1] = saved_operation
+                _record_ai_operation_reference(references, source_operation, saved_operation)
+
+            transaction.set_rollback(True)
+    finally:
+        _rollback_ai_project_file_operations(validated_operations)
+        _rollback_ai_project_workspaces(context)
+
+    for operation in validated_operations:
+        if operation.get('operation') == 'create':
+            operation.pop('object', None)
+            operation.pop('object_id', None)
+        if operation.get('resource_type') == 'project_file':
+            operation.pop('project_id', None)
+            operation.pop('target', None)
+    return validated_operations
+
+
+def _apply_ai_operations_sequentially(request, operations: list) -> tuple[list, bool]:
+    context = {'mode': 'apply', 'workspace_rollbacks': []}
+    references = {}
+    applied_operations = []
+    try:
+        with transaction.atomic():
+            for source_operation in operations:
+                resolved_operation, reference_errors = _resolve_ai_operation_references(source_operation, references)
+                if reference_errors:
+                    applied_operations.append(_reference_error_ai_operation(source_operation, reference_errors))
+                    raise AIResourceActionApplyError(applied_operations)
+
+                validation = _validate_ai_operation(request, resolved_operation, context=context)
+                applied_operations.append(validation)
+                if not validation.get('valid'):
+                    raise AIResourceActionApplyError(applied_operations)
+                if validation.get('_project_file'):
+                    _apply_ai_project_file_operation(validation)
+                    if not validation.get('valid'):
+                        raise AIResourceActionApplyError(applied_operations)
+
+                saved_operation = _save_ai_operation(request, validation)
+                applied_operations[-1] = saved_operation
+                _record_ai_operation_reference(references, source_operation, saved_operation)
+    except AIResourceActionApplyError as exc:
+        _rollback_ai_project_file_operations(exc.operations)
+        _rollback_ai_project_workspaces(context)
+        _scrub_ai_rolled_back_apply_operations(exc.operations)
+        return exc.operations, False
+    except Exception:
+        _rollback_ai_project_file_operations(applied_operations)
+        _rollback_ai_project_workspaces(context)
+        raise
+
+    return applied_operations, True
+
+
 class AIResourceActionView(APIView):
     """
     POST /api/v2/ai/resource_actions/
@@ -3118,17 +3404,16 @@ class AIResourceActionView(APIView):
         except (ValueError, json.JSONDecodeError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        operations = []
-        for operation in plan['operations']:
-            validated_operation = _validate_ai_operation(request, operation)
-            operations.append(validated_operation)
-            if mode == 'apply' and validated_operation.get('valid') and validated_operation.get('_project_file'):
-                _apply_ai_project_file_operation(validated_operation)
-                if not validated_operation.get('valid'):
-                    break
-        can_apply = all(operation.get('valid') for operation in operations)
+        if mode == 'preview':
+            if _ai_plan_uses_operation_references(plan['operations']):
+                operations = _simulate_ai_operations_for_preview(request, plan['operations'])
+            else:
+                operations = _validate_ai_operations_for_preview(request, plan['operations'])
+            can_apply = all(operation.get('valid') for operation in operations)
+        else:
+            operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+
         if mode == 'apply' and not can_apply:
-            _rollback_ai_project_file_operations(operations)
             audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model)
             return Response(
                 {
@@ -3141,14 +3426,6 @@ class AIResourceActionView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        if mode == 'apply':
-            try:
-                with transaction.atomic():
-                    operations = [_save_ai_operation(request, operation) for operation in operations]
-            except Exception:
-                _rollback_ai_project_file_operations(operations)
-                raise
 
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
         audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)

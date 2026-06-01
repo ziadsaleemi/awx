@@ -602,6 +602,210 @@ def test_ai_resource_action_apply_rolls_back_project_file_when_later_operation_f
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_preview_new_project_workspace_refs_without_persisting(post, admin_user, organization, tmp_path):
+    inventory = Inventory.objects.create(name='AI Ref Inventory', organization=organization)
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'preview',
+                'plan': {
+                    'name': 'Preview new project content',
+                    'operations': [
+                        {
+                            'id': 'create-project',
+                            'operation': 'create',
+                            'resource_type': 'project',
+                            'data': {
+                                'name': 'AI New Content Project',
+                                'organization': organization.pk,
+                                'scm_type': '',
+                                'create_local_path': True,
+                                'local_path': 'ai-new-content',
+                            },
+                        },
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {
+                                'project_ref': 'create-project',
+                                'path': 'site.yml',
+                                'content': '---\n- hosts: all\n  gather_facts: false\n',
+                            },
+                        },
+                        {
+                            'id': 'create-template',
+                            'operation': 'create',
+                            'resource_type': 'job_template',
+                            'data': {
+                                'name': 'AI Ref Template',
+                                'project_ref': 'create-project',
+                                'playbook': 'site.yml',
+                                'inventory': inventory.pk,
+                            },
+                        },
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['can_apply'] is True
+    assert [operation['valid'] for operation in response.data['operations']] == [True, True, True]
+    assert not Project.objects.filter(name='AI New Content Project').exists()
+    assert not JobTemplate.objects.filter(name='AI Ref Template').exists()
+    assert not (tmp_path / 'ai-new-content').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_creates_project_workspace_file_and_template_with_refs(post, admin_user, organization, tmp_path):
+    inventory = Inventory.objects.create(name='AI Ref Inventory', organization=organization)
+    playbook_content = '---\n- hosts: all\n  gather_facts: false\n'
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'name': 'Create new project content',
+                    'operations': [
+                        {
+                            'id': 'create-project',
+                            'operation': 'create',
+                            'resource_type': 'project',
+                            'data': {
+                                'name': 'AI New Content Project',
+                                'organization': organization.pk,
+                                'scm_type': '',
+                                'create_local_path': True,
+                                'local_path': 'ai-new-content',
+                            },
+                        },
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {'project_ref': 'create-project', 'path': 'site.yml', 'content': playbook_content},
+                        },
+                        {
+                            'id': 'create-template',
+                            'operation': 'create',
+                            'resource_type': 'job_template',
+                            'data': {
+                                'name': 'AI Ref Template',
+                                'project_ref': 'create-project',
+                                'playbook': 'site.yml',
+                                'inventory': inventory.pk,
+                            },
+                        },
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=201,
+        )
+
+    project = Project.objects.get(name='AI New Content Project')
+    job_template = JobTemplate.objects.get(name='AI Ref Template')
+    assert project.local_path == 'ai-new-content'
+    assert project.scm_type == ''
+    assert (tmp_path / 'ai-new-content' / 'site.yml').read_text() == playbook_content
+    assert job_template.project == project
+    assert job_template.playbook == 'site.yml'
+    assert response.data['operations'][0]['object_id'] == project.pk
+    assert response.data['operations'][1]['project_id'] == project.pk
+    assert response.data['operations'][2]['object_id'] == job_template.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert project in audit_entry.project.all()
+    assert job_template in audit_entry.job_template.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rolls_back_new_project_workspace_refs_on_later_failure(post, admin_user, organization, tmp_path):
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'operations': [
+                        {
+                            'id': 'create-project',
+                            'operation': 'create',
+                            'resource_type': 'project',
+                            'data': {
+                                'name': 'AI Failed Content Project',
+                                'organization': organization.pk,
+                                'scm_type': '',
+                                'create_local_path': True,
+                                'local_path': 'ai-failed-content',
+                            },
+                        },
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {'project_ref': 'create-project', 'path': 'bad.yml', 'content': '---\n- hosts: all\n'},
+                        },
+                        {
+                            'id': 'create-invalid-template',
+                            'operation': 'create',
+                            'resource_type': 'job_template',
+                            'data': {'name': 'Invalid AI Ref Template', 'project_ref': 'create-project', 'playbook': 'bad.yml', 'inventory': 999999},
+                        },
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['can_apply'] is False
+    assert response.data['operations'][2]['valid'] is False
+    assert not Project.objects.filter(name='AI Failed Content Project').exists()
+    assert not JobTemplate.objects.filter(name='Invalid AI Ref Template').exists()
+    assert not (tmp_path / 'ai-failed-content').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_unsafe_project_workspace_path(post, admin_user, organization, tmp_path):
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'operations': [
+                        {
+                            'id': 'create-project',
+                            'operation': 'create',
+                            'resource_type': 'project',
+                            'data': {
+                                'name': 'AI Unsafe Project',
+                                'organization': organization.pk,
+                                'scm_type': '',
+                                'create_local_path': True,
+                                'local_path': '../unsafe',
+                            },
+                        }
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'local_path' in response.data['operations'][0]['errors']
+    assert not (tmp_path / 'unsafe').exists()
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_creates_schedule_and_audits_relation(post, admin_user, project, inventory):
     job_template = JobTemplate.objects.create(name='AI Schedule JT', project=project, playbook='helloworld.yml', inventory=inventory)
 
