@@ -70,6 +70,32 @@ const ScrollDiv = styled.div`
   flex: 1;
 `;
 
+export function getVirtualizedRange(options: {
+  rowCount: number;
+  rowHeight: number;
+  viewportHeight: number;
+  scrollTop: number;
+  overscan: number;
+}) {
+  const { rowCount, rowHeight, viewportHeight, scrollTop, overscan } = options;
+  if (rowCount <= 0 || rowHeight <= 0 || viewportHeight <= 0) {
+    return { startIndex: 0, endIndex: rowCount, topSpacerHeight: 0, bottomSpacerHeight: 0 };
+  }
+
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(
+    rowCount,
+    Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan
+  );
+
+  return {
+    startIndex,
+    endIndex,
+    topSpacerHeight: startIndex * rowHeight,
+    bottomSpacerHeight: Math.max(0, (rowCount - endIndex) * rowHeight),
+  };
+}
+
 export type PageTableProps<T extends object> = {
   id?: string;
 
@@ -171,6 +197,14 @@ export type PageTableProps<T extends object> = {
   expandedRow?: (item: T) => ReactNode;
 
   disableLastRowBorder?: boolean;
+
+  /**
+   * Windows table rows inside the current page. Useful when users choose large page sizes for
+   * dense resources such as jobs or hosts.
+   */
+  virtualizeRows?: boolean;
+  virtualizedRowHeight?: number;
+  virtualizedOverscan?: number;
 
   /** Optional: Max selections permitted in a table. If this number of selections has been made,
    * the checkboxes on the rest of the rows are disabled until an item is unselected.
@@ -525,9 +559,36 @@ function PageTableView<T extends object>(props: PageTableProps<T>) {
   const settings = usePageSettings();
 
   let returnElement: JSX.Element;
+  let isTableVirtualized = false;
   if (props.itemCount === undefined || pageItems === undefined) {
     returnElement = <PageLoadingTable />;
   } else {
+    const virtualizedRowHeight =
+      props.virtualizedRowHeight ?? (props.compact || settings.tableLayout === 'compact' ? 44 : 56);
+    const virtualizedOverscan = props.virtualizedOverscan ?? 6;
+    const isVirtualized =
+      !!props.virtualizeRows &&
+      !props.defaultExpandedRows &&
+      pageItems.length > virtualizedOverscan * 2;
+    isTableVirtualized = isVirtualized;
+    const virtualizedRange = isVirtualized
+      ? getVirtualizedRange({
+          rowCount: pageItems.length,
+          rowHeight: virtualizedRowHeight,
+          viewportHeight: containerRef.current?.clientHeight ?? 0,
+          scrollTop: scroll.top,
+          overscan: virtualizedOverscan,
+        })
+      : undefined;
+    const visiblePageItems = virtualizedRange
+      ? pageItems.slice(virtualizedRange.startIndex, virtualizedRange.endIndex)
+      : pageItems;
+    const tableColumnCount =
+      tableColumns.length +
+      (expandedRow ? 1 : 0) +
+      (showSelect || onSelect ? 1 : 0) +
+      (rowActions !== undefined ? 1 : 0);
+
     returnElement = (
       <>
         <Table
@@ -550,31 +611,58 @@ function PageTableView<T extends object>(props: PageTableProps<T>) {
             onSelect={onSelect}
             expandedRow={expandedRow}
           />
-          <Tbody>
-            {pageItems.map((item, rowIndex) => (
-              <TableRow<T>
-                key={keyFn ? keyFn(item) : rowIndex}
-                columns={tableColumns}
-                item={item}
-                isItemSelected={isSelected?.(item)}
-                isSelectMultiple={isSelectMultiple}
-                selectItem={selectItem}
-                unselectItem={unselectItem}
-                rowActions={rowActions}
-                rowIndex={rowIndex}
-                showSelect={showSelect}
-                scrollLeft={scroll.left > 0}
-                scrollRight={scroll.right > 1}
-                unselectAll={unselectAll}
-                onSelect={onSelect}
-                expandedRow={expandedRow}
-                isLastRow={rowIndex === pageItems.length - 1}
-                disableLastRowBorder={props.disableLastRowBorder}
-                maxSelections={maxSelections}
-                selectedItems={props.selectedItems}
-                defaultExpandedRows={props.defaultExpandedRows}
-              />
-            ))}
+          <Tbody data-cy={isVirtualized ? 'virtualized-table-body' : undefined}>
+            {virtualizedRange && virtualizedRange.topSpacerHeight > 0 && (
+              <Tr aria-hidden="true">
+                <Td
+                  colSpan={tableColumnCount}
+                  style={{
+                    height: virtualizedRange.topSpacerHeight,
+                    padding: 0,
+                    border: 0,
+                  }}
+                />
+              </Tr>
+            )}
+            {visiblePageItems.map((item, visibleRowIndex) => {
+              const rowIndex = (virtualizedRange?.startIndex ?? 0) + visibleRowIndex;
+              return (
+                <TableRow<T>
+                  key={keyFn ? keyFn(item) : rowIndex}
+                  columns={tableColumns}
+                  item={item}
+                  isItemSelected={isSelected?.(item)}
+                  isSelectMultiple={isSelectMultiple}
+                  selectItem={selectItem}
+                  unselectItem={unselectItem}
+                  rowActions={rowActions}
+                  rowIndex={rowIndex}
+                  showSelect={showSelect}
+                  scrollLeft={scroll.left > 0}
+                  scrollRight={scroll.right > 1}
+                  unselectAll={unselectAll}
+                  onSelect={onSelect}
+                  expandedRow={expandedRow}
+                  isLastRow={rowIndex === pageItems.length - 1}
+                  disableLastRowBorder={props.disableLastRowBorder}
+                  maxSelections={maxSelections}
+                  selectedItems={props.selectedItems}
+                  defaultExpandedRows={props.defaultExpandedRows}
+                />
+              );
+            })}
+            {virtualizedRange && virtualizedRange.bottomSpacerHeight > 0 && (
+              <Tr aria-hidden="true">
+                <Td
+                  colSpan={tableColumnCount}
+                  style={{
+                    height: virtualizedRange.bottomSpacerHeight,
+                    padding: 0,
+                    border: 0,
+                  }}
+                />
+              </Tr>
+            )}
           </Tbody>
         </Table>
         {itemCount === 0 && (
@@ -608,6 +696,13 @@ function PageTableView<T extends object>(props: PageTableProps<T>) {
         onScroll={onScroll}
         style={{
           backgroundColor: 'var(--pf-v5-global--BackgroundColor--100)',
+          ...(isTableVirtualized
+            ? {
+                maxHeight: 'calc(100vh - 260px)',
+                minHeight: 360,
+                overflowY: 'auto',
+              }
+            : undefined),
         }}
       >
         {returnElement}
@@ -669,7 +764,13 @@ function TableHead<T extends object>(props: {
   return (
     <Thead>
       <Tr className="bg-lighten">
-        {expandedRow && <Th style={{ padding: 0, width: 0, minWidth: 0 }} className="bg-lighten" screenReaderText="Expand row" />}
+        {expandedRow && (
+          <Th
+            style={{ padding: 0, width: 0, minWidth: 0 }}
+            className="bg-lighten"
+            screenReaderText="Expand row"
+          />
+        )}
         {(showSelect || onSelect) && (
           <Th
             isStickyColumn
