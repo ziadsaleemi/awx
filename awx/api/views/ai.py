@@ -68,6 +68,8 @@ _OPENAI_MODEL_EXCLUDE_TOKENS = (
     'whisper',
     'dall-e',
 )
+_AI_CONTEXT_LIST_LIMIT = 25
+_AI_DIRECT_LIST_LIMIT = 200
 
 # ChatGPT device-login OAuth tokens do not reliably expose /v1/models.
 # Keep this aligned with the ChatGPT Codex backend models used by the reference app.
@@ -854,21 +856,324 @@ def _call_ai_provider(provider: str, model: str, messages: list, max_tokens: int
         raise AIProviderError(_('Could not parse the AI provider response.'))
 
 
+def _related_context(value):
+    if value is None:
+        return None
+    if hasattr(value, 'pk') and hasattr(value, '_meta'):
+        summary = {'id': value.pk}
+        label = getattr(value, 'name', None) or getattr(value, 'username', None)
+        if label:
+            summary['name'] = label
+        return summary
+    return value
+
+
+def _read_attr_path(obj, attr_path: str):
+    value = obj
+    for attr in attr_path.split('.'):
+        if value is None:
+            return None
+        value = getattr(value, attr, None)
+    return value
+
+
+def _visible_hosts_queryset(user):
+    return get_user_queryset(user, models.Host).exclude(inventory__kind='constructed').select_related('inventory').distinct()
+
+
+def _visible_resource_specs():
+    return [
+        {
+            'key': 'hosts',
+            'singular': 'host',
+            'plural': 'hosts',
+            'patterns': (r'\bhosts?\b',),
+            'queryset': _visible_hosts_queryset,
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('inventory', 'inventory'), ('enabled', 'enabled')),
+        },
+        {
+            'key': 'groups',
+            'singular': 'group',
+            'plural': 'groups',
+            'patterns': (r'\bgroups?\b',),
+            'model': models.Group,
+            'select_related': ('inventory',),
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('inventory', 'inventory')),
+        },
+        {
+            'key': 'inventories',
+            'singular': 'inventory',
+            'plural': 'inventories',
+            'patterns': (r'\binventories\b', r'\binventory\b(?!\s+sources?\b)'),
+            'model': models.Inventory,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('kind', 'kind'), ('organization', 'organization')),
+        },
+        {
+            'key': 'inventory_sources',
+            'singular': 'inventory source',
+            'plural': 'inventory sources',
+            'patterns': (r'\binventory sources?\b',),
+            'model': models.InventorySource,
+            'select_related': ('inventory', 'source_project'),
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('source', 'source'), ('inventory', 'inventory'), ('source_project', 'source_project')),
+        },
+        {
+            'key': 'projects',
+            'singular': 'project',
+            'plural': 'projects',
+            'patterns': (r'\bprojects?\b',),
+            'model': models.Project,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('scm_type', 'scm_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'job_templates',
+            'singular': 'job template',
+            'plural': 'job templates',
+            'patterns': (r'(?<!workflow )(?<!terraform )\bjob templates?\b', r'(?<!workflow )(?<!terraform )\btemplates?\b'),
+            'model': models.JobTemplate,
+            'select_related': ('project', 'inventory', 'organization'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('project', 'project'), ('inventory', 'inventory'), ('organization', 'organization')),
+        },
+        {
+            'key': 'workflow_job_templates',
+            'singular': 'workflow job template',
+            'plural': 'workflow job templates',
+            'patterns': (r'\bworkflows?\b', r'\bworkflow job templates?\b'),
+            'model': models.WorkflowJobTemplate,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'terraform_job_templates',
+            'singular': 'Terraform job template',
+            'plural': 'Terraform job templates',
+            'patterns': (r'\bterraform (?:job )?templates?\b',),
+            'model': models.TerraformJobTemplate,
+            'select_related': ('organization', 'project', 'target_inventory'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('terraform_dir', 'terraform_dir'),
+                ('organization', 'organization'),
+                ('project', 'project'),
+                ('target_inventory', 'target_inventory'),
+            ),
+        },
+        {
+            'key': 'credentials',
+            'singular': 'credential',
+            'plural': 'credentials',
+            'patterns': (r'\bcredentials?\b(?!\s+types?\b)',),
+            'model': models.Credential,
+            'select_related': ('credential_type', 'organization'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('credential_type', 'credential_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'credential_types',
+            'singular': 'credential type',
+            'plural': 'credential types',
+            'patterns': (r'\bcredential types?\b',),
+            'model': models.CredentialType,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('kind', 'kind'), ('managed', 'managed')),
+        },
+        {
+            'key': 'organizations',
+            'singular': 'organization',
+            'plural': 'organizations',
+            'patterns': (r'\borganizations?\b', r'\borgs?\b'),
+            'model': models.Organization,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name')),
+        },
+        {
+            'key': 'teams',
+            'singular': 'team',
+            'plural': 'teams',
+            'patterns': (r'\bteams?\b',),
+            'model': models.Team,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'users',
+            'singular': 'user',
+            'plural': 'users',
+            'patterns': (r'\busers?\b',),
+            'model': models.User,
+            'order_by': ('username', 'id'),
+            'fields': (('id', 'id'), ('username', 'username'), ('first_name', 'first_name'), ('last_name', 'last_name')),
+        },
+        {
+            'key': 'schedules',
+            'singular': 'schedule',
+            'plural': 'schedules',
+            'patterns': (r'\bschedules?\b',),
+            'model': models.Schedule,
+            'select_related': ('unified_job_template',),
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('enabled', 'enabled'), ('unified_job_template', 'unified_job_template')),
+        },
+        {
+            'key': 'execution_environments',
+            'singular': 'execution environment',
+            'plural': 'execution environments',
+            'patterns': (r'\bexecution environments?\b',),
+            'model': models.ExecutionEnvironment,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('image', 'image'), ('organization', 'organization')),
+        },
+        {
+            'key': 'instance_groups',
+            'singular': 'instance group',
+            'plural': 'instance groups',
+            'patterns': (r'\binstance groups?\b',),
+            'model': models.InstanceGroup,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('is_container_group', 'is_container_group')),
+        },
+        {
+            'key': 'instances',
+            'singular': 'instance',
+            'plural': 'instances',
+            'patterns': (r'\binstances?\b', r'\bnodes?\b'),
+            'model': models.Instance,
+            'order_by': ('hostname', 'id'),
+            'fields': (('id', 'id'), ('hostname', 'hostname'), ('node_type', 'node_type'), ('enabled', 'enabled')),
+        },
+        {
+            'key': 'jobs',
+            'singular': 'job',
+            'plural': 'jobs',
+            'patterns': (r'\bjobs?\b',),
+            'model': models.Job,
+            'select_related': ('job_template', 'inventory', 'project'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('job_template', 'job_template'),
+                ('inventory', 'inventory'),
+                ('project', 'project'),
+            ),
+        },
+        {
+            'key': 'catalog_items',
+            'singular': 'catalog item',
+            'plural': 'catalog items',
+            'patterns': (r'\bcatalog items?\b', r'\bmarketplace items?\b'),
+            'model': models.CatalogItem,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'catalog_deployments',
+            'singular': 'catalog deployment',
+            'plural': 'catalog deployments',
+            'patterns': (r'\bcatalog deployments?\b', r'\bdeployments?\b'),
+            'model': models.CatalogDeployment,
+            'select_related': ('catalog_item', 'catalog_item__organization', 'owner'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('catalog_item', 'catalog_item'),
+                ('organization', 'catalog_item.organization'),
+                ('owner', 'owner'),
+            ),
+        },
+        {
+            'key': 'cloud_provider_connections',
+            'singular': 'cloud provider connection',
+            'plural': 'cloud provider connections',
+            'patterns': (r'\bcloud (?:provider )?connections?\b',),
+            'model': models.CloudProviderConnection,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'provider_id', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('provider', 'provider_id'), ('organization', 'organization')),
+        },
+    ]
+
+
+def _visible_resource_spec_by_key(key: str):
+    for spec in _visible_resource_specs():
+        if spec['key'] == key:
+            return spec
+    return None
+
+
+def _visible_resource_queryset(user, spec):
+    queryset_factory = spec.get('queryset')
+    if queryset_factory:
+        queryset = queryset_factory(user)
+    else:
+        queryset = get_user_queryset(user, spec['model']).distinct()
+        select_related = spec.get('select_related') or ()
+        if select_related:
+            queryset = queryset.select_related(*select_related)
+    order_by = spec.get('order_by') or ('id',)
+    return queryset.order_by(*order_by)
+
+
+def _resource_context_row(obj, spec) -> dict:
+    row = {}
+    for output_key, attr_path in spec.get('fields') or ():
+        row[output_key] = _related_context(_read_attr_path(obj, attr_path))
+    return row
+
+
+def _visible_resource_rows(user, spec, limit=_AI_CONTEXT_LIST_LIMIT) -> list[dict]:
+    return [_resource_context_row(obj, spec) for obj in _visible_resource_queryset(user, spec)[:limit]]
+
+
 def _visible_host_count(user) -> int:
-    return get_user_queryset(user, models.Host).exclude(inventory__kind='constructed').distinct().count()
+    host_spec = _visible_resource_spec_by_key('hosts')
+    return _visible_resource_queryset(user, host_spec).count()
 
 
 def _visible_awx_counts(user) -> dict:
+    counts = {}
+    for spec in _visible_resource_specs():
+        counts[spec['key']] = _visible_resource_queryset(user, spec).count()
+    return counts
+
+
+def _visible_awx_context_snapshot(user, limit=_AI_CONTEXT_LIST_LIMIT) -> dict:
+    resources = {}
+    for spec in _visible_resource_specs():
+        queryset = _visible_resource_queryset(user, spec)
+        count = queryset.count()
+        items = [_resource_context_row(obj, spec) for obj in queryset[:limit]]
+        resources[spec['key']] = {
+            'label': spec['plural'],
+            'count': count,
+            'shown': len(items),
+            'truncated': count > len(items),
+            'items': items,
+        }
     return {
-        'hosts': _visible_host_count(user),
-        'credentials': get_user_queryset(user, models.Credential).distinct().count(),
-        'inventories': get_user_queryset(user, models.Inventory).distinct().count(),
-        'inventory_sources': get_user_queryset(user, models.InventorySource).distinct().count(),
-        'projects': get_user_queryset(user, models.Project).distinct().count(),
-        'job_templates': get_user_queryset(user, models.JobTemplate).distinct().count(),
-        'workflow_job_templates': get_user_queryset(user, models.WorkflowJobTemplate).distinct().count(),
-        'schedules': get_user_queryset(user, models.Schedule).distinct().count(),
-        'catalog_items': get_user_queryset(user, models.CatalogItem).distinct().count(),
+        'notes': [
+            'All resources are filtered by the requesting user RBAC permissions.',
+            'Credential secrets, passwords, private keys, tokens, and variable values are intentionally excluded.',
+            'Host resources exclude constructed-inventory synthetic hosts so host facts match the dashboard host count.',
+        ],
+        'resources': resources,
     }
 
 
@@ -886,37 +1191,99 @@ def _is_count_question(message: str, resource_pattern: str) -> bool:
     return bool(re.search(r'\bhow many\b', normalized) or re.search(r'\b(count|total|number of)\b', normalized) or re.search(r'\bdo we have\b', normalized))
 
 
+def _is_list_question(message: str, resource_pattern: str) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    if not re.search(resource_pattern, normalized):
+        return False
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup)\b', normalized):
+        return False
+    return bool(
+        re.search(r'\b(list|show|display)\b', normalized)
+        or re.search(r'\bwhat (?:are|is)\b', normalized)
+        or re.search(r'\bwhich\b', normalized)
+        or re.search(r'\bnames? of\b', normalized)
+        or re.search(r'\ball\b', normalized)
+    )
+
+
+def _resource_spec_matches_message(message: str, spec: dict) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    return any(re.search(pattern, normalized) for pattern in spec.get('patterns') or ())
+
+
+def _format_context_value(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, dict):
+        return value.get('name') or value.get('username') or value.get('id')
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    return value
+
+
+def _format_resource_list_item(row: dict) -> str:
+    label = row.get('name') or row.get('username') or row.get('hostname') or row.get('id')
+    detail_parts = []
+    if row.get('id') is not None:
+        detail_parts.append(f"id: {row['id']}")
+    for key, value in row.items():
+        if key in {'id', 'name', 'username', 'hostname'}:
+            continue
+        formatted_value = _format_context_value(value)
+        if formatted_value is not None:
+            detail_parts.append(f"{key.replace('_', ' ')}: {formatted_value}")
+    if detail_parts:
+        return f"- {label} ({', '.join(str(part) for part in detail_parts)})"
+    return f"- {label}"
+
+
+def _answer_resource_count(user, spec: dict) -> str:
+    count = _visible_resource_queryset(user, spec).count()
+    noun = spec['singular'] if count == 1 else spec['plural']
+    return f'There are {count} {noun} visible to you in AWX.'
+
+
+def _answer_resource_list(user, spec: dict) -> str:
+    queryset = _visible_resource_queryset(user, spec)
+    count = queryset.count()
+    if count == 0:
+        return f'There are no {spec["plural"]} visible to you in AWX.'
+
+    rows = [_resource_context_row(obj, spec) for obj in queryset[:_AI_DIRECT_LIST_LIMIT]]
+    noun = spec['singular'] if count == 1 else spec['plural']
+    lines = [f'There are {count} {noun} visible to you in AWX:']
+    lines.extend(_format_resource_list_item(row) for row in rows)
+    if count > len(rows):
+        lines.append(f'- Showing the first {len(rows)} of {count}. Narrow the question to list a specific inventory, organization, or resource type.')
+    return '\n'.join(lines)
+
+
 def _try_answer_awx_fact_question(user, messages: list) -> str | None:
     latest_message = _latest_user_message(messages)
-    if _is_count_question(latest_message, r'\bhosts?\b'):
-        count = _visible_host_count(user)
-        noun = 'host' if count == 1 else 'hosts'
-        return f'There are {count} {noun} visible to you in AWX.'
+    for spec in _visible_resource_specs():
+        if not _resource_spec_matches_message(latest_message, spec):
+            continue
+        resource_pattern = '|'.join(f'(?:{pattern})' for pattern in spec.get('patterns') or ())
+        if _is_count_question(latest_message, resource_pattern):
+            return _answer_resource_count(user, spec)
+        if _is_list_question(latest_message, resource_pattern):
+            return _answer_resource_list(user, spec)
     return None
 
 
 def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
     try:
-        counts = _visible_awx_counts(user)
+        snapshot = _visible_awx_context_snapshot(user)
     except Exception as exc:
         logger.warning('Could not build AI assistant AWX context: %s', exc)
         return system_prompt
 
     context = (
         '\n\nLive AWX context for the requesting user:\n'
-        '- Counts are filtered by the requester\'s AWX RBAC permissions.\n'
-        '- Host count excludes constructed-inventory synthetic hosts, matching the dashboard.\n'
-        f"- Hosts visible: {counts['hosts']}\n"
-        f"- Credentials visible: {counts['credentials']}\n"
-        f"- Inventories visible: {counts['inventories']}\n"
-        f"- Inventory sources visible: {counts['inventory_sources']}\n"
-        f"- Projects visible: {counts['projects']}\n"
-        f"- Job templates visible: {counts['job_templates']}\n"
-        f"- Workflow job templates visible: {counts['workflow_job_templates']}\n"
-        f"- Schedules visible: {counts['schedules']}\n"
-        f"- Catalog items visible: {counts['catalog_items']}\n"
+        f'{json.dumps(_json_safe(snapshot), indent=2)}\n'
         'Use this live context when answering direct questions about this AWX instance. '
-        'Do not say you cannot see the AWX instance when the answer is present in this context.'
+        'Do not say you cannot see the AWX instance when the answer is present in this context. '
+        'If a resource list is truncated, say so and ask the user to narrow by inventory, organization, or resource type.'
     )
     return f'{system_prompt}{context}'
 

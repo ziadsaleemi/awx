@@ -124,6 +124,73 @@ def test_ai_chat_answers_visible_host_count_without_provider(post, admin_user, o
 
 
 @pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_hosts_without_provider(post, admin_user, organization):
+    source_inv = Inventory.objects.create(name='source-inv', organization=organization)
+    source_host = source_inv.hosts.create(name='web01')
+    source_inv.hosts.create(name='db01', enabled=False)
+
+    constructed = Inventory.objects.create(name='constructed-inv', kind='constructed', organization=organization)
+    Host.objects.create(name='constructed-only', inventory=constructed, instance_id=str(source_host.pk))
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'Can you list all the hosts?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 2 hosts visible to you in AWX:')
+    assert '- db01 ' in content
+    assert '- web01 ' in content
+    assert 'inventory: source-inv' in content
+    assert 'enabled: no' in content
+    assert 'constructed-only' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_provider_prompt_includes_visible_awx_resource_rows(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='source-inv', organization=organization)
+    inventory.hosts.create(name='web01')
+
+    with mock.patch('awx.api.views.ai._call_ai_provider', return_value='OK') as call_provider:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'Summarize the current AWX instance.'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'OK'
+    system_prompt = call_provider.call_args.args[4]
+    assert '"hosts"' in system_prompt
+    assert '"inventories"' in system_prompt
+    assert 'web01' in system_prompt
+    assert 'source-inv' in system_prompt
+    assert 'Credential secrets, passwords, private keys, tokens, and variable values are intentionally excluded.' in system_prompt
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_how_to_host_questions_still_use_provider(post, admin_user):
+    with mock.patch('awx.api.views.ai._call_ai_provider', return_value='Use Resources > Hosts.') as call_provider:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'Show me how to add a host.'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'Use Resources > Hosts.'
+    call_provider.assert_called_once()
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_preview_validates_inventory_without_saving(post, admin_user, organization):
     before_count = Inventory.objects.count()
 
