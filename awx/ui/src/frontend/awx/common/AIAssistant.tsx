@@ -1,5 +1,7 @@
 import {
   ActionGroup,
+  Alert,
+  Badge,
   Button,
   Icon,
   Spinner,
@@ -34,6 +36,36 @@ interface AIChatResponse {
   model: string;
   provider: string;
 }
+
+interface AIResourceOperation {
+  id: string;
+  operation: string;
+  resource_type: string;
+  valid: boolean;
+  errors: Record<string, unknown>;
+  warnings?: string[];
+  data?: Record<string, unknown>;
+  validated_data?: Record<string, unknown>;
+  object_id?: number;
+  object?: Record<string, unknown>;
+}
+
+interface AIResourceActionResponse {
+  mode: 'preview' | 'apply';
+  generated: boolean;
+  plan: {
+    name?: string;
+    description?: string;
+    operations: Record<string, unknown>[];
+  };
+  operations: AIResourceOperation[];
+  can_apply: boolean;
+  audit?: {
+    activity_stream_id?: number;
+  };
+}
+
+type AssistantBusyState = 'chat' | 'plan' | 'apply' | null;
 
 const AssistantMarkdown = styled.div`
   p,
@@ -82,6 +114,41 @@ const AssistantMarkdown = styled.div`
   }
 `;
 
+function messageFromError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
+function buildRouteContext() {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  return {
+    path: window.location.pathname,
+    search: window.location.search,
+    hash: window.location.hash,
+    title: document.title,
+  };
+}
+
+function formatLabel(value: string) {
+  return value.replaceAll('_', ' ');
+}
+
+function errorSummary(errors: Record<string, unknown>) {
+  return Object.entries(errors)
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        return `${key}: ${value.join(', ')}`;
+      }
+      if (typeof value === 'object' && value !== null) {
+        return `${key}: ${JSON.stringify(value)}`;
+      }
+      return `${key}: ${String(value)}`;
+    })
+    .join('\n');
+}
+
 export function useAIAssistantEnabled() {
   const [enabled, setEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
@@ -109,23 +176,24 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<AssistantBusyState>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resourcePlan, setResourcePlan] = useState<AIResourceActionResponse | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, busy, resourcePlan]);
 
   const sendMessage = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || loading) return;
+    if (!trimmed || busy) return;
 
     const userMsg: ChatMessage = { role: 'user', content: trimmed };
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
     setInput('');
-    setLoading(true);
+    setBusy('chat');
     setError(null);
 
     try {
@@ -137,12 +205,64 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
       );
       setMessages((prev) => [...prev, resp.message]);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('An unexpected error occurred.');
-      setError(msg);
+      setError(messageFromError(err, t('An unexpected error occurred.')));
     } finally {
-      setLoading(false);
+      setBusy(null);
     }
-  }, [input, loading, messages, t]);
+  }, [busy, input, messages, t]);
+
+  const planResourceChanges = useCallback(async () => {
+    const trimmed = input.trim();
+    if (!trimmed || busy) return;
+
+    setInput('');
+    setBusy('plan');
+    setError(null);
+    setResourcePlan(null);
+
+    try {
+      const resp = await postRequest<
+        AIResourceActionResponse,
+        { mode: 'preview'; prompt: string; context: Record<string, unknown> }
+      >(awxAPI`/ai/resource_actions/`, {
+        mode: 'preview',
+        prompt: trimmed,
+        context: buildRouteContext(),
+      });
+      setResourcePlan(resp);
+    } catch (err: unknown) {
+      setError(messageFromError(err, t('Failed to plan resource changes.')));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, input, t]);
+
+  const applyResourcePlan = useCallback(async () => {
+    if (!resourcePlan || !resourcePlan.can_apply || busy) return;
+
+    setBusy('apply');
+    setError(null);
+
+    try {
+      const resp = await postRequest<
+        AIResourceActionResponse,
+        {
+          mode: 'apply';
+          plan: AIResourceActionResponse['plan'];
+          context: Record<string, unknown>;
+        }
+      >(awxAPI`/ai/resource_actions/`, {
+        mode: 'apply',
+        plan: resourcePlan.plan,
+        context: buildRouteContext(),
+      });
+      setResourcePlan(resp);
+    } catch (err: unknown) {
+      setError(messageFromError(err, t('Failed to apply resource changes.')));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, resourcePlan, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -209,7 +329,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             gap: '10px',
           }}
         >
-          {messages.length === 0 && !loading && (
+          {messages.length === 0 && !busy && !resourcePlan && (
             <TextContent style={{ color: 'var(--pf-v5-global--Color--200)', marginTop: 16 }}>
               <Text component={TextVariants.small}>
                 {t(
@@ -247,7 +367,130 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             </div>
           ))}
 
-          {loading && (
+          {resourcePlan && (
+            <div
+              style={{
+                alignSelf: 'stretch',
+                border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                borderRadius: 6,
+                background: 'var(--pf-v5-global--BackgroundColor--200)',
+                padding: 12,
+              }}
+              data-cy="ai-resource-plan"
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  marginBottom: 10,
+                }}
+              >
+                <TextContent>
+                  <Text component={TextVariants.h4} style={{ margin: 0 }}>
+                    {resourcePlan.plan.name || t('Resource plan')}
+                  </Text>
+                  {resourcePlan.plan.description ? (
+                    <Text component={TextVariants.small}>{resourcePlan.plan.description}</Text>
+                  ) : null}
+                </TextContent>
+                <Badge
+                  isRead
+                  style={{
+                    background:
+                      resourcePlan.mode === 'apply'
+                        ? 'var(--pf-v5-global--success-color--100)'
+                        : undefined,
+                    color: resourcePlan.mode === 'apply' ? '#fff' : undefined,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {resourcePlan.mode === 'apply' ? t('Applied') : t('Preview')}
+                </Badge>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {resourcePlan.operations.map((operation) => (
+                  <div
+                    key={operation.id}
+                    style={{
+                      border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                      borderRadius: 4,
+                      background: 'var(--pf-v5-global--BackgroundColor--100)',
+                      padding: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        marginBottom: operation.valid ? 6 : 8,
+                      }}
+                    >
+                      <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
+                        {formatLabel(operation.operation)} {formatLabel(operation.resource_type)}
+                        {operation.object_id ? ` #${operation.object_id}` : ''}
+                      </Text>
+                      <Badge isRead>{operation.valid ? t('Valid') : t('Blocked')}</Badge>
+                    </div>
+                    {operation.valid ? (
+                      <pre
+                        style={{
+                          margin: 0,
+                          maxHeight: 160,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          fontSize: 12,
+                          background: 'var(--pf-v5-global--BackgroundColor--300)',
+                          padding: 8,
+                          borderRadius: 4,
+                        }}
+                      >
+                        {JSON.stringify(
+                          operation.object ?? operation.validated_data ?? operation.data,
+                          null,
+                          2
+                        )}
+                      </pre>
+                    ) : (
+                      <Alert isInline variant="danger" title={t('Operation cannot be applied')}>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                          {errorSummary(operation.errors)}
+                        </pre>
+                      </Alert>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <ActionGroup style={{ marginTop: 12, marginBottom: 0 }}>
+                {resourcePlan.mode === 'preview' ? (
+                  <Button
+                    variant="primary"
+                    onClick={() => void applyResourcePlan()}
+                    isDisabled={!resourcePlan.can_apply || busy !== null}
+                    isLoading={busy === 'apply'}
+                    data-cy="ai-resource-plan-apply"
+                  >
+                    {t('Apply changes')}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="secondary"
+                  onClick={() => setResourcePlan(null)}
+                  isDisabled={busy !== null}
+                >
+                  {t('Dismiss')}
+                </Button>
+              </ActionGroup>
+            </div>
+          )}
+
+          {busy && (
             <div style={{ alignSelf: 'flex-start', padding: '8px 12px' }}>
               <Spinner size="md" />
             </div>
@@ -282,17 +525,26 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             onKeyDown={handleKeyDown}
             rows={3}
             resizeOrientation="vertical"
-            isDisabled={loading}
+            isDisabled={busy !== null}
             style={{ fontSize: 14 }}
           />
           <ActionGroup style={{ margin: 0 }}>
             <Button
               variant="primary"
-              isDisabled={!input.trim() || loading}
+              isDisabled={!input.trim() || busy !== null}
               onClick={() => void sendMessage()}
-              isLoading={loading}
+              isLoading={busy === 'chat'}
             >
               {t('Send')}
+            </Button>
+            <Button
+              variant="secondary"
+              isDisabled={!input.trim() || busy !== null}
+              onClick={() => void planResourceChanges()}
+              isLoading={busy === 'plan'}
+              data-cy="ai-resource-plan-button"
+            >
+              {t('Plan changes')}
             </Button>
             {messages.length > 0 && (
               <Button
@@ -300,7 +552,9 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 onClick={() => {
                   setMessages([]);
                   setError(null);
+                  setResourcePlan(null);
                 }}
+                isDisabled={busy !== null}
               >
                 {t('Clear chat')}
               </Button>
