@@ -36,15 +36,18 @@ from awx.api.serializers import (
     JobTemplateSerializer,
     ProjectSerializer,
     ScheduleSerializer,
+    TerraformJobTemplateSerializer,
     WorkflowJobTemplateSerializer,
 )
 from awx.api.views.opa import check_opa_policy
 from awx.conf.models import Setting
 from awx.main import models
 from awx.main.access import get_user_queryset
+from awx.main.constants import SURVEY_TYPE_MAPPING
 from awx.main.models.rbac import give_creator_permissions
 from awx.main.tasks.system import clear_setting_cache
 from awx.main.utils import parse_yaml_or_json
+from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
 
 logger = logging.getLogger('awx.api.views.ai')
@@ -150,6 +153,12 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'schedules': 'schedule',
     'smart_inventory': 'smart_inventory',
     'smart_inventories': 'smart_inventory',
+    'survey': 'survey_spec',
+    'surveys': 'survey_spec',
+    'survey_question': 'survey_spec',
+    'survey_questions': 'survey_spec',
+    'survey_spec': 'survey_spec',
+    'survey_specs': 'survey_spec',
     'workflow': 'workflow_job_template',
     'workflow_job_template': 'workflow_job_template',
     'workflow_job_templates': 'workflow_job_template',
@@ -266,6 +275,53 @@ _AI_ROLE_ASSIGNMENT_TARGETS = {
     'team': {'model': models.Team, 'audit_relation': 'team'},
     'terraform_job_template': {'model': models.TerraformJobTemplate, 'audit_relation': 'terraform_job_template'},
     'workflow_job_template': {'model': models.WorkflowJobTemplate, 'audit_relation': 'workflow_job_template'},
+}
+
+_AI_SURVEY_SPEC_TARGET_ALIASES = {
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'terraform_job_template': 'terraform_job_template',
+    'terraform_job_templates': 'terraform_job_template',
+    'terraform_template': 'terraform_job_template',
+    'terraform_templates': 'terraform_job_template',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_SURVEY_SPEC_TARGETS = {
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
+    },
+    'terraform_job_template': {
+        'model': models.TerraformJobTemplate,
+        'serializer': TerraformJobTemplateSerializer,
+        'audit_relation': 'terraform_job_template',
+    },
+    'workflow_job_template': {
+        'model': models.WorkflowJobTemplate,
+        'serializer': WorkflowJobTemplateSerializer,
+        'audit_relation': 'workflow_job_template',
+    },
+}
+
+_AI_SURVEY_TYPE_ALIASES = {
+    'choice': 'multiplechoice',
+    'choices': 'multiplechoice',
+    'int': 'integer',
+    'multi_choice': 'multiselect',
+    'multi_select': 'multiselect',
+    'multi_select_choice': 'multiselect',
+    'multiple_choice': 'multiplechoice',
+    'multiple_select': 'multiselect',
+    'number': 'float',
+    'select': 'multiplechoice',
+    'single_choice': 'multiplechoice',
+    'single_select': 'multiplechoice',
+    'str': 'text',
+    'string': 'text',
 }
 
 _AI_ROLE_FIELD_ALIASES = {
@@ -1315,8 +1371,11 @@ def _json_safe(value):
 def _redact_sensitive(value):
     if isinstance(value, dict):
         redacted = {}
+        is_password_survey_question = str(value.get('type', '')).lower() == 'password'
         for key, child in value.items():
-            if _SENSITIVE_KEY_RE.search(str(key)):
+            if is_password_survey_question and key == 'default' and child not in ('', None):
+                redacted[key] = '$encrypted$'
+            elif _SENSITIVE_KEY_RE.search(str(key)):
                 redacted[key] = '$encrypted$'
             else:
                 redacted[key] = _redact_sensitive(child)
@@ -1345,6 +1404,13 @@ def _normalize_role_assignment_target(target_type: str | None) -> str | None:
         return None
     normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
     return _AI_ROLE_ASSIGNMENT_TARGET_ALIASES.get(normalized)
+
+
+def _normalize_survey_spec_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_SURVEY_SPEC_TARGET_ALIASES.get(normalized)
 
 
 def _normalize_role_field(role_field: str | None) -> str | None:
@@ -1435,6 +1501,7 @@ def _ai_authoring_context(user) -> dict:
         'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
         'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'organization_id'), limit=20),
         'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
+        'terraform_job_templates': _limited_queryset_values(user, models.TerraformJobTemplate, ('id', 'name', 'project_id', 'target_inventory_id'), limit=20),
         'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
         'schedules': _limited_queryset_values(user, models.Schedule, ('id', 'name', 'enabled', 'unified_job_template_id'), limit=20),
         'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
@@ -1447,7 +1514,7 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
         'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, '
-        'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment.\n'
+        'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
         'Supported operation values: create, update, attach, detach. '
         'Use attach/detach only for credential_reference and role_assignment operations.\n'
         'For smart_inventory, data must include organization and a valid AWX host_filter expression, for example '
@@ -1459,12 +1526,16 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'target_id, and credential. These operations only link or unlink existing credentials and must never include credential secrets.\n'
         'For role_assignment, data must include target_resource_type, target_id, role_field or role, and exactly one user/user_id or team/team_id. '
         'Use existing users and teams from the supplied context. Common role values include admin, read, use, execute, update, member, and auditor.\n'
+        'For survey_spec, data must include target_resource_type ("job_template", "workflow_job_template", or "terraform_job_template"), target_id, '
+        'and either survey_spec or questions. Use update/create to replace the survey, or set merge=true to add/update questions by variable. '
+        'Survey question types must be text, textarea, password, multiplechoice, multiselect, integer, or float. '
+        'Never put secrets in survey defaults.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
         'Do not invent organization, project, inventory, workflow, user, team, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "..."}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -1727,6 +1798,243 @@ def _role_assignment_payload(operation: dict) -> dict:
         'role_field': _normalize_role_field(data.get('role_field') or data.get('role_name') or operation.get('role_field') or (None if role_id else raw_role)),
         'user_id': user_id,
         'team_id': team_id,
+    }
+
+
+def _coerce_ai_bool(value, default=False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'1', 'true', 'yes', 'on'}:
+            return True
+        if normalized in {'0', 'false', 'no', 'off'}:
+            return False
+    return bool(value)
+
+
+def _normalize_survey_question_type(value) -> str:
+    if value is None:
+        return 'text'
+    normalized = str(value).strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_SURVEY_TYPE_ALIASES.get(normalized, normalized)
+
+
+def _coerce_survey_int(value):
+    if value in ('', None):
+        return value
+    if isinstance(value, bool):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _normalize_survey_choices(value):
+    if isinstance(value, (list, tuple, set)):
+        return '\n'.join(str(choice).strip() for choice in value if str(choice).strip())
+    return value
+
+
+def _normalize_ai_survey_question(question, index: int) -> tuple[dict | None, dict | None]:
+    if not isinstance(question, dict):
+        return None, {'survey_spec': [_('Survey question {} must be an object.').format(index)]}
+
+    normalized = dict(question)
+    variable = normalized.get('variable') or normalized.get('name') or normalized.get('key')
+    if not isinstance(variable, str) or not variable.strip():
+        return None, {'variable': [_('Survey question {} must include variable.').format(index)]}
+
+    question_type = _normalize_survey_question_type(normalized.get('type') or normalized.get('question_type'))
+    normalized['index'] = _coerce_survey_int(normalized.get('index', index))
+    normalized['variable'] = variable.strip()
+    normalized['question_name'] = str(normalized.get('question_name') or normalized.get('label') or normalized.get('title') or variable).strip()
+    normalized['question_description'] = str(normalized.get('question_description') or normalized.get('description') or '').strip()
+    normalized['required'] = _coerce_ai_bool(normalized.get('required'), default=False)
+    normalized['type'] = question_type
+    normalized['choices'] = _normalize_survey_choices(normalized.get('choices', ''))
+    if 'min' in normalized:
+        normalized['min'] = _coerce_survey_int(normalized['min'])
+    if 'max' in normalized:
+        normalized['max'] = _coerce_survey_int(normalized['max'])
+    return normalized, None
+
+
+def _normalize_ai_survey_spec_input(data: dict) -> tuple[dict | None, dict | None]:
+    raw_spec = data.get('survey_spec') or data.get('survey') or {}
+    if raw_spec and not isinstance(raw_spec, dict):
+        return None, {'survey_spec': [_('survey_spec must be an object.')]}
+
+    questions = data.get('questions')
+    if questions is None and data.get('question') is not None:
+        questions = [data.get('question')]
+    if questions is None and isinstance(raw_spec, dict):
+        questions = raw_spec.get('questions', raw_spec.get('spec', []))
+    if not isinstance(questions, list):
+        return None, {'spec': [_('Survey spec questions must be a list.')]}
+
+    normalized_questions = []
+    for index, question in enumerate(questions):
+        normalized_question, error = _normalize_ai_survey_question(question, index)
+        if error:
+            return None, error
+        normalized_questions.append(normalized_question)
+
+    return (
+        {
+            'name': str(data.get('name') or raw_spec.get('name') or 'AI generated survey').strip(),
+            'description': str(data.get('description') or raw_spec.get('description') or '').strip(),
+            'spec': normalized_questions,
+        },
+        None,
+    )
+
+
+def _survey_spec_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    mode = data.get('mode') or data.get('strategy') or operation.get('mode') or ''
+    return {
+        'target_resource_type': _normalize_survey_spec_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'merge': _coerce_ai_bool(data.get('merge'), default=False) or str(mode).strip().lower() in {'add', 'append', 'merge', 'patch'},
+        'survey_enabled': _coerce_ai_bool(data.get('survey_enabled', data.get('enabled')), default=True),
+    }
+
+
+def _merge_survey_specs(existing_spec: dict, incoming_spec: dict) -> dict:
+    if not isinstance(existing_spec, dict) or not isinstance(existing_spec.get('spec'), list) or not existing_spec.get('spec'):
+        return incoming_spec
+
+    merged_questions = []
+    position_by_variable = {}
+    for question in existing_spec.get('spec', []):
+        if not isinstance(question, dict):
+            continue
+        merged_questions.append(dict(question))
+        variable = question.get('variable')
+        if variable:
+            position_by_variable[variable] = len(merged_questions) - 1
+
+    for question in incoming_spec.get('spec', []):
+        variable = question.get('variable')
+        if variable in position_by_variable:
+            merged_questions[position_by_variable[variable]] = question
+        else:
+            position_by_variable[variable] = len(merged_questions)
+            merged_questions.append(question)
+
+    for index, question in enumerate(merged_questions):
+        question['index'] = index
+
+    return {
+        'name': incoming_spec.get('name') or existing_spec.get('name') or 'AI generated survey',
+        'description': incoming_spec.get('description') if incoming_spec.get('description') != '' else existing_spec.get('description', ''),
+        'spec': merged_questions,
+    }
+
+
+def _validate_ai_survey_spec_schema(new_spec: dict, old_spec: dict) -> dict | None:
+    schema_errors = {}
+    for field, expect_type, type_label in [('name', str, 'string'), ('description', str, 'string'), ('spec', list, 'list of items')]:
+        if field not in new_spec:
+            schema_errors[field] = [_("Field '{}' is missing from survey spec.").format(field)]
+        elif not isinstance(new_spec[field], expect_type):
+            schema_errors[field] = [_("Expected {} for field '{}', received {} type.").format(type_label, field, type(new_spec[field]).__name__)]
+    if isinstance(new_spec.get('spec'), list) and len(new_spec['spec']) < 1:
+        schema_errors['spec'] = [_("'spec' doesn't contain any items.")]
+    if schema_errors:
+        return schema_errors
+
+    variable_set = set()
+    old_spec_dict = models.JobTemplate.pivot_spec(old_spec or {})
+    for index, survey_item in enumerate(new_spec['spec']):
+        if not isinstance(survey_item, dict):
+            return {'survey_spec': [_('Survey question {} is not a json object.').format(index)]}
+        for field_name in ['type', 'question_name', 'variable', 'required']:
+            if field_name not in survey_item:
+                return {field_name: [_("'{}' missing from survey question {}").format(field_name, index)]}
+            allow_types = bool if field_name == 'required' else str
+            type_label = 'boolean' if field_name == 'required' else 'string'
+            if not isinstance(survey_item[field_name], allow_types):
+                return {field_name: [_("'{}' in survey question {} expected to be {}.").format(field_name, index, type_label)]}
+        if survey_item['variable'] in variable_set:
+            return {'variable': [_("'variable' '{}' duplicated in survey question {}.").format(survey_item['variable'], index)]}
+        variable_set.add(survey_item['variable'])
+
+        qtype = survey_item['type']
+        if qtype not in SURVEY_TYPE_MAPPING:
+            return {
+                'type': [_("'{}' in survey question {} is not one of '{}' allowed question types.").format(qtype, index, ', '.join(SURVEY_TYPE_MAPPING.keys()))]
+            }
+        if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'] != '':
+            if qtype == 'integer':
+                try:
+                    survey_item['default'] = int(survey_item['default'])
+                except ValueError:
+                    pass
+            elif qtype == 'float':
+                try:
+                    survey_item['default'] = float(survey_item['default'])
+                except ValueError:
+                    pass
+        if 'default' in survey_item and survey_item['default'] != '' and not isinstance(survey_item['default'], SURVEY_TYPE_MAPPING[qtype]):
+            type_label = qtype if qtype in ['integer', 'float'] else 'string'
+            return {'default': [_('Default value in survey question {} expected to be {}.').format(index, type_label)]}
+        for key in ['min', 'max']:
+            if key in survey_item and survey_item[key] is not None and not isinstance(survey_item[key], int):
+                return {key: [_('The {} limit in survey question {} expected to be integer.').format(key, index)]}
+        if qtype in {'multiselect', 'multiplechoice'}:
+            if 'choices' not in survey_item:
+                return {'choices': [_('Survey question {} of type {} must specify choices.').format(index, qtype)]}
+            survey_item['choices'] = _normalize_survey_choices(survey_item['choices'])
+            if not survey_item['choices']:
+                return {'choices': [_('Survey question {} of type {} must specify at least one choice.').format(index, qtype)]}
+            if 'default' in survey_item:
+                if isinstance(survey_item['default'], str):
+                    survey_item['default'] = '\n'.join(choice for choice in survey_item['default'].splitlines() if choice.strip())
+                    list_of_defaults = survey_item['default'].splitlines()
+                else:
+                    list_of_defaults = survey_item['default']
+                if qtype == 'multiplechoice' and len(list_of_defaults) > 1:
+                    return {'default': [_('Multiple Choice (Single Select) can only have one default value.')]}
+                choices = survey_item['choices'].splitlines()
+                if any(item not in choices for item in list_of_defaults):
+                    return {'default': [_('Default choice must be answered from the choices listed.')]}
+
+        if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'].startswith('$encrypted$'):
+            if qtype != 'password':
+                return {'default': [_('$encrypted$ is reserved for password question defaults.')]}
+            old_element = old_spec_dict.get(survey_item['variable'], {})
+            old_default = old_element.get('default')
+            if not (isinstance(old_default, str) and (old_default.startswith('$encrypted$') or old_default == '')):
+                return {'default': [_('$encrypted$ may not be used for a new survey password default.')]}
+            survey_item['default'] = old_default
+        elif qtype == 'password' and 'default' in survey_item and survey_item['default']:
+            survey_item['default'] = encrypt_value(survey_item['default'])
+    return None
+
+
+def _survey_spec_preview(target_type: str, target, survey_spec: dict, survey_enabled: bool) -> dict:
+    return {
+        'type': 'survey_spec',
+        'target': _target_summary(target_type, target),
+        'survey_enabled': survey_enabled,
+        'question_count': len(survey_spec.get('spec') or []),
+        'questions': [
+            {
+                'index': question.get('index'),
+                'variable': question.get('variable'),
+                'question_name': question.get('question_name'),
+                'type': question.get('type'),
+                'required': question.get('required'),
+            }
+            for question in survey_spec.get('spec') or []
+        ],
     }
 
 
@@ -2022,6 +2330,93 @@ def _validate_ai_role_assignment_operation(request, operation: dict) -> dict:
     return result
 
 
+def _validate_ai_survey_spec_operation(request, operation: dict) -> dict:
+    action = operation.get('operation')
+    payload = _survey_spec_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+    }
+
+    if action not in {'create', 'update'}:
+        result['errors'] = {'operation': [_('Survey spec operations only support create and update operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing survey target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Survey spec operations must include target_id.')]}
+        return result
+
+    target_config = _AI_SURVEY_SPEC_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    incoming_spec, spec_error = _normalize_ai_survey_spec_input(operation.get('data') or {})
+    if spec_error:
+        result['errors'] = spec_error
+        return result
+
+    survey_spec = _merge_survey_specs(target.survey_spec or {}, incoming_spec) if payload['merge'] else incoming_spec
+    schema_error = _validate_ai_survey_spec_schema(survey_spec, target.survey_spec or {})
+    if schema_error:
+        result['errors'] = schema_error
+        return result
+
+    if not request.user.can_access(target_model, 'change', target, None):
+        result['errors'] = {'permission': [_('You do not have permission to apply this survey spec operation.')]}
+        return result
+
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': 'survey_spec',
+        'object_id': target.pk,
+        'target_resource_type': payload['target_resource_type'],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+    }
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['object_id'] = target.pk
+    result['survey_enabled'] = payload['survey_enabled']
+    result['question_count'] = len(survey_spec.get('spec') or [])
+    result['target'] = _target_summary(payload['target_resource_type'], target)
+    result['validated_data'] = _redact_sensitive(
+        _json_safe(
+            {
+                **payload,
+                'survey_spec': survey_spec,
+                'question_count': len(survey_spec.get('spec') or []),
+            }
+        )
+    )
+    result['preview'] = _survey_spec_preview(payload['target_resource_type'], target, survey_spec, payload['survey_enabled'])
+    result['_survey_spec'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_survey_spec_to_save'] = survey_spec
+    result['_survey_enabled_to_save'] = payload['survey_enabled']
+    return result
+
+
 def _validate_ai_operation(request, operation: dict) -> dict:
     resource_type = operation.get('resource_type')
     action = operation.get('operation')
@@ -2039,6 +2434,8 @@ def _validate_ai_operation(request, operation: dict) -> dict:
         return _validate_ai_credential_reference_operation(request, operation)
     if resource_type == 'role_assignment':
         return _validate_ai_role_assignment_operation(request, operation)
+    if resource_type == 'survey_spec':
+        return _validate_ai_survey_spec_operation(request, operation)
 
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
@@ -2212,11 +2609,31 @@ def _save_ai_role_assignment_operation(request, validation: dict) -> dict:
     return validation
 
 
+def _save_ai_survey_spec_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    target.survey_spec = validation['_survey_spec_to_save']
+    target.survey_enabled = validation['_survey_enabled_to_save']
+    target.save(update_fields=['survey_spec', 'survey_enabled'])
+
+    validation['object'] = _serialize_ai_resource(request, validation['_target_config']['serializer'], target)
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['target'] = _target_summary(validation['target_resource_type'], target)
+    validation.pop('_survey_spec', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_survey_spec_to_save', None)
+    validation.pop('_survey_enabled_to_save', None)
+    return validation
+
+
 def _save_ai_operation(request, validation: dict) -> dict:
     if validation.get('_credential_reference'):
         return _save_ai_credential_reference_operation(request, validation)
     if validation.get('_role_assignment'):
         return _save_ai_role_assignment_operation(request, validation)
+    if validation.get('_survey_spec'):
+        return _save_ai_survey_spec_operation(request, validation)
 
     serializer = validation['_serializer']
     obj = serializer.save()
@@ -2260,6 +2677,7 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 'actor_id': operation.get('actor_id'),
                 'user_id': operation.get('user_id'),
                 'team_id': operation.get('team_id'),
+                'question_count': operation.get('question_count'),
                 'errors': _json_safe(operation.get('errors') or {}),
             }
         )
@@ -2320,6 +2738,15 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 entry.user.add(user_id)
             if team_id:
                 entry.team.add(team_id)
+            continue
+        if resource_type == 'survey_spec':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_SURVEY_SPEC_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
             continue
 
         object_id = operation.get('object_id')

@@ -7,7 +7,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.conf.models import Setting
-from awx.main.models import ActivityStream, Credential, CredentialType, Host, Inventory, InventorySource, JobTemplate, Schedule
+from awx.main.models import ActivityStream, Credential, CredentialType, Host, Inventory, InventorySource, JobTemplate, Schedule, WorkflowJobTemplate
 
 
 class FakeJSONResponse:
@@ -780,6 +780,232 @@ def test_ai_resource_action_apply_rejects_role_assignment_without_target_admin(p
     assert response.data['operations'][0]['valid'] is False
     assert 'permission' in response.data['operations'][0]['errors']
     assert rando not in job_template.execute_role
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_preview_survey_spec_without_saving(post, admin_user, job_template):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'preview',
+            'plan': {
+                'name': 'Add deploy survey',
+                'operations': [
+                    {
+                        'id': 'preview-survey',
+                        'operation': 'update',
+                        'resource_type': 'survey_spec',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'survey_spec': {
+                                'name': 'Deploy survey',
+                                'description': 'Parameters collected before launch.',
+                                'spec': [
+                                    {
+                                        'variable': 'environment',
+                                        'question_name': 'Environment',
+                                        'type': 'multiplechoice',
+                                        'required': True,
+                                        'choices': ['dev', 'prod'],
+                                        'default': 'dev',
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    operation = response.data['operations'][0]
+    assert operation['valid'] is True
+    assert operation['resource_type'] == 'survey_spec'
+    assert operation['target_resource_type'] == 'job_template'
+    assert operation['target_id'] == job_template.pk
+    assert operation['question_count'] == 1
+    assert operation['validated_data']['survey_spec']['spec'][0]['choices'] == 'dev\nprod'
+    assert operation['preview']['question_count'] == 1
+
+    job_template.refresh_from_db()
+    assert job_template.survey_spec == {}
+    assert job_template.survey_enabled is False
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_preview_survey_spec_redacts_password_default(post, admin_user, job_template):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'preview',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'preview-password-survey',
+                        'operation': 'update',
+                        'resource_type': 'survey_spec',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'questions': [
+                                {
+                                    'variable': 'vault_password',
+                                    'question_name': 'Vault password',
+                                    'type': 'password',
+                                    'default': 'super-secret',
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    operation = response.data['operations'][0]
+    assert operation['valid'] is True
+    assert operation['validated_data']['survey_spec']['spec'][0]['default'] == '$encrypted$'
+    assert response.data['plan']['operations'][0]['data']['questions'][0]['default'] == '$encrypted$'
+    job_template.refresh_from_db()
+    assert job_template.survey_spec == {}
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_merges_workflow_survey_question_and_audits(post, admin_user, organization, survey_spec_factory):
+    workflow = WorkflowJobTemplate.objects.create(
+        name='AI Workflow Survey',
+        organization=organization,
+        survey_enabled=True,
+        survey_spec=survey_spec_factory('environment'),
+    )
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Merge workflow survey',
+                'operations': [
+                    {
+                        'id': 'merge-workflow-survey',
+                        'operation': 'update',
+                        'resource_type': 'survey_spec',
+                        'data': {
+                            'target_resource_type': 'workflow_job_template',
+                            'target_id': workflow.pk,
+                            'merge': True,
+                            'questions': [
+                                {
+                                    'variable': 'change_ticket',
+                                    'question_name': 'Change ticket',
+                                    'question_description': 'Ticket approving this launch.',
+                                    'type': 'text',
+                                    'required': True,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    workflow.refresh_from_db()
+    variables = [question['variable'] for question in workflow.survey_spec['spec']]
+    assert variables == ['environment', 'change_ticket']
+    assert workflow.survey_enabled is True
+    assert response.data['operations'][0]['question_count'] == 2
+    assert response.data['operations'][0]['object_id'] == workflow.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][0]['resource_type'] == 'survey_spec'
+    assert changes['operations'][0]['question_count'] == 2
+    assert workflow in audit_entry.workflow_job_template.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_updates_terraform_survey_spec(post, admin_user, terraform_job_template):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Terraform survey',
+                'operations': [
+                    {
+                        'id': 'terraform-survey',
+                        'operation': 'create',
+                        'resource_type': 'survey_spec',
+                        'data': {
+                            'target_resource_type': 'terraform_job_template',
+                            'target_id': terraform_job_template.pk,
+                            'questions': [
+                                {
+                                    'variable': 'vm_name',
+                                    'question_name': 'VM name',
+                                    'type': 'text',
+                                    'required': True,
+                                    'min': 3,
+                                    'max': 64,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    terraform_job_template.refresh_from_db()
+    assert terraform_job_template.survey_enabled is True
+    assert terraform_job_template.survey_spec['spec'][0]['variable'] == 'vm_name'
+    assert response.data['operations'][0]['target_resource_type'] == 'terraform_job_template'
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert terraform_job_template in audit_entry.terraform_job_template.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_survey_spec_without_admin(post, rando, job_template):
+    job_template.read_role.members.add(rando)
+
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'operations': [
+                    {
+                        'id': 'forbidden-survey',
+                        'operation': 'update',
+                        'resource_type': 'survey_spec',
+                        'data': {
+                            'target_resource_type': 'job_template',
+                            'target_id': job_template.pk,
+                            'questions': [{'variable': 'environment', 'question_name': 'Environment', 'type': 'text'}],
+                        },
+                    }
+                ]
+            },
+        },
+        user=rando,
+        expect=400,
+    )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'permission' in response.data['operations'][0]['errors']
+    job_template.refresh_from_db()
+    assert job_template.survey_spec == {}
 
 
 @pytest.mark.django_db
