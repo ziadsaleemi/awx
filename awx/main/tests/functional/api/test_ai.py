@@ -15,6 +15,7 @@ from awx.main.models import (
     Inventory,
     InventorySource,
     JobTemplate,
+    Project,
     Schedule,
     WorkflowJobTemplate,
     WorkflowJobTemplateNode,
@@ -420,6 +421,184 @@ def test_ai_resource_action_apply_creates_inventory_source_and_audits_relation(p
     assert changes['mode'] == 'apply'
     assert changes['operations'][0]['resource_type'] == 'inventory_source'
     assert inventory_source in audit_entry.inventory_source.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_preview_project_file_without_saving(post, admin_user, organization, tmp_path):
+    project_dir = tmp_path / 'ai-content'
+    project_dir.mkdir()
+    project = Project.objects.create(name='AI Content Project', organization=organization, scm_type='', local_path='ai-content')
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'preview',
+                'plan': {
+                    'name': 'Preview project file',
+                    'operations': [
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {
+                                'project': project.pk,
+                                'path': 'playbooks/site.yml',
+                                'content': '---\n- hosts: all\n  gather_facts: false\n',
+                            },
+                        }
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    operation = response.data['operations'][0]
+    assert operation['valid'] is True
+    assert operation['resource_type'] == 'project_file'
+    assert operation['project_id'] == project.pk
+    assert operation['path'] == 'playbooks/site.yml'
+    assert operation['preview']['will_create'] is True
+    assert not (project_dir / 'playbooks' / 'site.yml').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_writes_project_file_then_creates_job_template(post, admin_user, organization, tmp_path):
+    project_dir = tmp_path / 'ai-content'
+    project_dir.mkdir()
+    project = Project.objects.create(name='AI Content Project', organization=organization, scm_type='', local_path='ai-content')
+    inventory = Inventory.objects.create(name='AI Content Inventory', organization=organization)
+    playbook_content = '\n'.join(
+        [
+            '---',
+            '- name: AI generated playbook',
+            '  hosts: all',
+            '  gather_facts: false',
+            '  tasks:',
+            '    - name: Show generated message',
+            '      debug:',
+            '        msg: hello from AI',
+            '',
+        ]
+    )
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'name': 'Author playbook and template',
+                    'operations': [
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {'project': project.pk, 'path': 'playbooks/site.yml', 'content': playbook_content},
+                        },
+                        {
+                            'id': 'create-template',
+                            'operation': 'create',
+                            'resource_type': 'job_template',
+                            'data': {
+                                'name': 'AI Generated Template',
+                                'project': project.pk,
+                                'playbook': 'playbooks/site.yml',
+                                'inventory': inventory.pk,
+                            },
+                        },
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=201,
+        )
+
+    playbook_path = project_dir / 'playbooks' / 'site.yml'
+    assert playbook_path.read_text() == playbook_content
+    job_template = JobTemplate.objects.get(name='AI Generated Template')
+    assert job_template.project == project
+    assert job_template.playbook == 'playbooks/site.yml'
+    assert response.data['operations'][0]['resource_type'] == 'project_file'
+    assert response.data['operations'][1]['object_id'] == job_template.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][0]['resource_type'] == 'project_file'
+    assert changes['operations'][0]['path'] == 'playbooks/site.yml'
+    assert project in audit_entry.project.all()
+    assert job_template in audit_entry.job_template.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rejects_project_file_path_traversal(post, admin_user, organization, tmp_path):
+    project_dir = tmp_path / 'ai-content'
+    project_dir.mkdir()
+    project = Project.objects.create(name='AI Content Project', organization=organization, scm_type='', local_path='ai-content')
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'operations': [
+                        {
+                            'id': 'escape-project',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {'project': project.pk, 'path': '../outside.yml', 'content': '---\n'},
+                        }
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['operations'][0]['valid'] is False
+    assert 'path' in response.data['operations'][0]['errors']
+    assert not (tmp_path / 'outside.yml').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_rolls_back_project_file_when_later_operation_fails(post, admin_user, organization, tmp_path):
+    project_dir = tmp_path / 'ai-content'
+    project_dir.mkdir()
+    project = Project.objects.create(name='AI Content Project', organization=organization, scm_type='', local_path='ai-content')
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'operations': [
+                        {
+                            'id': 'write-playbook',
+                            'operation': 'create',
+                            'resource_type': 'project_file',
+                            'data': {'project': project.pk, 'path': 'playbooks/bad.yml', 'content': '---\n- hosts: all\n'},
+                        },
+                        {
+                            'id': 'create-invalid-template',
+                            'operation': 'create',
+                            'resource_type': 'job_template',
+                            'data': {'name': 'Invalid AI Template', 'project': project.pk, 'playbook': 'playbooks/bad.yml', 'inventory': 999999},
+                        },
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['can_apply'] is False
+    assert response.data['operations'][0]['valid'] is True
+    assert response.data['operations'][1]['valid'] is False
+    assert not (project_dir / 'playbooks' / 'bad.yml').exists()
+    assert not JobTemplate.objects.filter(name='Invalid AI Template').exists()
 
 
 @pytest.mark.django_db

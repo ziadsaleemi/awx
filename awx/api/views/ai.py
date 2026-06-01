@@ -9,6 +9,7 @@ import urllib.parse
 from base64 import urlsafe_b64decode
 from collections import defaultdict
 from datetime import timedelta, timezone
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import requests
@@ -77,6 +78,9 @@ _OPENAI_MODEL_EXCLUDE_TOKENS = (
 _AI_CONTEXT_LIST_LIMIT = 25
 _AI_DIRECT_LIST_LIMIT = 200
 _AI_RESOURCE_PREVIEW_LIMIT = 10
+_AI_PROJECT_FILE_MAX_BYTES = 256 * 1024
+_AI_PROJECT_FILE_ALLOWED_SUFFIXES = {'.cfg', '.ini', '.j2', '.json', '.md', '.toml', '.txt', '.yaml', '.yml'}
+_AI_PROJECT_FILE_BLOCKED_PARTS = {'.git', '.hg', '.svn', '__pycache__'}
 
 _CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
     'input_inventories',
@@ -145,6 +149,14 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'job_template': 'job_template',
     'job_templates': 'job_template',
     'project': 'project',
+    'project_file': 'project_file',
+    'project_files': 'project_file',
+    'project_content': 'project_file',
+    'project_contents': 'project_file',
+    'playbook_file': 'project_file',
+    'playbook_files': 'project_file',
+    'role_file': 'project_file',
+    'role_files': 'project_file',
     'projects': 'project',
     'permission_assignment': 'role_assignment',
     'permission_assignments': 'role_assignment',
@@ -1518,7 +1530,7 @@ def _ai_authoring_context(user) -> dict:
         'teams': _limited_queryset_values(user, models.Team, ('id', 'name', 'organization_id'), limit=20),
         'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
         'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
-        'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'organization_id'), limit=20),
+        'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'local_path', 'organization_id'), limit=20),
         'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
         'terraform_job_templates': _limited_queryset_values(user, models.TerraformJobTemplate, ('id', 'name', 'project_id', 'target_inventory_id'), limit=20),
         'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
@@ -1538,7 +1550,7 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
     return (
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
-        'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, '
+        'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, project_file, '
         'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
         'Supported operation values: create, update, attach, detach. '
         'Use attach/detach only for credential_reference and role_assignment operations.\n'
@@ -1557,12 +1569,15 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'and either survey_spec or questions. Use update/create to replace the survey, or set merge=true to add/update questions by variable. '
         'Survey question types must be text, textarea, password, multiplechoice, multiselect, integer, or float. '
         'Never put secrets in survey defaults.\n'
+        'For project_file, data must include an existing manual project ID, relative path, and UTF-8 text content. '
+        'Use it to author playbooks, roles, defaults, vars, handlers, templates, meta, README, and ansible.cfg files inside a project before '
+        'creating or updating job templates that reference those playbooks. Do not target SCM-backed projects or hidden/source-control paths.\n'
         'Use existing numeric IDs from the supplied AWX context for related objects. '
         'Do not invent organization, project, inventory, workflow, user, team, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "..."}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -1770,6 +1785,174 @@ def _constructed_inventory_preview(request, data: dict, validated_data: dict, in
         'source_vars': _redact_sensitive(_json_safe(parsed_source_vars)),
         'truncated': host_count > len(hosts) or group_count > len(groups),
     }
+
+
+def _project_file_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    return {
+        'project_id': _positive_int(
+            data.get('project') or data.get('project_id') or data.get('target_id') or operation.get('object_id') or operation.get('target_id')
+        ),
+        'path': data.get('path') or data.get('file') or data.get('file_path') or data.get('relative_path'),
+        'content': data.get('content'),
+        'overwrite': data.get('overwrite'),
+    }
+
+
+def _coerce_ai_bool(value, default=False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'true', '1', 'yes', 'y', 'on'}:
+            return True
+        if normalized in {'false', '0', 'no', 'n', 'off', ''}:
+            return False
+    return bool(value)
+
+
+def _normalize_ai_project_file_path(raw_path) -> tuple[str | None, str | None]:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None, _('Project file path is required.')
+    normalized = raw_path.strip().replace('\\', '/')
+    relative_path = PurePosixPath(normalized)
+    if relative_path.is_absolute():
+        return None, _('Project file path must be relative.')
+    if not relative_path.name:
+        return None, _('Project file path must include a file name.')
+
+    parts = relative_path.parts
+    if any(part in {'', '.', '..'} for part in parts):
+        return None, _('Project file path cannot contain empty, current, or parent directory segments.')
+    if any(part in _AI_PROJECT_FILE_BLOCKED_PARTS or part.startswith('.') for part in parts):
+        return None, _('Project file path cannot write hidden or source-control paths.')
+    if relative_path.suffix.lower() not in _AI_PROJECT_FILE_ALLOWED_SUFFIXES:
+        return None, _('Project file extension is not allowed for AI authoring.')
+    return relative_path.as_posix(), None
+
+
+def _resolve_ai_project_file_path(project, relative_path: str) -> tuple[Path | None, Path | None, str | None]:
+    project_path = project.get_project_path(check_if_exists=False)
+    if not project_path:
+        return None, None, _('Project does not have a local path.')
+
+    base_path = Path(project_path).resolve(strict=False)
+    target_path = (base_path / relative_path).resolve(strict=False)
+    try:
+        target_path.relative_to(base_path)
+    except ValueError:
+        return None, None, _('Project file path escapes the project directory.')
+    return base_path, target_path, None
+
+
+def _validate_ai_project_file_operation(request, operation: dict) -> dict:
+    action = operation.get('operation')
+    payload = _project_file_payload(operation)
+    overwrite = _coerce_ai_bool(payload['overwrite'], default=(action == 'update'))
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': 'project_file',
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': {
+            'project': payload['project_id'],
+            'path': payload['path'],
+            'overwrite': overwrite,
+        },
+    }
+
+    if action not in {'create', 'update'}:
+        result['errors'] = {'operation': [_('Unsupported AI project file operation.')]}
+        return result
+    if not payload['project_id']:
+        result['errors'] = {'project': [_('Project is required for project_file operations.')]}
+        return result
+
+    try:
+        project = models.Project.objects.get(pk=payload['project_id'])
+    except models.Project.DoesNotExist:
+        result['errors'] = {'project': [_('Project not found.')]}
+        return result
+    if not request.user.can_access(models.Project, 'read', project):
+        result['errors'] = {'project': [_('Project not found or not accessible.')]}
+        return result
+    if not request.user.can_access(models.Project, 'change', project):
+        result['errors'] = {'permission': [_('You do not have permission to write project files.')]}
+        return result
+    if project.scm_type:
+        result['errors'] = {'project': [_('AI project file authoring only supports manual projects.')]}
+        return result
+
+    relative_path, path_error = _normalize_ai_project_file_path(payload['path'])
+    if path_error:
+        result['errors'] = {'path': [path_error]}
+        return result
+
+    content = payload['content']
+    if not isinstance(content, str):
+        result['errors'] = {'content': [_('Project file content must be a string.')]}
+        return result
+    if '\x00' in content:
+        result['errors'] = {'content': [_('Project file content cannot include null bytes.')]}
+        return result
+    content_bytes = len(content.encode('utf-8'))
+    if content_bytes > _AI_PROJECT_FILE_MAX_BYTES:
+        result['errors'] = {'content': [_('Project file content exceeds the 256 KiB AI authoring limit.')]}
+        return result
+
+    base_path, target_path, target_error = _resolve_ai_project_file_path(project, relative_path)
+    if target_error:
+        result['errors'] = {'path': [target_error]}
+        return result
+    if target_path.exists() and target_path.is_dir():
+        result['errors'] = {'path': [_('Project file path points to a directory.')]}
+        return result
+    if target_path.exists() and action == 'create' and not overwrite:
+        result['errors'] = {'path': [_('Project file already exists; use update or set overwrite=true.')]}
+        return result
+
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': 'project_file',
+        'object_id': project.pk,
+        'data': {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
+    }
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result.update(
+        {
+            'valid': True,
+            'object_id': project.pk,
+            'project_id': project.pk,
+            'path': relative_path,
+            'content_bytes': content_bytes,
+            'validated_data': {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
+            'target': _target_summary('project', project),
+            'preview': {
+                'type': 'project_file',
+                'project': project.pk,
+                'path': relative_path,
+                'content_bytes': content_bytes,
+                'will_create': not target_path.exists(),
+                'will_overwrite': target_path.exists(),
+            },
+            '_project_file': True,
+            '_project': project,
+            '_base_path': base_path,
+            '_target_path': target_path,
+            '_content': content,
+        }
+    )
+    result['data'] = {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite}
+    return result
 
 
 def _operation_object_id(operation: dict) -> int | None:
@@ -2486,6 +2669,8 @@ def _validate_ai_operation(request, operation: dict) -> dict:
         return _validate_ai_role_assignment_operation(request, operation)
     if resource_type == 'survey_spec':
         return _validate_ai_survey_spec_operation(request, operation)
+    if resource_type == 'project_file':
+        return _validate_ai_project_file_operation(request, operation)
 
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
@@ -2677,6 +2862,76 @@ def _save_ai_survey_spec_operation(request, validation: dict) -> dict:
     return validation
 
 
+def _apply_ai_project_file_operation(validation: dict):
+    target_path = validation['_target_path']
+    base_path = validation['_base_path']
+    content = validation['_content']
+    existed = target_path.exists()
+    backup = target_path.read_bytes() if existed else None
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding='utf-8')
+    except OSError as exc:
+        validation['valid'] = False
+        validation['errors'] = {'path': [_('Could not write project file: {}').format(exc)]}
+        return
+    validation['_project_file_applied'] = True
+    validation['_project_file_rollback'] = {
+        'base_path': base_path,
+        'target_path': target_path,
+        'existed': existed,
+        'backup': backup,
+    }
+
+
+def _rollback_ai_project_file_operation(validation: dict):
+    rollback = validation.get('_project_file_rollback')
+    if not rollback:
+        return
+    target_path = rollback['target_path']
+    try:
+        if rollback['existed']:
+            target_path.write_bytes(rollback['backup'])
+        elif target_path.exists():
+            target_path.unlink()
+            parent = target_path.parent
+            base_path = rollback['base_path']
+            while parent != base_path and parent.is_relative_to(base_path):
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
+    except OSError:
+        logger.warning('Could not roll back AI-authored project file %s', target_path, exc_info=True)
+
+
+def _rollback_ai_project_file_operations(operations: list):
+    for operation in reversed(operations):
+        if operation.get('_project_file_applied'):
+            _rollback_ai_project_file_operation(operation)
+
+
+def _save_ai_project_file_operation(request, validation: dict) -> dict:
+    if not validation.get('_project_file_applied'):
+        _apply_ai_project_file_operation(validation)
+    project = validation['_project']
+    validation['object'] = {
+        'project': project.pk,
+        'project_name': project.name,
+        'path': validation['path'],
+        'content_bytes': validation['content_bytes'],
+    }
+    validation['object_id'] = project.pk
+    validation['project_id'] = project.pk
+    validation.pop('_project_file', None)
+    validation.pop('_project', None)
+    validation.pop('_base_path', None)
+    validation.pop('_target_path', None)
+    validation.pop('_content', None)
+    return validation
+
+
 def _save_ai_operation(request, validation: dict) -> dict:
     if validation.get('_credential_reference'):
         return _save_ai_credential_reference_operation(request, validation)
@@ -2684,6 +2939,8 @@ def _save_ai_operation(request, validation: dict) -> dict:
         return _save_ai_role_assignment_operation(request, validation)
     if validation.get('_survey_spec'):
         return _save_ai_survey_spec_operation(request, validation)
+    if validation.get('_project_file'):
+        return _save_ai_project_file_operation(request, validation)
 
     serializer = validation['_serializer']
     obj = serializer.save()
@@ -2720,6 +2977,9 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 'object_id': operation.get('object_id'),
                 'target_resource_type': operation.get('target_resource_type'),
                 'target_id': operation.get('target_id'),
+                'project_id': operation.get('project_id'),
+                'path': operation.get('path'),
+                'content_bytes': operation.get('content_bytes'),
                 'credential_id': operation.get('credential_id'),
                 'role_id': operation.get('role_id'),
                 'role_field': operation.get('role_field'),
@@ -2798,6 +3058,13 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
             if target_relation and target_id and hasattr(entry, target_relation):
                 getattr(entry, target_relation).add(target_id)
             continue
+        if resource_type == 'project_file':
+            if not operation.get('valid'):
+                continue
+            project_id = operation.get('project_id') or operation.get('object_id')
+            if project_id:
+                entry.project.add(project_id)
+            continue
 
         object_id = operation.get('object_id')
         resource_config = _AI_RESOURCE_TYPES.get(resource_type)
@@ -2851,9 +3118,17 @@ class AIResourceActionView(APIView):
         except (ValueError, json.JSONDecodeError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        operations = [_validate_ai_operation(request, operation) for operation in plan['operations']]
+        operations = []
+        for operation in plan['operations']:
+            validated_operation = _validate_ai_operation(request, operation)
+            operations.append(validated_operation)
+            if mode == 'apply' and validated_operation.get('valid') and validated_operation.get('_project_file'):
+                _apply_ai_project_file_operation(validated_operation)
+                if not validated_operation.get('valid'):
+                    break
         can_apply = all(operation.get('valid') for operation in operations)
         if mode == 'apply' and not can_apply:
+            _rollback_ai_project_file_operations(operations)
             audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model)
             return Response(
                 {
@@ -2868,8 +3143,12 @@ class AIResourceActionView(APIView):
             )
 
         if mode == 'apply':
-            with transaction.atomic():
-                operations = [_save_ai_operation(request, operation) for operation in operations]
+            try:
+                with transaction.atomic():
+                    operations = [_save_ai_operation(request, operation) for operation in operations]
+            except Exception:
+                _rollback_ai_project_file_operations(operations)
+                raise
 
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
         audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)
