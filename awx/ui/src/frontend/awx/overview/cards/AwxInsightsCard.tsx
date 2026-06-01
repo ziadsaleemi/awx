@@ -1,13 +1,11 @@
 /**
- * G2b — Real-time Actionable Insights Card
+ * G2b - Real-time Actionable Insights Card
  *
- * Analyses job statistics from /api/v2/dashboard/ to surface anomalies:
- *   - High failure rates (>20% failure in last N jobs)
- *   - Job templates with most failures
- *   - Inventory sync failures
- *
- * Uses the existing AI backend proxy to generate a natural-language summary
- * of the detected anomalies when AI is enabled.
+ * Surfaces live reliability signals from AWX data:
+ *  - recent job failure rate and top failing templates
+ *  - execution-time anomalies against recent runtime baseline
+ *  - inventory drift from failed/stale inventory sources and active host failures
+ *  - deterministic recommendations, with optional manual AI summary
  */
 
 import {
@@ -21,6 +19,9 @@ import {
   Spinner,
   Stack,
   StackItem,
+  Text,
+  TextContent,
+  TextVariants,
 } from '@patternfly/react-core';
 import { SyncAltIcon } from '@patternfly/react-icons';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -43,23 +44,90 @@ interface TemplateJobCounts {
   failed: number;
 }
 
+interface UnifiedJob {
+  id: number;
+  name: string;
+  type: string;
+  status: string;
+  elapsed?: number;
+  finished?: string;
+  modified?: string;
+  created?: string;
+  unified_job_template?: { name: string };
+}
+
+interface ProjectSummary {
+  name: string;
+  status?: string;
+  last_job_failed?: boolean;
+  last_update_failed?: boolean;
+  last_updated?: string;
+}
+
+interface InventorySummary {
+  name: string;
+  has_inventory_sources?: boolean;
+  inventory_sources_with_failures?: number;
+  pending_deletion?: boolean;
+  total_hosts?: number;
+  total_inventory_sources?: number;
+}
+
+interface InventorySourceSummary {
+  name: string;
+  source?: string;
+  status?: string;
+  last_job_failed?: boolean;
+  last_update_failed?: boolean;
+  last_updated?: string;
+  update_on_launch?: boolean;
+  summary_fields?: {
+    inventory?: {
+      name: string;
+      hosts_with_active_failures?: number;
+      total_hosts?: number;
+    };
+  };
+}
+
+interface ListResponse<T> {
+  count: number;
+  results: T[];
+}
+
+interface RuntimeAnomaly {
+  name: string;
+  elapsed: number;
+  baseline: number;
+  status: string;
+}
+
+interface InventoryDriftSignal {
+  name: string;
+  reason: string;
+  severity: 'danger' | 'warning' | 'info';
+}
+
+interface InsightSignal {
+  title: string;
+  severity: 'danger' | 'warning' | 'info';
+}
+
 interface AggregatedStats {
   jobs: JobStats;
   projects: JobStats;
-  inventories: JobStats;
+  inventories: {
+    total: number;
+    sourceFailures: number;
+    staleSources: number;
+    hostsWithFailures: number;
+  };
   topFailedTemplates: TemplateJobCounts[];
+  runtimeAnomalies: RuntimeAnomaly[];
+  inventoryDrift: InventoryDriftSignal[];
+  recommendations: string[];
+  signals: InsightSignal[];
   failureRate: number;
-}
-
-interface RecentJobsResponse {
-  count: number;
-  results: {
-    id: number;
-    name: string;
-    type: string;
-    status: string;
-    unified_job_template?: { name: string };
-  }[];
 }
 
 interface AIChatResponse {
@@ -68,48 +136,321 @@ interface AIChatResponse {
   provider: string;
 }
 
-function useInsightsData(): { stats: AggregatedStats | null; isLoading: boolean } {
-  const { data: recentJobs, isLoading } = useSWR<RecentJobsResponse>(
-    awxAPI`/unified_jobs/?page_size=200&order_by=-finished`,
-    (url: string) =>
-      fetch(url)
-        .then((r) => r.json())
-        .catch(() => ({ count: 0, results: [] }))
-  );
+const refreshInterval = 30_000;
+const staleInventorySourceMs = 7 * 24 * 60 * 60 * 1000;
+const failedStatuses = new Set(['failed', 'error']);
+const unhealthyStatuses = new Set(['failed', 'error', 'missing']);
 
-  const stats = useMemo<AggregatedStats | null>(() => {
-    if (!recentJobs || isLoading) return null;
+async function fetchJson<T>(url: string): Promise<ListResponse<T>> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return (await response.json()) as ListResponse<T>;
+}
 
-    const jobs = recentJobs.results;
-    const total = jobs.length;
-    const failed = jobs.filter((j) => j.status === 'failed' || j.status === 'error').length;
-    const successful = jobs.filter((j) => j.status === 'successful').length;
-    const failureRate = total > 0 ? (failed / total) * 100 : 0;
+function getDateValue(value?: string) {
+  if (!value) return undefined;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
 
-    const templateFailures: Record<string, { total: number; failed: number }> = {};
-    for (const job of jobs) {
-      const name = job.unified_job_template?.name ?? job.name ?? 'Unknown';
-      if (!templateFailures[name]) templateFailures[name] = { total: 0, failed: 0 };
-      templateFailures[name].total++;
-      if (job.status === 'failed' || job.status === 'error') {
-        templateFailures[name].failed++;
-      }
+function getJobTime(job: UnifiedJob) {
+  return getDateValue(job.finished) ?? getDateValue(job.modified) ?? getDateValue(job.created);
+}
+
+export function formatSeconds(seconds: number) {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+export function getJobStatistics(jobs: UnifiedJob[]) {
+  const total = jobs.length;
+  const failed = jobs.filter((job) => failedStatuses.has(job.status)).length;
+  const successful = jobs.filter((job) => job.status === 'successful').length;
+  const failureRate = total > 0 ? (failed / total) * 100 : 0;
+  const templateFailures: Record<string, { total: number; failed: number }> = {};
+
+  for (const job of jobs) {
+    const name = job.unified_job_template?.name ?? job.name ?? 'Unknown';
+    if (!templateFailures[name]) templateFailures[name] = { total: 0, failed: 0 };
+    templateFailures[name].total++;
+    if (failedStatuses.has(job.status)) templateFailures[name].failed++;
+  }
+
+  const topFailedTemplates = Object.entries(templateFailures)
+    .map(([name, counts]) => ({ name, ...counts }))
+    .filter((template) => template.failed > 0)
+    .sort((a, b) => b.failed - a.failed || b.total - a.total)
+    .slice(0, 5);
+
+  return {
+    jobs: { total, failed, successful },
+    failureRate,
+    topFailedTemplates,
+  };
+}
+
+function median(values: number[]) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+export function getRuntimeAnomalies(jobs: UnifiedJob[]) {
+  const completedJobs = jobs
+    .filter((job) => (job.elapsed ?? 0) > 0 && Boolean(getJobTime(job)))
+    .sort((a, b) => (getJobTime(b) ?? 0) - (getJobTime(a) ?? 0));
+  const runtimes = completedJobs.map((job) => job.elapsed ?? 0);
+  const runtimeMedian = median(runtimes);
+  const runtimeAverage =
+    runtimes.length > 0 ? runtimes.reduce((sum, elapsed) => sum + elapsed, 0) / runtimes.length : 0;
+  const baseline = Math.max(runtimeMedian, runtimeAverage, 1);
+  const anomalyFloor = Math.max(baseline * 2, 60);
+
+  return completedJobs
+    .filter((job) => (job.elapsed ?? 0) >= anomalyFloor)
+    .map((job) => ({
+      name: job.unified_job_template?.name ?? job.name ?? 'Unknown',
+      elapsed: job.elapsed ?? 0,
+      baseline,
+      status: job.status,
+    }))
+    .sort((a, b) => b.elapsed - a.elapsed)
+    .slice(0, 3);
+}
+
+export function getInventoryDrift(
+  inventories: InventorySummary[],
+  inventorySources: InventorySourceSummary[],
+  now: Date
+) {
+  const drift: InventoryDriftSignal[] = [];
+
+  for (const source of inventorySources) {
+    if (
+      source.last_job_failed ||
+      source.last_update_failed ||
+      unhealthyStatuses.has(source.status ?? '')
+    ) {
+      drift.push({
+        name: source.name,
+        reason: 'inventory source update failed',
+        severity: 'danger',
+      });
+      continue;
     }
 
-    const topFailedTemplates = Object.entries(templateFailures)
-      .map(([name, counts]) => ({ name, ...counts }))
-      .filter((t) => t.failed > 0)
-      .sort((a, b) => b.failed - a.failed)
-      .slice(0, 5);
+    const lastUpdated = getDateValue(source.last_updated);
+    if (
+      source.source &&
+      source.source !== 'file' &&
+      source.source !== 'scm' &&
+      (!lastUpdated || now.getTime() - lastUpdated > staleInventorySourceMs)
+    ) {
+      drift.push({
+        name: source.name,
+        reason: 'dynamic inventory source is stale',
+        severity: 'warning',
+      });
+    }
+  }
+
+  for (const inventory of inventories) {
+    if ((inventory.inventory_sources_with_failures ?? 0) > 0) {
+      drift.push({
+        name: inventory.name,
+        reason: `${inventory.inventory_sources_with_failures ?? 0} source failure(s)`,
+        severity: 'danger',
+      });
+    }
+    if (inventory.pending_deletion) {
+      drift.push({
+        name: inventory.name,
+        reason: 'inventory pending deletion',
+        severity: 'warning',
+      });
+    }
+  }
+
+  const activeHostFailures = new Map<string, number>();
+  for (const source of inventorySources) {
+    const inventory = source.summary_fields?.inventory;
+    if (!inventory || !inventory.hosts_with_active_failures) continue;
+    activeHostFailures.set(
+      inventory.name,
+      Math.max(activeHostFailures.get(inventory.name) ?? 0, inventory.hosts_with_active_failures)
+    );
+  }
+
+  for (const [name, failures] of activeHostFailures) {
+    drift.push({
+      name,
+      reason: `${failures} host(s) have active failures`,
+      severity: 'warning',
+    });
+  }
+
+  return drift
+    .sort((a, b) => {
+      const severityOrder = { danger: 0, warning: 1, info: 2 };
+      return severityOrder[a.severity] - severityOrder[b.severity] || a.name.localeCompare(b.name);
+    })
+    .slice(0, 5);
+}
+
+export function getRecommendations(stats: {
+  failureRate: number;
+  projectFailureCount?: number;
+  topFailedTemplates: TemplateJobCounts[];
+  runtimeAnomalies: RuntimeAnomaly[];
+  inventoryDrift: InventoryDriftSignal[];
+}) {
+  const recommendations: string[] = [];
+
+  if (stats.failureRate > 20) {
+    recommendations.push('Pause noncritical launches and triage the current failure spike.');
+  }
+  if (stats.topFailedTemplates.length > 0) {
+    recommendations.push(`Inspect "${stats.topFailedTemplates[0].name}" before the next run.`);
+  }
+  if ((stats.projectFailureCount ?? 0) > 0) {
+    recommendations.push('Sync failed or missing projects before dependent launches.');
+  }
+  if (stats.runtimeAnomalies.length > 0) {
+    recommendations.push(
+      `Review runtime growth for "${stats.runtimeAnomalies[0].name}" and recent task output.`
+    );
+  }
+  if (stats.inventoryDrift.length > 0) {
+    recommendations.push(
+      `Sync or repair "${stats.inventoryDrift[0].name}" to clear inventory drift.`
+    );
+  }
+
+  return recommendations.slice(0, 4);
+}
+
+export function buildInsightSignals(stats: AggregatedStats) {
+  const signals: InsightSignal[] = [];
+
+  if (stats.failureRate > 20) {
+    signals.push({
+      severity: 'warning',
+      title: `High failure rate: ${stats.failureRate.toFixed(1)}% of recent jobs failed`,
+    });
+  }
+  if (stats.topFailedTemplates.length > 0) {
+    signals.push({
+      severity: 'warning',
+      title: `Top failing template: "${stats.topFailedTemplates[0].name}" (${stats.topFailedTemplates[0].failed} failures)`,
+    });
+  }
+  if (stats.projects.failed > 0) {
+    signals.push({
+      severity: 'warning',
+      title: `Project sync issues: ${stats.projects.failed} project(s) unhealthy`,
+    });
+  }
+  if (stats.runtimeAnomalies.length > 0) {
+    signals.push({
+      severity: 'warning',
+      title: `Runtime anomaly: "${stats.runtimeAnomalies[0].name}" ran ${formatSeconds(
+        stats.runtimeAnomalies[0].elapsed
+      )}`,
+    });
+  }
+  if (stats.inventoryDrift.length > 0) {
+    signals.push({
+      severity: stats.inventoryDrift[0].severity,
+      title: `Inventory drift: ${stats.inventoryDrift[0].name} - ${stats.inventoryDrift[0].reason}`,
+    });
+  }
+
+  return signals;
+}
+
+function useInsightsData(): { stats: AggregatedStats | null; isLoading: boolean } {
+  const swrOptions = { refreshInterval };
+  const { data: recentJobs, isLoading: jobsLoading } = useSWR<ListResponse<UnifiedJob>>(
+    awxAPI`/unified_jobs/?page_size=200&order_by=-finished`,
+    fetchJson,
+    swrOptions
+  );
+  const { data: projects, isLoading: projectsLoading } = useSWR<ListResponse<ProjectSummary>>(
+    awxAPI`/projects/?page_size=100&order_by=-modified`,
+    fetchJson,
+    swrOptions
+  );
+  const { data: inventories, isLoading: inventoriesLoading } = useSWR<
+    ListResponse<InventorySummary>
+  >(awxAPI`/inventories/?page_size=100&order_by=-modified`, fetchJson, swrOptions);
+  const { data: inventorySources, isLoading: sourcesLoading } = useSWR<
+    ListResponse<InventorySourceSummary>
+  >(awxAPI`/inventory_sources/?page_size=100&order_by=-modified`, fetchJson, swrOptions);
+
+  const isLoading = jobsLoading || projectsLoading || inventoriesLoading || sourcesLoading;
+
+  const stats = useMemo<AggregatedStats | null>(() => {
+    if (!recentJobs || !projects || !inventories || !inventorySources || isLoading) return null;
+
+    const jobStatistics = getJobStatistics(recentJobs.results);
+    const runtimeAnomalies = getRuntimeAnomalies(recentJobs.results);
+    const inventoryDrift = getInventoryDrift(
+      inventories.results,
+      inventorySources.results,
+      new Date()
+    );
+    const projectFailures = projects.results.filter(
+      (project) =>
+        project.last_job_failed ||
+        project.last_update_failed ||
+        unhealthyStatuses.has(project.status ?? '')
+    ).length;
+    const inventorySourceFailures = inventorySources.results.filter(
+      (source) =>
+        source.last_job_failed ||
+        source.last_update_failed ||
+        unhealthyStatuses.has(source.status ?? '')
+    ).length;
+    const staleSources = inventoryDrift.filter((signal) => signal.reason.includes('stale')).length;
+    const hostsWithFailures = inventorySources.results.reduce(
+      (total, source) =>
+        total + (source.summary_fields?.inventory?.hosts_with_active_failures ?? 0),
+      0
+    );
+
+    const partialStats = {
+      ...jobStatistics,
+      runtimeAnomalies,
+      inventoryDrift,
+    };
+    const aggregatedStats: AggregatedStats = {
+      ...partialStats,
+      projects: {
+        total: projects.results.length,
+        failed: projectFailures,
+        successful: projects.results.filter((project) => project.status === 'successful').length,
+      },
+      inventories: {
+        total: inventories.results.length,
+        sourceFailures: inventorySourceFailures,
+        staleSources,
+        hostsWithFailures,
+      },
+      recommendations: getRecommendations({
+        ...partialStats,
+        projectFailureCount: projectFailures,
+      }),
+      signals: [],
+    };
 
     return {
-      jobs: { total, failed, successful },
-      projects: { total: 0, failed: 0, successful: 0 },
-      inventories: { total: 0, failed: 0, successful: 0 },
-      topFailedTemplates,
-      failureRate,
+      ...aggregatedStats,
+      signals: buildInsightSignals(aggregatedStats),
     };
-  }, [isLoading, recentJobs]);
+  }, [inventories, inventorySources, isLoading, projects, recentJobs]);
 
   return { stats, isLoading };
 }
@@ -129,16 +470,25 @@ export function AwxInsightsCard() {
     setAiLoading(true);
     setAiError(null);
     try {
-      const prompt = `Analyse the following AWX automation platform job statistics and provide 2-3 concise, actionable recommendations for the platform administrator.
+      const prompt = `Analyze the following AWX automation platform reliability signals and provide 2-3 concise, actionable recommendations for the platform administrator.
 
-Job statistics (last 200 jobs):
+Recent jobs:
 - Total jobs: ${stats.jobs.total}
 - Successful: ${stats.jobs.successful}
 - Failed: ${stats.jobs.failed}
 - Failure rate: ${stats.failureRate.toFixed(1)}%
 
 Top failing job templates:
-${stats.topFailedTemplates.map((t) => `  - "${t.name}": ${t.failed} failures out of ${t.total} runs`).join('\n')}
+${stats.topFailedTemplates.map((template) => `  - "${template.name}": ${template.failed} failures out of ${template.total} runs`).join('\n')}
+
+Runtime anomalies:
+${stats.runtimeAnomalies.map((job) => `  - "${job.name}": ${formatSeconds(job.elapsed)} runtime, baseline ${formatSeconds(job.baseline)}`).join('\n')}
+
+Inventory drift:
+${stats.inventoryDrift.map((signal) => `  - "${signal.name}": ${signal.reason}`).join('\n')}
+
+Current recommendations:
+${stats.recommendations.map((recommendation) => `  - ${recommendation}`).join('\n')}
 
 Be specific, brief, and actionable. Format as a short bulleted list.`;
 
@@ -148,7 +498,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
       >(awxAPI`/ai/chat/`, {
         messages: [{ role: 'user', content: prompt }],
         system_override:
-          'You are an AWX automation reliability engineer. Provide concise, actionable recommendations based on job statistics. Use plain text with bullet points. No markdown headings or code blocks.',
+          'You are an AWX automation reliability engineer. Provide concise, actionable recommendations based on job, project, runtime, and inventory signals. Use plain text with bullet points. No markdown headings or code blocks.',
       });
       setAiSummary(resp.message.content);
     } catch {
@@ -159,30 +509,11 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
     }
   }, [aiConfigured, aiEnabled, stats, t]);
 
-  const anomalies: string[] = [];
-  if (stats) {
-    if (stats.failureRate > 20) {
-      anomalies.push(
-        t('High failure rate: {{rate}}% of recent jobs failed', {
-          rate: stats.failureRate.toFixed(1),
-        })
-      );
-    }
-    if (stats.topFailedTemplates.length > 0) {
-      anomalies.push(
-        t('Top failing template: "{{name}}" ({{count}} failures)', {
-          name: stats.topFailedTemplates[0].name,
-          count: stats.topFailedTemplates[0].failed,
-        })
-      );
-    }
-  }
-
   return (
     <PageDashboardCard
       title={t('Automation Insights')}
       width="half"
-      height="sm"
+      height="md"
       headerControls={
         aiEnabled && aiConfigured ? (
           <Button
@@ -206,18 +537,27 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
           <Spinner size="lg" />
         ) : (
           <Stack hasGutter>
-            {anomalies.length > 0 && (
+            {stats?.signals.length ? (
               <StackItem>
-                {anomalies.map((msg, i) => (
+                {stats.signals.slice(0, 4).map((signal) => (
                   <Alert
-                    key={i}
-                    variant="warning"
+                    key={signal.title}
+                    variant={signal.severity}
                     isInline
                     isPlain
-                    title={msg}
+                    title={signal.title}
                     style={{ marginBottom: 6 }}
                   />
                 ))}
+              </StackItem>
+            ) : (
+              <StackItem>
+                <Alert
+                  variant="success"
+                  isInline
+                  isPlain
+                  title={t('No active reliability anomalies detected')}
+                />
               </StackItem>
             )}
 
@@ -241,15 +581,42 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
                     {(stats?.failureRate ?? 0).toFixed(1)}%
                   </DescriptionListDescription>
                 </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Runtime anomalies')}</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {stats?.runtimeAnomalies.length ?? 0}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Inventory drift')}</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {stats?.inventoryDrift.length ?? 0}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
               </DescriptionList>
             </StackItem>
+
+            {!!stats?.recommendations.length && (
+              <StackItem>
+                <TextContent>
+                  <Text component={TextVariants.h4} style={{ margin: 0, fontSize: 13 }}>
+                    {t('Recommended actions')}
+                  </Text>
+                </TextContent>
+                <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 13 }}>
+                  {stats.recommendations.map((recommendation) => (
+                    <li key={recommendation}>{recommendation}</li>
+                  ))}
+                </ul>
+              </StackItem>
+            )}
 
             {aiEnabled && aiConfigured && (
               <StackItem>
                 {aiLoading ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Spinner size="sm" />
-                    <span style={{ fontSize: 13 }}>{t('Generating AI insights…')}</span>
+                    <span style={{ fontSize: 13 }}>{t('Generating AI insights...')}</span>
                   </div>
                 ) : aiSummary ? (
                   <div
