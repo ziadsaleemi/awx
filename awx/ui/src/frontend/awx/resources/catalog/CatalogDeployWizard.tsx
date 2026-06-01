@@ -42,14 +42,25 @@ interface VmSizePreset {
   enabled?: boolean;
 }
 
+type SurveyQuestionType =
+  | 'text'
+  | 'textarea'
+  | 'password'
+  | 'integer'
+  | 'float'
+  | 'multiplechoice'
+  | 'multiselect';
+
 interface SchemaProperty {
-  type?: 'string' | 'integer' | 'number' | 'boolean';
+  type?: 'string' | 'integer' | 'number' | 'boolean' | 'array';
   title?: string;
   description?: string;
   default?: unknown;
   minimum?: number;
   maximum?: number;
   enum?: string[];
+  items?: { type: 'string'; enum?: string[] };
+  surveyType?: SurveyQuestionType;
 }
 
 interface JsonSchema {
@@ -68,9 +79,9 @@ interface WjtSurveyQuestion {
   question_name: string;
   question_description?: string;
   required: boolean;
-  type: 'text' | 'textarea' | 'password' | 'integer' | 'float' | 'multiplechoice' | 'multiselect';
+  type: SurveyQuestionType;
   default?: unknown;
-  choices?: string; // newline-separated choices for multiplechoice/multiselect
+  choices?: string | string[]; // newline-separated or list choices for multiplechoice/multiselect
   min?: number;
   max?: number;
 }
@@ -79,6 +90,27 @@ interface WjtSurveySpec {
   name: string;
   description?: string;
   spec: WjtSurveyQuestion[];
+}
+
+function normalizeSurveyChoices(choices: unknown): string[] {
+  const rawChoices = Array.isArray(choices)
+    ? choices
+    : typeof choices === 'string'
+      ? choices.split('\n')
+      : [];
+  return rawChoices.map((choice) => String(choice).trim()).filter((choice) => choice.length > 0);
+}
+
+function defaultToFormValue(prop: SchemaProperty): string {
+  if (prop.default === undefined || prop.default === null || prop.default === '') return '';
+  if (prop.type === 'array' || Array.isArray(prop.default)) {
+    return normalizeSurveyChoices(prop.default).join('\n');
+  }
+  return String(prop.default);
+}
+
+function formValueToArray(value: string | undefined): string[] {
+  return normalizeSurveyChoices(value ?? '');
 }
 
 /** Convert an AWX WJT survey spec into the JsonSchema format used by the form renderer. */
@@ -90,12 +122,15 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     const prop: SchemaProperty = {
       title: q.question_name,
       description: q.question_description || undefined,
+      surveyType: q.type,
     };
 
     if (q.type === 'integer') {
       prop.type = 'integer';
     } else if (q.type === 'float') {
       prop.type = 'number';
+    } else if (q.type === 'multiselect') {
+      prop.type = 'array';
     } else {
       prop.type = 'string';
     }
@@ -107,9 +142,12 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     if (q.min !== undefined) prop.minimum = q.min;
     if (q.max !== undefined) prop.maximum = q.max;
 
-    if (q.type === 'multiplechoice' && q.choices) {
-      const choicesArr = q.choices.split('\n');
-      prop.enum = choicesArr.map((c) => c.trim()).filter(Boolean);
+    if ((q.type === 'multiplechoice' || q.type === 'multiselect') && q.choices) {
+      const choices = normalizeSurveyChoices(q.choices);
+      prop.enum = choices;
+      if (q.type === 'multiselect') {
+        prop.items = { type: 'string', enum: choices };
+      }
     }
 
     properties[q.variable] = prop;
@@ -344,7 +382,7 @@ export function CatalogDeployContent({
   const initialFormValues = useMemo((): Record<string, string> => {
     const values: Record<string, string> = {};
     for (const [key, prop] of Object.entries(properties)) {
-      values[key] = prop.default !== undefined ? String(prop.default) : '';
+      values[key] = defaultToFormValue(prop);
     }
     Object.assign(values, prefilledValues);
 
@@ -536,6 +574,25 @@ export function CatalogDeployContent({
     setFieldErrors((prev) => ({ ...prev, [key]: '' }));
   }, []);
 
+  const setMultiSelectValue = useCallback(
+    (key: string, option: string, checked: boolean, options: string[]) => {
+      setFormValues((prev) => {
+        const selected = new Set(formValueToArray(prev[key]));
+        if (checked) {
+          selected.add(option);
+        } else {
+          selected.delete(option);
+        }
+        return {
+          ...prev,
+          [key]: options.filter((candidate) => selected.has(candidate)).join('\n'),
+        };
+      });
+      setFieldErrors((prev) => ({ ...prev, [key]: '' }));
+    },
+    []
+  );
+
   const validate = (): boolean => {
     let valid = true;
 
@@ -579,7 +636,9 @@ export function CatalogDeployContent({
       for (const [key, prop] of Object.entries(properties)) {
         const raw = resolvedValues[key];
         if (raw === '' || raw === undefined) continue;
-        if (prop.type === 'integer' || prop.type === 'number') {
+        if (prop.type === 'array' || prop.surveyType === 'multiselect') {
+          extraVars[key] = formValueToArray(raw);
+        } else if (prop.type === 'integer' || prop.type === 'number') {
           const parsed = Number(raw);
           if (!Number.isNaN(parsed)) extraVars[key] = parsed;
         } else if (prop.type === 'boolean') {
@@ -868,6 +927,43 @@ export function CatalogDeployContent({
                         );
                       }
 
+                      if (prop.surveyType === 'multiselect' && prop.enum && prop.enum.length > 0) {
+                        const selectedValues = formValueToArray(formValues[key]);
+                        return (
+                          <FormGroup
+                            key={key}
+                            label={fieldLabel}
+                            isRequired={isReq}
+                            fieldId={fieldId}
+                          >
+                            {prop.description && (
+                              <HelperText style={{ marginBottom: '0.25rem' }}>
+                                <HelperTextItem>{prop.description}</HelperTextItem>
+                              </HelperText>
+                            )}
+                            <div style={{ display: 'grid', gap: '0.5rem' }}>
+                              {prop.enum.map((opt, index) => (
+                                <Checkbox
+                                  key={opt}
+                                  id={`${fieldId}-${index}`}
+                                  label={opt}
+                                  isChecked={selectedValues.includes(opt)}
+                                  onChange={(_event, checked) =>
+                                    setMultiSelectValue(key, opt, checked, prop.enum ?? [])
+                                  }
+                                  isDisabled={isEffectivelyDisabled || isSubmitting}
+                                />
+                              ))}
+                            </div>
+                            {fieldError && (
+                              <HelperText>
+                                <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                              </HelperText>
+                            )}
+                          </FormGroup>
+                        );
+                      }
+
                       if (prop.enum && prop.enum.length > 0) {
                         return (
                           <FormGroup
@@ -949,6 +1045,37 @@ export function CatalogDeployContent({
             const fieldLabel = prop.title ?? key;
             const fieldId = `deploy-field-${key}`;
             const isAdminDisabledField = disabledFieldSet.has(key);
+            if (prop.surveyType === 'multiselect' && prop.enum && prop.enum.length > 0) {
+              const selectedValues = formValueToArray(formValues[key]);
+              return (
+                <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
+                  {prop.description && (
+                    <HelperText style={{ marginBottom: '0.25rem' }}>
+                      <HelperTextItem>{prop.description}</HelperTextItem>
+                    </HelperText>
+                  )}
+                  <div style={{ display: 'grid', gap: '0.5rem' }}>
+                    {prop.enum.map((opt, index) => (
+                      <Checkbox
+                        key={opt}
+                        id={`${fieldId}-${index}`}
+                        label={opt}
+                        isChecked={selectedValues.includes(opt)}
+                        onChange={(_event, checked) =>
+                          setMultiSelectValue(key, opt, checked, prop.enum ?? [])
+                        }
+                        isDisabled={isAdminDisabledField || isSubmitting}
+                      />
+                    ))}
+                  </div>
+                  {fieldError && (
+                    <HelperText>
+                      <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                    </HelperText>
+                  )}
+                </FormGroup>
+              );
+            }
             if (prop.enum && prop.enum.length > 0) {
               return (
                 <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
