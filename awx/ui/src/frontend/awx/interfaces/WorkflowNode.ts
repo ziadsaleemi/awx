@@ -10,7 +10,8 @@ export type WorkflowNodeType =
   | 'inventory_update'
   | 'system_job'
   | 'terraform_job'
-  | 'eda_rulebook';
+  | 'eda_rulebook'
+  | 'ai_task';
 
 export interface WorkflowNode {
   id: number;
@@ -59,7 +60,8 @@ export interface WorkflowNode {
         | 'inventory_update'
         | 'system_job'
         | 'terraform_job'
-        | 'eda_rulebook';
+        | 'eda_rulebook'
+        | 'ai_task';
       timeout?: number;
     };
     eda_rulebook?: {
@@ -67,6 +69,12 @@ export interface WorkflowNode {
       activation_id?: string;
       event_source?: string;
       event_source_status?: string;
+      status?: string;
+    };
+    ai_task?: {
+      prompt: string;
+      model?: string;
+      approval_required?: boolean;
       status?: string;
     };
     inventory: SummaryFieldInventory;
@@ -97,6 +105,19 @@ export interface WorkflowNode {
   eda_activation_id: string;
   eda_event_source: string;
   eda_event_source_status: string;
+  ai_task_prompt: string;
+  ai_task_model: string;
+  ai_task_approval_required: boolean;
+  ai_task_status: string;
+  ai_task_result: {
+    status?: string;
+    provider?: string;
+    model?: string;
+    response?: string;
+    plan?: object | null;
+    error?: string;
+    approval_required?: boolean;
+  };
   success_nodes: number[];
   failure_nodes: number[];
   always_nodes: number[];

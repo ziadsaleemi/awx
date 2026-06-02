@@ -107,7 +107,7 @@ from awx.main.models import (
 )
 from awx.main.models.base import VERBOSITY_CHOICES, NEW_JOB_TYPE_CHOICES
 from awx.main.models.rbac import role_summary_fields_generator, give_creator_permissions, get_role_codenames, to_permissions, get_role_from_object_role
-from awx.main.models.workflow import WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 from awx.main.fields import ImplicitRoleField
 from awx.main.utils import (
     get_model_for_type,
@@ -3897,9 +3897,7 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
         if obj.target_inventory_id:
             res['target_inventory'] = self.reverse('api:inventory_detail', kwargs={'pk': obj.target_inventory_id})
         if obj.execution_environment_id:
-            res['execution_environment'] = self.reverse(
-                'api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id}
-            )
+            res['execution_environment'] = self.reverse('api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id})
         return res
 
 
@@ -3935,9 +3933,7 @@ class TerraformJobSerializer(UnifiedJobSerializer):
     def get_related(self, obj):
         res = super().get_related(obj)
         if obj.terraform_job_template_id:
-            res['terraform_job_template'] = self.reverse(
-                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
-            )
+            res['terraform_job_template'] = self.reverse('api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id})
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
         res['cancel'] = self.reverse('api:terraform_job_cancel', kwargs={'pk': obj.pk})
@@ -3947,10 +3943,9 @@ class TerraformJobSerializer(UnifiedJobSerializer):
         try:
             return obj.result_stdout
         except StdoutMaxBytesExceeded as e:
-            return _(
-                "Standard Output too large to display ({text_size} bytes), "
-                "only download supported for sizes over {supported_size} bytes."
-            ).format(text_size=e.total, supported_size=e.supported)
+            return _("Standard Output too large to display ({text_size} bytes), " "only download supported for sizes over {supported_size} bytes.").format(
+                text_size=e.total, supported_size=e.supported
+            )
 
 
 class TerraformJobListSerializer(TerraformJobSerializer, UnifiedJobListSerializer):
@@ -4002,32 +3997,19 @@ class CatalogItemSerializer(BaseSerializer):
         res['deploy'] = self.reverse('api:catalog_item_deploy', kwargs={'pk': obj.pk})
         res['deploy_survey'] = self.reverse('api:catalog_item_deploy_survey', kwargs={'pk': obj.pk})
         if obj.provision_workflow_id:
-            res['provision_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id}
-            )
+            res['provision_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id})
         if obj.terraform_job_template_id:
-            res['terraform_job_template'] = self.reverse(
-                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
-            )
+            res['terraform_job_template'] = self.reverse('api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id})
         if obj.deprovision_workflow_id:
-            res['deprovision_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id}
-            )
+            res['deprovision_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id})
         if obj.configure_workflow_id:
-            res['configure_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.configure_workflow_id}
-            )
+            res['configure_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.configure_workflow_id})
         if obj.validate_workflow_id:
-            res['validate_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.validate_workflow_id}
-            )
+            res['validate_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.validate_workflow_id})
         # Per-provider WJT survey links
         if obj.provider_workflows and isinstance(obj.provider_workflows, dict):
             res['provider_workflow_surveys'] = {
-                provider: self.reverse(
-                    'api:workflow_job_template_survey_spec', kwargs={'pk': wjt_pk}
-                )
-                for provider, wjt_pk in obj.provider_workflows.items()
+                provider: self.reverse('api:workflow_job_template_survey_spec', kwargs={'pk': wjt_pk}) for provider, wjt_pk in obj.provider_workflows.items()
             }
         return res
 
@@ -4101,6 +4083,7 @@ class CatalogDeploymentSerializer(BaseSerializer):
         if obj.expires_at is None:
             return None
         from django.utils.timezone import now as utcnow
+
         delta = obj.expires_at - utcnow()
         return max(0, int(delta.total_seconds()))
 
@@ -4556,7 +4539,13 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
     failure_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     always_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     exclude_errors = ('required',)  # required variables may be provided by WFJT or on launch
-    eda_fields = ('node_type', 'eda_rulebook_name', 'eda_activation_id', 'eda_event_source', 'eda_event_source_status')
+    eda_fields = ('eda_rulebook_name', 'eda_activation_id', 'eda_event_source', 'eda_event_source_status')
+    ai_fields = ('ai_task_prompt', 'ai_task_model', 'ai_task_approval_required', 'ai_task_status', 'ai_task_result')
+    virtual_node_fields = ('node_type',) + eda_fields + ai_fields
+
+    def _submitted_metadata_value(self, field_name):
+        initial_data = getattr(self, 'initial_data', {}) or {}
+        return field_name in initial_data and initial_data[field_name] not in ('', None, {}, [])
 
     class Meta:
         model = WorkflowJobTemplateNode
@@ -4579,6 +4568,11 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
             'eda_activation_id',
             'eda_event_source',
             'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
         )
 
     def get_related(self, obj):
@@ -4614,14 +4608,28 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
                 'event_source': obj.eda_event_source,
                 'event_source_status': obj.eda_event_source_status,
             }
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            summary_fields['ai_task'] = {
+                'prompt': obj.ai_task_prompt,
+                'model': obj.ai_task_model,
+                'approval_required': obj.ai_task_approval_required,
+                'status': obj.ai_task_status or 'pending',
+            }
         return summary_fields
 
     def validate(self, attrs):
-        eda_values = {field_name: attrs[field_name] for field_name in self.eda_fields if field_name in attrs}
+        virtual_values = {
+            field_name: attrs[field_name]
+            for field_name in self.virtual_node_fields
+            if field_name in attrs and field_name in (getattr(self, 'initial_data', {}) or {})
+        }
         unified_job_template_submitted = 'unified_job_template' in attrs
         submitted_unified_job_template = attrs.get('unified_job_template')
         attrs = super(WorkflowJobTemplateNodeSerializer, self).validate(attrs)
-        attrs.update(eda_values)
+        for field_name in self.eda_fields + self.ai_fields:
+            if field_name not in virtual_values:
+                attrs.pop(field_name, None)
+        attrs.update(virtual_values)
         if unified_job_template_submitted:
             attrs['unified_job_template'] = submitted_unified_job_template
 
@@ -4642,8 +4650,18 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
                 raise serializers.ValidationError({'eda_rulebook_name': _('This field is required for EDA rulebook nodes.')})
             return attrs
 
-        if any(attrs.get(field_name) for field_name in self.eda_fields if field_name != 'node_type'):
+        if node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            if unified_job_template is not None:
+                raise serializers.ValidationError({'unified_job_template': _('AI task nodes cannot also reference a unified job template.')})
+            prompt = attrs.get('ai_task_prompt') or getattr(self.instance, 'ai_task_prompt', '')
+            if not prompt:
+                raise serializers.ValidationError({'ai_task_prompt': _('This field is required for AI task nodes.')})
+            return attrs
+
+        if any(self._submitted_metadata_value(field_name) for field_name in self.eda_fields):
             raise serializers.ValidationError({'node_type': _('EDA metadata is only valid when node_type is eda_rulebook.')})
+        if any(self._submitted_metadata_value(field_name) for field_name in self.ai_fields):
+            raise serializers.ValidationError({'node_type': _('AI task metadata is only valid when node_type is ai_task.')})
 
         return attrs
 
@@ -4677,6 +4695,11 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             'eda_activation_id',
             'eda_event_source',
             'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
         )
 
     def get_related(self, obj):
@@ -4703,6 +4726,13 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
                 'event_source': obj.eda_event_source,
                 'event_source_status': obj.eda_event_source_status,
                 'status': obj.bypassed_job_status or 'pending',
+            }
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            summary_fields['ai_task'] = {
+                'prompt': obj.ai_task_prompt,
+                'model': obj.ai_task_model,
+                'approval_required': obj.ai_task_approval_required,
+                'status': obj.ai_task_status or obj.bypassed_job_status or 'pending',
             }
         return summary_fields
 

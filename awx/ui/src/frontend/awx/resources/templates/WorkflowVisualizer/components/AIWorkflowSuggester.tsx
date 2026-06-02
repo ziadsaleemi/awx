@@ -52,6 +52,7 @@ interface AIWorkflowPlanNode {
   description?: string;
   template_id?: number;
   template_name?: string;
+  model?: string;
   after?: string | string[];
   run?: 'success' | 'failure' | 'always' | 'root';
   approval_timeout?: number;
@@ -136,6 +137,7 @@ Schema:
       "type": "job|workflow_job|terraform_job|project_update|inventory_update|system_job|workflow_approval|eda_rulebook|ai_task",
       "template_id": 123,
       "template_name": "exact existing AWX template name when template_id is unknown",
+      "model": "optional model override for ai_task nodes",
       "description": "what this node does",
       "after": "previous-node-id",
       "run": "success|failure|always|root",
@@ -151,7 +153,7 @@ Schema:
 Use only available AWX template ids/names from context for executable nodes.
 Use workflow_approval for human gates.
 Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX persists these nodes and can create/start/poll activation status from the configured EDA Controller at runtime.
-Use ai_task only when user explicitly asks for runtime AI behavior; these are preview-only until AWX persistence supports them.
+Use ai_task only when user explicitly asks for runtime AI behavior; AWX persists these nodes and generates execution-plan artifacts from the configured AI provider at runtime.
 List at most 8 nodes.`;
 
 const typeAliases: Record<string, UnifiedJobType | 'eda_rulebook' | 'ai_task'> = {
@@ -273,9 +275,7 @@ function resolveWorkflowPlan(
         planNode,
         key,
         nodeType,
-        valid: false,
-        error:
-          'AI task nodes are preview-only until AWX workflow persistence and runtime execution support them.',
+        valid: true,
       };
     }
 
@@ -498,7 +498,9 @@ export function AIWorkflowSuggester() {
       const nodeDescription = node.planNode.description || node.template?.description || '';
       const nodeType = node.nodeType;
       const isEda = nodeType === 'eda_rulebook';
+      const isAi = nodeType === 'ai_task';
       const isApproval = nodeType === RESOURCE_TYPE.workflow_approval;
+      const aiPrompt = node.planNode.description || node.planNode.name;
       const nodeToCreate = {
         id: nodeId,
         type: 'node',
@@ -513,11 +515,14 @@ export function AIWorkflowSuggester() {
             failure_nodes: [],
             success_nodes: [],
             identifier: nodeName,
-            node_type: isEda ? RESOURCE_TYPE.eda_rulebook : undefined,
+            node_type: isEda ? RESOURCE_TYPE.eda_rulebook : isAi ? RESOURCE_TYPE.ai_task : undefined,
             eda_rulebook_name: isEda ? nodeName : undefined,
             eda_activation_id: isEda ? node.planNode.template_name || '' : undefined,
             eda_event_source: isEda ? node.planNode.description || '' : undefined,
             eda_event_source_status: isEda ? 'planned' : undefined,
+            ai_task_prompt: isAi ? aiPrompt : undefined,
+            ai_task_model: isAi ? node.planNode.model || '' : undefined,
+            ai_task_approval_required: isAi ? true : undefined,
             all_parents_must_converge: node.planNode.convergence === 'all',
             summary_fields: {
               ...(isEda
@@ -529,6 +534,15 @@ export function AIWorkflowSuggester() {
                       event_source_status: 'planned',
                     },
                   }
+                : isAi
+                  ? {
+                      ai_task: {
+                        prompt: aiPrompt,
+                        model: node.planNode.model || '',
+                        approval_required: true,
+                        status: 'pending',
+                      },
+                    }
                 : {
                     unified_job_template: {
                       id: isApproval ? -1 : Number(node.template?.id || 0),

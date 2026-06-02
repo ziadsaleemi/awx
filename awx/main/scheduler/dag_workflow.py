@@ -6,7 +6,7 @@ from awx.main.models import (
     WorkflowJobTemplateNode,
     WorkflowJobNode,
 )
-from awx.main.models.workflow import WORKFLOW_NODE_TYPE_EDA_RULEBOOK
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK
 
 # AWX
 from awx.main.scheduler.dag_simple import SimpleDAG
@@ -52,11 +52,17 @@ class WorkflowDAG(SimpleDAG):
     def _is_eda_rulebook_node(self, obj):
         return getattr(obj, 'node_type', None) == WORKFLOW_NODE_TYPE_EDA_RULEBOOK
 
+    def _is_ai_task_node(self, obj):
+        return getattr(obj, 'node_type', None) == WORKFLOW_NODE_TYPE_AI_TASK
+
+    def _is_virtual_node(self, obj):
+        return self._is_eda_rulebook_node(obj) or self._is_ai_task_node(obj)
+
     def _node_waits_for_virtual_success(self, obj):
-        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and self._is_eda_rulebook_node(obj)
+        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and self._is_virtual_node(obj)
 
     def _node_waits_for_job_or_virtual_success(self, obj):
-        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and (obj.unified_job_template or self._is_eda_rulebook_node(obj))
+        return obj.do_not_run is False and not obj.job and not obj.bypassed_job_status and (obj.unified_job_template or self._is_virtual_node(obj))
 
     def _are_relevant_parents_finished(self, node):
         obj = node['node_object']
@@ -66,7 +72,7 @@ class WorkflowDAG(SimpleDAG):
                 continue
             elif p.bypassed_job_status:
                 continue
-            elif self._is_eda_rulebook_node(p):
+            elif self._is_virtual_node(p):
                 return False
             elif p.unified_job_template is None:
                 continue
@@ -125,7 +131,7 @@ class WorkflowDAG(SimpleDAG):
                     nodes.extend(self.get_children(obj, 'failure_nodes') + self.get_children(obj, 'always_nodes'))
                 elif obj.job.status == 'successful':
                     nodes.extend(self.get_children(obj, 'success_nodes') + self.get_children(obj, 'always_nodes'))
-            elif self._is_eda_rulebook_node(obj):
+            elif self._is_virtual_node(obj):
                 if not obj.all_parents_must_converge and self._are_relevant_parents_finished(n):
                     nodes_found.append(n)
                 elif obj.all_parents_must_converge and self._are_relevant_parents_finished(n):
@@ -177,7 +183,7 @@ class WorkflowDAG(SimpleDAG):
 
         for node in self.nodes:
             obj = node['node_object']
-            if obj.do_not_run is False and obj.unified_job_template is None and not self._is_eda_rulebook_node(obj):
+            if obj.do_not_run is False and obj.unified_job_template is None and not self._is_virtual_node(obj):
                 failed_nodes.append(node)
             elif obj.bypassed_job_status in ['failed', 'canceled', 'error']:
                 failed_nodes.append(node)
@@ -260,7 +266,7 @@ class WorkflowDAG(SimpleDAG):
                         return False
                 else:
                     return False
-            elif self._is_eda_rulebook_node(p):
+            elif self._is_virtual_node(p):
                 return False
             elif not p.do_not_run and p.unified_job_template is None:
                 if node in (self.get_children(p, 'failure_nodes') + self.get_children(p, 'always_nodes')):

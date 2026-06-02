@@ -240,6 +240,11 @@ class WorkflowManager(TaskBase):
                         logger.info('Marked EDA rulebook node %s %s in %s.', spawn_node.pk, spawn_node.bypassed_job_status, workflow_job.log_format)
                         ScheduleWorkflowManager().schedule()
                         continue
+                    if spawn_node.is_ai_task_node:
+                        spawn_node.sync_ai_task()
+                        logger.info('Marked AI task node %s %s in %s.', spawn_node.pk, spawn_node.bypassed_job_status, workflow_job.log_format)
+                        ScheduleWorkflowManager().schedule()
+                        continue
                     if spawn_node.unified_job_template is None:
                         continue
                     kv = spawn_node.get_job_kwargs()

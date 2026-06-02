@@ -64,10 +64,77 @@ WORKFLOW_BASE_URL = "{}/jobs/workflow/{}"
 _HOST_IP_ARTIFACT_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
 WORKFLOW_NODE_TYPE_TEMPLATE = 'template'
 WORKFLOW_NODE_TYPE_EDA_RULEBOOK = 'eda_rulebook'
+WORKFLOW_NODE_TYPE_AI_TASK = 'ai_task'
 WORKFLOW_NODE_TYPES = (
     (WORKFLOW_NODE_TYPE_TEMPLATE, _('Template')),
     (WORKFLOW_NODE_TYPE_EDA_RULEBOOK, _('EDA rulebook activation')),
+    (WORKFLOW_NODE_TYPE_AI_TASK, _('AI task')),
 )
+
+
+class AIWorkflowTaskError(Exception):
+    pass
+
+
+def _extract_ai_plan(value):
+    source = str(value or '').strip()
+    if not source:
+        return None
+    start = source.find('{')
+    end = source.rfind('}')
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(source[start : end + 1])
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def run_ai_workflow_task(prompt, parent_artifacts=None, model_name=''):
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIWorkflowTaskError(_('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'))
+
+    from awx.api.views.ai import _PROVIDER_DEFAULTS, _call_ai_provider, _openai_codex_effective_default_model, AIProviderError
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIWorkflowTaskError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'))
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = model_name or (
+        _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    )
+    artifacts_json = json.dumps(parent_artifacts or {}, default=str, sort_keys=True)[:12000]
+    system_prompt = (
+        'You are an AWX runtime workflow planner. Generate an execution plan for the requested automation. '
+        'Do not mutate AWX resources or claim that actions were executed. Return concise JSON when possible.'
+    )
+    messages = [
+        {
+            'role': 'user',
+            'content': '\n\n'.join(
+                [
+                    f'Runtime AI task:\n{prompt}',
+                    f'Parent workflow artifacts JSON:\n{artifacts_json or "{}"}',
+                ]
+            ),
+        }
+    ]
+    try:
+        response = _call_ai_provider(
+            provider, model, messages, getattr(settings, 'AI_MAX_TOKENS', 2048), system_prompt, api_key, getattr(settings, 'AI_API_URL', '')
+        )
+    except AIProviderError as exc:
+        raise AIWorkflowTaskError(str(exc.detail)) from exc
+
+    return {
+        'provider': provider,
+        'model': model,
+        'response': response,
+        'plan': _extract_ai_plan(response),
+    }
 
 
 class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
@@ -109,10 +176,19 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
     eda_activation_id = models.CharField(max_length=128, blank=True, default='')
     eda_event_source = models.CharField(max_length=512, blank=True, default='')
     eda_event_source_status = models.CharField(max_length=64, blank=True, default='')
+    ai_task_prompt = models.TextField(blank=True, default='')
+    ai_task_model = models.CharField(max_length=128, blank=True, default='')
+    ai_task_approval_required = models.BooleanField(default=True)
+    ai_task_status = models.CharField(max_length=64, blank=True, default='')
+    ai_task_result = JSONBlob(default=dict, blank=True)
 
     @property
     def is_eda_rulebook_node(self):
         return self.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK
+
+    @property
+    def is_ai_task_node(self):
+        return self.node_type == WORKFLOW_NODE_TYPE_AI_TASK
 
     def get_parent_nodes(self):
         '''Returns queryset containing all parents of this node'''
@@ -134,6 +210,11 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
             'eda_activation_id',
             'eda_event_source',
             'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
             'extra_data',
             'survey_passwords',
             'inventory',
@@ -186,6 +267,11 @@ class WorkflowJobTemplateNode(WorkflowNodeBase):
         'eda_activation_id',
         'eda_event_source',
         'eda_event_source_status',
+        'ai_task_prompt',
+        'ai_task_model',
+        'ai_task_approval_required',
+        'ai_task_status',
+        'ai_task_result',
         'workflow_job_template',
         'success_nodes',
         'failure_nodes',
@@ -409,6 +495,54 @@ class WorkflowJobNode(WorkflowNodeBase):
 
     def mark_eda_rulebook_successful(self):
         return self.sync_eda_rulebook_activation()
+
+    def sync_ai_task(self):
+        artifacts = self._build_parent_artifacts()
+        ai_status = 'planned'
+        workflow_status = 'failed'
+        error = ''
+        result = {
+            'provider': '',
+            'model': self.ai_task_model,
+            'response': '',
+            'plan': None,
+        }
+
+        try:
+            if not self.ai_task_prompt:
+                raise AIWorkflowTaskError(_('AI task prompt is required.'))
+            result = run_ai_workflow_task(self.ai_task_prompt, copy(artifacts), self.ai_task_model)
+            ai_status = 'successful'
+            workflow_status = 'successful'
+        except AIWorkflowTaskError as exc:
+            ai_status = 'failed'
+            error = str(exc)
+
+        self.ai_task_status = ai_status
+        self.ai_task_result = {
+            'status': ai_status,
+            'provider': result.get('provider', ''),
+            'model': result.get('model') or self.ai_task_model,
+            'response': result.get('response', ''),
+            'plan': result.get('plan'),
+            'error': error,
+            'approval_required': self.ai_task_approval_required,
+        }
+        artifacts['awx_ai'] = {
+            'prompt': self.ai_task_prompt,
+            'status': ai_status,
+            'provider': self.ai_task_result['provider'],
+            'model': self.ai_task_result['model'],
+            'response': self.ai_task_result['response'],
+            'plan': self.ai_task_result['plan'],
+            'error': error,
+            'approval_required': self.ai_task_approval_required,
+            'source': 'ai_provider',
+        }
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        return self
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
@@ -821,7 +955,9 @@ class WorkflowJobTemplate(UnifiedJobTemplate, WorkflowJobOptions, SurveyJobTempl
     def node_templates_missing(self):
         return [
             node.pk
-            for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True).exclude(node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK).all()
+            for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True)
+            .exclude(node_type__in=(WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_AI_TASK))
+            .all()
         ]
 
     def node_prompts_rejected(self):

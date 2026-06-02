@@ -45,6 +45,9 @@ interface CreateWorkflowNodePayload {
   eda_activation_id?: string;
   eda_event_source?: string;
   eda_event_source_status?: string;
+  ai_task_prompt?: string;
+  ai_task_model?: string;
+  ai_task_approval_required?: boolean;
 }
 type CreatePayloadProperty = keyof CreateWorkflowNodePayload;
 
@@ -220,6 +223,7 @@ export function useSaveVisualizer(templateId: string) {
         const { launch_data, resource, survey_data } = nodeData;
         const { unified_job_template } = resource.summary_fields;
         const isEdaNode = resource.node_type === RESOURCE_TYPE.eda_rulebook;
+        const isAiNode = resource.node_type === RESOURCE_TYPE.ai_task;
 
         setValue('all_parents_must_converge', resource.all_parents_must_converge);
         setValue('identifier', resource?.identifier);
@@ -229,13 +233,18 @@ export function useSaveVisualizer(templateId: string) {
           setValue('eda_activation_id', resource.eda_activation_id);
           setValue('eda_event_source', resource.eda_event_source);
           setValue('eda_event_source_status', resource.eda_event_source_status);
+        } else if (isAiNode) {
+          setValue('node_type', RESOURCE_TYPE.ai_task);
+          setValue('ai_task_prompt', resource.ai_task_prompt);
+          setValue('ai_task_model', resource.ai_task_model);
+          setValue('ai_task_approval_required', resource.ai_task_approval_required);
         } else {
           if (!unified_job_template) return;
           setValue('unified_job_template', unified_job_template.id);
         }
 
         // Prompt values
-        if (!isEdaNode) {
+        if (!isEdaNode && !isAiNode) {
           setValue('diff_mode', launch_data?.diff_mode, true);
           setValue('execution_environment', launch_data?.execution_environment, true);
           setValue('forks', launch_data?.forks, true);
@@ -291,6 +300,7 @@ export function useSaveVisualizer(templateId: string) {
           const { launch_data, survey_data, resource } = nodeData;
           const { unified_job_template } = resource.summary_fields;
           const isEdaNode = resource.node_type === RESOURCE_TYPE.eda_rulebook;
+          const isAiNode = resource.node_type === RESOURCE_TYPE.ai_task;
 
           const setValue = <K extends CreatePayloadProperty>(
             key: K,
@@ -335,6 +345,18 @@ export function useSaveVisualizer(templateId: string) {
             setValue('eda_activation_id', resource.eda_activation_id);
             setValue('eda_event_source', resource.eda_event_source);
             setValue('eda_event_source_status', resource.eda_event_source_status);
+            setValue('ai_task_prompt', '');
+            setValue('ai_task_model', '');
+          } else if (isAiNode) {
+            setValue('node_type', RESOURCE_TYPE.ai_task);
+            setValue('unified_job_template', null);
+            setValue('ai_task_prompt', resource.ai_task_prompt);
+            setValue('ai_task_model', resource.ai_task_model);
+            setValue('ai_task_approval_required', resource.ai_task_approval_required);
+            setValue('eda_rulebook_name', '');
+            setValue('eda_activation_id', '');
+            setValue('eda_event_source', '');
+            setValue('eda_event_source_status', '');
           } else {
             if (!unified_job_template) return;
             setValue('node_type', 'template');
@@ -343,10 +365,12 @@ export function useSaveVisualizer(templateId: string) {
             setValue('eda_activation_id', '');
             setValue('eda_event_source', '');
             setValue('eda_event_source_status', '');
+            setValue('ai_task_prompt', '');
+            setValue('ai_task_model', '');
           }
 
           // Prompt values
-          if (!isEdaNode) {
+          if (!isEdaNode && !isAiNode) {
             setValue('diff_mode', launch_data?.diff_mode, true);
             setValue('execution_environment', launch_data?.execution_environment, true);
             setValue('forks', launch_data?.forks, true);

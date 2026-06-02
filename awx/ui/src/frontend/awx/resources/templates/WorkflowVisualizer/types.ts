@@ -126,6 +126,17 @@ export interface EDARulebookResource {
   event_source_status?: string;
 }
 
+export interface AITaskResource {
+  id: number;
+  name: string;
+  description: string;
+  type: 'ai_task';
+  prompt: string;
+  model?: string;
+  approval_required?: boolean;
+  status?: string;
+}
+
 export interface PromptFormValues {
   inventory: Partial<Inventory> | SummaryFieldInventory | null;
   credentials:
@@ -177,7 +188,8 @@ export type AllResources =
   | TerraformJobTemplate
   | WorkflowApproval
   | WorkflowJobTemplate
-  | EDARulebookResource;
+  | EDARulebookResource
+  | AITaskResource;
 
 export interface WizardFormValues {
   approval_description: string;
@@ -190,6 +202,9 @@ export interface WizardFormValues {
   eda_event_source: string;
   eda_event_source_status: string;
   eda_rulebook_name: string;
+  ai_task_prompt: string;
+  ai_task_model: string;
+  ai_task_approval_required: boolean;
   resource: AllResources | NodeResource | null;
   node_type: UnifiedJobType;
   node_status_type?: EdgeStatus;
@@ -208,4 +223,5 @@ export type UnifiedJobType =
   | 'inventory_update'
   | 'system_job'
   | 'terraform_job'
-  | 'eda_rulebook';
+  | 'eda_rulebook'
+  | 'ai_task';

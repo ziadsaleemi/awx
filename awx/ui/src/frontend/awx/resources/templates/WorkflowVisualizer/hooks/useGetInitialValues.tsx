@@ -30,7 +30,12 @@ export function useNodeTypeStepDefaults(): (node?: GraphNode) => CommonNodeValue
     const { resource } = nodeData || {};
     const nodeUJT = resource?.summary_fields?.unified_job_template;
     const isEdaNode = resource?.node_type === RESOURCE_TYPE.eda_rulebook;
-    const nodeType = isEdaNode ? RESOURCE_TYPE.eda_rulebook : nodeUJT?.unified_job_type;
+    const isAiNode = resource?.node_type === RESOURCE_TYPE.ai_task;
+    const nodeType = isEdaNode
+      ? RESOURCE_TYPE.eda_rulebook
+      : isAiNode
+        ? RESOURCE_TYPE.ai_task
+        : nodeUJT?.unified_job_type;
     const nodeIdentifier = stringIsUUID(resource?.identifier || '') ? '' : resource?.identifier;
     const nodeConvergence = getConvergenceType(resource?.all_parents_must_converge);
     const nodeDaysToKeep = resource?.extra_data?.days;
@@ -52,6 +57,10 @@ export function useNodeTypeStepDefaults(): (node?: GraphNode) => CommonNodeValue
       eda_event_source_status:
         resource?.eda_event_source_status ?? defaultMapper.eda_event_source_status,
       eda_rulebook_name: resource?.eda_rulebook_name ?? defaultMapper.eda_rulebook_name,
+      ai_task_prompt: resource?.ai_task_prompt ?? defaultMapper.ai_task_prompt,
+      ai_task_model: resource?.ai_task_model ?? defaultMapper.ai_task_model,
+      ai_task_approval_required:
+        resource?.ai_task_approval_required ?? defaultMapper.ai_task_approval_required,
       resource: nodeUJT ?? defaultMapper.resource,
       node_type: nodeType || defaultMapper.node_type,
     };
@@ -70,6 +79,9 @@ const defaultMapper: CommonNodeValues = {
   eda_event_source: '',
   eda_event_source_status: '',
   eda_rulebook_name: '',
+  ai_task_prompt: '',
+  ai_task_model: '',
+  ai_task_approval_required: true,
   resource: null,
   node_type: RESOURCE_TYPE.job,
   node_status_type: EdgeStatus.info,

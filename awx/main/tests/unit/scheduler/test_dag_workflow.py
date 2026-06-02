@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.encoding import smart_str
 
 from awx.main.scheduler.dag_workflow import WorkflowDAG
-from awx.main.models.workflow import WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 
 
 class Job:
@@ -585,6 +585,21 @@ class TestBFSNodesToRun:
         assert g.bfs_nodes_to_run() == [eda_node]
 
         eda_node.bypassed_job_status = 'successful'
+        assert g.bfs_nodes_to_run() == [child_node]
+
+    def test_ai_task_root_node_runs_as_virtual_success(self, wf_node_generator):
+        g = WorkflowDAG()
+        ai_node = wf_node_generator(unified_job_template=None, node_type=WORKFLOW_NODE_TYPE_AI_TASK)
+        child_node = wf_node_generator()
+        g.add_node(ai_node)
+        g.add_node(child_node)
+        g.add_edge(ai_node, child_node, "success_nodes")
+
+        assert g.is_workflow_done() is False
+        assert g.has_workflow_failed() == (False, None)
+        assert g.bfs_nodes_to_run() == [ai_node]
+
+        ai_node.bypassed_job_status = 'successful'
         assert g.bfs_nodes_to_run() == [child_node]
 
     def test_missing_template_root_still_fails(self, wf_node_generator):

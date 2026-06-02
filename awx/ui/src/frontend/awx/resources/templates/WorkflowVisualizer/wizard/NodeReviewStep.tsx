@@ -99,6 +99,9 @@ export function NodeReviewStep() {
     eda_event_source,
     eda_event_source_status,
     eda_rulebook_name,
+    ai_task_prompt,
+    ai_task_model,
+    ai_task_approval_required,
     survey,
   } = wizardData;
 
@@ -108,6 +111,8 @@ export function NodeReviewStep() {
   const nameDetail =
     node_type === RESOURCE_TYPE.eda_rulebook
       ? eda_rulebook_name
+      : node_type === RESOURCE_TYPE.ai_task
+        ? ai_task_prompt?.split('\n')[0].slice(0, 60) || t('AI task')
       : getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
   const descriptionDetail = getValueBasedOnJobType(
     node_type,
@@ -166,6 +171,17 @@ export function NodeReviewStep() {
             <PageDetail label={t('Event source status')} isEmpty={!eda_event_source_status}>
               {eda_event_source_status}
             </PageDetail>
+          </>
+        )}
+        {node_type === RESOURCE_TYPE.ai_task && (
+          <>
+            <PageDetail label={t('Model')} isEmpty={!ai_task_model}>
+              {ai_task_model}
+            </PageDetail>
+            <PageDetail label={t('Approval required')}>
+              {ai_task_approval_required ? t('Yes') : t('No')}
+            </PageDetail>
+            <PageDetailCodeEditor label={t('Prompt')} value={ai_task_prompt || ''} />
           </>
         )}
         <PageDetail label={t('Timeout')}>{timeoutDetail}</PageDetail>

@@ -315,6 +315,111 @@ describe('WorkflowVisualizer', () => {
     cy.wait('@createEdaWorkflowNode');
   });
 
+  it('Should apply AI task workflow plans as persisted metadata nodes', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: { count: 0, next: null, previous: null, results: [] },
+    }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: false,
+        status: 'not_configured',
+        controller_url: '',
+      },
+    }).as('edaStatus');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'AI runtime planning',
+            summary: 'Generate a runtime execution plan from workflow artifacts.',
+            nodes: [
+              {
+                id: 'plan',
+                name: 'Generate remediation plan',
+                type: 'ai_task',
+                description: 'Build execution plan from upstream workflow artifacts.',
+                run: 'root',
+                model: 'gpt-5.2',
+              },
+            ],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+    cy.intercept('POST', '/api/v2/workflow_job_templates/*/workflow_nodes/', (req) => {
+      expect(req.body.node_type).to.equal('ai_task');
+      expect(req.body.ai_task_prompt).to.equal(
+        'Build execution plan from upstream workflow artifacts.'
+      );
+      expect(req.body.ai_task_model).to.equal('gpt-5.2');
+      expect(req.body.ai_task_approval_required).to.equal(true);
+      req.reply({
+        id: 9002,
+        type: 'workflow_job_template_node',
+        url: '/api/v2/workflow_job_template_nodes/9002/',
+        related: {
+          labels: '/api/v2/workflow_job_template_nodes/9002/labels/',
+          credentials: '/api/v2/workflow_job_template_nodes/9002/credentials/',
+          instance_groups: '/api/v2/workflow_job_template_nodes/9002/instance_groups/',
+          create_approval_template:
+            '/api/v2/workflow_job_template_nodes/9002/create_approval_template/',
+          success_nodes: '/api/v2/workflow_job_template_nodes/9002/success_nodes/',
+          failure_nodes: '/api/v2/workflow_job_template_nodes/9002/failure_nodes/',
+          always_nodes: '/api/v2/workflow_job_template_nodes/9002/always_nodes/',
+          workflow_job_template: '/api/v2/workflow_job_templates/1/',
+        },
+        summary_fields: {
+          workflow_job_template: { id: 1, name: 'E2E 6GDe', description: '' },
+          ai_task: {
+            prompt: 'Build execution plan from upstream workflow artifacts.',
+            model: 'gpt-5.2',
+            approval_required: true,
+            status: '',
+          },
+        },
+        node_type: 'ai_task',
+        ai_task_prompt: 'Build execution plan from upstream workflow artifacts.',
+        ai_task_model: 'gpt-5.2',
+        ai_task_approval_required: true,
+        ai_task_status: '',
+        ai_task_result: {},
+        workflow_job_template: 1,
+        unified_job_template: null,
+        success_nodes: [],
+        failure_nodes: [],
+        always_nodes: [],
+        all_parents_must_converge: false,
+        identifier: 'Generate remediation plan',
+      });
+    }).as('createAiTaskWorkflowNode');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('Plan runtime remediation with AI');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'AI runtime planning');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').should('be.enabled');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').click();
+    cy.wait('@createAiTaskWorkflowNode');
+  });
+
   it('Should toggle the expand collapse button in the toolbar', () => {
     cy.mount(<WorkflowVisualizer />);
     cy.get('button[data-cy="workflow-visualizer-toolbar-expand-collapse"]').click();

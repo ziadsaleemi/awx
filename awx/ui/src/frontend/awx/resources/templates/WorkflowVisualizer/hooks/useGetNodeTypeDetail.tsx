@@ -12,6 +12,7 @@ export function useGetNodeTypeDetail(type?: UnifiedJobType) {
     system_job: t('Management job'),
     terraform_job: t('Terraform template'),
     eda_rulebook: t('EDA rulebook activation'),
+    ai_task: t('AI task'),
   };
   if (!type) return null;
   return typeMapping[type];

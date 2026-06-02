@@ -5,6 +5,7 @@ import {
   CogIcon,
   HomeIcon,
   InfrastructureIcon,
+  MagicIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -33,6 +34,7 @@ const NodeIcon: { [key: string]: ElementType<SVGIconProps> } = {
   workflow_approval: ClockIcon,
   workflow_job: ShareAltIcon,
   eda_rulebook: ProcessAutomationIcon,
+  ai_task: MagicIcon,
   deleted_resource: TrashIcon,
 };
 

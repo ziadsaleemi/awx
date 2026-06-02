@@ -9,7 +9,13 @@ import {
 import { Dispatch, SetStateAction, useEffect } from 'react';
 import { Controller, FieldPath, useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
-import { PageFormSelect, PageFormTextInput, PageWizardStep } from '../../../../../../framework';
+import {
+  PageFormCheckbox,
+  PageFormSelect,
+  PageFormTextArea,
+  PageFormTextInput,
+  PageWizardStep,
+} from '../../../../../../framework';
 import { PageFormGroup } from '../../../../../../framework/PageForm/Inputs/PageFormGroup';
 import { PageFormWatch } from '../../../../../../framework/PageForm/Utils/PageFormWatch';
 import { usePageWizard } from '../../../../../../framework/PageWizard/PageWizardProvider';
@@ -242,6 +248,7 @@ function NodeTypeInput() {
         { label: t('Management Job'), value: RESOURCE_TYPE.system_job },
         { label: t('Terraform Template'), value: RESOURCE_TYPE.terraform_job },
         { label: t('EDA Rulebook Activation'), value: RESOURCE_TYPE.eda_rulebook },
+        { label: t('AI Task'), value: RESOURCE_TYPE.ai_task },
       ]}
     />
   );
@@ -324,6 +331,28 @@ function NodeResourceInput() {
                   label={t('Event source status')}
                   name="eda_event_source_status"
                   id="eda_event_source_status"
+                />
+              </>
+            );
+          case RESOURCE_TYPE.ai_task:
+            return (
+              <>
+                <PageFormTextArea<WizardFormValues>
+                  label={t('Prompt')}
+                  name="ai_task_prompt"
+                  id="ai_task_prompt"
+                  isRequired
+                  disableAutoResize
+                />
+                <PageFormTextInput<WizardFormValues>
+                  label={t('Model')}
+                  name="ai_task_model"
+                  id="ai_task_model"
+                  placeholder={t('Use configured default model')}
+                />
+                <PageFormCheckbox<WizardFormValues>
+                  label={t('Require approval before generated plan execution')}
+                  name="ai_task_approval_required"
                 />
               </>
             );

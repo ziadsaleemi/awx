@@ -7,6 +7,7 @@ import {
   ClockIcon,
   CogIcon,
   InfrastructureIcon,
+  MagicIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -73,12 +74,14 @@ export function WorkflowNodeDetails({ node }: { node: GraphNode }) {
   const nodeData = node.getData();
   const unifiedJobTemplate = nodeData?.resource?.summary_fields?.unified_job_template;
   const isEdaNode = nodeData?.resource?.node_type === 'eda_rulebook';
+  const isAiNode = nodeData?.resource?.node_type === 'ai_task';
   const { data } = useGet<RelatedTemplate>(
     getRelatedResourceUrl(nodeData?.resource?.summary_fields.unified_job_template)
   );
   const timeoutString = useGetTimeoutString(unifiedJobTemplate?.timeout || 0);
   const nodeTypeDetail = useGetNodeTypeDetail(
-    unifiedJobTemplate?.unified_job_type || (isEdaNode ? 'eda_rulebook' : undefined)
+    unifiedJobTemplate?.unified_job_type ||
+      (isEdaNode ? 'eda_rulebook' : isAiNode ? 'ai_task' : undefined)
   );
   const controller = useVisualizationController();
   const { RBAC } = controller.getState<ControllerState>();
@@ -141,6 +144,23 @@ export function WorkflowNodeDetails({ node }: { node: GraphNode }) {
               </PageDetail>
             </>
           )}
+          {isAiNode && (
+            <>
+              <PageDetail label={t('Model')} isEmpty={!nodeData?.resource?.ai_task_model}>
+                {nodeData?.resource?.ai_task_model}
+              </PageDetail>
+              <PageDetail label={t('Approval required')}>
+                {nodeData?.resource?.ai_task_approval_required ? t('Yes') : t('No')}
+              </PageDetail>
+              <PageDetail label={t('Status')} isEmpty={!nodeData?.resource?.ai_task_status}>
+                {nodeData?.resource?.ai_task_status}
+              </PageDetail>
+              <PageDetailCodeEditor
+                label={t('Prompt')}
+                value={nodeData?.resource?.ai_task_prompt || ''}
+              />
+            </>
+          )}
           <PageDetail label={t('Convergence')}>
             {nodeData?.resource?.all_parents_must_converge ? t('All') : t('Any')}
           </PageDetail>
@@ -177,6 +197,7 @@ function WorkflowNodeDetailsHeader({ node }: { node: GraphNode }) {
     workflow_approval: ClockIcon,
     workflow_job: ShareAltIcon,
     eda_rulebook: ProcessAutomationIcon,
+    ai_task: MagicIcon,
   };
 
   const nodeData = node.getData();

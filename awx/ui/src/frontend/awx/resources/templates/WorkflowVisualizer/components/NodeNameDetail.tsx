@@ -35,6 +35,16 @@ export function NodeNameDetail({ nodeData }: { nodeData: WorkflowNode }) {
     );
   }
 
+  if (nodeData.node_type === RESOURCE_TYPE.ai_task) {
+    return (
+      <PageDetail label={t('Name')}>
+        {nodeData.summary_fields?.ai_task?.prompt?.split('\n')[0].slice(0, 60) ||
+          nodeData.ai_task_prompt?.split('\n')[0].slice(0, 60) ||
+          t('AI task')}
+      </PageDetail>
+    );
+  }
+
   if (type === RESOURCE_TYPE.inventory_update) {
     link = <InventorySourceLink id={id?.toString() || ''}>{name}</InventorySourceLink>;
   } else if (type) {
