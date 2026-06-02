@@ -1553,3 +1553,14 @@ register(
     category=_('AI Assistant'),
     category_slug='ai-assistant',
 )
+
+register(
+    'MCP_POLICY_VECTOR_DIMENSIONS',
+    field_class=fields.IntegerField,
+    default=64,
+    min_value=16,
+    label=_('MCP Policy Vector Dimensions'),
+    help_text=_('Number of dimensions used by the local hash-vector policy context index.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)

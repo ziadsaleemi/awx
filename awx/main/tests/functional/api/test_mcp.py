@@ -1,7 +1,9 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from awx.api.views import mcp
 from awx.api.versioning import reverse
 from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Organization
 
@@ -23,8 +25,14 @@ def test_mcp_manifest_and_tools_expose_policy_context(get, admin_user, settings)
 
     tool_names = {tool['name'] for tool in tools.data['tools']}
     assert manifest.data['capabilities']['audit']['activity_stream'] is True
+    assert manifest.data['capabilities']['auth']['oauth2_scope_model']['read'] == 'mcp:read'
+    assert manifest.data['capabilities']['auth']['oauth2_scope_model']['write'] == 'mcp:write'
+    assert manifest.data['capabilities']['policy_context']['rag']['embedding_provider'] == 'local_hash_vector'
+    assert manifest.data['capabilities']['policy_context']['rag']['document_count'] == 1
     assert manifest.data['policy_context_enabled'] is True
     assert manifest.data['tool_count'] == len(tools.data['tools'])
+    assert next(tool for tool in tools.data['tools'] if tool['name'] == 'launch_job')['mcp_scope'] == 'mcp:write'
+    assert next(tool for tool in tools.data['tools'] if tool['name'] == 'get_job_status')['mcp_scope'] == 'mcp:read'
     assert {'list_catalog_items', 'list_catalog_deployments', 'get_catalog_deployment', 'get_policy_context'} <= tool_names
 
 
@@ -74,6 +82,42 @@ def test_mcp_list_catalog_deployments_is_rbac_scoped_and_includes_policy_context
     assert own_deployment.pk in deployment_ids
     assert other_deployment.pk not in deployment_ids
     assert result['policy_context'][0]['title'] == 'Catalog lease policy'
+
+
+@pytest.mark.django_db
+def test_mcp_policy_context_uses_vector_ranking_and_hides_embeddings(post, admin_user, settings):
+    settings.MCP_POLICY_CONTEXT = (
+        'Launch approval policy\nHuman approval is required before destructive job template launches.\n\n'
+        'Catalog lease policy\nProduction VM deployments need lease renewal and expiry review.\n\n'
+        'Credential hygiene policy\nRotate cloud API credentials after incident response.'
+    )
+
+    response = post(
+        reverse('api:mcp_invoke'),
+        {'name': 'get_policy_context', 'arguments': {'query': 'production vm deploy lease renewal', 'limit': 1}},
+        admin_user,
+        expect=200,
+    )
+
+    result = _mcp_result(response)
+    context = result['policy_context']
+    assert result['count'] == 1
+    assert context[0]['title'] == 'Catalog lease policy'
+    assert context[0]['score'] > 0
+    assert 'lease' in context[0]['matched_terms']
+    assert '_embedding' not in context[0]
+
+
+def test_mcp_oauth_scope_helper_enforces_write_scope_for_launch():
+    read_request = SimpleNamespace(auth=SimpleNamespace(scope='mcp:read'))
+    write_request = SimpleNamespace(auth=SimpleNamespace(scope='mcp:write'))
+    legacy_write_request = SimpleNamespace(auth=SimpleNamespace(scope='write'))
+
+    allowed, detail = mcp._check_mcp_tool_scope(read_request, 'launch_job')
+    assert allowed is False
+    assert 'mcp:write' in detail
+    assert mcp._check_mcp_tool_scope(write_request, 'launch_job') == (True, None)
+    assert mcp._check_mcp_tool_scope(legacy_write_request, 'launch_job') == (True, None)
 
 
 @pytest.mark.django_db

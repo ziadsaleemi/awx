@@ -33,6 +33,7 @@ MCP Tool catalogue
 - get_policy_context       → Retrieve configured MCP policy context
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -57,6 +58,12 @@ from awx.main.models import (
 logger = logging.getLogger('awx.api.mcp')
 
 MCP_VERSION = '2024-11-05'
+MCP_READ_SCOPE = 'mcp:read'
+MCP_WRITE_SCOPE = 'mcp:write'
+MCP_WRITE_TOOLS = {'launch_job'}
+MCP_COMPAT_READ_SCOPES = {'read', 'write'}
+MCP_COMPAT_WRITE_SCOPES = {'write'}
+MCP_TOKEN_RE = re.compile(r'[a-zA-Z0-9_]{3,}')
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -231,6 +238,37 @@ def _page_size(params: dict, default=50):
         return default
 
 
+def _policy_vector_dimensions():
+    try:
+        value = int(getattr(settings, 'MCP_POLICY_VECTOR_DIMENSIONS', 64))
+    except (TypeError, ValueError):
+        return 64
+    return max(16, min(value, 512))
+
+
+def _policy_tokens(text):
+    return [token.lower() for token in MCP_TOKEN_RE.findall(str(text or ''))]
+
+
+def _policy_embedding(text, dimensions=None):
+    dimensions = dimensions or _policy_vector_dimensions()
+    vector = [0.0] * dimensions
+    for token in _policy_tokens(text):
+        digest = hashlib.sha256(token.encode('utf-8')).digest()
+        bucket = int.from_bytes(digest[:4], 'big') % dimensions
+        sign = 1.0 if digest[4] & 1 else -1.0
+        vector[bucket] += sign
+
+    norm = sum(value * value for value in vector) ** 0.5
+    if not norm:
+        return vector
+    return [value / norm for value in vector]
+
+
+def _policy_vector_score(left, right):
+    return sum(left_value * right_value for left_value, right_value in zip(left, right))
+
+
 def _policy_documents():
     raw_context = getattr(settings, 'MCP_POLICY_CONTEXT', '') or ''
     if not isinstance(raw_context, str) or not raw_context.strip():
@@ -242,11 +280,13 @@ def _policy_documents():
         if not content:
             continue
         first_line = content.splitlines()[0].strip().lstrip('#').strip()
+        title = first_line[:120] or f'Policy context {index}'
         documents.append(
             {
                 'id': f'policy-{index}',
-                'title': first_line[:120] or f'Policy context {index}',
+                'title': title,
                 'content': content[:2000],
+                '_embedding': _policy_embedding(f'{title}\n{content}'),
             }
         )
     return documents
@@ -262,10 +302,9 @@ def _safe_argument_summary(arguments):
     return summary
 
 
-def _policy_context_for_request(tool_name, arguments):
-    documents = _policy_documents()
-    if not documents:
-        return []
+def _policy_query_for_request(tool_name, arguments):
+    if isinstance(arguments.get('query'), str) and arguments['query'].strip():
+        return arguments['query'].strip()
 
     query_parts = [tool_name]
     for value in _safe_argument_summary(arguments).values():
@@ -273,15 +312,32 @@ def _policy_context_for_request(tool_name, arguments):
             query_parts.append(str(value))
         elif isinstance(value, list):
             query_parts.extend(str(item) for item in value)
-    query = ' '.join(query_parts).lower()
-    tokens = {token for token in re.findall(r'[a-zA-Z0-9_]{3,}', query)}
+    return ' '.join(query_parts)
+
+
+def _policy_context_for_request(tool_name, arguments):
+    documents = _policy_documents()
+    if not documents:
+        return []
+
+    query = _policy_query_for_request(tool_name, arguments)
+    tokens = set(_policy_tokens(query))
+    query_embedding = _policy_embedding(query)
 
     ranked = []
     for document in documents:
-        text = f"{document['title']} {document['content']}".lower()
-        score = sum(1 for token in tokens if token in text)
-        ranked.append((score, document))
-    ranked.sort(key=lambda item: item[0], reverse=True)
+        document_text = f"{document['title']} {document['content']}"
+        document_tokens = set(_policy_tokens(document_text))
+        matched_terms = sorted(tokens & document_tokens)
+        token_score = len(matched_terms) / max(len(tokens), 1)
+        vector_score = max(0.0, _policy_vector_score(query_embedding, document['_embedding']))
+        score = round((vector_score * 0.8) + (token_score * 0.2), 6)
+        payload = {key: value for key, value in document.items() if not key.startswith('_')}
+        payload['score'] = score
+        if matched_terms:
+            payload['matched_terms'] = matched_terms[:20]
+        ranked.append((score, len(matched_terms), payload))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
 
     requested_limit = arguments.get('limit', 3)
     try:
@@ -289,9 +345,9 @@ def _policy_context_for_request(tool_name, arguments):
     except (TypeError, ValueError):
         limit = 3
 
-    selected = [document for score, document in ranked if score > 0][:limit]
+    selected = [document for score, matched_count, document in ranked if score > 0 or matched_count > 0][:limit]
     if not selected:
-        selected = [document for _, document in ranked[:limit]]
+        selected = [document for _, _, document in ranked[:limit]]
     return selected
 
 
@@ -302,6 +358,67 @@ def _mcp_base_url(request):
     host = forwarded_host or request.get_host()
     prefix = request.META.get('HTTP_X_FORWARDED_PREFIX', '').rstrip('/')
     return f'{scheme}://{host}{prefix}/api/v2/mcp/'
+
+
+def _tool_required_scope(tool_name):
+    return MCP_WRITE_SCOPE if tool_name in MCP_WRITE_TOOLS else MCP_READ_SCOPE
+
+
+def _tool_allows_write(tool_name):
+    return tool_name in MCP_WRITE_TOOLS
+
+
+def _mcp_tools_for_response():
+    tools = []
+    for tool in MCP_TOOLS:
+        tool_name = tool['name']
+        tools.append(
+            {
+                **tool,
+                'mcp_scope': _tool_required_scope(tool_name),
+                'annotations': {'readOnlyHint': not _tool_allows_write(tool_name)},
+            }
+        )
+    return tools
+
+
+def _request_oauth_scopes(request):
+    auth = getattr(request, 'auth', None)
+    if auth is None:
+        return set()
+
+    values = []
+    for attr in ('scope', 'scopes'):
+        raw = getattr(auth, attr, None)
+        if isinstance(raw, str):
+            values.extend(raw.split())
+        elif isinstance(raw, (list, tuple, set)):
+            values.extend(raw)
+
+    get_scopes = getattr(auth, 'get_scopes', None)
+    if callable(get_scopes):
+        raw = get_scopes()
+        if isinstance(raw, str):
+            values.extend(raw.split())
+        elif isinstance(raw, (list, tuple, set)):
+            values.extend(raw)
+
+    return {str(value) for value in values if str(value)}
+
+
+def _check_mcp_tool_scope(request, tool_name):
+    scopes = _request_oauth_scopes(request)
+    if not scopes:
+        return True, None
+
+    if _tool_allows_write(tool_name):
+        allowed_scopes = {MCP_WRITE_SCOPE, *MCP_COMPAT_WRITE_SCOPES}
+    else:
+        allowed_scopes = {MCP_READ_SCOPE, MCP_WRITE_SCOPE, *MCP_COMPAT_READ_SCOPES}
+
+    if scopes & allowed_scopes:
+        return True, None
+    return False, f'MCP tool {tool_name} requires OAuth scope {_tool_required_scope(tool_name)}.'
 
 
 def _audit_related_resource(action, arguments, result):
@@ -680,7 +797,7 @@ def _handle_get_catalog_deployment(request, params: dict):
 
 
 def _handle_get_policy_context(request, params: dict):
-    context = _policy_context_for_request(params.get('query', 'get_policy_context'), params)
+    context = _policy_context_for_request('get_policy_context', params)
     return {'policy_context': context, 'count': len(context)}
 
 
@@ -717,7 +834,8 @@ class MCPManifestView(APIView):
 
     def get(self, request, *args, **kwargs):
         base = _mcp_base_url(request)
-        policy_context_enabled = bool(_policy_documents())
+        policy_documents = _policy_documents()
+        policy_context_enabled = bool(policy_documents)
         return Response(
             {
                 'protocolVersion': MCP_VERSION,
@@ -727,7 +845,26 @@ class MCPManifestView(APIView):
                 },
                 'capabilities': {
                     'tools': {'listChanged': False},
-                    'policy_context': {'enabled': policy_context_enabled},
+                    'policy_context': {
+                        'enabled': policy_context_enabled,
+                        'rag': {
+                            'enabled': policy_context_enabled,
+                            'embedding_provider': 'local_hash_vector',
+                            'vector_dimensions': _policy_vector_dimensions(),
+                            'document_count': len(policy_documents),
+                            'max_results': 10,
+                        },
+                    },
+                    'auth': {
+                        'oauth2_scope_model': {
+                            'read': MCP_READ_SCOPE,
+                            'write': MCP_WRITE_SCOPE,
+                            'awx_compatibility': {
+                                'read': sorted(MCP_COMPAT_READ_SCOPES),
+                                'write': sorted(MCP_COMPAT_WRITE_SCOPES),
+                            },
+                        }
+                    },
                     'audit': {'activity_stream': True, 'triggered_by': 'mcp_agent'},
                 },
                 'tool_count': len(MCP_TOOLS),
@@ -748,7 +885,7 @@ class MCPToolsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        return Response({'tools': MCP_TOOLS})
+        return Response({'tools': _mcp_tools_for_response()})
 
 
 class MCPInvokeView(APIView):
@@ -793,6 +930,22 @@ class MCPInvokeView(APIView):
             return Response(
                 {'error': f'Unknown tool: {tool_name!r}. Call GET /api/v2/mcp/tools/ to list available tools.'},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        allowed, scope_error = _check_mcp_tool_scope(request, tool_name)
+        if not allowed:
+            result = {
+                'error': scope_error,
+                'required_scope': _tool_required_scope(tool_name),
+                'token_scopes': sorted(_request_oauth_scopes(request)),
+            }
+            _tag_activity(request.user, tool_name, arguments, result, [])
+            return Response(
+                {
+                    'content': [{'type': 'text', 'text': json.dumps(result)}],
+                    'isError': True,
+                },
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         policy_context = _policy_context_for_request(tool_name, arguments)
