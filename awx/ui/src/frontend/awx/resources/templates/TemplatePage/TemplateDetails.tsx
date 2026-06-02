@@ -78,7 +78,7 @@ export function TemplateDetails(props: { templateId?: string; disableScroll?: bo
   };
 
   const artifactsValue = (() => {
-    const artifacts = (lastJob as Job & { artifacts?: unknown } | undefined)?.artifacts;
+    const artifacts = (lastJob as (Job & { artifacts?: unknown }) | undefined)?.artifacts;
     if (typeof artifacts === 'string') {
       return artifacts;
     }

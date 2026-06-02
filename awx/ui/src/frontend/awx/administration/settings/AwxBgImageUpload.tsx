@@ -9,11 +9,7 @@ import styled from 'styled-components';
  * Accepts PNG, JPEG, GIF, WebP, or SVG files (converted to base64) or an https:// URL.
  * Matches the visual design of AwxLogoUpload.
  */
-export function AwxBgImageUpload(props: {
-  name: string;
-  label: string;
-  helpText?: string;
-}) {
+export function AwxBgImageUpload(props: { name: string; label: string; helpText?: string }) {
   const { control } = useFormContext();
   const { field } = useController({ name: props.name, control });
 
@@ -184,4 +180,3 @@ const ApplyBtn = styled.button`
     cursor: not-allowed;
   }
 `;
-

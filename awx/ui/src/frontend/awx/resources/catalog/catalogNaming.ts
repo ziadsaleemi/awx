@@ -24,7 +24,8 @@ export function generateCatalogName(
   fallbackPrefix: string
 ) {
   const rawTemplate = template?.trim() ?? '';
-  const renderedBase = renderTemplate(rawTemplate || fallbackPrefix, context).trim() || 'deployment';
+  const renderedBase =
+    renderTemplate(rawTemplate || fallbackPrefix, context).trim() || 'deployment';
   const wantsSequence = renderedBase.endsWith('+1');
   const base = wantsSequence ? renderedBase.slice(0, -2) : renderedBase;
 

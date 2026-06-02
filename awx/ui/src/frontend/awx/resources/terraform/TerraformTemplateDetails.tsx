@@ -1,28 +1,22 @@
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import {
-  LoadingPage,
-  PageDetail,
-  PageDetails,
-  useGetPageUrl,
-} from '../../../../framework';
+import { LoadingPage, PageDetail, PageDetails } from '../../../../framework';
 import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
 import { useGetItem } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
-import { AwxRoute } from '../../main/AwxRoutes';
 import { TerraformJobTemplate } from '../../interfaces/TerraformJobTemplate';
 import { StatusCell } from '../../../common/Status';
 
 export function TerraformTemplateDetails() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
-  const getPageUrl = useGetPageUrl();
-
-  const { data: template, error, isLoading, refresh } = useGetItem<TerraformJobTemplate>(
-    awxAPI`/terraform_job_templates`,
-    params.id
-  );
+  const {
+    data: template,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<TerraformJobTemplate>(awxAPI`/terraform_job_templates`, params.id);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !template) return <LoadingPage />;
@@ -46,9 +40,7 @@ export function TerraformTemplateDetails() {
       <PageDetail label={t('Verbosity')}>
         {verbosityLabels[template.verbosity] ?? template.verbosity}
       </PageDetail>
-      <PageDetail label={t('Project')}>
-        {template.summary_fields?.project?.name ?? '-'}
-      </PageDetail>
+      <PageDetail label={t('Project')}>{template.summary_fields?.project?.name ?? '-'}</PageDetail>
       <PageDetail label={t('Terraform Directory')}>{template.terraform_dir || '.'}</PageDetail>
       <PageDetail label={t('Target Inventory')}>
         {template.summary_fields?.target_inventory?.name ?? t('None')}
@@ -74,9 +66,7 @@ export function TerraformTemplateDetails() {
         </PageDetail>
       )}
       {template.created && (
-        <PageDetail label={t('Created')}>
-          {new Date(template.created).toLocaleString()}
-        </PageDetail>
+        <PageDetail label={t('Created')}>{new Date(template.created).toLocaleString()}</PageDetail>
       )}
       {template.summary_fields?.modified_by && (
         <PageDetail label={t('Last modified by')}>
@@ -89,10 +79,7 @@ export function TerraformTemplateDetails() {
         </PageDetail>
       )}
       {template.extra_vars && (
-        <PageDetailCodeEditor
-          label={t('Extra Variables')}
-          value={template.extra_vars}
-        />
+        <PageDetailCodeEditor label={t('Extra Variables')} value={template.extra_vars} />
       )}
     </PageDetails>
   );

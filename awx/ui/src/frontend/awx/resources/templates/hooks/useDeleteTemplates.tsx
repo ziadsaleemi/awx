@@ -17,14 +17,18 @@ export function useDeleteTemplates(
   const confirmationColumns = useTemplateColumns({ disableLinks: true, disableSort: true });
   const deleteActionNameColumn = useNameColumn({ disableLinks: true, disableSort: true });
   const actionColumns = useMemo(() => [deleteActionNameColumn], [deleteActionNameColumn]);
-  const bulkAction = useAwxBulkConfirmation<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>();
+  const bulkAction = useAwxBulkConfirmation<
+    JobTemplate | WorkflowJobTemplate | TerraformJobTemplate
+  >();
   const getSingularDeleteTitle = (type: string) =>
     type === 'job_template'
       ? t('Permanently delete job template')
       : type === 'terraform_job_template'
         ? t('Permanently delete terraform template')
         : t('Permanently delete workflow job template');
-  const deleteTemplates = (templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]) => {
+  const deleteTemplates = (
+    templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]
+  ) => {
     bulkAction({
       title:
         templates.length === 1

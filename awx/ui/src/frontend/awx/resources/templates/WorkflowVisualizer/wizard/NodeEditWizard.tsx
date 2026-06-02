@@ -201,7 +201,11 @@ export function NodeEditWizard({ node }: { node: GraphNode }) {
         extra_data: {
           days: node_days_to_keep,
         },
-        node_type: isEdaNode ? RESOURCE_TYPE.eda_rulebook : isAiNode ? RESOURCE_TYPE.ai_task : 'template',
+        node_type: isEdaNode
+          ? RESOURCE_TYPE.eda_rulebook
+          : isAiNode
+            ? RESOURCE_TYPE.ai_task
+            : 'template',
         eda_rulebook_name: isEdaNode ? eda_rulebook_name : '',
         eda_activation_id: isEdaNode ? eda_activation_id : '',
         eda_event_source: isEdaNode ? eda_event_source : '',
@@ -232,21 +236,21 @@ export function NodeEditWizard({ node }: { node: GraphNode }) {
                   eda_rulebook: undefined,
                   unified_job_template: undefined,
                 }
-            : {
-                ai_task: undefined,
-                eda_rulebook: undefined,
-                unified_job_template: {
-                  id: Number(resource?.id || -1),
-                  name: nodeName,
-                  description: getValueBasedOnJobType(
-                    node_type,
-                    resource?.description || '',
-                    approval_description
-                  ),
-                  unified_job_type: node_type,
-                  timeout: approval_timeout,
-                },
-              }),
+              : {
+                  ai_task: undefined,
+                  eda_rulebook: undefined,
+                  unified_job_template: {
+                    id: Number(resource?.id || -1),
+                    name: nodeName,
+                    description: getValueBasedOnJobType(
+                      node_type,
+                      resource?.description || '',
+                      approval_description
+                    ),
+                    unified_job_type: node_type,
+                    timeout: approval_timeout,
+                  },
+                }),
         },
       },
       launch_data: promptValues,

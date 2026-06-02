@@ -61,9 +61,7 @@ export function CatalogItems() {
         icon: PlusCircleIcon,
         onClick: () => pageNavigate(AwxRoute.CreateCatalogItem),
         isDisabled: () =>
-          canCreate
-            ? undefined
-            : t('You do not have permission to create catalog items.'),
+          canCreate ? undefined : t('You do not have permission to create catalog items.'),
       },
       {
         type: PageActionType.Button,
@@ -176,9 +174,7 @@ function useCatalogItemColumns(): ITableColumn<CatalogItem>[] {
       },
       {
         header: t('Organization'),
-        cell: (item) => (
-          <TextCell text={item.summary_fields?.organization?.name ?? '-'} />
-        ),
+        cell: (item) => <TextCell text={item.summary_fields?.organization?.name ?? '-'} />,
       },
       {
         header: t('Provision'),
@@ -187,7 +183,7 @@ function useCatalogItemColumns(): ITableColumn<CatalogItem>[] {
             text={
               item.summary_fields?.terraform_job_template?.name
                 ? `${item.summary_fields.terraform_job_template.name} (Terraform)`
-                : (item.summary_fields?.provision_workflow?.name ?? '-')
+                : item.summary_fields?.provision_workflow?.name ?? '-'
             }
           />
         ),
@@ -195,9 +191,7 @@ function useCatalogItemColumns(): ITableColumn<CatalogItem>[] {
       {
         header: t('Browse'),
         cell: (item) => (
-          <TextCell
-            text={item.browse_enabled !== false ? t('Visible') : t('Hidden')}
-          />
+          <TextCell text={item.browse_enabled !== false ? t('Visible') : t('Hidden')} />
         ),
       },
     ],

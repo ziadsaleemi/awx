@@ -56,7 +56,6 @@ function PageNavigationItems(props: { items: PageNavigationItem[]; baseRoute: st
 
 function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRoute: string }) {
   const { item } = props;
-  const navBar = usePageNavSideBar();
   const [isExpanded, setIsExpanded] = useState(
     () =>
       localStorage.getItem('default-nav-expanded') === 'true' ||

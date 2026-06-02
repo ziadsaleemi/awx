@@ -15,7 +15,16 @@ import { Help } from '../components/Help';
 import { useID } from '../hooks/useID';
 import { PageDashboardContext } from './PageDashboard';
 
-export type PageDashboardCardWidth = 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl' | 'half' | 'full';
+export type PageDashboardCardWidth =
+  | 'xxs'
+  | 'xs'
+  | 'sm'
+  | 'md'
+  | 'lg'
+  | 'xl'
+  | 'xxl'
+  | 'half'
+  | 'full';
 export type PageDashboardCardHeight = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
 
 const heightUnit = 90;

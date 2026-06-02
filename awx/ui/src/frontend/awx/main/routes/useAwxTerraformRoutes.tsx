@@ -20,7 +20,10 @@ import { TerraformTemplateAddTeams } from '../../resources/terraform/TerraformTe
 import { TerraformTemplateAddUsers } from '../../resources/terraform/TerraformTemplateAddUsers';
 import { ResourceNotifications } from '../../resources/notifications/ResourceNotifications';
 import { TemplateSurvey } from '../../resources/templates/TemplatePage/TemplateSurvey';
-import { AddTemplateSurveyForm, EditTemplateSurveyForm } from '../../resources/templates/TemplatePage/TemplateSurveyForm';
+import {
+  AddTemplateSurveyForm,
+  EditTemplateSurveyForm,
+} from '../../resources/templates/TemplatePage/TemplateSurveyForm';
 import { SchedulesList } from '../../views/schedules/SchedulesList';
 import { ScheduleAddWizard } from '../../views/schedules/wizard/ScheduleAddWizard';
 import { ScheduleEditWizard } from '../../views/schedules/wizard/ScheduleEditWizard';

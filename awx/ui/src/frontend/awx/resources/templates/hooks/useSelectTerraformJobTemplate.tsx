@@ -53,10 +53,7 @@ export function useSelectTerraformJobTemplate() {
   const openSelectDialog = useCallback(
     (onSelect: (template: TerraformJobTemplate) => void) => {
       setDialog(
-        <SelectTerraformJobTemplate
-          title={t('Select Terraform template')}
-          onSelect={onSelect}
-        />
+        <SelectTerraformJobTemplate title={t('Select Terraform template')} onSelect={onSelect} />
       );
     },
     [setDialog, t]

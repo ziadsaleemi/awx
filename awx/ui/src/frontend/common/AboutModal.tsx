@@ -30,7 +30,7 @@ function AnsibleAboutModal(props: AnsibleAboutModalProps) {
           <TextListItem component="dt">{t('Enhanced by')}</TextListItem>
           <TextListItem component="dd">
             <a href="https://ziadsaleemi.com" target="_blank" rel="noopener noreferrer">
-              Ziad Saleemi
+              {t('Ziad Saleemi')}
             </a>
           </TextListItem>
         </TextList>

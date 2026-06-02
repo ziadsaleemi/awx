@@ -187,7 +187,7 @@ const templateTypeMap: Record<string, UnifiedJobType> = {
   workflow_job_template: RESOURCE_TYPE.workflow_job,
 };
 
-function normalizeNodeType(type: AIWorkflowPlanNodeType | string | undefined) {
+function normalizeNodeType(type: string | undefined) {
   return typeAliases[String(type ?? '').toLowerCase()] ?? null;
 }
 
@@ -515,7 +515,11 @@ export function AIWorkflowSuggester() {
             failure_nodes: [],
             success_nodes: [],
             identifier: nodeName,
-            node_type: isEda ? RESOURCE_TYPE.eda_rulebook : isAi ? RESOURCE_TYPE.ai_task : undefined,
+            node_type: isEda
+              ? RESOURCE_TYPE.eda_rulebook
+              : isAi
+                ? RESOURCE_TYPE.ai_task
+                : undefined,
             eda_rulebook_name: isEda ? nodeName : undefined,
             eda_activation_id: isEda ? node.planNode.template_name || '' : undefined,
             eda_event_source: isEda ? node.planNode.description || '' : undefined,
@@ -543,15 +547,15 @@ export function AIWorkflowSuggester() {
                         status: 'pending',
                       },
                     }
-                : {
-                    unified_job_template: {
-                      id: isApproval ? -1 : Number(node.template?.id || 0),
-                      name: nodeName,
-                      description: nodeDescription,
-                      unified_job_type: nodeType as UnifiedJobType,
-                      timeout: isApproval ? node.planNode.approval_timeout || 0 : undefined,
-                    },
-                  }),
+                  : {
+                      unified_job_template: {
+                        id: isApproval ? -1 : Number(node.template?.id || 0),
+                        name: nodeName,
+                        description: nodeDescription,
+                        unified_job_type: nodeType as UnifiedJobType,
+                        timeout: isApproval ? node.planNode.approval_timeout || 0 : undefined,
+                      },
+                    }),
             },
           },
           launch_data: createEmptyPromptValues(),

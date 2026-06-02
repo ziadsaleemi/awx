@@ -113,7 +113,7 @@ export function NodeReviewStep() {
       ? eda_rulebook_name
       : node_type === RESOURCE_TYPE.ai_task
         ? ai_task_prompt?.split('\n')[0].slice(0, 60) || t('AI task')
-      : getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
+        : getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
   const descriptionDetail = getValueBasedOnJobType(
     node_type,
     resource?.description || '',

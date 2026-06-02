@@ -1,7 +1,6 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDeleteRequest } from '../../../../common/crud/useDeleteRequest';
-import { usePostRequest } from '../../../../common/crud/usePostRequest';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { usePageAlertToaster } from '../../../../../framework';

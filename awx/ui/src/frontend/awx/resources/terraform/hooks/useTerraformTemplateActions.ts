@@ -1,6 +1,11 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePageNavigate, IPageAction, PageActionType, PageActionSelection } from '../../../../../framework';
+import {
+  usePageNavigate,
+  IPageAction,
+  PageActionType,
+  PageActionSelection,
+} from '../../../../../framework';
 import { ButtonVariant } from '@patternfly/react-core';
 import { PencilAltIcon, TrashIcon, RocketIcon } from '@patternfly/react-icons';
 import { useDeleteRequest } from '../../../../common/crud/useDeleteRequest';

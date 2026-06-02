@@ -86,11 +86,12 @@ export const WorkflowOutputNode = observer(({ element, selected }: WorkflowOutpu
   const statusDecorator = useStatusDecorator();
   const status = element.getController().getNodeById(element.getId())?.getNodeStatus();
   const data = element.getData();
-  const { job, unified_job_template, eda_rulebook, ai_task } =
-    data?.resource?.summary_fields || {};
+  const { job, unified_job_template, eda_rulebook, ai_task } = data?.resource?.summary_fields || {};
   const { unified_job_type: templateType } = unified_job_template || {};
   const Icon =
-    NodeIcon[templateType ?? (eda_rulebook ? 'eda_rulebook' : ai_task ? 'ai_task' : 'deleted_resource')];
+    NodeIcon[
+      templateType ?? (eda_rulebook ? 'eda_rulebook' : ai_task ? 'ai_task' : 'deleted_resource')
+    ];
 
   function handleSelect() {
     if (!job) return;

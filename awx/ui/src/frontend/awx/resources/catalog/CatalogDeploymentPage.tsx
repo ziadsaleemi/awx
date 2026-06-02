@@ -24,10 +24,12 @@ export function CatalogDeploymentPage() {
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest();
 
-  const { data: deployment, error, isLoading, refresh } = useGetItem<CatalogDeployment>(
-    awxAPI`/catalog_deployments`,
-    params.id
-  );
+  const {
+    data: deployment,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<CatalogDeployment>(awxAPI`/catalog_deployments`, params.id);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !deployment) return <LoadingPage />;
@@ -124,4 +126,3 @@ export function CatalogDeploymentPage() {
     </PageLayout>
   );
 }
-

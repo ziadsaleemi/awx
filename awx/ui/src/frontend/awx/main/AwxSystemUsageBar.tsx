@@ -1,4 +1,4 @@
-import { Tooltip } from '@patternfly/react-core';
+import { Button, Tooltip } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { usePageNavigate } from '../../../framework';
 import { useGet } from '../../common/crud/useGet';
@@ -35,9 +35,13 @@ export function AwxSystemUsageBar() {
 
   ensurePulseKeyframes();
 
-  const { data } = useGet<AwxItemsResponse<Instance>>(awxAPI`/instances/`, { page_size: 50 }, {
-    refreshInterval: 30000,
-  });
+  const { data } = useGet<AwxItemsResponse<Instance>>(
+    awxAPI`/instances/`,
+    { page_size: 50 },
+    {
+      refreshInterval: 30000,
+    }
+  );
 
   if (!data) return null;
 
@@ -55,7 +59,9 @@ export function AwxSystemUsageBar() {
 
   // Per-node breakdown — only shown when there are multiple execution nodes.
   const showNodeBreakdown = instances.length > 1;
-  const execNodes = instances.filter((i) => i.node_type === 'execution' || i.node_type === 'hybrid');
+  const execNodes = instances.filter(
+    (i) => i.node_type === 'execution' || i.node_type === 'hybrid'
+  );
   const breakdownNodes = execNodes.length > 0 ? execNodes : instances;
 
   const tooltipContent = (
@@ -72,13 +78,17 @@ export function AwxSystemUsageBar() {
         <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 6 }}>
           {breakdownNodes.map((inst) => {
             const instPct =
-              inst.capacity > 0
-                ? Math.round((inst.consumed_capacity / inst.capacity) * 100)
-                : 0;
+              inst.capacity > 0 ? Math.round((inst.consumed_capacity / inst.capacity) * 100) : 0;
             return (
               <div
                 key={inst.id}
-                style={{ fontSize: '11px', marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 12 }}
+                style={{
+                  fontSize: '11px',
+                  marginBottom: 2,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
               >
                 <span>{inst.hostname}</span>
                 <span>
@@ -94,8 +104,9 @@ export function AwxSystemUsageBar() {
 
   return (
     <Tooltip content={tooltipContent} position="bottom">
-      <div
+      <Button
         data-cy="system-usage-bar"
+        variant="plain"
         onClick={() => pageNavigate(AwxRoute.Instances)}
         style={{
           display: 'flex',
@@ -104,6 +115,7 @@ export function AwxSystemUsageBar() {
           cursor: 'pointer',
           padding: '0 8px',
           userSelect: 'none',
+          color: 'inherit',
         }}
       >
         <span
@@ -145,9 +157,7 @@ export function AwxSystemUsageBar() {
           {showNodeBreakdown &&
             breakdownNodes.map((inst) => {
               const instPct =
-                inst.capacity > 0
-                  ? Math.round((inst.consumed_capacity / inst.capacity) * 100)
-                  : 0;
+                inst.capacity > 0 ? Math.round((inst.consumed_capacity / inst.capacity) * 100) : 0;
               return (
                 <div
                   key={inst.id}
@@ -187,7 +197,7 @@ export function AwxSystemUsageBar() {
         >
           {usedPct}%
         </span>
-      </div>
+      </Button>
     </Tooltip>
   );
 }

@@ -37,8 +37,8 @@ export function useSurveyColumns(_options?: {
                 templateType === 'job_template'
                   ? AwxRoute.EditJobTemplateSurvey
                   : templateType === 'terraform_job_template'
-                  ? AwxRoute.EditTerraformTemplateSurvey
-                  : AwxRoute.EditWorkflowJobTemplateSurvey,
+                    ? AwxRoute.EditTerraformTemplateSurvey
+                    : AwxRoute.EditWorkflowJobTemplateSurvey,
                 { params: { id }, query: { question_variable: question.variable } }
               )}
             />
