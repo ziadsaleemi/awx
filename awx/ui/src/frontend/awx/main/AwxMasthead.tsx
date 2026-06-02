@@ -37,6 +37,7 @@ import { WorkflowApproval } from '../interfaces/WorkflowApproval';
 import { AwxRoute } from './AwxRoutes';
 import { AwxGlobalSearch } from './AwxGlobalSearch';
 import { AwxSystemUsageBar } from './AwxSystemUsageBar';
+import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotification';
 
 const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
 
@@ -230,9 +231,7 @@ export function useAwxNotifications() {
               description: workflow_approval.summary_fields.workflow_job?.name,
               timestamp: workflow_approval.created,
               variant: 'info',
-              to: getPageUrl(AwxRoute.WorkflowApprovalDetails, {
-                params: { id: workflow_approval.id },
-              }),
+              to: getWorkflowApprovalNotificationUrl(getPageUrl, workflow_approval),
               actions: [
                 {
                   label: t('Approve'),

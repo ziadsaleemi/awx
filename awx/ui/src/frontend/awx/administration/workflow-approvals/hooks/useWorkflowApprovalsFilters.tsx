@@ -7,7 +7,7 @@ export function useWorkflowApprovalsFilters() {
       name: { apiPath: 'workflow_approvals' },
       id: { apiPath: 'workflow_approvals' },
     },
-    preSortedKeys: ['name', 'id'],
+    preSortedKeys: ['name', 'id', 'status'],
   });
   return toolbarFilters;
 }
