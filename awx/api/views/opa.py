@@ -218,10 +218,40 @@ def check_opa_policy(policy_path: str, input_data: dict) -> bool:
 
 
 def opa_response_allows(opa_response: dict) -> bool:
-    result = opa_response.get('result', True)
-    if isinstance(result, dict) and 'allowed' in result:
-        return bool(result['allowed'])
+    if 'result' not in opa_response:
+        return False
+
+    result = opa_response['result']
+    if isinstance(result, dict):
+        has_clear_denial_key = False
+
+        for deny_key in ('deny', 'denied'):
+            if deny_key in result:
+                has_clear_denial_key = True
+                if _opa_decision_has_entries(result[deny_key]):
+                    return False
+
+        for violation_key in ('violations', 'violation', 'errors'):
+            if violation_key in result:
+                has_clear_denial_key = True
+                if _opa_decision_has_entries(result[violation_key]):
+                    return False
+
+        for allow_key in ('allow', 'allowed', 'authorized', 'permitted'):
+            if allow_key in result:
+                return bool(result[allow_key])
+
+        if has_clear_denial_key:
+            return True
+
+        return False
     return bool(result)
+
+
+def _opa_decision_has_entries(value) -> bool:
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) > 0
+    return bool(value)
 
 
 def _safe_opa_id(value):

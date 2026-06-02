@@ -5,7 +5,7 @@ import pytest
 from django.test import override_settings
 
 from awx.api.versioning import reverse
-from awx.api.views.opa import OPAPolicyEngine, check_opa_policy
+from awx.api.views.opa import OPAPolicyEngine, check_opa_policy, opa_response_allows
 from awx.main.models import CatalogDeployment, CatalogItem, Job, SystemJob, TerraformJob, WorkflowJob
 from awx.main.tasks.policy import OPA_AUTH_TYPES
 
@@ -172,6 +172,37 @@ def test_opa_evaluate_uses_registered_connection_settings_and_parses_denial(post
 def test_check_opa_policy_understands_structured_denial():
     with mock.patch.object(OPAPolicyEngine, 'evaluate', return_value={'result': {'allowed': False, 'violations': ['blocked']}}):
         assert check_opa_policy('awx/ai_action/allow', {'action': 'launch'}) is False
+
+
+@pytest.mark.parametrize(
+    ('opa_response', 'expected'),
+    [
+        ({'result': True}, True),
+        ({'result': False}, False),
+        ({'result': {'allow': True}}, True),
+        ({'result': {'allow': False}}, False),
+        ({'result': {'allow': True, 'violations': ['blocked']}}, False),
+        ({'result': {'allowed': False, 'violations': ['blocked']}}, False),
+        ({'result': {'deny': []}}, True),
+        ({'result': {'deny': ['blocked']}}, False),
+        ({'result': {'denied': True}}, False),
+        ({'result': {'denied': False}}, True),
+        ({'result': {'violations': []}}, True),
+        ({'result': {'violations': ['blocked']}}, False),
+        ({'result': {'errors': {'policy': 'blocked'}}}, False),
+        ({'result': {'unknown': 'value'}}, False),
+        ({}, False),
+    ],
+)
+def test_opa_response_allows_common_opa_decision_shapes(opa_response, expected):
+    assert opa_response_allows(opa_response) is expected
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_SSL=False)
+def test_check_opa_policy_understands_common_opa_allow_denial():
+    with mock.patch.object(OPAPolicyEngine, 'evaluate', return_value={'result': {'allow': False, 'violations': ['blocked']}}):
+        assert check_opa_policy('awx/job_launch/allow', {'action': 'launch'}) is False
 
 
 @pytest.mark.django_db
