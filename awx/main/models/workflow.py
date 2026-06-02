@@ -672,6 +672,7 @@ class WorkflowJobNode(WorkflowNodeBase):
         from awx.api.views.ai import (
             _apply_ai_operations_sequentially,
             _audit_ai_resource_action,
+            _build_ai_rollback_plan,
             _public_ai_operation_result,
             _redact_sensitive,
             _json_safe,
@@ -695,6 +696,7 @@ class WorkflowJobNode(WorkflowNodeBase):
         operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
         provider_result = provider_result or self.ai_task_result
+        rollback_plan = _build_ai_rollback_plan(plan, public_operations) if can_apply else None
         audit_entry = _audit_ai_resource_action(
             request,
             'apply',
@@ -702,14 +704,19 @@ class WorkflowJobNode(WorkflowNodeBase):
             public_operations,
             provider=provider_result.get('provider', ''),
             model=provider_result.get('model', ''),
+            prompt_summary=provider_result.get('prompt', ''),
+            rollback_plan=rollback_plan,
         )
-        return {
+        result = {
             'mode': 'apply',
             'plan': _redact_sensitive(_json_safe(plan)),
             'operations': public_operations,
             'can_apply': can_apply,
             'audit': {'activity_stream_id': audit_entry.pk},
         }
+        if rollback_plan:
+            result['rollback_plan'] = rollback_plan
+        return result
 
     def approve_ai_resource_action_plan(self, user):
         resource_action = self.apply_ai_resource_action_plan(user=user, human_approved=True)

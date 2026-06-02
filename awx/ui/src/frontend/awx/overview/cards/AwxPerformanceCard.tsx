@@ -43,6 +43,8 @@ interface InstancesResponse {
 }
 
 interface UnifiedJob {
+  id?: number;
+  type?: string;
   unified_job_template?: { name: string };
   name?: string;
   elapsed?: number;
@@ -50,6 +52,9 @@ interface UnifiedJob {
   created?: string;
   finished?: string;
   modified?: string;
+  related?: {
+    job_events?: string;
+  };
 }
 
 interface UnifiedJobsResponse {
@@ -206,6 +211,22 @@ export function getRuntimeTrend(jobs: UnifiedJob[], timeWindow: PerformanceWindo
   return { buckets, direction, percentChange, totalElapsed: firstHalf + secondHalf };
 }
 
+function addQueryParams(url: string, params: Record<string, string>) {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${new URLSearchParams(params).toString()}`;
+}
+
+async function fetchFailedJobEvents(urls: string[]) {
+  const responses = await Promise.all(
+    urls.map((url) =>
+      fetch(addQueryParams(url, { page_size: '200', order_by: '-created' }))
+        .then((r) => (r.ok ? r.json() : { count: 0, results: [] }))
+        .catch(() => ({ count: 0, results: [] }))
+    )
+  );
+  return responses.flatMap((response: JobEventsResponse) => response.results ?? []);
+}
+
 function usePerformanceData(timeWindow: PerformanceWindow) {
   const now = new Date();
   const windowStart = getWindowStart(now, timeWindow);
@@ -226,21 +247,25 @@ function usePerformanceData(timeWindow: PerformanceWindow) {
         .catch(() => ({ count: 0, results: [] }))
   );
 
-  const { data: failedEvents, isLoading: eventsLoading } = useSWR<JobEventsResponse>(
-    awxAPI`/job_events/?page_size=200&order_by=-created`,
-    (url: string) =>
-      fetch(url)
-        .then((r) => r.json())
-        .catch(() => ({ count: 0, results: [] }))
+  const jobs = recentJobs?.results ?? [];
+  const failedEventUrls = jobs
+    .filter((job) => job.status === 'failed' || job.status === 'error')
+    .map((job) => job.related?.job_events)
+    .filter((url): url is string => Boolean(url))
+    .slice(0, 8);
+  const failedEventsKey = failedEventUrls.length ? failedEventUrls.join('\n') : null;
+
+  const { data: failedEvents = [], isLoading: eventsLoading } = useSWR<JobEvent[]>(
+    failedEventsKey,
+    (key: string) => fetchFailedJobEvents(key.split('\n').filter(Boolean))
   );
 
-  const jobs = recentJobs?.results ?? [];
   const executionNodes = getExecutionNodes(instances?.results ?? []);
 
   return {
     capacitySummary: getCapacitySummary(executionNodes),
     executionNodes,
-    failedHosts: getFailedHosts(failedEvents?.results ?? [], windowStart, now),
+    failedHosts: getFailedHosts(failedEvents, windowStart, now),
     runtimeTrend: getRuntimeTrend(jobs, timeWindow, now),
     slowestTemplates: getSlowestTemplates(jobs, windowStart, now),
     isLoading: instLoading || jobsLoading || eventsLoading,

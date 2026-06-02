@@ -186,6 +186,8 @@ _AI_RESOURCE_TYPE_ALIASES = {
 _AI_OPERATION_ALIASES = {
     'associate': 'attach',
     'disassociate': 'detach',
+    'remove': 'delete',
+    'destroy': 'delete',
 }
 
 _AI_RESOURCE_TYPES = {
@@ -1411,6 +1413,13 @@ def _json_safe(value):
     return value
 
 
+def _summarize_ai_prompt(prompt: str | None) -> str:
+    if not isinstance(prompt, str):
+        return ''
+    summary = re.sub(r'\s+', ' ', prompt).strip()
+    return summary[:240]
+
+
 def _redact_sensitive(value):
     if isinstance(value, dict):
         redacted = {}
@@ -1651,7 +1660,7 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '{"id": "stable id", "operation": "create|update|delete|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id"}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
@@ -2114,7 +2123,7 @@ def _validate_ai_project_file_operation(request, operation: dict, context: dict 
         },
     }
 
-    if action not in {'create', 'update'}:
+    if action not in {'create', 'update', 'delete'}:
         result['errors'] = {'operation': [_('Unsupported AI project file operation.')]}
         return result
     if not payload['project_id']:
@@ -2142,16 +2151,18 @@ def _validate_ai_project_file_operation(request, operation: dict, context: dict 
         return result
 
     content = payload['content']
-    if not isinstance(content, str):
-        result['errors'] = {'content': [_('Project file content must be a string.')]}
-        return result
-    if '\x00' in content:
-        result['errors'] = {'content': [_('Project file content cannot include null bytes.')]}
-        return result
-    content_bytes = len(content.encode('utf-8'))
-    if content_bytes > _AI_PROJECT_FILE_MAX_BYTES:
-        result['errors'] = {'content': [_('Project file content exceeds the 256 KiB AI authoring limit.')]}
-        return result
+    content_bytes = 0
+    if action != 'delete':
+        if not isinstance(content, str):
+            result['errors'] = {'content': [_('Project file content must be a string.')]}
+            return result
+        if '\x00' in content:
+            result['errors'] = {'content': [_('Project file content cannot include null bytes.')]}
+            return result
+        content_bytes = len(content.encode('utf-8'))
+        if content_bytes > _AI_PROJECT_FILE_MAX_BYTES:
+            result['errors'] = {'content': [_('Project file content exceeds the 256 KiB AI authoring limit.')]}
+            return result
 
     base_path, target_path, target_error = _resolve_ai_project_file_path(project, relative_path)
     if target_error:
@@ -2159,6 +2170,9 @@ def _validate_ai_project_file_operation(request, operation: dict, context: dict 
         return result
     if target_path.exists() and target_path.is_dir():
         result['errors'] = {'path': [_('Project file path points to a directory.')]}
+        return result
+    if action == 'delete' and not target_path.exists():
+        result['errors'] = {'path': [_('Project file does not exist.')]}
         return result
     if target_path.exists() and action == 'create' and not overwrite:
         result['errors'] = {'path': [_('Project file already exists; use update or set overwrite=true.')]}
@@ -2192,7 +2206,8 @@ def _validate_ai_project_file_operation(request, operation: dict, context: dict 
                 'path': relative_path,
                 'content_bytes': content_bytes,
                 'will_create': not target_path.exists(),
-                'will_overwrite': target_path.exists(),
+                'will_overwrite': target_path.exists() and action != 'delete',
+                'will_delete': action == 'delete',
             },
             '_project_file': True,
             '_project': project,
@@ -2900,6 +2915,86 @@ def _validate_ai_survey_spec_operation(request, operation: dict, context: dict |
     result['_target_config'] = target_config
     result['_survey_spec_to_save'] = survey_spec
     result['_survey_enabled_to_save'] = payload['survey_enabled']
+    result['_previous_survey_spec'] = target.survey_spec
+    result['_previous_survey_enabled'] = target.survey_enabled
+    return result
+
+
+def _rollback_data_for_update(instance, data: dict) -> dict:
+    rollback_data = {}
+    for field_name in data:
+        if not isinstance(field_name, str) or field_name.startswith('_'):
+            continue
+        if hasattr(instance, field_name):
+            value = getattr(instance, field_name)
+        elif hasattr(instance, f'{field_name}_id'):
+            value = getattr(instance, f'{field_name}_id')
+        else:
+            continue
+        if hasattr(value, 'all') and callable(value.all):
+            continue
+        rollback_data[field_name] = _json_safe(value.pk if hasattr(value, 'pk') else value)
+    return rollback_data
+
+
+def _validate_ai_delete_operation(request, operation: dict, context: dict | None = None) -> dict:
+    resource_type = operation.get('resource_type')
+    object_id = _operation_object_id(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': 'delete',
+        'resource_type': resource_type,
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': {},
+        'object_id': object_id,
+    }
+
+    if resource_type not in _AI_RESOURCE_TYPES:
+        result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
+        return result
+    if object_id is None:
+        result['errors'] = {'object_id': [_('Delete operations must include object_id.')]}
+        return result
+
+    resource_config = _AI_RESOURCE_TYPES[resource_type]
+    model = resource_config['model']
+    try:
+        instance = model.objects.get(pk=object_id)
+    except model.DoesNotExist:
+        result['errors'] = {'object_id': [_('Object not found.')]}
+        return result
+    if not request.user.can_access(model, 'read', instance):
+        result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
+        return result
+    if not request.user.can_access(model, 'delete', instance):
+        result['errors'] = {'permission': [_('You do not have permission to delete this resource.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type=resource_type,
+        action='delete',
+        object_id=object_id,
+        data={},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result.update(
+        {
+            'valid': True,
+            'object': _serialize_ai_resource(request, resource_config['serializer'], instance),
+            '_delete': True,
+            '_instance': instance,
+            '_model': model,
+            '_resource_config': resource_config,
+        }
+    )
     return result
 
 
@@ -2928,6 +3023,8 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
         return result
+    if action == 'delete':
+        return _validate_ai_delete_operation(request, operation, context=context)
     if action not in {'create', 'update'}:
         result['errors'] = {'operation': [_('Unsupported AI resource operation.')]}
         return result
@@ -2963,6 +3060,16 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
     else:
         _pop_ai_project_workspace_fields(serializer_data)
     result['data'] = _redact_sensitive(_json_safe(serializer_data))
+    if instance is not None:
+        rollback_data = _rollback_data_for_update(instance, serializer_data)
+        if rollback_data:
+            result['_rollback_operation'] = {
+                'id': f"rollback-{operation.get('id') or resource_type}",
+                'operation': 'update',
+                'resource_type': resource_type,
+                'object_id': instance.pk,
+                'data': _redact_sensitive(rollback_data),
+            }
 
     if resource_type == 'constructed_inventory':
         constructed_input_inventory_ids, invalid_input_inventory_values = _pop_constructed_input_inventory_ids(serializer_data)
@@ -3056,14 +3163,26 @@ def _save_ai_credential_reference_operation(request, validation: dict) -> dict:
     credential = validation['_credential']
     if validation.get('operation') == 'attach':
         target.credentials.add(credential)
+        rollback_operation = 'detach'
     else:
         target.credentials.remove(credential)
+        rollback_operation = 'attach'
 
     validation['object'] = _serialize_ai_resource(request, validation['_target_config']['serializer'], target)
     validation['object_id'] = target.pk
     validation['target_id'] = target.pk
     validation['credential_id'] = credential.pk
     validation['credential'] = _credential_summary(credential)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'credential-reference'}",
+        'operation': rollback_operation,
+        'resource_type': 'credential_reference',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'credential_id': credential.pk,
+        },
+    }
     validation.pop('_credential_reference', None)
     validation.pop('_target', None)
     validation.pop('_target_config', None)
@@ -3080,12 +3199,16 @@ def _save_ai_role_assignment_operation(request, validation: dict) -> dict:
     if actor_type == 'user':
         if validation.get('operation') == 'attach':
             role.members.add(actor)
+            rollback_operation = 'detach'
         else:
             role.members.remove(actor)
+            rollback_operation = 'attach'
     elif validation.get('operation') == 'attach':
         actor.member_role.children.add(role)
+        rollback_operation = 'detach'
     else:
         actor.member_role.children.remove(role)
+        rollback_operation = 'attach'
 
     validation['object_id'] = target.pk
     validation['target_id'] = target.pk
@@ -3096,6 +3219,18 @@ def _save_ai_role_assignment_operation(request, validation: dict) -> dict:
     validation['actor_type'] = actor_type
     validation['actor_id'] = actor.pk
     validation['actor'] = _actor_summary(actor_type, actor)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'role-assignment'}",
+        'operation': rollback_operation,
+        'resource_type': 'role_assignment',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'role_id': role.pk,
+            'actor_type': actor_type,
+            'actor_id': actor.pk,
+        },
+    }
     validation.pop('_role_assignment', None)
     validation.pop('_target', None)
     validation.pop('_target_config', None)
@@ -3115,6 +3250,17 @@ def _save_ai_survey_spec_operation(request, validation: dict) -> dict:
     validation['object_id'] = target.pk
     validation['target_id'] = target.pk
     validation['target'] = _target_summary(validation['target_resource_type'], target)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'survey-spec'}",
+        'operation': 'update',
+        'resource_type': 'survey_spec',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'survey_spec': validation.pop('_previous_survey_spec', {}),
+            'survey_enabled': validation.pop('_previous_survey_enabled', False),
+        },
+    }
     validation.pop('_survey_spec', None)
     validation.pop('_target', None)
     validation.pop('_target_config', None)
@@ -3130,11 +3276,14 @@ def _apply_ai_project_file_operation(validation: dict):
     existed = target_path.exists()
     backup = target_path.read_bytes() if existed else None
     try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content, encoding='utf-8')
+        if validation.get('operation') == 'delete':
+            target_path.unlink()
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content, encoding='utf-8')
     except OSError as exc:
         validation['valid'] = False
-        validation['errors'] = {'path': [_('Could not write project file: {}').format(exc)]}
+        validation['errors'] = {'path': [_('Could not change project file: {}').format(exc)]}
         return
     validation['_project_file_applied'] = True
     validation['_project_file_rollback'] = {
@@ -3176,6 +3325,7 @@ def _rollback_ai_project_file_operations(operations: list):
 def _save_ai_project_file_operation(request, validation: dict) -> dict:
     if not validation.get('_project_file_applied'):
         _apply_ai_project_file_operation(validation)
+    rollback = validation.get('_project_file_rollback') or {}
     project = validation['_project']
     validation['object'] = {
         'project': project.pk,
@@ -3185,6 +3335,15 @@ def _save_ai_project_file_operation(request, validation: dict) -> dict:
     }
     validation['object_id'] = project.pk
     validation['project_id'] = project.pk
+    if rollback.get('existed'):
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content is not copied into audit rollback plans.'))
+    elif validation.get('operation') != 'delete':
+        validation['rollback'] = {
+            'id': f"rollback-{validation.get('id') or 'project-file'}",
+            'operation': 'delete',
+            'resource_type': 'project_file',
+            'data': {'project': project.pk, 'path': validation['path']},
+        }
     validation.pop('_project_file', None)
     validation.pop('_project', None)
     validation.pop('_base_path', None)
@@ -3194,6 +3353,16 @@ def _save_ai_project_file_operation(request, validation: dict) -> dict:
 
 
 def _save_ai_operation(request, validation: dict) -> dict:
+    if validation.get('_delete'):
+        obj = validation['_instance']
+        object_id = obj.pk
+        obj.delete()
+        validation['object_id'] = object_id
+        validation.pop('_delete', None)
+        validation.pop('_instance', None)
+        validation.pop('_model', None)
+        validation.pop('_resource_config', None)
+        return validation
     if validation.get('_credential_reference'):
         return _save_ai_credential_reference_operation(request, validation)
     if validation.get('_role_assignment'):
@@ -3217,14 +3386,51 @@ def _save_ai_operation(request, validation: dict) -> dict:
 
     validation['object'] = _serialize_ai_resource(request, validation['_resource_config']['serializer'], obj)
     validation['object_id'] = obj.pk
+    if validation.get('operation') == 'create':
+        validation['rollback'] = {
+            'id': f"rollback-{validation.get('id') or validation.get('resource_type')}",
+            'operation': 'delete',
+            'resource_type': validation.get('resource_type'),
+            'object_id': obj.pk,
+            'data': {},
+        }
+    elif validation.get('_rollback_operation'):
+        validation['rollback'] = validation['_rollback_operation']
     validation.pop('_serializer', None)
     validation.pop('_model', None)
     validation.pop('_resource_config', None)
     validation.pop('_constructed_input_inventories', None)
+    validation.pop('_rollback_operation', None)
     return validation
 
 
-def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, provider: str = '', model: str = ''):
+def _build_ai_rollback_plan(plan: dict, operations: list) -> dict | None:
+    rollback_operations = []
+    for operation in reversed(operations):
+        rollback = operation.get('rollback') if isinstance(operation, dict) else None
+        if isinstance(rollback, dict):
+            rollback_operations.append(_redact_sensitive(_json_safe(rollback)))
+    if not rollback_operations:
+        return None
+    plan_name = plan.get('name') if isinstance(plan, dict) else ''
+    return {
+        'name': str(_('Rollback AI resource action: %(name)s') % {'name': plan_name or str(_('untitled plan'))}),
+        'description': str(_('Inverse operations generated from the Activity Stream audited AI apply result.')),
+        'operations': rollback_operations,
+    }
+
+
+def _audit_ai_resource_action(
+    request,
+    mode: str,
+    plan: dict,
+    operations: list,
+    provider: str = '',
+    model: str = '',
+    prompt_summary: str = '',
+    rollback_plan: dict | None = None,
+):
+    rollback_plan = rollback_plan if isinstance(rollback_plan, dict) else (_build_ai_rollback_plan(plan, operations) if mode == 'apply' else None)
     safe_operations = []
     is_error = False
     for operation in operations:
@@ -3249,6 +3455,8 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
                 'user_id': operation.get('user_id'),
                 'team_id': operation.get('team_id'),
                 'question_count': operation.get('question_count'),
+                'rollback': _redact_sensitive(_json_safe(operation.get('rollback') or {})),
+                'rollback_unsupported_reason': str(operation.get('rollback_unsupported_reason') or ''),
                 'errors': _json_safe(operation.get('errors') or {}),
             }
         )
@@ -3259,11 +3467,15 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
         'mode': mode,
         'provider': provider,
         'model': model,
+        'prompt_summary': _summarize_ai_prompt(prompt_summary),
         'plan_name': plan.get('name', ''),
         'operation_count': len(operations),
         'is_error': is_error,
+        'rollback_available': bool(rollback_plan),
         'operations': safe_operations,
     }
+    if rollback_plan:
+        changes['rollback_plan'] = _redact_sensitive(_json_safe(rollback_plan))
     entry = models.ActivityStream.objects.create(
         operation='create',
         object1='ai_resource_action',
@@ -3325,6 +3537,8 @@ def _audit_ai_resource_action(request, mode: str, plan: dict, operations: list, 
             project_id = operation.get('project_id') or operation.get('object_id')
             if project_id:
                 entry.project.add(project_id)
+            continue
+        if operation.get('operation') == 'delete':
             continue
 
         object_id = operation.get('object_id')
@@ -3456,6 +3670,7 @@ class AIResourceActionView(APIView):
         provider = ''
         model = ''
         generated = False
+        prompt_summary = ''
 
         try:
             if request.data.get('plan') is not None:
@@ -3464,7 +3679,9 @@ class AIResourceActionView(APIView):
                 prompt = request.data.get('prompt')
                 if not isinstance(prompt, str) or not prompt.strip():
                     return Response({'detail': _('Provide either a plan object or a non-empty prompt.')}, status=status.HTTP_400_BAD_REQUEST)
-                plan, provider, model = _ai_provider_plan_from_prompt(request, prompt.strip(), context)
+                prompt = prompt.strip()
+                prompt_summary = _summarize_ai_prompt(prompt)
+                plan, provider, model = _ai_provider_plan_from_prompt(request, prompt, context)
                 generated = True
         except AIProviderError as exc:
             return Response({'detail': exc.detail}, status=exc.status_code)
@@ -3487,7 +3704,7 @@ class AIResourceActionView(APIView):
             operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
 
         if mode == 'apply' and not can_apply:
-            audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model)
+            audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model, prompt_summary=prompt_summary)
             return Response(
                 {
                     'mode': mode,
@@ -3501,19 +3718,22 @@ class AIResourceActionView(APIView):
             )
 
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
-        audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)
-
-        return Response(
-            {
-                'mode': mode,
-                'generated': generated,
-                'plan': _redact_sensitive(_json_safe(plan)),
-                'operations': public_operations,
-                'can_apply': can_apply,
-                'audit': {'activity_stream_id': audit_entry.pk},
-            },
-            status=status.HTTP_200_OK if mode == 'preview' else status.HTTP_201_CREATED,
+        rollback_plan = _build_ai_rollback_plan(plan, public_operations) if mode == 'apply' else None
+        audit_entry = _audit_ai_resource_action(
+            request, mode, plan, public_operations, provider=provider, model=model, prompt_summary=prompt_summary, rollback_plan=rollback_plan
         )
+        response_data = {
+            'mode': mode,
+            'generated': generated,
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': can_apply,
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+        if rollback_plan:
+            response_data['rollback_plan'] = rollback_plan
+
+        return Response(response_data, status=status.HTTP_200_OK if mode == 'preview' else status.HTTP_201_CREATED)
 
 
 class AIChatView(APIView):

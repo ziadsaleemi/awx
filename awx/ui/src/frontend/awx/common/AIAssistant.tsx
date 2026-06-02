@@ -70,6 +70,11 @@ interface AIResourceActionResponse {
     description?: string;
     operations: Record<string, unknown>[];
   };
+  rollback_plan?: {
+    name?: string;
+    description?: string;
+    operations: Record<string, unknown>[];
+  };
   operations: AIResourceOperation[];
   can_apply: boolean;
   audit?: {
@@ -532,6 +537,46 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                   </div>
                 ))}
               </div>
+
+              {resourcePlan.rollback_plan?.operations?.length ? (
+                <div
+                  style={{
+                    border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                    borderRadius: 4,
+                    background: 'var(--pf-v5-global--BackgroundColor--100)',
+                    padding: 10,
+                    marginTop: 10,
+                  }}
+                  data-cy="ai-resource-rollback-plan"
+                >
+                  <Text
+                    component={TextVariants.small}
+                    style={{ display: 'block', fontWeight: 600 }}
+                  >
+                    {t('Rollback plan')}
+                  </Text>
+                  {resourcePlan.rollback_plan.description ? (
+                    <Text component={TextVariants.small} style={{ display: 'block', marginTop: 2 }}>
+                      {resourcePlan.rollback_plan.description}
+                    </Text>
+                  ) : null}
+                  <pre
+                    style={{
+                      margin: '6px 0 0',
+                      maxHeight: 180,
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: 12,
+                      background: 'var(--pf-v5-global--BackgroundColor--300)',
+                      padding: 8,
+                      borderRadius: 4,
+                    }}
+                  >
+                    {JSON.stringify(resourcePlan.rollback_plan, null, 2)}
+                  </pre>
+                </div>
+              ) : null}
 
               <ActionGroup style={{ marginTop: 12, marginBottom: 0 }}>
                 {resourcePlan.mode === 'preview' ? (

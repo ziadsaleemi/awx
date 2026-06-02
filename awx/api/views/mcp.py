@@ -875,10 +875,12 @@ def _handle_resource_action(request, params: dict, mode: str):
         _ai_provider_plan_from_prompt,
         _apply_ai_operations_sequentially,
         _audit_ai_resource_action,
+        _build_ai_rollback_plan,
         _json_safe,
         _normalize_ai_plan,
         _public_ai_operation_result,
         _redact_sensitive,
+        _summarize_ai_prompt,
         _simulate_ai_operations_for_preview,
         _validate_ai_operations_for_preview,
     )
@@ -894,6 +896,7 @@ def _handle_resource_action(request, params: dict, mode: str):
     generated = False
     provider = ''
     model = ''
+    prompt_summary = ''
     try:
         if params.get('plan') is not None:
             plan = _normalize_ai_plan(params.get('plan'))
@@ -901,7 +904,9 @@ def _handle_resource_action(request, params: dict, mode: str):
             prompt = params.get('prompt')
             if not isinstance(prompt, str) or not prompt.strip():
                 return {'error': 'Provide either a plan object or a non-empty prompt.'}
-            plan, provider, model = _ai_provider_plan_from_prompt(request, prompt.strip(), context)
+            prompt = prompt.strip()
+            prompt_summary = _summarize_ai_prompt(prompt)
+            plan, provider, model = _ai_provider_plan_from_prompt(request, prompt, context)
             generated = True
         else:
             return {'error': 'apply_resource_action requires an explicit plan. Run preview_resource_action first.'}
@@ -926,7 +931,10 @@ def _handle_resource_action(request, params: dict, mode: str):
         operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=resource_policy_context)
 
     public_operations = [_public_ai_operation_result(operation) for operation in operations]
-    audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)
+    rollback_plan = _build_ai_rollback_plan(plan, public_operations) if mode == 'apply' else None
+    audit_entry = _audit_ai_resource_action(
+        request, mode, plan, public_operations, provider=provider, model=model, prompt_summary=prompt_summary, rollback_plan=rollback_plan
+    )
     result = {
         'mode': mode,
         'generated': generated,
@@ -936,6 +944,8 @@ def _handle_resource_action(request, params: dict, mode: str):
         'audit': {'activity_stream_id': audit_entry.pk},
         'supported_resource_types': list(MCP_RESOURCE_ACTION_TYPES),
     }
+    if rollback_plan:
+        result['rollback_plan'] = rollback_plan
     if mode == 'apply' and not can_apply:
         result['error'] = 'AI resource action apply failed validation.'
     return result

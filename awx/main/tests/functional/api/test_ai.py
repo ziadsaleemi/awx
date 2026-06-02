@@ -382,6 +382,54 @@ def test_ai_resource_action_apply_creates_inventory_and_audits_relation(post, ad
 
 
 @pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_resource_action_generated_apply_audits_prompt_and_returns_rollback_plan(post, admin_user, organization):
+    generated_plan = {
+        'name': 'Generated applied inventory',
+        'operations': [
+            {
+                'id': 'generated-inventory',
+                'operation': 'create',
+                'resource_type': 'inventory',
+                'data': {'name': 'AI Generated Applied Inventory', 'organization': organization.pk},
+            }
+        ],
+    }
+
+    with mock.patch('awx.api.views.ai._call_ai_provider', return_value=json.dumps(generated_plan)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={'mode': 'apply', 'prompt': 'Create a disposable inventory for rollback testing.'},
+            user=admin_user,
+            expect=201,
+        )
+
+    inventory = Inventory.objects.get(name='AI Generated Applied Inventory')
+    rollback_plan = response.data['rollback_plan']
+    assert rollback_plan['operations'][0]['operation'] == 'delete'
+    assert rollback_plan['operations'][0]['resource_type'] == 'inventory'
+    assert rollback_plan['operations'][0]['object_id'] == inventory.pk
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['provider'] == 'openai'
+    assert changes['model'] == 'gpt-4o'
+    assert changes['prompt_summary'] == 'Create a disposable inventory for rollback testing.'
+    assert changes['rollback_available'] is True
+    assert changes['rollback_plan']['operations'][0]['object_id'] == inventory.pk
+
+    rollback_response = post(
+        reverse('api:ai_resource_actions'),
+        data={'mode': 'apply', 'plan': rollback_plan},
+        user=admin_user,
+        expect=201,
+    )
+
+    assert rollback_response.data['can_apply'] is True
+    assert not Inventory.objects.filter(pk=inventory.pk).exists()
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_marks_destructive_human_approval_for_opa(post, admin_user, organization):
     inventory = Inventory.objects.create(name='AI OPA Source', organization=organization)
     policy_inputs = []
