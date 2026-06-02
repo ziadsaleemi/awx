@@ -60,6 +60,7 @@ from awx.main.utils.eda import (
     configured_url as eda_configured_url,
     connection_status as eda_connection_status,
 )
+from awx.main.utils.cloud_inventory import collect_cloud_inventory_resources
 from awx.main.utils.filters import SmartFilter
 
 logger = logging.getLogger('awx.api.views.ai')
@@ -1760,6 +1761,187 @@ def _answer_resource_list(user, spec: dict, message: str) -> str:
     if count > len(rows):
         lines.append(f'- Showing the first {len(rows)} of {count}. Narrow the question to list a specific inventory, organization, or resource type.')
     return '\n'.join(lines)
+
+
+_CLOUD_PROVIDER_LABELS = {
+    'digitalocean': 'DigitalOcean',
+    'proxmox': 'Proxmox VE',
+    'vmware': 'VMware vSphere',
+    'azure': 'Azure',
+}
+
+_CLOUD_PROVIDER_PATTERNS = {
+    'digitalocean': r'\bdigital\s*ocean\b|\bdigitalocean\b',
+    'proxmox': r'\bproxmox\b|\bpve\b',
+    'vmware': r'\bvmware\b|\bvsphere\b',
+    'azure': r'\bazure\b',
+}
+
+_CLOUD_RESOURCE_KIND_PATTERNS = (
+    ({'resource_group'}, 'resource group', 'resource groups', r'\bresource groups?\b'),
+    ({'storage_account'}, 'storage account', 'storage accounts', r'\bstorage accounts?\b'),
+    ({'datacenter'}, 'datacenter', 'datacenters', r'\bdatacenters?\b'),
+    ({'container'}, 'container', 'containers', r'\bcontainers?\b|\blxc\b'),
+    ({'template'}, 'template', 'templates', r'\btemplates?\b'),
+    ({'image'}, 'image', 'images', r'\bimages?\b'),
+    ({'size'}, 'size', 'sizes', r'\bsizes?\b|\bpricing\b|\bplans?\b'),
+    ({'region'}, 'region', 'regions', r'\bregions?\b|\blocations?\b'),
+    ({'vpc'}, 'VPC', 'VPCs', r'\bvpcs?\b'),
+    ({'vnet'}, 'virtual network', 'virtual networks', r'\bvnets?\b|\bvirtual networks?\b|\bnetworks?\b'),
+    ({'node'}, 'node', 'nodes', r'\bnodes?\b'),
+    ({'cluster'}, 'cluster', 'clusters', r'\bclusters?\b'),
+    ({'host'}, 'host', 'hosts', r'\bhosts?\b'),
+    ({'vm'}, 'VM', 'VMs', r'\bvms?\b|\bvirtual machines?\b|\binstances?\b'),
+)
+
+
+def _mentioned_cloud_providers(normalized: str) -> list[str]:
+    return [provider_id for provider_id, pattern in _CLOUD_PROVIDER_PATTERNS.items() if re.search(pattern, normalized)]
+
+
+def _cloud_resource_kind_match(normalized: str) -> tuple[set[str], str, str] | None:
+    for kinds, singular, plural, pattern in _CLOUD_RESOURCE_KIND_PATTERNS:
+        if re.search(pattern, normalized):
+            return set(kinds), singular, plural
+    return None
+
+
+def _visible_cloud_connection_scope(user, message: str):
+    for connection in get_user_queryset(user, models.CloudProviderConnection).select_related('organization').order_by('name', 'id')[:500]:
+        if _message_mentions_name(message, connection.name):
+            return connection
+    return None
+
+
+def _cloud_resource_scope_suffix(labels: list[str]) -> str:
+    return _format_scope_suffix(labels)
+
+
+def _cloud_resource_detail_value(value):
+    if value in (None, ''):
+        return None
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    if isinstance(value, (list, tuple, set)):
+        return ','.join(str(item) for item in list(value)[:6])
+    return value
+
+
+def _format_cloud_resource_item(resource: dict) -> str:
+    variables = resource.get('variables') if isinstance(resource.get('variables'), dict) else {}
+    label = resource.get('name') or variables.get('cloud_id') or 'cloud_resource'
+    detail_keys = (
+        'cloud_provider',
+        'cloud_connection_id',
+        'cloud_id',
+        'status',
+        'power_state',
+        'connection_state',
+        'proxmox_node',
+        'region',
+        'location',
+        'resource_group',
+        'image_name',
+        'size_slug',
+        'region_name',
+        'vm_size',
+    )
+    details = []
+    for key in detail_keys:
+        value = _cloud_resource_detail_value(variables.get(key))
+        if value is not None:
+            details.append(f"{key.replace('_', ' ')}: {value}")
+    if details:
+        return f"- {label} ({', '.join(str(detail) for detail in details)})"
+    return f"- {label}"
+
+
+def _visible_cloud_resources_for_message(user, message: str, provider_ids: list[str], kinds: set[str]) -> tuple[list[dict], list[str], bool]:
+    spec = _visible_resource_spec_by_key('cloud_provider_states')
+    queryset = _visible_resource_queryset(user, spec).exclude(provider_data__isnull=True)
+    filters, labels = _resource_scope_for_message(user, spec, message)
+    if filters:
+        queryset = queryset.filter(**filters)
+    if provider_ids:
+        queryset = queryset.filter(provider_id__in=provider_ids)
+
+    connection = _visible_cloud_connection_scope(user, message)
+    connection_id = None
+    if connection is not None:
+        queryset = queryset.filter(provider_id=connection.provider_id, organization_id=connection.organization_id)
+        connection_id = str(connection.pk)
+        labels.append(_('connection "%(name)s"') % {'name': connection.name})
+
+    resources = []
+    truncated = False
+    for state in queryset:
+        scoped_connection_id = connection_id if connection_id and state.provider_id == connection.provider_id else None
+        collected = collect_cloud_inventory_resources(
+            state.provider_id, state.provider_data, connection_id=scoped_connection_id, sample_limit=_AI_DIRECT_LIST_LIMIT
+        )
+        for resource in collected:
+            if resource.get('kind') in kinds:
+                resources.append(resource)
+                if len(resources) >= _AI_DIRECT_LIST_LIMIT:
+                    truncated = True
+                    return resources, labels, truncated
+    return resources, labels, truncated
+
+
+def _cloud_resource_provider_label(provider_ids: list[str]) -> str:
+    if len(provider_ids) == 1:
+        return _CLOUD_PROVIDER_LABELS.get(provider_ids[0], provider_ids[0])
+    return 'cloud'
+
+
+def _answer_cloud_resource_count(user, message: str, provider_ids: list[str], kinds: set[str], singular: str, plural: str) -> str:
+    resources, labels, truncated = _visible_cloud_resources_for_message(user, message, provider_ids, kinds)
+    count = len(resources)
+    noun = singular if count == 1 else plural
+    provider_label = _cloud_resource_provider_label(provider_ids)
+    prefix = 'at least ' if truncated else ''
+    suffix = _cloud_resource_scope_suffix(labels)
+    return f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}.'
+
+
+def _answer_cloud_resource_list(user, message: str, provider_ids: list[str], kinds: set[str], singular: str, plural: str) -> str:
+    resources, labels, truncated = _visible_cloud_resources_for_message(user, message, provider_ids, kinds)
+    count = len(resources)
+    provider_label = _cloud_resource_provider_label(provider_ids)
+    suffix = _cloud_resource_scope_suffix(labels)
+    if count == 0:
+        return f'There are no pulled {provider_label} {plural} visible to you in AWX{suffix}.'
+
+    noun = singular if count == 1 else plural
+    prefix = 'at least ' if truncated else ''
+    lines = [f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}:']
+    lines.extend(_format_cloud_resource_item(resource) for resource in resources[:_AI_DIRECT_LIST_LIMIT])
+    if truncated:
+        lines.append(f'- Showing the first {len(resources)} pulled resources. Narrow by provider, organization, connection, or resource type.')
+    return '\n'.join(lines)
+
+
+def _try_answer_cloud_provider_resource_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup|pull|sync|delete|remove)\b', normalized):
+        return None
+
+    kind_match = _cloud_resource_kind_match(normalized)
+    if kind_match is None:
+        return None
+    kinds, singular, plural = kind_match
+
+    provider_ids = _mentioned_cloud_providers(normalized)
+    if not provider_ids and not re.search(r'\bcloud\b|\bprovider\b|\bpulled\b', normalized):
+        return None
+
+    resource_pattern = '|'.join(pattern for _kinds, _singular, _plural, pattern in _CLOUD_RESOURCE_KIND_PATTERNS if kinds & _kinds)
+    if _is_count_question(latest_message, resource_pattern):
+        return _answer_cloud_resource_count(user, latest_message, provider_ids, kinds, singular, plural)
+    if _is_list_question(latest_message, resource_pattern):
+        return _answer_cloud_resource_list(user, latest_message, provider_ids, kinds, singular, plural)
+    return None
 
 
 def _try_answer_awx_fact_question(user, messages: list) -> str | None:
@@ -4628,6 +4810,7 @@ class AIChatView(APIView):
             builtin_answer = (
                 _try_answer_opa_fact_question(request.user, messages)
                 or _try_answer_eda_fact_question(messages)
+                or _try_answer_cloud_provider_resource_question(request.user, messages)
                 or _try_answer_awx_fact_question(request.user, messages)
             )
             if builtin_answer is not None:

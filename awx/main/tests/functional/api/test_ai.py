@@ -9,6 +9,7 @@ from awx.api.versioning import reverse
 from awx.conf.models import Setting
 from awx.main.models import (
     ActivityStream,
+    CloudProviderConnection,
     CloudProviderState,
     Credential,
     CredentialType,
@@ -256,6 +257,87 @@ def test_ai_chat_lists_visible_cloud_provider_states_scoped_to_org_without_provi
     assert f'id: {foreign_state.pk}' not in content
     assert 'digitalocean' not in content
     assert 'own-pve' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_counts_pulled_digitalocean_images_scoped_to_org_without_provider(post, org_admin, organization):
+    other_org = Organization.objects.create(name='AI Other DO Org')
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data={
+            'images': [
+                {'id': 101, 'name': 'Ubuntu 22.04 x64', 'distribution': 'Ubuntu', 'type': 'snapshot', 'status': 'available'},
+                {'id': 202, 'name': 'CentOS Stream 9 x64', 'distribution': 'CentOS', 'type': 'snapshot', 'status': 'available'},
+            ]
+        },
+    )
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        provider_data={'images': [{'id': 303, 'name': 'Foreign Fedora'}]},
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': f'How many DigitalOcean images are in organization {organization.name}?'}]},
+            user=org_admin,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == f'There are 2 pulled DigitalOcean images visible to you in AWX matching organization "{organization.name}".'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_pulled_proxmox_vms_scoped_to_connection_without_provider(post, org_admin, organization):
+    scoped_connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Prod Proxmox',
+        status='connected',
+        organization=organization,
+    )
+    other_connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Other Proxmox',
+        status='connected',
+        organization=organization,
+    )
+    CloudProviderState.objects.create(
+        provider_id='proxmox',
+        organization=organization,
+        provider_data={
+            str(scoped_connection.pk): {
+                'nodes': [{'node': 'pve-a', 'status': 'online'}],
+                'vms': [{'vmid': 101, 'name': 'web-01', 'status': 'running', 'node': 'pve-a'}],
+            },
+            str(other_connection.pk): {
+                'nodes': [{'node': 'pve-b', 'status': 'online'}],
+                'vms': [{'vmid': 202, 'name': 'db-01', 'status': 'running', 'node': 'pve-b'}],
+            },
+        },
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List Proxmox VMs for Prod Proxmox'}]},
+            user=org_admin,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 pulled Proxmox VE VM visible to you in AWX matching connection "Prod Proxmox":')
+    assert 'vm_web-01' in content
+    assert 'status: running' in content
+    assert 'proxmox node: pve-a' in content
+    assert 'db-01' not in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
