@@ -11,6 +11,7 @@ from awx.main.models import (
     ActivityStream,
     Credential,
     CredentialType,
+    Group,
     Host,
     Inventory,
     InventorySource,
@@ -512,6 +513,105 @@ def test_ai_resource_action_apply_creates_inventory_source_and_audits_relation(p
     assert changes['mode'] == 'apply'
     assert changes['operations'][0]['resource_type'] == 'inventory_source'
     assert inventory_source in audit_entry.inventory_source.all()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_preview_inventory_group_host_refs_without_saving(post, admin_user, organization):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'preview',
+            'plan': {
+                'name': 'Preview inventory tree',
+                'operations': [
+                    {
+                        'id': 'create-inventory',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Preview Tree', 'organization': organization.pk},
+                    },
+                    {
+                        'id': 'create-group',
+                        'operation': 'create',
+                        'resource_type': 'group',
+                        'data': {'name': 'web', 'inventory_ref': 'create-inventory'},
+                    },
+                    {
+                        'id': 'create-host',
+                        'operation': 'create',
+                        'resource_type': 'host',
+                        'data': {'name': 'web01', 'inventory_ref': 'create-inventory', 'group_ref': 'create-group'},
+                    },
+                ],
+            },
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['can_apply'] is True
+    assert [operation['resource_type'] for operation in response.data['operations']] == ['inventory', 'group', 'host']
+    assert response.data['operations'][2]['group_ids']
+    assert not Inventory.objects.filter(name='AI Preview Tree').exists()
+    assert not Group.objects.filter(name='web').exists()
+    assert not Host.objects.filter(name='web01').exists()
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_apply_creates_inventory_group_host_with_refs_and_audits(post, admin_user, organization):
+    response = post(
+        reverse('api:ai_resource_actions'),
+        data={
+            'mode': 'apply',
+            'plan': {
+                'name': 'Create inventory tree',
+                'operations': [
+                    {
+                        'id': 'create-inventory',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Managed Tree', 'organization': organization.pk},
+                    },
+                    {
+                        'id': 'create-group',
+                        'operation': 'create',
+                        'resource_type': 'group',
+                        'data': {'name': 'web', 'inventory_ref': 'create-inventory'},
+                    },
+                    {
+                        'id': 'create-host',
+                        'operation': 'create',
+                        'resource_type': 'host',
+                        'data': {
+                            'name': 'web01',
+                            'inventory_ref': 'create-inventory',
+                            'group_ref': 'create-group',
+                            'variables': '{"ansible_host": "10.0.0.10"}',
+                        },
+                    },
+                ],
+            },
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    inventory = Inventory.objects.get(name='AI Managed Tree')
+    group = Group.objects.get(name='web', inventory=inventory)
+    host = Host.objects.get(name='web01', inventory=inventory)
+    assert host.groups.filter(pk=group.pk).exists()
+    assert host.variables_dict['ansible_host'] == '10.0.0.10'
+    assert response.data['operations'][1]['object_id'] == group.pk
+    assert response.data['operations'][2]['object_id'] == host.pk
+    assert response.data['operations'][2]['group_ids'] == [group.pk]
+
+    audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = _activity_changes(audit_entry)
+    assert changes['operations'][2]['resource_type'] == 'host'
+    assert changes['operations'][2]['group_ids'] == [group.pk]
+    assert inventory in audit_entry.inventory.all()
+    assert group in audit_entry.group.all()
+    assert host in audit_entry.host.all()
 
 
 @pytest.mark.django_db

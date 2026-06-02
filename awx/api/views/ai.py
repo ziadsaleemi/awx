@@ -34,6 +34,8 @@ from awx.api.permissions import IsSystemAdmin
 from awx.api.serializers import (
     CatalogItemSerializer,
     ConstructedInventorySerializer,
+    GroupSerializer,
+    HostSerializer,
     InventorySerializer,
     InventorySourceSerializer,
     JobTemplateSerializer,
@@ -94,6 +96,7 @@ _CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
     'source_inventories',
     'source_inventory_ids',
 )
+_AI_HOST_GROUP_FIELDS = ('groups', 'group_ids', 'group', 'group_id')
 
 # ChatGPT device-login OAuth tokens do not reliably expose /v1/models.
 # Keep this aligned with the ChatGPT Codex backend models used by the reference app.
@@ -148,6 +151,10 @@ _AI_RESOURCE_TYPE_ALIASES = {
     'constructed_inventories': 'constructed_inventory',
     'credential_reference': 'credential_reference',
     'credential_references': 'credential_reference',
+    'group': 'group',
+    'groups': 'group',
+    'host': 'host',
+    'hosts': 'host',
     'inventory': 'inventory',
     'inventories': 'inventory',
     'inventory_source': 'inventory_source',
@@ -201,6 +208,16 @@ _AI_RESOURCE_TYPES = {
         'serializer': ConstructedInventorySerializer,
         'audit_relation': 'inventory',
         'forced_data': {'kind': 'constructed'},
+    },
+    'group': {
+        'model': models.Group,
+        'serializer': GroupSerializer,
+        'audit_relation': 'group',
+    },
+    'host': {
+        'model': models.Host,
+        'serializer': HostSerializer,
+        'audit_relation': 'host',
     },
     'inventory': {
         'model': models.Inventory,
@@ -1631,8 +1648,8 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
     return (
         'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
-        'Supported resource_type values: credential_reference, inventory, smart_inventory, constructed_inventory, project, project_file, '
-        'inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
+        'Supported resource_type values: credential_reference, inventory, group, host, smart_inventory, constructed_inventory, project, '
+        'project_file, inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
         'Supported operation values: create, update, attach, detach. '
         'Use attach/detach only for credential_reference and role_assignment operations.\n'
         'For smart_inventory, data must include organization and a valid AWX host_filter expression, for example '
@@ -1640,6 +1657,9 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'For constructed_inventory, data must include organization and may include input_inventories as an array of existing inventory IDs plus '
         'source_vars as a YAML or JSON object for the constructed inventory source. Constructed inventory plans are validated and previewed '
         'against visible input inventories, source hosts, and source groups before save.\n'
+        'For group, data must include name and inventory or inventory_ref. For host, data must include name and inventory or inventory_ref, and '
+        'may include group_ids, group_ref, or group_refs to place the host into existing or same-plan groups. group_ref must reference a prior '
+        'group operation in the same plan. inventory_ref must reference a prior inventory operation in the same plan.\n'
         'For credential_reference, data must include target_resource_type ("job_template", "inventory_source", "schedule", or '
         '"workflow_job_template_node"), target_id, and credential. These operations only link or unlink existing credentials and must never '
         'include credential secrets. Schedule and workflow-node credential references are saved launch prompts and require the related template '
@@ -1660,8 +1680,8 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
-        '{"id": "stable id", "operation": "create|update|delete|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
-        '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id"}}]}\n\n'
+        '{"id": "stable id", "operation": "create|update|delete|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|group|host|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id", "inventory_ref": "prior-inventory-op-id", "group_ref": "prior-group-op-id"}}]}\n\n'
         f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
     )
@@ -1742,6 +1762,13 @@ def _pop_constructed_input_inventory_ids(data: dict) -> tuple[list[int] | None, 
     return None, []
 
 
+def _pop_ai_host_group_ids(data: dict) -> tuple[list[int] | None, list]:
+    for field in _AI_HOST_GROUP_FIELDS:
+        if field in data:
+            return _coerce_positive_int_list(data.pop(field))
+    return None, []
+
+
 def _operation_organization_id(data: dict, validated_data: dict, instance=None) -> int | None:
     organization = validated_data.get('organization') or data.get('organization')
     if organization is None and instance is not None:
@@ -1801,6 +1828,42 @@ def _validate_constructed_input_inventories(request, input_inventory_ids: list[i
             )
 
     ordered = [inventory_by_id[inventory_id] for inventory_id in input_inventory_ids if inventory_id in inventory_by_id]
+    return ordered, errors
+
+
+def _validated_operation_inventory_id(serializer_data: dict, validated_data: dict, instance=None) -> int | None:
+    inventory = validated_data.get('inventory') or serializer_data.get('inventory')
+    if inventory is None and instance is not None:
+        return instance.inventory_id
+    if hasattr(inventory, 'pk'):
+        return inventory.pk
+    return _positive_int(inventory)
+
+
+def _validate_ai_host_groups(request, group_ids: list[int] | None, inventory_id: int | None, instance=None) -> tuple[list, dict]:
+    if group_ids is None:
+        if instance is None:
+            return [], {}
+        group_ids = list(instance.groups.values_list('pk', flat=True))
+
+    if not group_ids:
+        return [], {}
+
+    visible = get_user_queryset(request.user, models.Group).filter(pk__in=group_ids).select_related('inventory')
+    group_by_id = {group.pk: group for group in visible}
+    errors = {}
+    missing_ids = [group_id for group_id in group_ids if group_id not in group_by_id]
+    if missing_ids:
+        errors['group_ids'] = [_('Groups were not found or are not accessible: {}.').format(', '.join(str(value) for value in missing_ids))]
+
+    if inventory_id:
+        cross_inventory_ids = [group.pk for group in group_by_id.values() if group.inventory_id != inventory_id]
+        if cross_inventory_ids:
+            errors.setdefault('group_ids', []).append(
+                _('Host groups must belong to the host inventory: {}.').format(', '.join(str(value) for value in cross_inventory_ids))
+            )
+
+    ordered = [group_by_id[group_id] for group_id in group_ids if group_id in group_by_id]
     return ordered, errors
 
 
@@ -2011,7 +2074,58 @@ def _resolve_ai_operation_references(operation: dict, references: dict) -> tuple
             errors['project_ref'] = [_('project_ref must reference a project operation.')]
         else:
             data['project'] = referenced_operation.get('object_id')
-            resolved['_resolved_refs'] = {'project': project_ref}
+            resolved.setdefault('_resolved_refs', {})['project'] = project_ref
+
+    inventory_ref = (
+        data.pop('inventory_ref', None)
+        or data.pop('inventory_operation_id', None)
+        or resolved.pop('inventory_ref', None)
+        or _extract_ai_reference(data.get('inventory'))
+    )
+    inventory_ref = _extract_ai_reference(inventory_ref, allow_plain=True)
+    if inventory_ref:
+        referenced_operation = references.get(inventory_ref)
+        if not referenced_operation:
+            errors['inventory_ref'] = [_('Referenced inventory operation was not found or has not been applied yet.')]
+        elif referenced_operation.get('resource_type') not in {'inventory', 'smart_inventory', 'constructed_inventory'}:
+            errors['inventory_ref'] = [_('inventory_ref must reference an inventory operation.')]
+        else:
+            data['inventory'] = referenced_operation.get('object_id')
+            resolved.setdefault('_resolved_refs', {})['inventory'] = inventory_ref
+
+    if resolved.get('resource_type') == 'host':
+        group_values = []
+        group_refs = []
+
+        def collect_group_values(raw_value, allow_plain_refs=False):
+            values = raw_value if isinstance(raw_value, (list, tuple, set)) else [raw_value]
+            for value in values:
+                ref = _extract_ai_reference(value, allow_plain=allow_plain_refs or isinstance(value, dict))
+                if ref:
+                    group_refs.append(ref)
+                else:
+                    group_values.append(value)
+
+        for field in ('group_ref', 'group_refs', 'group_operation_id', 'group_operation_ids'):
+            if field in data:
+                collect_group_values(data.pop(field), allow_plain_refs=True)
+        if 'group_ref' in resolved:
+            collect_group_values(resolved.pop('group_ref'), allow_plain_refs=True)
+        for field in _AI_HOST_GROUP_FIELDS:
+            if field in data:
+                collect_group_values(data.pop(field))
+
+        for group_ref in group_refs:
+            referenced_operation = references.get(group_ref)
+            if not referenced_operation:
+                errors.setdefault('group_ref', []).append(_('Referenced group operation was not found or has not been applied yet: {}.').format(group_ref))
+            elif referenced_operation.get('resource_type') != 'group':
+                errors.setdefault('group_ref', []).append(_('group_ref must reference a group operation: {}.').format(group_ref))
+            else:
+                group_values.append(referenced_operation.get('object_id'))
+                resolved.setdefault('_resolved_refs', {}).setdefault('groups', []).append(group_ref)
+        if group_values:
+            data['group_ids'] = group_values
 
     resolved['data'] = data
     return resolved, errors
@@ -3037,6 +3151,8 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
     constructed_input_inventory_ids = None
     constructed_input_inventories = None
     constructed_source_vars = None
+    host_group_ids = None
+    host_groups = None
 
     instance = None
     object_id = _operation_object_id(operation)
@@ -3085,6 +3201,11 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
         if source_vars_error:
             result['errors'] = source_vars_error
             return result
+    if resource_type == 'host':
+        host_group_ids, invalid_group_values = _pop_ai_host_group_ids(serializer_data)
+        if invalid_group_values:
+            result['errors'] = {'group_ids': [_('Host groups must be a list of positive integer IDs or group operation references.')]}
+            return result
 
     serializer = serializer_class(instance=instance, data=serializer_data, partial=(action == 'update'), context=_serializer_context(request))
     if not serializer.is_valid():
@@ -3098,6 +3219,12 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
         )
         if input_inventory_errors:
             result['errors'] = input_inventory_errors
+            return result
+    if resource_type == 'host':
+        inventory_id = _validated_operation_inventory_id(serializer_data, serializer.validated_data, instance)
+        host_groups, host_group_errors = _validate_ai_host_groups(request, host_group_ids, inventory_id, instance=instance)
+        if host_group_errors:
+            result['errors'] = host_group_errors
             return result
 
     permission_allowed = (
@@ -3142,6 +3269,24 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
             constructed_source_vars,
             instance=instance,
         )
+    if resource_type == 'host' and host_group_ids is not None:
+        result['_host_groups'] = host_groups
+        result['group_ids'] = [group.pk for group in host_groups]
+        result['validated_data']['group_ids'] = [group.pk for group in host_groups]
+        result['preview'] = {
+            'type': 'host',
+            'groups': [_group_preview_row(group) for group in host_groups],
+        }
+        if instance is not None:
+            rollback_data = dict(result.get('_rollback_operation', {}).get('data') or {})
+            rollback_data['group_ids'] = list(instance.groups.values_list('pk', flat=True).order_by('pk'))
+            result['_rollback_operation'] = {
+                'id': f"rollback-{operation.get('id') or resource_type}",
+                'operation': 'update',
+                'resource_type': resource_type,
+                'object_id': instance.pk,
+                'data': _redact_sensitive(_json_safe(rollback_data)),
+            }
     return result
 
 
@@ -3379,6 +3524,9 @@ def _save_ai_operation(request, validation: dict) -> dict:
         obj.input_inventories.clear()
         if constructed_input_inventories:
             obj.input_inventories.add(*constructed_input_inventories)
+    host_groups = validation.get('_host_groups')
+    if host_groups is not None:
+        obj.groups.set(host_groups)
 
     model = validation['_model']
     if validation.get('operation') == 'create' and model in permission_registry.all_registered_models and request.user:
@@ -3400,6 +3548,7 @@ def _save_ai_operation(request, validation: dict) -> dict:
     validation.pop('_model', None)
     validation.pop('_resource_config', None)
     validation.pop('_constructed_input_inventories', None)
+    validation.pop('_host_groups', None)
     validation.pop('_rollback_operation', None)
     return validation
 
@@ -3445,6 +3594,7 @@ def _audit_ai_resource_action(
                 'target_resource_type': operation.get('target_resource_type'),
                 'target_id': operation.get('target_id'),
                 'project_id': operation.get('project_id'),
+                'group_ids': operation.get('group_ids'),
                 'path': operation.get('path'),
                 'content_bytes': operation.get('content_bytes'),
                 'credential_id': operation.get('credential_id'),
@@ -3546,6 +3696,8 @@ def _audit_ai_resource_action(
         relation = resource_config and resource_config.get('audit_relation')
         if relation and object_id and hasattr(entry, relation):
             getattr(entry, relation).add(object_id)
+        if mode == 'apply' and resource_type == 'host' and operation.get('group_ids'):
+            entry.group.add(*operation['group_ids'])
 
     return entry
 
@@ -3557,7 +3709,21 @@ def _public_ai_operation_result(operation: dict) -> dict:
 def _ai_plan_uses_operation_references(operations: list) -> bool:
     for operation in operations:
         data = operation.get('data') if isinstance(operation.get('data'), dict) else {}
-        if data.get('project_ref') or data.get('project_operation_id') or operation.get('project_ref') or _extract_ai_reference(data.get('project')):
+        if (
+            data.get('project_ref')
+            or data.get('project_operation_id')
+            or operation.get('project_ref')
+            or _extract_ai_reference(data.get('project'))
+            or data.get('inventory_ref')
+            or data.get('inventory_operation_id')
+            or operation.get('inventory_ref')
+            or _extract_ai_reference(data.get('inventory'))
+            or data.get('group_ref')
+            or data.get('group_refs')
+            or data.get('group_operation_id')
+            or data.get('group_operation_ids')
+            or operation.get('group_ref')
+        ):
             return True
     return False
 
