@@ -2225,6 +2225,183 @@ def _try_answer_opa_fact_question(user, messages: list) -> str | None:
     return None
 
 
+def _gatekeeper_message_pattern() -> str:
+    return r'\bgatekeeper\b|\bconstraint\s*templates?\b|\bconstrainttemplates?\b|\bgatekeeper policies?\b|\bgatekeeper policy manager\b'
+
+
+def _gatekeeper_context():
+    from awx.api.views.gatekeeper import GatekeeperKubernetesClient, _gatekeeper_context_for_ai
+
+    return _gatekeeper_context_for_ai(GatekeeperKubernetesClient())
+
+
+def _gatekeeper_error_text(context: dict) -> str:
+    errors = context.get('errors') if isinstance(context.get('errors'), list) else []
+    if not errors:
+        return ''
+    return '; '.join(str(error.get('detail') or error) if isinstance(error, dict) else str(error) for error in errors[:3])
+
+
+def _format_gatekeeper_json(value) -> str:
+    if value in (None, {}, [], ''):
+        return ''
+    rendered = json.dumps(_json_safe(value), sort_keys=True)
+    if len(rendered) > 220:
+        return f'{rendered[:217]}...'
+    return rendered
+
+
+def _gatekeeper_resource_label(violation: dict) -> str:
+    parts = [violation.get('resource_kind') or 'resource']
+    namespace = violation.get('resource_namespace') or ''
+    name = violation.get('resource_name') or ''
+    if namespace:
+        parts.append(f'{namespace}/{name}' if name else namespace)
+    elif name:
+        parts.append(name)
+    return '/'.join(part for part in parts if part)
+
+
+def _answer_gatekeeper_status() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    errors = _gatekeeper_error_text(context)
+    cluster = context.get('cluster') or {}
+    counts = context.get('counts') or {}
+    status_line = (
+        f"Gatekeeper is configured in AWX. Context: {cluster.get('context') or 'default'}. "
+        f"Server URL: {cluster.get('server_url') or 'not set'}. "
+        f"Templates: {counts.get('constraint_templates', 0)}. Constraints: {counts.get('constraints', 0)}. "
+        f"Violations: {counts.get('violations', 0)}. Configs: {counts.get('configs', 0)}."
+    )
+    if errors:
+        return f'{status_line} Latest read errors: {errors}'
+    return status_line
+
+
+def _answer_gatekeeper_count(resource_key: str, label: str) -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    errors = _gatekeeper_error_text(context)
+    count = int((context.get('counts') or {}).get(resource_key) or 0)
+    noun = label if count == 1 else f'{label}s'
+    answer = f'There are {count} Gatekeeper {noun} visible through AWX.'
+    if errors:
+        answer = f'{answer} Latest read errors: {errors}'
+    return answer
+
+
+def _answer_gatekeeper_templates() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('constraint_templates') if isinstance(context.get('constraint_templates'), list) else []
+    count = int((context.get('counts') or {}).get('constraint_templates') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper ConstraintTemplates visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper ConstraintTemplates visible through AWX:']
+    for row in rows:
+        targets = ', '.join(row.get('targets') or [])
+        detail = [f"kind: {row.get('kind') or 'unknown'}", f"constraints: {row.get('constraint_count', 0)}"]
+        if targets:
+            detail.append(f'targets: {targets}')
+        lines.append(f"- {row.get('name') or 'unnamed'} ({', '.join(detail)})")
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_constraints() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('constraints') if isinstance(context.get('constraints'), list) else []
+    count = int((context.get('counts') or {}).get('constraints') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper constraints visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper constraints visible through AWX:']
+    for row in rows:
+        detail = [
+            f"enforcement: {row.get('enforcement_action') or 'deny'}",
+            f"violations: {row.get('total_violations', 0)}",
+        ]
+        parameters = _format_gatekeeper_json(row.get('parameters'))
+        if parameters:
+            detail.append(f'parameters: {parameters}')
+        lines.append(f"- {row.get('kind') or 'Constraint'}/{row.get('name') or 'unnamed'} ({', '.join(detail)})")
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_violations() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('violations') if isinstance(context.get('violations'), list) else []
+    count = int((context.get('counts') or {}).get('violations') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper violations visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper violations visible through AWX:']
+    for row in rows:
+        constraint = f"{row.get('constraint_kind') or 'Constraint'}/{row.get('constraint_name') or 'unnamed'}"
+        lines.append(
+            f"- {constraint}: {row.get('message') or 'violation'} "
+            f"(resource: {_gatekeeper_resource_label(row)}, enforcement: {row.get('enforcement_action') or 'deny'})"
+        )
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_configs() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('configs') if isinstance(context.get('configs'), list) else []
+    count = int((context.get('counts') or {}).get('configs') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper configs visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper configs visible through AWX:']
+    for row in rows:
+        lines.append(
+            f"- {row.get('name') or 'config'} "
+            f"(syncOnly: {row.get('sync_only_count', 0)}, readiness stats: {'yes' if row.get('readiness_stats_enabled') else 'no'})"
+        )
+    return '\n'.join(lines)
+
+
+def _try_answer_gatekeeper_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if not re.search(_gatekeeper_message_pattern(), normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author|install|apply|delete|remove)\b', normalized):
+        return None
+    if not user.is_superuser:
+        return 'Gatekeeper policy-manager details require system administrator access in AWX.'
+
+    violation_pattern = r'\bviolations?\b|\bdenials?\b|\bdenied\b|\baudit findings?\b'
+    template_pattern = r'\bconstraint\s*templates?\b|\bconstrainttemplates?\b|\btemplates?\b'
+    config_pattern = r'\bconfigs?\b|\bconfigurations?\b|\bsync\b|\breadiness\b'
+    constraint_pattern = r'\bconstraints?\b|\bgatekeeper policies?\b|\bpolicies\b'
+    if _is_count_question(latest_message, violation_pattern):
+        return _answer_gatekeeper_count('violations', 'violation')
+    if _is_list_question(latest_message, violation_pattern):
+        return _answer_gatekeeper_violations()
+    if _is_count_question(latest_message, template_pattern):
+        return _answer_gatekeeper_count('constraint_templates', 'ConstraintTemplate')
+    if _is_list_question(latest_message, template_pattern):
+        return _answer_gatekeeper_templates()
+    if _is_count_question(latest_message, config_pattern):
+        return _answer_gatekeeper_count('configs', 'config')
+    if _is_list_question(latest_message, config_pattern):
+        return _answer_gatekeeper_configs()
+    if _is_count_question(latest_message, constraint_pattern):
+        return _answer_gatekeeper_count('constraints', 'constraint')
+    if _is_list_question(latest_message, constraint_pattern):
+        return _answer_gatekeeper_constraints()
+    if re.search(r'\b(status|configured|enabled|disabled|connected|connection|server|url|health|counts?)\b', normalized):
+        return _answer_gatekeeper_status()
+    return None
+
+
 def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
     try:
         snapshot = _visible_awx_context_snapshot(user)
@@ -4836,7 +5013,8 @@ class AIChatView(APIView):
             system_prompt = system_override
         else:
             builtin_answer = (
-                _try_answer_opa_fact_question(request.user, messages)
+                _try_answer_gatekeeper_fact_question(request.user, messages)
+                or _try_answer_opa_fact_question(request.user, messages)
                 or _try_answer_eda_fact_question(messages)
                 or _try_answer_cloud_provider_resource_question(request.user, messages)
                 or _try_answer_awx_fact_question(request.user, messages)

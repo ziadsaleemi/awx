@@ -714,7 +714,7 @@ def test_ai_chat_answers_opa_status_without_provider(post, admin_user):
     content = response.data['message']['content']
     assert content.startswith('OPA guardrails are enabled in AWX. Server URL: https://opa.example.com:8181.')
     assert 'Managed policy bundle: configured (2 lines' in content
-    assert 'Registered policy paths: job_launch, inventory_access, credential_use, ai_action.' in content
+    assert 'Registered policy paths: job_launch, inventory_access, credential_use, ai_action, gatekeeper_resource.' in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
@@ -731,9 +731,10 @@ def test_ai_chat_lists_opa_policy_paths_without_provider(post, admin_user):
         )
 
     content = response.data['message']['content']
-    assert content.startswith('There are 4 OPA policy paths registered in AWX:')
+    assert content.startswith('There are 5 OPA policy paths registered in AWX:')
     assert '- job_launch (path: awx/job_launch/allow' in content
     assert '- ai_action (path: awx/ai_action/allow' in content
+    assert '- gatekeeper_resource (path: awx/gatekeeper_resource/allow' in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
@@ -818,6 +819,78 @@ def test_ai_chat_counts_opa_denials_without_provider(post, admin_user):
         )
 
     assert response.data['message']['content'] == 'There are 1 recent denied OPA guardrail audit events visible to you in AWX.'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(
+    AI_ENABLED=True,
+    AI_PROVIDER='openai',
+    AI_API_KEY='api-key',
+    AI_MODEL_NAME='gpt-4o',
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+)
+def test_ai_chat_counts_gatekeeper_violations_without_provider(post, admin_user):
+    from awx.main.tests.functional.api.test_opa import _gatekeeper_policy_manager_responses
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()), mock.patch(
+        'awx.api.views.ai.requests.post'
+    ) as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many Gatekeeper violations do we have?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 2 Gatekeeper violations visible through AWX.'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(
+    AI_ENABLED=True,
+    AI_PROVIDER='openai',
+    AI_API_KEY='api-key',
+    AI_MODEL_NAME='gpt-4o',
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+)
+def test_ai_chat_lists_gatekeeper_constraints_without_provider(post, admin_user):
+    from awx.main.tests.functional.api.test_opa import _gatekeeper_policy_manager_responses
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()), mock.patch(
+        'awx.api.views.ai.requests.post'
+    ) as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List OPA Gatekeeper constraints'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 2 Gatekeeper constraints visible through AWX:')
+    assert '- K8sRequiredLabels/require-owner (enforcement: deny, violations: 1' in content
+    assert '- K8sRequiredLabels/require-team (enforcement: dryrun, violations: 1' in content
+    assert '"labels": ["owner"]' in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_gatekeeper_facts_require_system_admin(post, rando):
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List Gatekeeper constraints'}]},
+            user=rando,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'Gatekeeper policy-manager details require system administrator access in AWX.'
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
