@@ -1021,7 +1021,17 @@ export function GatekeeperPolicyManager() {
                 variant="warning"
                 title={t('Gatekeeper Kubernetes API is not configured.')}
               >
-                {data.message}
+                <Stack hasGutter>
+                  <StackItem>{data.message}</StackItem>
+                  <StackItem>
+                    <Link
+                      to={getPageUrl(AwxRoute.SettingsPolicyAsCode)}
+                      data-cy="gatekeeper-policy-settings-link"
+                    >
+                      {t('Open Policy Connections settings')}
+                    </Link>
+                  </StackItem>
+                </Stack>
               </Alert>
             </StackItem>
           ) : null}

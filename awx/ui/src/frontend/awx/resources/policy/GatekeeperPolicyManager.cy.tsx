@@ -1,4 +1,8 @@
+import { ReactNode, useEffect } from 'react';
+import { PageNavigationItem } from '../../../../framework';
+import { usePageNavigationRoutesContext } from '../../../../framework/PageNavigation/PageNavigationRoutesProvider';
 import { awxAPI } from '../../common/api/awx-utils';
+import { AwxRoute } from '../../main/AwxRoutes';
 import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
 
 const gatekeeperResponse = {
@@ -74,13 +78,58 @@ interface GatekeeperRequestBody {
   human_approved?: boolean;
 }
 
-function mountGatekeeper() {
-  cy.intercept('GET', '/api/v2/opa/gatekeeper/**', gatekeeperResponse).as('gatekeeper');
-  cy.mount(<GatekeeperPolicyManager />);
+function SeedNavigation(props: { children: ReactNode }) {
+  const [, setNavigation] = usePageNavigationRoutesContext();
+  useEffect(() => {
+    setNavigation([
+      {
+        id: AwxRoute.SettingsPolicyAsCode,
+        path: 'settings/policy-as-code',
+        element: <div />,
+      } as PageNavigationItem,
+    ]);
+  }, [setNavigation]);
+  return <>{props.children}</>;
+}
+
+function mountGatekeeper(response = gatekeeperResponse) {
+  cy.intercept('GET', '/api/v2/opa/gatekeeper/**', response).as('gatekeeper');
+  cy.mount(
+    <SeedNavigation>
+      <GatekeeperPolicyManager />
+    </SeedNavigation>
+  );
   cy.wait('@gatekeeper');
 }
 
 describe('GatekeeperPolicyManager', () => {
+  it('links the unconfigured Gatekeeper state to Policy Connections settings', () => {
+    mountGatekeeper({
+      ...gatekeeperResponse,
+      configured: false,
+      message: 'Configure the Gatekeeper Kubernetes API connection in Settings.',
+      contexts: [
+        {
+          name: 'default',
+          selected: true,
+          configured: false,
+          server_url: '',
+          verify_ssl: true,
+          source: 'settings',
+        },
+      ],
+      cluster: {
+        server_url: '',
+        context: 'default',
+        verify_ssl: true,
+      },
+    });
+
+    cy.getByDataCy('gatekeeper-policy-settings-link')
+      .should('be.visible')
+      .and('have.attr', 'href', '/settings/policy-as-code');
+  });
+
   it('requires confirmation before live apply', () => {
     let calls = 0;
     cy.intercept('POST', awxAPI`/opa/gatekeeper/apply/`, (req) => {
