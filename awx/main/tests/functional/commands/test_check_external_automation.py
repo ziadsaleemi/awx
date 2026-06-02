@@ -137,6 +137,75 @@ def test_check_external_automation_can_sync_opa_policy_bundle(mocker):
     opa_engine.evaluate.assert_called_once()
 
 
+@override_settings(EDA_SERVER_URL='', OPA_HOST='opa.example.test', OPA_PORT=8181, OPA_SSL=False)
+def test_check_external_automation_can_run_opa_deny_smoke(mocker):
+    opa_engine = mocker.Mock()
+    opa_engine.base_url = 'http://opa.example.test:8181'
+    opa_engine.timeout = 1.5
+    opa_engine.is_available.return_value = True
+    opa_engine.validate_configuration.return_value = None
+    opa_engine._headers.return_value = {'Content-Type': 'application/json'}
+    opa_engine.put_policy.return_value = {'status_code': 200}
+    opa_engine.delete_policy.return_value = {'status_code': 204}
+    opa_engine.evaluate.side_effect = [{'result': True}, {'result': False}]
+    mocker.patch('awx.main.management.commands.check_external_automation.OPAPolicyEngine', return_value=opa_engine)
+    mocker.patch('awx.main.management.commands.check_external_automation.opa_cert_file', return_value=contextlib.nullcontext((None, False)))
+
+    health_response = mocker.Mock()
+    health_response.status_code = 200
+    health_response.raise_for_status.return_value = None
+    mocker.patch('awx.main.management.commands.check_external_automation.requests.get', return_value=health_response)
+
+    output = StringIO()
+    call_command('check_external_automation', '--json', '--skip-eda', '--opa-deny-smoke', '--opa-deny-policy-id=awx/test_deny', stdout=output)
+    payload = json.loads(output.getvalue())
+    deny_smoke = payload['checks']['opa']['deny_smoke']
+
+    assert payload['ok'] is True
+    assert deny_smoke['ok'] is True
+    assert deny_smoke['status'] == 'denied'
+    assert deny_smoke['allowed'] is False
+    assert deny_smoke['cleanup'] == {'status_code': 204}
+    opa_engine.put_policy.assert_called_once()
+    assert opa_engine.put_policy.call_args.args[0] == 'awx/test_deny'
+    assert 'package awx.codex_deny_smoke' in opa_engine.put_policy.call_args.args[1]
+    opa_engine.delete_policy.assert_called_once_with('awx/test_deny')
+
+
+@override_settings(EDA_SERVER_URL='', OPA_HOST='opa.example.test', OPA_PORT=8181, OPA_SSL=False)
+def test_check_external_automation_opa_deny_smoke_fails_on_unexpected_allow(mocker):
+    opa_engine = mocker.Mock()
+    opa_engine.base_url = 'http://opa.example.test:8181'
+    opa_engine.timeout = 1.5
+    opa_engine.is_available.return_value = True
+    opa_engine.validate_configuration.return_value = None
+    opa_engine._headers.return_value = {'Content-Type': 'application/json'}
+    opa_engine.put_policy.return_value = {'status_code': 200}
+    opa_engine.delete_policy.return_value = {'status_code': 204}
+    opa_engine.evaluate.side_effect = [{'result': True}, {'result': True}]
+    mocker.patch('awx.main.management.commands.check_external_automation.OPAPolicyEngine', return_value=opa_engine)
+    mocker.patch('awx.main.management.commands.check_external_automation.opa_cert_file', return_value=contextlib.nullcontext((None, False)))
+
+    health_response = mocker.Mock()
+    health_response.status_code = 200
+    health_response.raise_for_status.return_value = None
+    mocker.patch('awx.main.management.commands.check_external_automation.requests.get', return_value=health_response)
+
+    output = StringIO()
+    with pytest.raises(CommandError):
+        call_command('check_external_automation', '--json', '--skip-eda', '--opa-deny-smoke', '--fail-on-unavailable', stdout=output)
+
+    payload = json.loads(output.getvalue())
+    deny_smoke = payload['checks']['opa']['deny_smoke']
+    assert payload['ok'] is False
+    assert payload['checks']['opa']['status'] == 'deny_smoke_failed'
+    assert deny_smoke['ok'] is False
+    assert deny_smoke['status'] == 'allowed_unexpectedly'
+    assert deny_smoke['allowed'] is True
+    assert deny_smoke['cleanup'] == {'status_code': 204}
+    opa_engine.delete_policy.assert_called_once()
+
+
 @override_settings(EDA_SERVER_URL='', OPA_HOST='opa.example.test', OPA_PORT=8181, OPA_SSL=False, OPA_POLICY_BUNDLE='')
 def test_check_external_automation_opa_policy_sync_requires_bundle(mocker):
     opa_engine = mocker.Mock()

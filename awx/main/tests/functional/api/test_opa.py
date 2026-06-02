@@ -107,6 +107,38 @@ def test_opa_policy_sync_puts_managed_rego_to_real_opa_policy_api(post, admin_us
     )
 
 
+@override_settings(
+    OPA_HOST='opa.example.com',
+    OPA_PORT=8181,
+    OPA_SSL=True,
+    OPA_AUTH_TYPE=OPA_AUTH_TYPES.TOKEN,
+    OPA_AUTH_TOKEN='secret-token',
+    OPA_AUTH_CUSTOM_HEADERS={'X-Custom': 'Header'},
+    OPA_REQUEST_TIMEOUT=2.5,
+)
+def test_opa_policy_engine_deletes_policy_from_real_opa_policy_api():
+    opa_response = mock.Mock()
+    opa_response.status_code = 204
+    opa_response.content = b''
+    opa_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.delete', return_value=opa_response) as requests_delete:
+        response = OPAPolicyEngine().delete_policy('/awx/temp deny')
+
+    assert response == {'status_code': 204}
+    requests_delete.assert_called_once_with(
+        'https://opa.example.com:8181/v1/policies/awx/temp%20deny',
+        timeout=2.5,
+        headers={
+            'Content-Type': 'application/json',
+            'X-Custom': 'Header',
+            'Authorization': 'Bearer secret-token',
+        },
+        cert=None,
+        verify=True,
+    )
+
+
 @pytest.mark.django_db
 @override_settings(OPA_HOST='opa.example.com', OPA_POLICY_BUNDLE='')
 def test_opa_policy_sync_requires_managed_bundle_text(post, admin_user):

@@ -1,5 +1,5 @@
-import json
 import hashlib
+import json
 import re
 
 import requests
@@ -11,6 +11,14 @@ from awx.main.tasks.policy import opa_cert_file
 from awx.main.utils.eda import EDAControllerClient, EDAControllerError, EDA_FAILURE_STATUSES
 
 OPA_SMOKE_POLICY_PATH = 'awx/job_launch/allow'
+OPA_DENY_SMOKE_POLICY_ID = 'awx/codex_deny_smoke'
+OPA_DENY_SMOKE_POLICY_PATH = 'awx/codex_deny_smoke/allow'
+OPA_DENY_SMOKE_POLICY_TEXT = """package awx.codex_deny_smoke
+
+default allow := false
+
+allow if input.action == "allow"
+"""
 
 
 class Command(BaseCommand):
@@ -29,6 +37,12 @@ class Command(BaseCommand):
         parser.add_argument('--skip-opa', action='store_true', help='Skip Open Policy Agent check.')
         parser.add_argument('--sync-opa-policy', action='store_true', help='Sync OPA_POLICY_BUNDLE to OPA before evaluating smoke policy.')
         parser.add_argument('--opa-policy-id', default='awx/managed', help='OPA policy id used with --sync-opa-policy.')
+        parser.add_argument(
+            '--opa-deny-smoke',
+            action='store_true',
+            help='Install a temporary deny policy, verify denied evaluation, then delete it.',
+        )
+        parser.add_argument('--opa-deny-policy-id', default=OPA_DENY_SMOKE_POLICY_ID, help='Temporary OPA policy id used with --opa-deny-smoke.')
         parser.add_argument('--fail-on-unavailable', action='store_true', help='Return nonzero when a checked service is unavailable.')
 
     def handle(self, *args, **options):
@@ -44,7 +58,12 @@ class Command(BaseCommand):
                 cleanup=options['cleanup_eda_activation'],
             )
         if not options['skip_opa']:
-            checks['opa'] = self._check_opa(sync_policy=options['sync_opa_policy'], policy_id=options['opa_policy_id'])
+            checks['opa'] = self._check_opa(
+                sync_policy=options['sync_opa_policy'],
+                policy_id=options['opa_policy_id'],
+                deny_smoke=options['opa_deny_smoke'],
+                deny_policy_id=options['opa_deny_policy_id'],
+            )
 
         result = {
             'ok': all(check['ok'] for check in checks.values()) if checks else True,
@@ -145,7 +164,7 @@ class Command(BaseCommand):
                 result['status'] = 'cleanup_failed'
         return result
 
-    def _check_opa(self, sync_policy=False, policy_id='awx/managed'):
+    def _check_opa(self, sync_policy=False, policy_id='awx/managed', deny_smoke=False, deny_policy_id=OPA_DENY_SMOKE_POLICY_ID):
         engine = OPAPolicyEngine()
         result = {
             'ok': False,
@@ -153,10 +172,12 @@ class Command(BaseCommand):
             'server_url': engine.base_url,
             'policy_path': OPA_SMOKE_POLICY_PATH,
             'policy_sync': {'requested': bool(sync_policy)},
+            'deny_smoke': {'requested': bool(deny_smoke)},
         }
         if not engine.is_available():
             return result
 
+        health_status_code = None
         try:
             engine.validate_configuration()
             health_status_code = self._check_opa_health(engine)
@@ -174,10 +195,15 @@ class Command(BaseCommand):
             result.update({'status': 'unreachable', 'error': str(exc)})
             return result
 
+        deny_smoke_ok = True
+        if deny_smoke:
+            result['deny_smoke'] = self._check_opa_deny_smoke(engine, deny_policy_id)
+            deny_smoke_ok = result['deny_smoke']['ok']
+
         result.update(
             {
-                'ok': allowed,
-                'status': 'available' if allowed else 'policy_denied',
+                'ok': allowed and deny_smoke_ok,
+                'status': 'available' if allowed and deny_smoke_ok else 'deny_smoke_failed' if allowed else 'policy_denied',
                 'health_status_code': health_status_code,
                 'allowed': allowed,
             }
@@ -185,11 +211,9 @@ class Command(BaseCommand):
         return result
 
     def _sync_opa_policy(self, engine, policy_id):
-        policy_id = str(policy_id or '').strip().strip('/')
-        if not policy_id:
-            return {'requested': True, 'ok': False, 'status': 'invalid_policy_id', 'error': 'OPA policy id is required.'}
-        if not re.match(r'^[a-zA-Z0-9_/-]+$', policy_id):
-            return {'requested': True, 'ok': False, 'status': 'invalid_policy_id', 'error': 'OPA policy id contains invalid characters.'}
+        policy_id, error = self._normalize_opa_policy_id(policy_id)
+        if error:
+            return {'requested': True, 'ok': False, 'status': 'invalid_policy_id', 'error': error}
 
         policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
         if not policy_bundle.strip():
@@ -210,6 +234,55 @@ class Command(BaseCommand):
             'sha256': hashlib.sha256(policy_bundle.encode()).hexdigest(),
             'opa_response': response,
         }
+
+    def _check_opa_deny_smoke(self, engine, policy_id):
+        policy_id, error = self._normalize_opa_policy_id(policy_id)
+        if error:
+            return {'requested': True, 'ok': False, 'status': 'invalid_policy_id', 'error': error}
+
+        result = {
+            'requested': True,
+            'ok': False,
+            'status': 'pending',
+            'policy_id': policy_id,
+            'policy_path': OPA_DENY_SMOKE_POLICY_PATH,
+        }
+        policy_written = False
+        try:
+            result['policy_sync'] = engine.put_policy(policy_id, OPA_DENY_SMOKE_POLICY_TEXT)
+            policy_written = True
+            decision = engine.evaluate(
+                OPA_DENY_SMOKE_POLICY_PATH,
+                {'action': 'deny', 'source': 'awx-manage', 'metadata': {'command': 'check_external_automation', 'check': 'opa_deny_smoke'}},
+            )
+            allowed = opa_response_allows(decision)
+            result.update(
+                {
+                    'allowed': allowed,
+                    'opa_response': decision,
+                    'status': 'allowed_unexpectedly' if allowed else 'denied',
+                    'ok': not allowed,
+                }
+            )
+        except Exception as exc:
+            result.update({'status': 'unreachable', 'error': str(exc)})
+        finally:
+            if policy_written:
+                try:
+                    result['cleanup'] = engine.delete_policy(policy_id)
+                except Exception as exc:
+                    result['cleanup'] = {'ok': False, 'status': 'cleanup_failed', 'error': str(exc)}
+                    result['ok'] = False
+                    result['status'] = 'cleanup_failed'
+        return result
+
+    def _normalize_opa_policy_id(self, policy_id):
+        policy_id = str(policy_id or '').strip().strip('/')
+        if not policy_id:
+            return '', 'OPA policy id is required.'
+        if not re.match(r'^[a-zA-Z0-9_/-]+$', policy_id):
+            return '', 'OPA policy id contains invalid characters.'
+        return policy_id, ''
 
     def _check_opa_health(self, engine):
         with opa_cert_file() as cert_files:

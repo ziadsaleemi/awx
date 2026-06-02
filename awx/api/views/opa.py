@@ -23,8 +23,8 @@ OPA input schema for job launch checks:
 """
 
 import hashlib
-import logging
 import json
+import logging
 import re
 from urllib.parse import quote
 
@@ -191,6 +191,33 @@ class OPAPolicyEngine:
                 data=policy_text,
                 timeout=self.timeout,
                 headers=self._headers(content_type='text/plain'),
+                cert=cert,
+                verify=verify,
+            )
+        resp.raise_for_status()
+        if getattr(resp, 'content', b''):
+            try:
+                return resp.json()
+            except ValueError:
+                return {'status_code': resp.status_code}
+        return {'status_code': resp.status_code}
+
+    def delete_policy(self, policy_id: str) -> dict:
+        """
+        DELETE Rego module from /v1/policies/<policy_id>.
+        """
+        self.validate_configuration()
+        if not self.is_available():
+            raise ValueError(_('OPA is not enabled or configured.'))
+
+        quoted_policy_id = quote(policy_id.strip('/'), safe='/')
+        url = f'{self.base_url}/v1/policies/{quoted_policy_id}'
+        with opa_cert_file() as cert_files:
+            cert, verify = cert_files
+            resp = requests.delete(
+                url,
+                timeout=self.timeout,
+                headers=self._headers(),
                 cert=cert,
                 verify=verify,
             )
