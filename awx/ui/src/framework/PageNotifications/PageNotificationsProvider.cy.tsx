@@ -1,5 +1,6 @@
 /* eslint-disable i18next/no-literal-string */
 import { PageSection, Toolbar, ToolbarContent, ToolbarItem } from '@patternfly/react-core';
+import { useEffect } from 'react';
 import { PageLayout } from '../PageLayout';
 import { PageNotificationsIcon } from '../PageMasthead/PageNotificationsIcon';
 import {
@@ -9,15 +10,17 @@ import {
 } from './PageNotificationsProvider';
 
 describe('PageNotificationsProvider component tests', () => {
-  function Component(props: { notifications?: IPageNotification[] }) {
+  function Component(props: { notifications?: IPageNotification[]; count?: number }) {
     const { setNotificationGroups } = usePageNotifications();
 
-    if (props.notifications) {
-      setNotificationGroups((notificationGroups) => {
-        notificationGroups['test'] = { title: 'test', notifications: props.notifications! };
-        return notificationGroups;
-      });
-    }
+    useEffect(() => {
+      if (props.notifications) {
+        setNotificationGroups((notificationGroups) => ({
+          ...notificationGroups,
+          test: { title: 'test', notifications: props.notifications!, count: props.count },
+        }));
+      }
+    }, [props.count, props.notifications, setNotificationGroups]);
 
     return (
       <>
@@ -45,5 +48,28 @@ describe('PageNotificationsProvider component tests', () => {
     cy.get('[data-cy=notification-badge]').click();
     cy.get('[data-cy=notifications-drawer]').should('be.visible');
     cy.get('[data-cy=notifications-drawer]').should('contain', 'test');
+  });
+
+  it('renders notification actions and uses group count override', () => {
+    const approve = cy.spy().as('approve');
+    cy.mount(
+      <Component
+        count={3}
+        notifications={[
+          {
+            title: 'approval needed',
+            description: 'workflow job',
+            to: '/test',
+            actions: [{ label: 'Approve', onClick: approve }],
+          },
+        ]}
+      />
+    );
+
+    cy.get('[data-cy=notification-badge]').should('contain', '3');
+    cy.get('[data-cy=notification-badge]').click();
+    cy.contains('button', 'Approve').click();
+    cy.get('@approve').should('have.been.calledOnce');
+    cy.get('[data-cy=notifications-drawer]').should('be.visible');
   });
 });

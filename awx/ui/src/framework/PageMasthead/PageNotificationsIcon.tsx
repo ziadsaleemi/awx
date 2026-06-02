@@ -5,7 +5,7 @@ export function PageNotificationsIcon() {
   const { setNotificationsDrawerOpen, notificationGroups } = usePageNotifications();
 
   const count = Object.values(notificationGroups).reduce(
-    (count, group) => count + group.notifications.length,
+    (count, group) => count + (group.count ?? group.notifications.length),
     0
   );
 

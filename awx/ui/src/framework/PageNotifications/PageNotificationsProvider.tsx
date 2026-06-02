@@ -1,4 +1,6 @@
 import {
+  Button,
+  ButtonVariant,
   Drawer,
   DrawerCloseButton,
   DrawerContent,
@@ -41,6 +43,7 @@ interface IPageNotifications {
 export interface IPageNotificationGroup {
   title: string;
   notifications: IPageNotification[];
+  count?: number;
 }
 
 export interface IPageNotification {
@@ -49,6 +52,15 @@ export interface IPageNotification {
   timestamp?: string;
   variant?: 'success' | 'danger' | 'warning' | 'info';
   to: string;
+  actions?: IPageNotificationAction[];
+}
+
+export interface IPageNotificationAction {
+  label: string;
+  variant?: ButtonVariant;
+  isDanger?: boolean;
+  isDisabled?: boolean;
+  onClick: () => void | Promise<void>;
 }
 
 export const PageNotificationsContext = createContext<IPageNotifications>({
@@ -139,11 +151,12 @@ const DrawerContentBodyStyled = styled(DrawerContentBody)`
 function PageNotificationGroup(props: { group: IPageNotificationGroup }) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(true);
+  const count = props.group.count ?? props.group.notifications.length;
   return (
     <NotificationDrawerGroup
       title={props.group.title}
       isExpanded={isExpanded}
-      count={props.group.notifications.length}
+      count={count}
       onExpand={(_, expand) => setIsExpanded(expand)}
     >
       <NotificationDrawerList isHidden={!isExpanded}>
@@ -186,6 +199,26 @@ function PageNotification(props: { notification: IPageNotification }) {
       />
       <NotificationDrawerListItemBody timestamp={timestampString}>
         {props.notification.description}
+        {props.notification.actions && props.notification.actions.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {props.notification.actions.map((action) => (
+              <Button
+                key={action.label}
+                size="sm"
+                variant={action.variant ?? ButtonVariant.secondary}
+                isDanger={action.isDanger}
+                isDisabled={action.isDisabled}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void action.onClick();
+                }}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        )}
       </NotificationDrawerListItemBody>
     </NotificationDrawerListItem>
   );
