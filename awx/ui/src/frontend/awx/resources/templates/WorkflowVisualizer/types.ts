@@ -27,6 +27,7 @@ export type GraphNodeData = {
   resource: WorkflowNode;
   launch_data: PromptFormValues;
   survey_data: { [key: string]: string | string[] | { name: string }[] };
+  modeDimmed?: boolean;
 };
 export interface CustomNodeProps extends WithSelectionProps {
   element: GraphElement<
@@ -34,6 +35,7 @@ export interface CustomNodeProps extends WithSelectionProps {
     {
       secondaryLabel?: string;
       resource: WorkflowNode;
+      modeDimmed?: boolean;
       badge?: string;
       badgeTextColor?: string;
       badgeColor?: string;
@@ -45,6 +47,7 @@ export interface CustomNodeProps extends WithSelectionProps {
 export type GraphEdgeData = {
   tag: string;
   tagStatus: EdgeStatus;
+  modeDimmed?: boolean;
 };
 export interface CustomEdgeProps {
   element: GraphElement<
@@ -61,6 +64,7 @@ export interface CustomEdgeInnerProps extends Omit<CustomEdgeProps, 'element'> {
     {
       tag: string;
       tagStatus: EdgeStatus;
+      modeDimmed?: boolean;
     }
   >;
   dragging?: boolean;

@@ -113,7 +113,9 @@ export function NodeAddWizard() {
           return true;
         }
         if (
-          (node_type === RESOURCE_TYPE.workflow_job || node_type === RESOURCE_TYPE.job) &&
+          (node_type === RESOURCE_TYPE.workflow_job ||
+            node_type === RESOURCE_TYPE.job ||
+            node_type === RESOURCE_TYPE.terraform_job) &&
           resource &&
           launch_config
         ) {
@@ -131,7 +133,12 @@ export function NodeAddWizard() {
         if (Object.keys(wizardData).length === 0) {
           return true;
         }
-        if (node_type && ![RESOURCE_TYPE.workflow_job, RESOURCE_TYPE.job].includes(node_type)) {
+        if (
+          node_type &&
+          ![RESOURCE_TYPE.workflow_job, RESOURCE_TYPE.job, RESOURCE_TYPE.terraform_job].includes(
+            node_type
+          )
+        ) {
           return true;
         }
         return !launch_config?.survey_enabled;
@@ -206,7 +213,11 @@ export function NodeAddWizard() {
           extra_data: {
             days: node_days_to_keep,
           },
-          node_type: isEdaNode ? RESOURCE_TYPE.eda_rulebook : isAiNode ? RESOURCE_TYPE.ai_task : undefined,
+          node_type: isEdaNode
+            ? RESOURCE_TYPE.eda_rulebook
+            : isAiNode
+              ? RESOURCE_TYPE.ai_task
+              : undefined,
           eda_rulebook_name: isEdaNode ? eda_rulebook_name : undefined,
           eda_activation_id: isEdaNode ? eda_activation_id : undefined,
           eda_event_source: isEdaNode ? eda_event_source : undefined,
@@ -233,19 +244,19 @@ export function NodeAddWizard() {
                       status: 'pending',
                     },
                   }
-              : {
-                  unified_job_template: {
-                    id: Number(resource?.id || 0),
-                    name: nodeName,
-                    description: getValueBasedOnJobType(
-                      node_type,
-                      resource?.description || '',
-                      approval_description
-                    ),
-                    unified_job_type: node_type,
-                    timeout: approval_timeout,
-                  },
-                }),
+                : {
+                    unified_job_template: {
+                      id: Number(resource?.id || 0),
+                      name: nodeName,
+                      description: getValueBasedOnJobType(
+                        node_type,
+                        resource?.description || '',
+                        approval_description
+                      ),
+                      unified_job_type: node_type,
+                      timeout: approval_timeout,
+                    },
+                  }),
           },
         },
         launch_data: promptValues,

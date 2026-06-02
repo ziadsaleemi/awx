@@ -19,6 +19,8 @@ import {
   CogIcon,
   ExclamationTriangleIcon,
   ExclamationCircleIcon,
+  InfrastructureIcon,
+  MagicIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -76,10 +78,16 @@ export const Legend = () => {
                 <LegendDescription label={t('System Job')} icon={<CogIcon />} />
               </DescriptionListDescription>
               <DescriptionListDescription>
+                <LegendDescription label={t('Terraform Template')} icon={<InfrastructureIcon />} />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
                 <LegendDescription
                   label={t('EDA Rulebook Activation')}
                   icon={<ProcessAutomationIcon />}
                 />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription label={t('AI Task')} icon={<MagicIcon />} />
               </DescriptionListDescription>
             </DescriptionListGroup>
             <DescriptionListGroup data-cy="legend-node-status-types">

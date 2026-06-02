@@ -51,12 +51,13 @@ export const CustomNode: FC<
   if (!data && isNode(element)) return null;
 
   const Icon = NodeIcon[jobType ?? 'deleted_resource'];
+  const opacity = data?.modeDimmed ? 0.35 : 1;
 
   return id !== START_NODE_ID ? (
     <DefaultNode
       showLabel
       element={element}
-      labelClassName={`${id}-node-label`}
+      labelClassName={`${id}-node-label${data?.modeDimmed ? ' workflow-node-label-dimmed' : ''}`}
       onSelect={(e) => {
         if (!jobType) return;
         setSidebarMode('view');
@@ -69,7 +70,7 @@ export const CustomNode: FC<
       badgeTextColor={data?.badgeTextColor}
       badgeBorderColor={data?.badgeBorderColor}
     >
-      <g transform={`translate(13, 13)`}>
+      <g transform={`translate(13, 13)`} opacity={opacity}>
         <Icon style={{ color: '#393F44' }} width={25} height={25} />
       </g>
     </DefaultNode>
@@ -85,7 +86,7 @@ export const CustomNode: FC<
       badgeTextColor={data?.badgeTextColor}
       badgeBorderColor={data?.badgeBorderColor}
     >
-      <g transform={`translate(13, 13)`}>
+      <g transform={`translate(13, 13)`} opacity={opacity}>
         <HomeIcon style={{ color: '#393F44' }} width={25} height={25} />
       </g>
     </DefaultNode>
