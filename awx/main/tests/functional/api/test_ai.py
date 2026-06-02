@@ -17,7 +17,10 @@ from awx.main.models import (
     InventorySource,
     JobTemplate,
     Project,
+    ProjectUpdate,
     Schedule,
+    WorkflowApproval,
+    WorkflowApprovalTemplate,
     WorkflowJobTemplate,
     WorkflowJobTemplateNode,
 )
@@ -295,6 +298,88 @@ def test_ai_chat_lists_visible_schedules_scoped_to_template_without_provider(pos
     assert content.startswith('There are 1 schedule visible to you in AWX matching template "AI Scoped Schedule Template":')
     assert 'AI Scoped Nightly' in content
     assert 'AI Other Nightly' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_workflow_jobs_scoped_to_workflow_template_without_provider(post, admin_user, organization):
+    scoped_template = WorkflowJobTemplate.objects.create(name='AI Scoped Workflow JT', organization=organization)
+    other_template = WorkflowJobTemplate.objects.create(name='AI Other Workflow JT', organization=organization)
+    scoped_job = scoped_template.create_unified_job(_eager_fields={'status': 'failed'})
+    other_job = other_template.create_unified_job(_eager_fields={'status': 'failed'})
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List failed workflow jobs for AI Scoped Workflow JT'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 workflow job visible to you in AWX matching workflow job template "AI Scoped Workflow JT", status "failed":')
+    assert f'id: {scoped_job.pk}' in content
+    assert f'id: {other_job.pk}' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_counts_visible_project_updates_scoped_to_project_without_provider(post, admin_user, organization):
+    scoped_project = Project.objects.create(name='AI Update Project', organization=organization)
+    other_project = Project.objects.create(name='AI Other Update Project', organization=organization)
+    ProjectUpdate.objects.create(name='AI Scoped Update 1', project=scoped_project, organization=organization, status='successful')
+    ProjectUpdate.objects.create(name='AI Scoped Update 2', project=scoped_project, organization=organization, status='failed')
+    ProjectUpdate.objects.create(name='AI Other Update', project=other_project, organization=organization, status='failed')
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many project updates for AI Update Project?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 2 project updates visible to you in AWX matching project "AI Update Project".'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_workflow_approvals_scoped_to_status_without_provider(post, admin_user, organization):
+    pending_template = WorkflowApprovalTemplate.objects.create(name='AI Pending Approval Template', organization=organization)
+    other_template = WorkflowApprovalTemplate.objects.create(name='AI Other Approval Template', organization=organization)
+    pending_approval = WorkflowApproval.objects.create(
+        name='AI Pending Approval',
+        workflow_approval_template=pending_template,
+        organization=organization,
+        status='pending',
+    )
+    WorkflowApproval.objects.create(
+        name='AI Successful Approval',
+        workflow_approval_template=other_template,
+        organization=organization,
+        status='successful',
+        approved_or_denied_by=admin_user,
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List pending workflow approvals'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 workflow approval visible to you in AWX matching status "pending":')
+    assert 'AI Pending Approval' in content
+    assert f'id: {pending_approval.pk}' in content
+    assert 'AI Successful Approval' not in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
