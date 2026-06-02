@@ -16,6 +16,8 @@ import {
   FormSelect,
   FormSelectOption,
   Label,
+  Modal,
+  ModalVariant,
   PageSection,
   TextInput,
   Spinner,
@@ -223,12 +225,14 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState('');
+  const [moduleAutoSelect, setModuleAutoSelect] = useState(true);
   const [moduleId, setModuleId] = useState('awx/managed');
   const [moduleText, setModuleText] = useState(defaultModuleText);
   const [moduleDetail, setModuleDetail] = useState<OPAPolicyModuleDetail | null>(null);
   const [moduleLoading, setModuleLoading] = useState(false);
   const [moduleSaving, setModuleSaving] = useState(false);
   const [moduleDeleting, setModuleDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [moduleResult, setModuleResult] = useState<string | null>(null);
   const [moduleAudit, setModuleAudit] = useState<OPAAuditRef | null>(null);
@@ -259,9 +263,10 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   }, [policies, policyPath]);
 
   useEffect(() => {
-    if (!modules.length || selectedModuleId) return;
+    if (!moduleAutoSelect || !modules.length || selectedModuleId) return;
     setSelectedModuleId(modules[0].id);
-  }, [modules, selectedModuleId]);
+    setModuleAutoSelect(false);
+  }, [moduleAutoSelect, modules, selectedModuleId]);
 
   useEffect(() => {
     if (!selectedModuleId) return;
@@ -332,6 +337,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   }
 
   const newModule = () => {
+    setModuleAutoSelect(false);
     setSelectedModuleId('');
     setModuleDetail(null);
     setModuleId('awx/new_policy');
@@ -360,6 +366,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
         policy_text: moduleText,
       });
       setModuleDetail(response.module);
+      setModuleAutoSelect(false);
       setSelectedModuleId(response.module.id);
       setModuleResult(
         response.created
@@ -397,6 +404,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
         t('Policy module {{policyId}} deleted from OPA.', { policyId: response.policy_id })
       );
       setModuleAudit(response.audit ?? null);
+      setShowDeleteConfirm(false);
       modulesResponse.refresh();
     } catch (err) {
       setModuleError(
@@ -619,7 +627,10 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                         <FormSelect
                           id="opa-module-select"
                           value={selectedModuleId}
-                          onChange={(_event, value) => setSelectedModuleId(String(value))}
+                          onChange={(_event, value) => {
+                            setModuleAutoSelect(false);
+                            setSelectedModuleId(String(value));
+                          }}
                           isDisabled={moduleLoading || modules.length === 0}
                         >
                           {modules.length === 0 ? (
@@ -682,9 +693,10 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                       <Button
                         variant="danger"
                         icon={<TrashIcon />}
-                        onClick={() => void handleDeleteModule()}
+                        onClick={() => setShowDeleteConfirm(true)}
                         isLoading={moduleDeleting}
                         isDisabled={moduleDeleting || !moduleDetail?.id}
+                        data-cy="opa-module-delete-button"
                       >
                         {t('Delete from OPA')}
                       </Button>
@@ -953,6 +965,45 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
           </StackItem>
         ) : null}
       </Stack>
+      {showDeleteConfirm ? (
+        <Modal
+          titleIconVariant="danger"
+          title={t('Delete OPA policy module')}
+          variant={ModalVariant.small}
+          description={t(
+            'This removes the live policy module from OPA. The current Rego snapshot is kept in Activity Stream version history for rollback.'
+          )}
+          isOpen
+          onClose={() => setShowDeleteConfirm(false)}
+          data-cy="opa-module-delete-confirm-dialog"
+          actions={[
+            <Button
+              key="delete"
+              variant="danger"
+              onClick={() => void handleDeleteModule()}
+              isLoading={moduleDeleting}
+              isDisabled={moduleDeleting}
+              data-cy="opa-module-delete-confirm-button"
+              aria-label={t('Confirm delete')}
+            >
+              {t('Delete from OPA')}
+            </Button>,
+            <Button
+              key="cancel"
+              variant="link"
+              onClick={() => setShowDeleteConfirm(false)}
+              isDisabled={moduleDeleting}
+              data-cy="opa-module-delete-cancel-button"
+            >
+              {t('Cancel')}
+            </Button>,
+          ]}
+        >
+          <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+            {moduleId}
+          </ClipboardCopy>
+        </Modal>
+      ) : null}
     </PageSection>
   );
 }
