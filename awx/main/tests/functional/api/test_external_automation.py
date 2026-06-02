@@ -3,6 +3,7 @@ import json
 import pytest
 
 from awx.api.versioning import reverse
+from awx.main.management.commands.check_external_automation import run_external_automation_checks
 from awx.main.models import ActivityStream
 
 pytestmark = pytest.mark.django_db
@@ -21,6 +22,12 @@ def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
             'checks': {
                 'eda': {'ok': True, 'status': 'available'},
                 'opa': {'ok': True, 'status': 'available', 'deny_smoke': {'ok': True, 'status': 'denied'}},
+                'gatekeeper': {
+                    'ok': True,
+                    'status': 'available',
+                    'context': 'prod',
+                    'counts': {'constraint_templates': 1, 'constraints': 2, 'violations': 3, 'configs': 1},
+                },
             },
         },
     )
@@ -34,6 +41,8 @@ def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
             'opa_policy_id': 'awx/ui_smoke',
             'opa_deny_smoke': True,
             'start_eda_activation': False,
+            'include_gatekeeper': True,
+            'gatekeeper_context': 'prod',
         },
         user=admin_user,
         expect=200,
@@ -55,6 +64,8 @@ def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
     assert changes['is_error'] is False
     assert changes['checks']['eda']['status'] == 'available'
     assert changes['checks']['opa']['deny_smoke']['status'] == 'denied'
+    assert changes['checks']['gatekeeper']['context'] == 'prod'
+    assert changes['checks']['gatekeeper']['counts']['violations'] == 3
     check.assert_called_once_with(
         include_eda=True,
         include_opa=True,
@@ -69,6 +80,8 @@ def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
         opa_policy_id='awx/ui_smoke',
         opa_deny_smoke=True,
         opa_deny_policy_id='awx/codex_deny_smoke',
+        include_gatekeeper=True,
+        gatekeeper_context='prod',
     )
 
 
@@ -96,3 +109,63 @@ def test_external_automation_check_audits_failed_smoke(post, admin_user, mocker)
     assert changes['is_error'] is True
     assert changes['checks']['opa']['status'] == 'deny_smoke_failed'
     assert changes['checks']['opa']['deny_smoke']['allowed'] is True
+
+
+def test_external_automation_shared_smoke_checks_gatekeeper(mocker):
+    client = mocker.Mock()
+    client.context_error = ''
+    client.server_url = 'https://kube.example.test'
+    client.context = 'prod'
+    client.verify_ssl = False
+    client.is_configured.return_value = True
+    client.context_options.return_value = [
+        {
+            'name': 'prod',
+            'selected': True,
+            'configured': True,
+            'server_url': 'https://kube.example.test',
+            'verify_ssl': False,
+            'source': 'settings',
+        }
+    ]
+    client.list_constraint_templates.return_value = ('v1', [{'metadata': {'name': 'required-labels'}}])
+    client.list_constraint_resources.return_value = (
+        [
+            {'metadata': {'name': 'require-team'}, 'status': {'violations': [{'message': 'missing team'}, {'message': 'missing owner'}]}},
+            {'metadata': {'name': 'require-env'}, 'status': {}},
+        ],
+        [],
+    )
+    client.list_configs.return_value = [{'metadata': {'name': 'config'}}]
+    client_cls = mocker.patch('awx.main.management.commands.check_external_automation.GatekeeperKubernetesClient', return_value=client)
+
+    result = run_external_automation_checks(include_eda=False, include_opa=False, include_gatekeeper=True, gatekeeper_context='prod')
+
+    client_cls.assert_called_once_with('prod')
+    assert result['ok'] is True
+    assert result['checks']['gatekeeper']['status'] == 'available'
+    assert result['checks']['gatekeeper']['api_versions']['constraint_templates'] == 'v1'
+    assert result['checks']['gatekeeper']['counts'] == {
+        'constraint_templates': 1,
+        'constraints': 2,
+        'violations': 2,
+        'configs': 1,
+    }
+
+
+def test_external_automation_gatekeeper_unconfigured_is_not_ok(mocker):
+    client = mocker.Mock()
+    client.context_error = ''
+    client.server_url = ''
+    client.context = 'default'
+    client.verify_ssl = True
+    client.is_configured.return_value = False
+    client.context_options.return_value = [
+        {'name': 'default', 'selected': True, 'configured': False, 'server_url': '', 'verify_ssl': True, 'source': 'settings'}
+    ]
+    mocker.patch('awx.main.management.commands.check_external_automation.GatekeeperKubernetesClient', return_value=client)
+
+    result = run_external_automation_checks(include_eda=False, include_opa=False, include_gatekeeper=True)
+
+    assert result['ok'] is False
+    assert result['checks']['gatekeeper']['status'] == 'not_configured'

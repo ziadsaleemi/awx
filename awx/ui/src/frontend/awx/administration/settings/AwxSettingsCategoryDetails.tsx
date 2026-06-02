@@ -81,6 +81,9 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
       />
       <AwxSettingsCategoryDetails options={categoryOptions} data={all.data} />
       {categoryId === 'eda' ? <ExternalAutomationSmokePanel /> : null}
+      {categoryId === 'policyascode' ? (
+        <ExternalAutomationSmokePanel includeEda={false} includeOpa includeGatekeeper />
+      ) : null}
     </PageLayout>
   );
 }

@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from awx.api.views.opa import OPAPolicyEngine, opa_response_allows
+from awx.api.views.gatekeeper import GatekeeperKubernetesClient
 from awx.main.tasks.policy import opa_cert_file
 from awx.main.utils.eda import EDAControllerClient, EDAControllerError, EDA_FAILURE_STATUSES
 
@@ -43,6 +44,8 @@ class Command(BaseCommand):
             help='Install a temporary deny policy, verify denied evaluation, then delete it.',
         )
         parser.add_argument('--opa-deny-policy-id', default=OPA_DENY_SMOKE_POLICY_ID, help='Temporary OPA policy id used with --opa-deny-smoke.')
+        parser.add_argument('--skip-gatekeeper', action='store_true', help='Skip Gatekeeper Kubernetes API check.')
+        parser.add_argument('--gatekeeper-context', default='', help='Optional configured Gatekeeper Kubernetes context to check.')
         parser.add_argument('--fail-on-unavailable', action='store_true', help='Return nonzero when a checked service is unavailable.')
 
     def handle(self, *args, **options):
@@ -60,6 +63,8 @@ class Command(BaseCommand):
             opa_policy_id=options['opa_policy_id'],
             opa_deny_smoke=options['opa_deny_smoke'],
             opa_deny_policy_id=options['opa_deny_policy_id'],
+            include_gatekeeper=not options['skip_gatekeeper'],
+            gatekeeper_context=options['gatekeeper_context'],
         )
 
         if options['json_output']:
@@ -289,6 +294,56 @@ class Command(BaseCommand):
         response.raise_for_status()
         return response.status_code
 
+    def _check_gatekeeper(self, context_name=''):
+        client = GatekeeperKubernetesClient(context_name)
+        result = {
+            'ok': False,
+            'status': 'not_configured',
+            'server_url': client.server_url,
+            'context': client.context,
+            'verify_ssl': client.verify_ssl,
+            'contexts': client.context_options(),
+        }
+        if client.context_error:
+            result.update({'status': 'invalid_context', 'error': str(client.context_error)})
+            return result
+        if not client.is_configured():
+            return result
+
+        try:
+            template_version, templates = client.list_constraint_templates()
+            constraints, constraint_errors = client.list_constraint_resources()
+            try:
+                configs = client.list_configs()
+            except requests.HTTPError as exc:
+                response = getattr(exc, 'response', None)
+                if response is None or response.status_code != 404:
+                    raise
+                configs = []
+            violations = sum(len((constraint.get('status') or {}).get('violations') or []) for constraint in constraints)
+        except Exception as exc:
+            result.update({'status': 'unreachable', 'error': str(exc)})
+            return result
+
+        partial = bool(constraint_errors)
+        result.update(
+            {
+                'ok': not partial,
+                'status': 'partial' if partial else 'available',
+                'api_versions': {
+                    'constraint_templates': template_version,
+                },
+                'counts': {
+                    'constraint_templates': len(templates),
+                    'constraints': len(constraints),
+                    'violations': violations,
+                    'configs': len(configs),
+                },
+                'errors': constraint_errors,
+            }
+        )
+        return result
+
     def _write_text_result(self, result):
         self.stdout.write(f"Overall: {'ok' if result['ok'] else 'failed'}")
         for name, check in result['checks'].items():
@@ -309,6 +364,8 @@ def run_external_automation_checks(
     opa_policy_id='awx/managed',
     opa_deny_smoke=False,
     opa_deny_policy_id=OPA_DENY_SMOKE_POLICY_ID,
+    include_gatekeeper=False,
+    gatekeeper_context='',
 ):
     checker = Command()
     checks = {}
@@ -329,6 +386,8 @@ def run_external_automation_checks(
             deny_smoke=opa_deny_smoke,
             deny_policy_id=opa_deny_policy_id,
         )
+    if include_gatekeeper:
+        checks['gatekeeper'] = checker._check_gatekeeper(context_name=gatekeeper_context)
     return {
         'ok': all(check['ok'] for check in checks.values()) if checks else True,
         'checks': checks,

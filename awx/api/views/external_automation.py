@@ -23,9 +23,12 @@ def _safe_check_summary(result):
             'ok': bool(check.get('ok')),
             'status': str(check.get('status') or ''),
         }
-        for key in ('count', 'allowed', 'health_status_code'):
+        for key in ('count', 'allowed', 'health_status_code', 'context', 'verify_ssl'):
             if key in check:
                 entry[key] = check[key]
+        counts = check.get('counts')
+        if isinstance(counts, dict):
+            entry['counts'] = {key: counts.get(key) for key in ('constraint_templates', 'constraints', 'violations', 'configs') if key in counts}
         policy_sync = check.get('policy_sync')
         if isinstance(policy_sync, dict):
             entry['policy_sync'] = {
@@ -88,6 +91,8 @@ class ExternalAutomationCheckView(APIView):
             opa_policy_id=str(data.get('opa_policy_id') or 'awx/managed'),
             opa_deny_smoke=bool(data.get('opa_deny_smoke', False)),
             opa_deny_policy_id=str(data.get('opa_deny_policy_id') or 'awx/codex_deny_smoke'),
+            include_gatekeeper=bool(data.get('include_gatekeeper', False)),
+            gatekeeper_context=str(data.get('gatekeeper_context') or ''),
         )
         result['audit'] = _audit_external_automation_check(request, result)
         return Response(result)

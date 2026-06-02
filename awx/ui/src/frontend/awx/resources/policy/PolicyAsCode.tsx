@@ -17,7 +17,7 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
         : view === 'tester'
           ? t('Policy Tester')
           : view === 'smoke'
-            ? t('OPA Smoke Test')
+            ? t('Policy Smoke Test')
             : t('Policy as Code');
 
   return (
@@ -27,7 +27,9 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
       {view === 'gatekeeper' ? <GatekeeperPolicyManager /> : null}
       {view === 'modules' ? <OPAPolicyManagementPanel sections={['modules']} /> : null}
       {view === 'tester' ? <OPAPolicyManagementPanel sections={['tester']} /> : null}
-      {view === 'smoke' ? <ExternalAutomationSmokePanel includeEda={false} /> : null}
+      {view === 'smoke' ? (
+        <ExternalAutomationSmokePanel includeEda={false} includeGatekeeper />
+      ) : null}
     </PageLayout>
   );
 }
