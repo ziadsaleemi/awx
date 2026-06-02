@@ -1259,6 +1259,99 @@ def _visible_resource_queryset(user, spec):
     return queryset.order_by(*order_by)
 
 
+def _message_mentions_name(message: str, name: str) -> bool:
+    name = re.sub(r'\s+', ' ', str(name or '').lower()).strip()
+    if not name or len(name) < 2:
+        return False
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    return name in normalized
+
+
+def _visible_named_rows(user, model, fields=('id', 'name'), limit=500):
+    rows = []
+    for row in get_user_queryset(user, model).values(*fields).order_by('name', 'id')[:limit]:
+        if row.get('name'):
+            rows.append(row)
+    return sorted(rows, key=lambda item: len(str(item.get('name') or '')), reverse=True)
+
+
+def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, list[str]]:
+    filters = {}
+    labels = []
+    field_paths = {attr_path for _output_key, attr_path in spec.get('fields') or ()}
+    spec_key = spec.get('key')
+
+    if spec_key != 'inventories' and any('inventory' in path for path in field_paths):
+        for inventory in _visible_named_rows(user, models.Inventory):
+            if _message_mentions_name(message, inventory['name']):
+                inventory_filter = 'inventory_id'
+                if spec_key in {'hosts', 'groups', 'inventory_sources', 'job_templates', 'jobs'}:
+                    inventory_filter = 'inventory_id'
+                elif spec_key == 'terraform_job_templates':
+                    inventory_filter = 'target_inventory_id'
+                filters[inventory_filter] = inventory['id']
+                labels.append(_('inventory "%(name)s"') % {'name': inventory['name']})
+                break
+
+    organization_filter_by_key = {
+        'hosts': 'inventory__organization_id',
+        'groups': 'inventory__organization_id',
+        'inventory_sources': 'inventory__organization_id',
+        'inventories': 'organization_id',
+        'projects': 'organization_id',
+        'job_templates': 'organization_id',
+        'workflow_job_templates': 'organization_id',
+        'terraform_job_templates': 'organization_id',
+        'credentials': 'organization_id',
+        'teams': 'organization_id',
+        'execution_environments': 'organization_id',
+        'jobs': 'organization_id',
+        'catalog_items': 'organization_id',
+        'catalog_deployments': 'catalog_item__organization_id',
+        'cloud_provider_connections': 'organization_id',
+    }
+    organization_filter = organization_filter_by_key.get(spec_key)
+    if organization_filter:
+        for organization in _visible_named_rows(user, models.Organization):
+            if _message_mentions_name(message, organization['name']):
+                filters[organization_filter] = organization['id']
+                labels.append(_('organization "%(name)s"') % {'name': organization['name']})
+                break
+
+    if 'status' in field_paths:
+        status_terms = (
+            'active',
+            'canceled',
+            'created',
+            'destroyed',
+            'deprovisioning',
+            'error',
+            'failed',
+            'new',
+            'pending',
+            'provisioning',
+            'running',
+            'successful',
+            'waiting',
+        )
+        normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+        for status_term in status_terms:
+            if re.search(rf'\b{re.escape(status_term)}\b', normalized):
+                filters['status'] = status_term
+                labels.append(_('status "%(status)s"') % {'status': status_term})
+                break
+
+    return filters, labels
+
+
+def _visible_resource_queryset_for_message(user, spec: dict, message: str):
+    queryset = _visible_resource_queryset(user, spec)
+    filters, labels = _resource_scope_for_message(user, spec, message)
+    if filters:
+        queryset = queryset.filter(**filters)
+    return queryset, labels
+
+
 def _resource_context_row(obj, spec) -> dict:
     row = {}
     for output_key, attr_path in spec.get('fields') or ():
@@ -1365,21 +1458,29 @@ def _format_resource_list_item(row: dict) -> str:
     return f"- {label}"
 
 
-def _answer_resource_count(user, spec: dict) -> str:
-    count = _visible_resource_queryset(user, spec).count()
-    noun = spec['singular'] if count == 1 else spec['plural']
-    return f'There are {count} {noun} visible to you in AWX.'
+def _format_scope_suffix(labels: list[str]) -> str:
+    if not labels:
+        return ''
+    return ' matching ' + ', '.join(str(label) for label in labels)
 
 
-def _answer_resource_list(user, spec: dict) -> str:
-    queryset = _visible_resource_queryset(user, spec)
+def _answer_resource_count(user, spec: dict, message: str) -> str:
+    queryset, labels = _visible_resource_queryset_for_message(user, spec, message)
     count = queryset.count()
+    noun = spec['singular'] if count == 1 else spec['plural']
+    return f'There are {count} {noun} visible to you in AWX{_format_scope_suffix(labels)}.'
+
+
+def _answer_resource_list(user, spec: dict, message: str) -> str:
+    queryset, labels = _visible_resource_queryset_for_message(user, spec, message)
+    count = queryset.count()
+    scope_suffix = _format_scope_suffix(labels)
     if count == 0:
-        return f'There are no {spec["plural"]} visible to you in AWX.'
+        return f'There are no {spec["plural"]} visible to you in AWX{scope_suffix}.'
 
     rows = [_resource_context_row(obj, spec) for obj in queryset[:_AI_DIRECT_LIST_LIMIT]]
     noun = spec['singular'] if count == 1 else spec['plural']
-    lines = [f'There are {count} {noun} visible to you in AWX:']
+    lines = [f'There are {count} {noun} visible to you in AWX{scope_suffix}:']
     lines.extend(_format_resource_list_item(row) for row in rows)
     if count > len(rows):
         lines.append(f'- Showing the first {len(rows)} of {count}. Narrow the question to list a specific inventory, organization, or resource type.')
@@ -1393,9 +1494,9 @@ def _try_answer_awx_fact_question(user, messages: list) -> str | None:
             continue
         resource_pattern = '|'.join(f'(?:{pattern})' for pattern in spec.get('patterns') or ())
         if _is_count_question(latest_message, resource_pattern):
-            return _answer_resource_count(user, spec)
+            return _answer_resource_count(user, spec, latest_message)
         if _is_list_question(latest_message, resource_pattern):
-            return _answer_resource_list(user, spec)
+            return _answer_resource_list(user, spec, latest_message)
     return None
 
 

@@ -167,6 +167,53 @@ def test_ai_chat_lists_visible_hosts_without_provider(post, admin_user, organiza
 
 @pytest.mark.django_db
 @override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_hosts_scoped_to_inventory_without_provider(post, admin_user, organization):
+    source_inv = Inventory.objects.create(name='source-inv', organization=organization)
+    source_inv.hosts.create(name='web01')
+    other_inv = Inventory.objects.create(name='other-inv', organization=organization)
+    other_inv.hosts.create(name='db01')
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'Can you list hosts in inventory source-inv?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 host visible to you in AWX matching inventory "source-inv":')
+    assert '- web01 ' in content
+    assert 'inventory: source-inv' in content
+    assert 'db01' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_counts_visible_hosts_scoped_to_inventory_without_provider(post, admin_user, organization):
+    source_inv = Inventory.objects.create(name='source-inv', organization=organization)
+    source_inv.hosts.create(name='web01')
+    source_inv.hosts.create(name='web02')
+    other_inv = Inventory.objects.create(name='other-inv', organization=organization)
+    other_inv.hosts.create(name='db01')
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many hosts are in source-inv?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 2 hosts visible to you in AWX matching inventory "source-inv".'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
 def test_ai_chat_provider_prompt_includes_visible_awx_resource_rows(post, admin_user, organization):
     inventory = Inventory.objects.create(name='source-inv', organization=organization)
     inventory.hosts.create(name='web01')
