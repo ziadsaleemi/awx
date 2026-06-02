@@ -273,10 +273,21 @@ register(
 register(
     'EDA_ACTIVATION_START_API_PATH',
     field_class=fields.CharField,
-    default='/api/eda/v1/activations/{activation_id}/start/',
+    default='/api/eda/v1/activations/{activation_id}/enable/',
     allow_blank=False,
     label=_('EDA activation start API path'),
-    help_text=_('Relative API path used to start an Event-Driven Ansible Controller rulebook activation. Supports {activation_id}.'),
+    help_text=_('Relative API path used to enable/start an Event-Driven Ansible Controller rulebook activation. Supports {activation_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_INSTANCE_LOGS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activation-instances/{activation_instance_id}/logs/',
+    allow_blank=False,
+    label=_('EDA activation instance logs API path'),
+    help_text=_('Relative API path used to read Event-Driven Ansible activation instance logs. Supports {activation_instance_id}.'),
     category=_('Event-Driven Ansible'),
     category_slug='eda',
 )

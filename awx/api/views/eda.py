@@ -61,6 +61,7 @@ class EDAStatusView(APIView):
                 'request_timeout': client.timeout,
                 'activations_api_path': client.activations_path,
                 'activation_start_api_path': client.activation_start_path,
+                'activation_instance_logs_api_path': client.activation_instance_logs_path,
                 'activation_events_api_path': client.activation_events_path,
                 'activation_poll_attempts': client.poll_attempts,
                 'activation_poll_interval': client.poll_interval,

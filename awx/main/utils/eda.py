@@ -11,6 +11,8 @@ EDA_SUCCESS_STATUSES = {'active', 'completed', 'complete', 'enabled', 'ok', 'run
 EDA_FAILURE_STATUSES = {'canceled', 'cancelled', 'deleted', 'disabled', 'error', 'failed', 'failure', 'missing', 'not_found', 'stopped', 'unreachable'}
 EDA_STARTABLE_STATUSES = {'created', 'disabled', 'idle', 'new', 'pending', 'planned', 'ready', 'stopped', 'unknown'}
 EDA_RUNNING_STATUSES = {'active', 'enabled', 'ok', 'running', 'started', 'successful'}
+DEFAULT_ACTIVATION_START_PATH = '/api/eda/v1/activations/{activation_id}/enable/'
+DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH = '/api/eda/v1/activation-instances/{activation_instance_id}/logs/'
 
 
 class EDAControllerError(Exception):
@@ -82,6 +84,18 @@ def _short_text(value, length=1000):
     return str(value or '')[:length]
 
 
+def _normalize_instance(item):
+    if not isinstance(item, dict):
+        return {}
+    return {
+        'id': _pick_first(item, ('id', 'uuid', 'activation_instance_id', 'pk')),
+        'name': _pick_first(item, ('name', 'activation_name')),
+        'status': _pick_first(item, ('status', 'state', 'activation_status')),
+        'started': _pick_first(item, ('started', 'started_at', 'created_at', 'created')),
+        'finished': _pick_first(item, ('finished', 'ended_at', 'finished_at', 'modified_at', 'updated_at')),
+    }
+
+
 class EDAControllerClient:
     def __init__(self):
         self.controller_url = configured_url()
@@ -91,8 +105,11 @@ class EDAControllerClient:
         self.timeout = max(int(getattr(settings, 'EDA_REQUEST_TIMEOUT', 5) or 5), 1)
         self.activations_path = (getattr(settings, 'EDA_ACTIVATIONS_API_PATH', '') or '/api/eda/v1/activations/').strip() or '/api/eda/v1/activations/'
         self.activation_start_path = (
-            getattr(settings, 'EDA_ACTIVATION_START_API_PATH', '') or '/api/eda/v1/activations/{activation_id}/start/'
-        ).strip() or '/api/eda/v1/activations/{activation_id}/start/'
+            getattr(settings, 'EDA_ACTIVATION_START_API_PATH', '') or DEFAULT_ACTIVATION_START_PATH
+        ).strip() or DEFAULT_ACTIVATION_START_PATH
+        self.activation_instance_logs_path = (
+            getattr(settings, 'EDA_ACTIVATION_INSTANCE_LOGS_API_PATH', '') or DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH
+        ).strip() or DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH
         self.activation_events_path = (
             getattr(settings, 'EDA_ACTIVATION_EVENTS_API_PATH', '') or '/api/eda/v1/activations/{activation_id}/events/'
         ).strip() or '/api/eda/v1/activations/{activation_id}/events/'
@@ -158,6 +175,12 @@ class EDAControllerClient:
     def _format_activation_path(self, path_template, activation_id):
         return path_template.format(activation_id=activation_id)
 
+    def _activation_instances_path(self, activation_id):
+        return f'{self._activation_path(activation_id).rstrip("/")}/instances/'
+
+    def _format_activation_instance_logs_path(self, path_template, activation_instance_id):
+        return path_template.format(activation_instance_id=activation_instance_id)
+
     def get_activation(self, activation_id):
         if not activation_id:
             raise EDAControllerError('EDA activation id is required.', 'missing')
@@ -202,6 +225,12 @@ class EDAControllerClient:
             'previous': previous_link,
             'results': [self.normalize_activation(item) for item in items if isinstance(item, dict)],
         }
+
+    def list_activation_instances(self, activation_id, page=1, page_size=20):
+        if not activation_id:
+            return []
+        payload = self.get_json(self._activation_instances_path(activation_id), params={'page': page, 'page_size': page_size})
+        return [_normalize_instance(item) for item in _coerce_items(payload) if isinstance(item, dict)]
 
     def find_activation(self, activation_id='', rulebook_name=''):
         if activation_id:
@@ -250,7 +279,13 @@ class EDAControllerClient:
         activation_id = activation.get('id') if activation else ''
         if not activation_id:
             raise EDAControllerError('EDA activation id is required to start an activation.', 'missing')
-        response = self.post_json(self._format_activation_path(self.activation_start_path, activation_id), {})
+        try:
+            response = self.post_json(self._format_activation_path(self.activation_start_path, activation_id), {})
+        except EDAControllerError as exc:
+            missing_custom_endpoint = any(marker in str(exc).lower() for marker in ('404', '405', 'not found', 'method not allowed'))
+            if self.activation_start_path == DEFAULT_ACTIVATION_START_PATH or not missing_custom_endpoint:
+                raise
+            response = self.post_json(self._format_activation_path(DEFAULT_ACTIVATION_START_PATH, activation_id), {})
         normalized = self.normalize_activation(_coerce_activation_payload(response))
         return normalized if normalized.get('id') or normalized.get('status') != 'unknown' else activation
 
@@ -268,6 +303,27 @@ class EDAControllerClient:
     def activation_events(self, activation_id='', limit=20):
         if not activation_id:
             return []
+        instance_id = ''
+        try:
+            activation = self.get_activation(activation_id)
+            instance_id = self._activation_instance_id(activation)
+        except EDAControllerError:
+            pass
+        if not instance_id:
+            try:
+                instance_id = self._activation_instance_id({'instances': self.list_activation_instances(activation_id, page_size=limit)})
+            except EDAControllerError:
+                instance_id = ''
+
+        if instance_id:
+            try:
+                payload = self.get_json(
+                    self._format_activation_instance_logs_path(self.activation_instance_logs_path, instance_id), params={'page_size': limit}
+                )
+                return [self.normalize_event(item) for item in _coerce_items(payload)[:limit] if isinstance(item, dict)]
+            except EDAControllerError:
+                pass
+
         payload = self.get_json(self._format_activation_path(self.activation_events_path, activation_id), params={'page_size': limit})
         return [self.normalize_event(item) for item in _coerce_items(payload)[:limit] if isinstance(item, dict)]
 
@@ -313,6 +369,7 @@ class EDAControllerClient:
         activation_id = _pick_first(item, ('id', 'uuid', 'activation_id', 'pk'))
         name = _pick_first(item, ('name', 'activation_name', 'rulebook_name'), rulebook or activation_id)
         event_source = _dict_name(_pick_first(item, ('event_source', 'event_stream', 'source', 'source_name')))
+        instances = [_normalize_instance(instance) for instance in _coerce_items(item.get('instances')) if isinstance(instance, dict)]
         return {
             'id': activation_id,
             'name': name,
@@ -321,6 +378,8 @@ class EDAControllerClient:
             'finished': _pick_first(item, ('finished', 'finished_at', 'modified_at', 'updated_at')),
             'rulebook': rulebook or name,
             'event_source': event_source or '',
+            'current_job_id': _pick_first(item, ('current_job_id', 'current_instance_id', 'activation_instance_id')),
+            'instances': instances,
             'source': 'eda_controller',
             'related': {
                 'controller_activation': (
@@ -329,12 +388,24 @@ class EDAControllerClient:
             },
         }
 
+    def _activation_instance_id(self, activation):
+        instance_id = _pick_first(activation, ('current_job_id', 'current_instance_id', 'activation_instance_id'))
+        if instance_id:
+            return instance_id
+        instances = activation.get('instances') if isinstance(activation, dict) else None
+        if isinstance(instances, list):
+            for instance in sorted(instances, key=lambda item: str(item.get('started') or item.get('id') or ''), reverse=True):
+                instance_id = _pick_first(instance, ('id', 'uuid', 'activation_instance_id', 'pk'))
+                if instance_id:
+                    return instance_id
+        return ''
+
     def normalize_event(self, item):
         return {
             'id': _pick_first(item, ('id', 'uuid', 'event_id', 'pk')),
             'event_type': _pick_first(item, ('event_type', 'type', 'kind')),
             'status': _pick_first(item, ('status', 'state', 'level')),
             'rule': _dict_name(_pick_first(item, ('rule', 'rule_name'))),
-            'message': _short_text(_pick_first(item, ('message', 'msg', 'stdout', 'summary', 'detail'))),
-            'created': _pick_first(item, ('created', 'created_at', 'timestamp', 'time')),
+            'message': _short_text(_pick_first(item, ('message', 'msg', 'stdout', 'summary', 'detail', 'log'))),
+            'created': _pick_first(item, ('created', 'created_at', 'timestamp', 'time', 'log_timestamp', 'log_created_at')),
         }

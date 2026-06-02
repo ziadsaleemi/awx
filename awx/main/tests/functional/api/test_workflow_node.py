@@ -235,7 +235,8 @@ def test_launch_eda_rulebook_node_creates_starts_and_polls_activation(post, admi
             eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'created', 'rulebook_name': 'ops-alerts.yml'}),
             eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
             eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
-            eda_response(mocker, {'results': [{'id': 'event-1', 'message': 'activation started'}]}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'current_job_id': 'instance-1'}),
+            eda_response(mocker, {'results': [{'id': 'event-1', 'log': 'activation started'}]}),
         ],
     )
     workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow controller start')
@@ -261,8 +262,10 @@ def test_launch_eda_rulebook_node_creates_starts_and_polls_activation(post, admi
     assert node.eda_event_source_status == 'running'
     assert node.ancestor_artifacts['awx_eda']['actions'] == ['created', 'started', 'polled', 'events']
     assert node.ancestor_artifacts['awx_eda']['events'][0]['message'] == 'activation started'
-    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET']
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET', 'GET']
     assert request_mock.call_args_list[1].kwargs['json']['event_source'] == 'webhook'
+    assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/activations/created-1/enable/'
+    assert request_mock.call_args_list[5].args[1] == 'https://eda.example.test/api/eda/v1/activation-instances/instance-1/logs/'
 
 
 @pytest.mark.django_db

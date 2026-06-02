@@ -39,7 +39,8 @@ def test_eda_status_reports_configured_controller(get, admin_user):
     assert response.data['verify_ssl'] is False
     assert response.data['request_timeout'] == 7
     assert response.data['activations_api_path'] == '/api/eda/v1/activations/'
-    assert response.data['activation_start_api_path'] == '/api/eda/v1/activations/{activation_id}/start/'
+    assert response.data['activation_start_api_path'] == '/api/eda/v1/activations/{activation_id}/enable/'
+    assert response.data['activation_instance_logs_api_path'] == '/api/eda/v1/activation-instances/{activation_instance_id}/logs/'
     assert response.data['activation_events_api_path'] == '/api/eda/v1/activations/{activation_id}/events/'
     assert response.data['activation_poll_attempts'] == 1
     assert response.data['activation_poll_interval'] == 0
@@ -112,7 +113,17 @@ def test_eda_activation_start_creates_starts_polls_and_reads_events(post, admin_
             eda_response(mocker, {'id': 42, 'name': 'Restart web on alert', 'status': 'created', 'rulebook_name': 'restart-web.yml'}),
             eda_response(mocker, {'id': 42, 'name': 'Restart web on alert', 'status': 'running', 'rulebook_name': 'restart-web.yml'}),
             eda_response(mocker, {'id': 42, 'name': 'Restart web on alert', 'status': 'running', 'rulebook_name': 'restart-web.yml'}),
-            eda_response(mocker, {'results': [{'id': 9, 'event_type': 'rule', 'message': 'activation started'}]}),
+            eda_response(
+                mocker,
+                {
+                    'id': 42,
+                    'name': 'Restart web on alert',
+                    'status': 'running',
+                    'rulebook_name': 'restart-web.yml',
+                    'current_job_id': 84,
+                },
+            ),
+            eda_response(mocker, {'results': [{'id': 9, 'log': 'activation started', 'log_timestamp': '2026-06-01T00:00:00Z'}]}),
         ],
     )
 
@@ -127,9 +138,10 @@ def test_eda_activation_start_creates_starts_polls_and_reads_events(post, admin_
     assert response.data['activation']['status'] == 'running'
     assert response.data['actions'] == ['created', 'started', 'polled', 'events']
     assert response.data['events'][0]['message'] == 'activation started'
-    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET']
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET', 'GET']
     assert request_mock.call_args_list[1].kwargs['json']['rulebook_name'] == 'Restart web on alert'
-    assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/activations/42/start/'
+    assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/activations/42/enable/'
+    assert request_mock.call_args_list[5].args[1] == 'https://eda.example.test/api/eda/v1/activation-instances/84/logs/'
 
 
 @pytest.mark.django_db
@@ -154,7 +166,18 @@ def test_eda_activation_detail_reads_controller_activation(get, admin_user, mock
 def test_eda_activation_events_reads_controller_events(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.eda.requests.request',
-        return_value=eda_response(mocker, {'results': [{'id': 9, 'event_type': 'rule', 'message': 'activation started'}]}),
+        side_effect=[
+            eda_response(
+                mocker,
+                {
+                    'id': 42,
+                    'name': 'Restart web on alert',
+                    'status': 'running',
+                    'current_job_id': 84,
+                },
+            ),
+            eda_response(mocker, {'results': [{'id': 9, 'log': 'activation started', 'log_timestamp': '2026-06-01T00:00:00Z'}]}),
+        ],
     )
 
     response = get(reverse('api:eda_activation_events', kwargs={'pk': '42'}), {'page_size': '5'}, user=admin_user, expect=200)
@@ -162,8 +185,10 @@ def test_eda_activation_events_reads_controller_events(get, admin_user, mocker):
     assert response.data['count'] == 1
     assert response.data['results'][0]['id'] == 9
     assert response.data['results'][0]['message'] == 'activation started'
-    assert request_mock.call_args.args[0] == 'GET'
-    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/activations/42/events/'
+    assert response.data['results'][0]['created'] == '2026-06-01T00:00:00Z'
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'GET']
+    assert request_mock.call_args_list[0].args[1] == 'https://eda.example.test/api/eda/v1/activations/42/'
+    assert request_mock.call_args_list[1].args[1] == 'https://eda.example.test/api/eda/v1/activation-instances/84/logs/'
     assert request_mock.call_args.kwargs['params'] == {'page_size': 5}
 
 

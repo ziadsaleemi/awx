@@ -71,7 +71,8 @@ def test_eda_settings_category_is_registered(api_request):
     assert response.data['EDA_VERIFY_SSL'] is True
     assert response.data['EDA_REQUEST_TIMEOUT'] == 5
     assert response.data['EDA_ACTIVATIONS_API_PATH'] == '/api/eda/v1/activations/'
-    assert response.data['EDA_ACTIVATION_START_API_PATH'] == '/api/eda/v1/activations/{activation_id}/start/'
+    assert response.data['EDA_ACTIVATION_START_API_PATH'] == '/api/eda/v1/activations/{activation_id}/enable/'
+    assert response.data['EDA_ACTIVATION_INSTANCE_LOGS_API_PATH'] == '/api/eda/v1/activation-instances/{activation_instance_id}/logs/'
     assert response.data['EDA_ACTIVATION_EVENTS_API_PATH'] == '/api/eda/v1/activations/{activation_id}/events/'
     assert response.data['EDA_ACTIVATION_POLL_ATTEMPTS'] == 1
     assert response.data['EDA_ACTIVATION_POLL_INTERVAL'] == 0
