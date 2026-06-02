@@ -38,9 +38,12 @@ from rest_framework.views import APIView
 
 from awx.api.permissions import IsSystemAdmin as IsSuperUser
 from awx.main import models
+from awx.main.models import ActivityStream
 from awx.main.tasks.policy import OPA_AUTH_TYPES, opa_cert_file
 
 logger = logging.getLogger('awx.api.opa')
+
+OPA_POLICY_ID_PATTERN = re.compile(r'^(?!.*\.\.)[A-Za-z0-9_.@/-]+$')
 
 DEFAULT_POLICIES = [
     {
@@ -202,6 +205,51 @@ class OPAPolicyEngine:
                 return {'status_code': resp.status_code}
         return {'status_code': resp.status_code}
 
+    def list_policies(self) -> list:
+        """
+        GET /v1/policies and return OPA policy modules.
+        """
+        self.validate_configuration()
+        if not self.is_available():
+            raise ValueError(_('OPA is not enabled or configured.'))
+
+        url = f'{self.base_url}/v1/policies'
+        with opa_cert_file() as cert_files:
+            cert, verify = cert_files
+            resp = requests.get(
+                url,
+                timeout=self.timeout,
+                headers=self._headers(),
+                cert=cert,
+                verify=verify,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get('result') or []
+
+    def get_policy(self, policy_id: str) -> dict:
+        """
+        GET /v1/policies/<policy_id> and return one OPA policy module.
+        """
+        self.validate_configuration()
+        if not self.is_available():
+            raise ValueError(_('OPA is not enabled or configured.'))
+
+        quoted_policy_id = quote(policy_id.strip('/'), safe='/')
+        url = f'{self.base_url}/v1/policies/{quoted_policy_id}'
+        with opa_cert_file() as cert_files:
+            cert, verify = cert_files
+            resp = requests.get(
+                url,
+                timeout=self.timeout,
+                headers=self._headers(),
+                cert=cert,
+                verify=verify,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get('result') or {}
+
     def delete_policy(self, policy_id: str) -> dict:
         """
         DELETE Rego module from /v1/policies/<policy_id>.
@@ -279,6 +327,178 @@ def _opa_decision_has_entries(value) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return len(value) > 0
     return bool(value)
+
+
+def _validate_policy_id(policy_id):
+    if not isinstance(policy_id, str) or not policy_id.strip():
+        return None, _('policy_id must be a non-empty string.')
+    policy_id = policy_id.strip().strip('/')
+    if not OPA_POLICY_ID_PATTERN.match(policy_id):
+        return None, _('policy_id contains invalid characters.')
+    return policy_id, None
+
+
+def _rego_package_from_raw(raw):
+    match = re.search(r'(?m)^\s*package\s+([A-Za-z0-9_.]+)\s*$', raw or '')
+    return match.group(1) if match else ''
+
+
+def _rego_rules_from_raw(raw):
+    rules = []
+    for match in re.finditer(r'(?m)^\s*(?:default\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[|\{|:=|=|\bif\b)', raw or ''):
+        name = match.group(1)
+        if name in {'package', 'import', 'else'} or name in rules:
+            continue
+        rules.append(name)
+    return rules
+
+
+def _rego_package_from_ast(ast):
+    package_path = ((ast or {}).get('package') or {}).get('path') or []
+    parts = []
+    for item in package_path:
+        value = item.get('value') if isinstance(item, dict) else None
+        if value == 'data' and not parts:
+            continue
+        if value:
+            parts.append(str(value))
+    return '.'.join(parts)
+
+
+def _rego_rules_from_ast(ast):
+    rules = []
+    for rule in (ast or {}).get('rules') or []:
+        head = rule.get('head') if isinstance(rule, dict) else {}
+        name = head.get('name') if isinstance(head, dict) else None
+        if not name and isinstance(head, dict):
+            ref = head.get('ref') or []
+            if isinstance(ref, list) and ref:
+                last = ref[-1]
+                if isinstance(last, dict):
+                    name = last.get('value')
+        if name and name not in rules:
+            rules.append(str(name))
+    return rules
+
+
+def _opa_policy_module_summary(module, include_raw=False):
+    raw = module.get('raw') or ''
+    ast = module.get('ast') if isinstance(module.get('ast'), dict) else {}
+    package = _rego_package_from_ast(ast) or _rego_package_from_raw(raw)
+    rules = _rego_rules_from_ast(ast) or _rego_rules_from_raw(raw)
+    decision_prefix = package.replace('.', '/') if package else ''
+    summary = {
+        'id': module.get('id') or '',
+        'package': package,
+        'rules': rules,
+        'decision_paths': [f'{decision_prefix}/{rule}' for rule in rules] if decision_prefix else [],
+        'size': len(raw),
+        'line_count': raw.count('\n') + 1 if raw else 0,
+        'sha256': hashlib.sha256(raw.encode()).hexdigest() if raw else '',
+        'awx_managed': str(module.get('id') or '').startswith('awx/'),
+    }
+    if include_raw:
+        summary['raw'] = raw
+        summary['ast'] = ast
+    return summary
+
+
+def _opa_http_error_payload(exc):
+    response = getattr(exc, 'response', None)
+    if response is None:
+        return {'detail': _('OPA policy module operation failed.'), 'opa_error': str(exc)}, status.HTTP_502_BAD_GATEWAY
+
+    try:
+        opa_error = response.json()
+    except ValueError:
+        opa_error = getattr(response, 'text', '') or str(exc)
+    if response.status_code == 404:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif response.status_code == 400:
+        status_code = status.HTTP_400_BAD_REQUEST
+    else:
+        status_code = status.HTTP_502_BAD_GATEWAY
+    return {
+        'detail': _('OPA policy module operation failed.'),
+        'status_code': response.status_code,
+        'opa_error': opa_error,
+    }, status_code
+
+
+def _get_policy_or_none(engine, policy_id):
+    try:
+        return engine.get_policy(policy_id)
+    except requests.HTTPError as exc:
+        response = getattr(exc, 'response', None)
+        if response is not None and response.status_code == 404:
+            return None
+        raise
+
+
+def _audit_opa_policy_module(request, operation, policy_id, before=None, after=None, error=''):
+    changes = {
+        'triggered_by': 'opa_policy_module_manager',
+        'source': 'opa_policy_modules',
+        'policy_id': policy_id,
+        'is_error': bool(error),
+        'before': _opa_policy_module_summary(before) if before else None,
+        'after': _opa_policy_module_summary(after) if after else None,
+    }
+    if error:
+        changes['error'] = str(error)
+    entry = ActivityStream.objects.create(
+        operation=operation,
+        object1='opa_policy_module',
+        object2=policy_id,
+        changes=json.dumps(changes),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+    return {
+        'activity_stream_id': entry.pk,
+        'activity_stream_url': f'/api/v2/activity_stream/{entry.pk}/',
+    }
+
+
+def _save_opa_policy_module(request, policy_id, policy_text):
+    if not isinstance(policy_text, str) or not policy_text.strip():
+        return Response({'detail': _('policy_text must be non-empty Rego text.')}, status=status.HTTP_400_BAD_REQUEST)
+
+    engine = OPAPolicyEngine()
+    if not engine.is_available():
+        return Response({'detail': _('OPA is not enabled or configured.')}, status=status.HTTP_400_BAD_REQUEST)
+
+    before = None
+    try:
+        before = _get_policy_or_none(engine, policy_id)
+        opa_response = engine.put_policy(policy_id, policy_text)
+    except ValueError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except requests.RequestException as exc:
+        _audit_opa_policy_module(request, 'update', policy_id, before=before, error=exc)
+        payload, status_code = _opa_http_error_payload(exc)
+        return Response(payload, status=status_code)
+
+    after = {'id': policy_id, 'raw': policy_text, 'ast': {}}
+    audit = _audit_opa_policy_module(
+        request,
+        'update' if before else 'create',
+        policy_id,
+        before=before,
+        after=after,
+    )
+    previous_sha256 = _opa_policy_module_summary(before)['sha256'] if before else ''
+    summary = _opa_policy_module_summary(after, include_raw=True)
+    return Response(
+        {
+            'changed': True,
+            'created': before is None,
+            'module': summary,
+            'previous_sha256': previous_sha256,
+            'opa_response': opa_response,
+            'audit': audit,
+        }
+    )
 
 
 def _safe_opa_id(value):
@@ -411,6 +631,116 @@ class OPAPolicyListView(APIView):
                     'sha256': hashlib.sha256(policy_bundle.encode()).hexdigest() if policy_bundle_configured else '',
                     'sync_endpoint': '/api/v2/opa/policies/sync/',
                 },
+            }
+        )
+
+
+class OPAPolicyModuleListView(APIView):
+    """
+    GET /api/v2/opa/policy-modules/
+    POST /api/v2/opa/policy-modules/
+
+    Manage live OPA policy modules through OPA's Policy API.
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def get(self, request, *args, **kwargs):
+        engine = OPAPolicyEngine()
+        if not engine.is_available():
+            return Response({'enabled': False, 'server_url': '', 'count': 0, 'modules': []})
+
+        try:
+            modules = engine.list_policies()
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            payload, status_code = _opa_http_error_payload(exc)
+            return Response(payload, status=status_code)
+
+        summaries = sorted(
+            [_opa_policy_module_summary(module) for module in modules if isinstance(module, dict)],
+            key=lambda module: module['id'],
+        )
+        return Response(
+            {
+                'enabled': True,
+                'server_url': engine.base_url,
+                'count': len(summaries),
+                'modules': summaries,
+            }
+        )
+
+    def post(self, request, *args, **kwargs):
+        policy_id, error = _validate_policy_id(request.data.get('policy_id'))
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        return _save_opa_policy_module(request, policy_id, request.data.get('policy_text'))
+
+
+class OPAPolicyModuleDetailView(APIView):
+    """
+    GET /api/v2/opa/policy-modules/<policy_id>/
+    PUT /api/v2/opa/policy-modules/<policy_id>/
+    DELETE /api/v2/opa/policy-modules/<policy_id>/
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def get(self, request, policy_id=None, *args, **kwargs):
+        policy_id, error = _validate_policy_id(policy_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = OPAPolicyEngine()
+        if not engine.is_available():
+            return Response({'detail': _('OPA is not enabled or configured.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            module = engine.get_policy(policy_id)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            payload, status_code = _opa_http_error_payload(exc)
+            return Response(payload, status=status_code)
+
+        return Response(_opa_policy_module_summary(module, include_raw=True))
+
+    def put(self, request, policy_id=None, *args, **kwargs):
+        policy_id, error = _validate_policy_id(policy_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+        return _save_opa_policy_module(request, policy_id, request.data.get('policy_text'))
+
+    def delete(self, request, policy_id=None, *args, **kwargs):
+        policy_id, error = _validate_policy_id(policy_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = OPAPolicyEngine()
+        if not engine.is_available():
+            return Response({'detail': _('OPA is not enabled or configured.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        before = None
+        try:
+            before = _get_policy_or_none(engine, policy_id)
+            opa_response = engine.delete_policy(policy_id)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            _audit_opa_policy_module(request, 'delete', policy_id, before=before, error=exc)
+            payload, status_code = _opa_http_error_payload(exc)
+            return Response(payload, status=status_code)
+
+        audit = _audit_opa_policy_module(request, 'delete', policy_id, before=before)
+        return Response(
+            {
+                'changed': True,
+                'policy_id': policy_id,
+                'previous': _opa_policy_module_summary(before) if before else None,
+                'opa_response': opa_response,
+                'audit': audit,
             }
         )
 

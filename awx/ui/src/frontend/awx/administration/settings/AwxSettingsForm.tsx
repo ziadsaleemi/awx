@@ -31,6 +31,7 @@ export type AwxSettingsOptionsAction =
   | IOptionStringAction
   | IOptionChoiceAction
   | IOptionIntegerAction
+  | IOptionFloatAction
   | IOptionBooleanAction
   | IOptionListAction
   | IOptionObjectAction
@@ -60,6 +61,14 @@ interface IOptionFieldAction extends IOptionActionBase {
 
 interface IOptionIntegerAction extends IOptionActionBase {
   type: 'integer';
+  default?: number;
+  min_value?: number;
+  max_value?: number;
+  unit?: string;
+}
+
+interface IOptionFloatAction extends IOptionActionBase {
+  type: 'float';
   default?: number;
   min_value?: number;
   max_value?: number;
@@ -322,6 +331,7 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
         />
       );
     case 'integer':
+    case 'float':
       return (
         <PageFormTextInput
           label={option.label}

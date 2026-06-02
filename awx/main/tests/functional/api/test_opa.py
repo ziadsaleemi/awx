@@ -2,11 +2,12 @@ import hashlib
 from unittest import mock
 
 import pytest
+import requests
 from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.api.views.opa import OPAPolicyEngine, check_opa_policy, opa_response_allows
-from awx.main.models import CatalogDeployment, CatalogItem, Job, SystemJob, TerraformJob, WorkflowJob
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Job, SystemJob, TerraformJob, WorkflowJob
 from awx.main.tasks.policy import OPA_AUTH_TYPES
 
 
@@ -116,6 +117,7 @@ def test_opa_policy_sync_puts_managed_rego_to_real_opa_policy_api(post, admin_us
     OPA_AUTH_CUSTOM_HEADERS={'X-Custom': 'Header'},
     OPA_REQUEST_TIMEOUT=2.5,
 )
+@pytest.mark.django_db
 def test_opa_policy_engine_deletes_policy_from_real_opa_policy_api():
     opa_response = mock.Mock()
     opa_response.status_code = 204
@@ -158,6 +160,176 @@ def test_opa_policy_sync_rejects_invalid_policy_id(post, admin_user):
     )
 
     assert response.data['detail'] == 'policy_id contains invalid characters.'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=True, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_modules_list_live_modules(get, admin_user):
+    opa_response = mock.Mock()
+    opa_response.json.return_value = {
+        'result': [
+            {
+                'id': 'awx/job_launch',
+                'raw': 'package awx.job_launch\n\ndefault allow := false\nallow if { input.user.is_superuser }\n',
+                'ast': {
+                    'package': {
+                        'path': [
+                            {'type': 'var', 'value': 'data'},
+                            {'type': 'string', 'value': 'awx'},
+                            {'type': 'string', 'value': 'job_launch'},
+                        ]
+                    },
+                    'rules': [{'head': {'name': 'allow'}}],
+                },
+            }
+        ]
+    }
+    opa_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=opa_response) as requests_get:
+        response = get(reverse('api:opa_policy_modules'), user=admin_user, expect=200)
+
+    assert response.data['enabled'] is True
+    assert response.data['server_url'] == 'https://opa.example.com:8181'
+    assert response.data['count'] == 1
+    assert response.data['modules'][0]['id'] == 'awx/job_launch'
+    assert response.data['modules'][0]['package'] == 'awx.job_launch'
+    assert response.data['modules'][0]['rules'] == ['allow']
+    assert response.data['modules'][0]['decision_paths'] == ['awx/job_launch/allow']
+    assert response.data['modules'][0]['awx_managed'] is True
+    requests_get.assert_called_once_with(
+        'https://opa.example.com:8181/v1/policies',
+        timeout=2.5,
+        headers={'Content-Type': 'application/json'},
+        cert=None,
+        verify=True,
+    )
+
+
+@pytest.mark.django_db
+def test_opa_policy_modules_require_system_admin(get, post, delete, rando):
+    get(reverse('api:opa_policy_modules'), user=rando, expect=403)
+    post(reverse('api:opa_policy_modules'), data={'policy_id': 'awx/managed', 'policy_text': 'package awx'}, user=rando, expect=403)
+    delete(reverse('api:opa_policy_module_detail', kwargs={'policy_id': 'awx/managed'}), user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_detail_returns_raw_rego(get, admin_user):
+    opa_response = mock.Mock()
+    opa_response.json.return_value = {
+        'result': {
+            'id': 'awx/managed',
+            'raw': 'package awx\nallow := true\n',
+            'ast': {'package': {'path': [{'type': 'string', 'value': 'awx'}]}, 'rules': [{'head': {'name': 'allow'}}]},
+        }
+    }
+    opa_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=opa_response):
+        response = get(reverse('api:opa_policy_module_detail', kwargs={'policy_id': 'awx/managed'}), user=admin_user, expect=200)
+
+    assert response.data['id'] == 'awx/managed'
+    assert response.data['raw'] == 'package awx\nallow := true\n'
+    assert response.data['package'] == 'awx'
+    assert response.data['decision_paths'] == ['awx/allow']
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_upsert_writes_live_module_and_audits(post, admin_user):
+    previous_raw = 'package awx\nallow := false\n'
+    next_raw = 'package awx\nallow := true\n'
+    get_response = mock.Mock()
+    get_response.json.return_value = {'result': {'id': 'awx/managed', 'raw': previous_raw, 'ast': {}}}
+    get_response.raise_for_status.return_value = None
+    put_response = mock.Mock()
+    put_response.status_code = 200
+    put_response.content = b'{}'
+    put_response.json.return_value = {}
+    put_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.put', return_value=put_response
+    ) as requests_put:
+        response = post(
+            reverse('api:opa_policy_modules'),
+            data={'policy_id': 'awx/managed', 'policy_text': next_raw},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['created'] is False
+    assert response.data['module']['id'] == 'awx/managed'
+    assert response.data['module']['raw'] == next_raw
+    assert response.data['previous_sha256'] == hashlib.sha256(previous_raw.encode()).hexdigest()
+    assert response.data['audit']['activity_stream_id']
+    requests_put.assert_called_once_with(
+        'http://opa.example.com:8181/v1/policies/awx/managed',
+        data=next_raw,
+        timeout=2.5,
+        headers={'Content-Type': 'text/plain'},
+        cert=None,
+        verify=False,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.operation == 'update'
+    assert audit.object1 == 'opa_policy_module'
+    assert audit.object2 == 'awx/managed'
+    assert '"triggered_by": "opa_policy_module_manager"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_delete_removes_live_module_and_audits(delete, admin_user):
+    previous_raw = 'package awx\nallow := true\n'
+    get_response = mock.Mock()
+    get_response.json.return_value = {'result': {'id': 'awx/managed', 'raw': previous_raw, 'ast': {}}}
+    get_response.raise_for_status.return_value = None
+    delete_response = mock.Mock()
+    delete_response.status_code = 204
+    delete_response.content = b''
+    delete_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.delete', return_value=delete_response
+    ) as requests_delete:
+        response = delete(reverse('api:opa_policy_module_detail', kwargs={'policy_id': 'awx/managed'}), user=admin_user, expect=200)
+
+    assert response.data['changed'] is True
+    assert response.data['policy_id'] == 'awx/managed'
+    assert response.data['previous']['sha256'] == hashlib.sha256(previous_raw.encode()).hexdigest()
+    requests_delete.assert_called_once()
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.operation == 'delete'
+    assert audit.object1 == 'opa_policy_module'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False)
+def test_opa_policy_module_upsert_surfaces_opa_compile_error(post, admin_user):
+    get_response = mock.Mock()
+    get_response.json.return_value = {'result': {'id': 'awx/managed', 'raw': 'package awx\nallow := true', 'ast': {}}}
+    get_response.raise_for_status.return_value = None
+    put_response = mock.Mock()
+    put_response.status_code = 400
+    put_response.json.return_value = {'code': 'invalid_parameter', 'message': 'rego_parse_error'}
+    put_error = requests.HTTPError('bad policy')
+    put_error.response = put_response
+    put_response.raise_for_status.side_effect = put_error
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch('awx.api.views.opa.requests.put', return_value=put_response):
+        response = post(
+            reverse('api:opa_policy_modules'),
+            data={'policy_id': 'awx/managed', 'policy_text': 'package awx\nallow if {'},
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['detail'] == 'OPA policy module operation failed.'
+    assert response.data['opa_error'] == {'code': 'invalid_parameter', 'message': 'rego_parse_error'}
+    assert ActivityStream.objects.filter(object1='opa_policy_module', object2='awx/managed').count() == 1
 
 
 @pytest.mark.django_db

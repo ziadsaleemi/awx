@@ -56,8 +56,14 @@ function PageNavigationItems(props: { items: PageNavigationItem[]; baseRoute: st
 
 function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRoute: string }) {
   const { item } = props;
+  let route = props.baseRoute + '/' + item.path;
+  route = route.replace('//', '/');
+  let path = (process.env.ROUTE_PREFIX ?? '') + route;
+  path = path.replace('//', '/');
+  const isCurrentRoute = !item.href && path !== '/' && location.pathname.startsWith(path);
   const [isExpanded, setIsExpanded] = useState(
     () =>
+      isCurrentRoute ||
       localStorage.getItem('default-nav-expanded') === 'true' ||
       localStorage.getItem((item.id ?? item.label) + '-expanded') === 'true'
   );
@@ -77,8 +83,6 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
   }
 
   const onClickNavItem = usePageNavBarClick();
-  let route = props.baseRoute + '/' + item.path;
-  route = route.replace('//', '/');
   if (item.path === '/' && 'children' in item) {
     return <PageNavigationItems items={item.children} baseRoute={''} />;
   }
@@ -87,9 +91,6 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
   const subtitleStyle: CSSProperties = { fontSize: 'small', opacity: 0.5, textAlign: 'left' };
 
   if (!hasChildNavItems && 'label' in item) {
-    let path = (process.env.ROUTE_PREFIX ?? '') + route;
-    path = path.replace('//', '/');
-
     const isActive = item.href ? false : location.pathname.startsWith(path);
 
     return (
@@ -144,7 +145,7 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
           </div>
         ) as unknown as string
       }
-      isExpanded={isExpanded}
+      isExpanded={isExpanded || isCurrentRoute}
       onExpand={(_e, expanded: boolean) => setExpanded(expanded)}
     >
       <PageNavigationItems items={item.children} baseRoute={route} />

@@ -196,6 +196,13 @@ export enum AwxRoute {
   CloudConnections = 'awx-cloud-connections',
   CloudProviderSettings = 'awx-cloud-provider-settings',
 
+  // Policy as Code
+  PolicyAsCode = 'awx-policy-as-code',
+  PolicyAsCodeOverview = 'awx-policy-as-code-overview',
+  PolicyAsCodeModules = 'awx-policy-as-code-modules',
+  PolicyAsCodeTester = 'awx-policy-as-code-tester',
+  PolicyAsCodeSmoke = 'awx-policy-as-code-smoke',
+
   // Event-Driven Ansible
   EventDriven = 'awx-event-driven',
   EdaActivations = 'awx-eda-activations',

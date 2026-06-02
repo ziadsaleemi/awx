@@ -17,15 +17,22 @@ import {
   FormSelectOption,
   Label,
   PageSection,
+  TextInput,
   Spinner,
   Stack,
   StackItem,
   TextArea,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, SyncAltIcon, TimesCircleIcon } from '@patternfly/react-icons';
+import {
+  CheckCircleIcon,
+  PlusCircleIcon,
+  SyncAltIcon,
+  TimesCircleIcon,
+  TrashIcon,
+} from '@patternfly/react-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { postRequest } from '../../../common/crud/Data';
+import { postRequest, requestDelete, requestGet } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 
@@ -65,6 +72,52 @@ interface OPASyncResponse {
   opa_response: unknown;
 }
 
+interface OPAPolicyModuleSummary {
+  id: string;
+  package: string;
+  rules: string[];
+  decision_paths: string[];
+  size: number;
+  line_count: number;
+  sha256: string;
+  awx_managed: boolean;
+}
+
+interface OPAPolicyModulesResponse {
+  enabled: boolean;
+  server_url: string;
+  count: number;
+  modules: OPAPolicyModuleSummary[];
+}
+
+interface OPAPolicyModuleDetail extends OPAPolicyModuleSummary {
+  raw: string;
+  ast?: unknown;
+}
+
+interface OPAPolicyModuleSaveResponse {
+  changed: boolean;
+  created: boolean;
+  module: OPAPolicyModuleDetail;
+  previous_sha256: string;
+  opa_response: unknown;
+  audit?: {
+    activity_stream_id?: number;
+    activity_stream_url?: string;
+  };
+}
+
+interface OPAPolicyModuleDeleteResponse {
+  changed: boolean;
+  policy_id: string;
+  previous?: OPAPolicyModuleSummary;
+  opa_response: unknown;
+  audit?: {
+    activity_stream_id?: number;
+    activity_stream_url?: string;
+  };
+}
+
 const fallbackInput = {
   action: 'launch',
   source: 'api',
@@ -72,14 +125,34 @@ const fallbackInput = {
   template: { id: 1, name: 'Deploy App', type: 'jobtemplate' },
 };
 
+const defaultModuleText = `package awx.job_launch
+
+default allow := false
+
+allow if {
+  input.user.is_superuser
+}
+`;
+
 function formatInput(policy?: OPAPolicy) {
   return JSON.stringify(policy?.input_example ?? fallbackInput, null, 2);
 }
 
-export function OPAPolicyManagementPanel() {
+type OPAPolicyManagementSection = 'status' | 'modules' | 'tester';
+
+export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagementSection[] }) {
   const { t } = useTranslation();
+  const sections = props?.sections ?? ['status', 'modules', 'tester'];
+  const showStatus = sections.includes('status');
+  const showModules = sections.includes('modules');
+  const showTester = sections.includes('tester');
   const { data, isLoading, error } = useGet<OPAStatusResponse>(awxAPI`/opa/policies/`);
+  const modulesResponse = useGet<OPAPolicyModulesResponse>(awxAPI`/opa/policy-modules/`);
   const policies = useMemo(() => data?.policies ?? [], [data?.policies]);
+  const modules = useMemo(
+    () => modulesResponse.data?.modules ?? [],
+    [modulesResponse.data?.modules]
+  );
   const [policyPath, setPolicyPath] = useState('awx/job_launch/allow');
   const [inputJson, setInputJson] = useState(() => JSON.stringify(fallbackInput, null, 2));
   const [evalResult, setEvalResult] = useState<OPAEvalResponse | null>(null);
@@ -88,6 +161,15 @@ export function OPAPolicyManagementPanel() {
   const [syncResult, setSyncResult] = useState<OPASyncResponse | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [selectedModuleId, setSelectedModuleId] = useState('');
+  const [moduleId, setModuleId] = useState('awx/managed');
+  const [moduleText, setModuleText] = useState(defaultModuleText);
+  const [moduleDetail, setModuleDetail] = useState<OPAPolicyModuleDetail | null>(null);
+  const [moduleLoading, setModuleLoading] = useState(false);
+  const [moduleSaving, setModuleSaving] = useState(false);
+  const [moduleDeleting, setModuleDeleting] = useState(false);
+  const [moduleError, setModuleError] = useState<string | null>(null);
+  const [moduleResult, setModuleResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (!policies.length) return;
@@ -97,12 +179,109 @@ export function OPAPolicyManagementPanel() {
     }
   }, [policies, policyPath]);
 
+  useEffect(() => {
+    if (!modules.length || selectedModuleId) return;
+    setSelectedModuleId(modules[0].id);
+  }, [modules, selectedModuleId]);
+
+  useEffect(() => {
+    if (!selectedModuleId) return;
+    void loadModule(selectedModuleId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModuleId]);
+
   const selectPolicy = (path: string) => {
     const policy = policies.find((item) => item.path === path);
     setPolicyPath(path);
     setInputJson(formatInput(policy));
     setEvalResult(null);
     setEvalError(null);
+  };
+
+  async function loadModule(id: string) {
+    setModuleLoading(true);
+    setModuleError(null);
+    setModuleResult(null);
+    try {
+      const detail = await requestGet<OPAPolicyModuleDetail>(awxAPI`/opa/policy-modules/${id}/`);
+      setModuleDetail(detail);
+      setModuleId(detail.id);
+      setModuleText(detail.raw ?? '');
+    } catch (err) {
+      setModuleError(
+        err instanceof Error
+          ? err.message
+          : t('Policy module load failed. Check OPA settings and server connectivity.')
+      );
+    } finally {
+      setModuleLoading(false);
+    }
+  }
+
+  const newModule = () => {
+    setSelectedModuleId('');
+    setModuleDetail(null);
+    setModuleId('awx/new_policy');
+    setModuleText(defaultModuleText);
+    setModuleError(null);
+    setModuleResult(null);
+  };
+
+  const handleSaveModule = async () => {
+    setModuleSaving(true);
+    setModuleError(null);
+    setModuleResult(null);
+    try {
+      const response = await postRequest<
+        OPAPolicyModuleSaveResponse,
+        { policy_id: string; policy_text: string }
+      >(awxAPI`/opa/policy-modules/`, {
+        policy_id: moduleId,
+        policy_text: moduleText,
+      });
+      setModuleDetail(response.module);
+      setSelectedModuleId(response.module.id);
+      setModuleResult(
+        response.created
+          ? t('Policy module created and validated by OPA.')
+          : t('Policy module updated and validated by OPA.')
+      );
+      modulesResponse.refresh();
+    } catch (err) {
+      setModuleError(
+        err instanceof Error
+          ? err.message
+          : t('Policy module save failed. OPA rejected the Rego or connection failed.')
+      );
+    } finally {
+      setModuleSaving(false);
+    }
+  };
+
+  const handleDeleteModule = async () => {
+    if (!moduleId) return;
+    setModuleDeleting(true);
+    setModuleError(null);
+    setModuleResult(null);
+    try {
+      const response = await requestDelete<OPAPolicyModuleDeleteResponse>(
+        awxAPI`/opa/policy-modules/${moduleId}/`,
+        new AbortController().signal
+      );
+      newModule();
+      setModuleResult(
+        t('Policy module {{policyId}} deleted from OPA.', { policyId: response.policy_id })
+      );
+      modulesResponse.refresh();
+    } catch (err) {
+      setModuleError(
+        err instanceof Error
+          ? err.message
+          : t('Policy module delete failed. Check OPA settings and server connectivity.')
+      );
+    } finally {
+      setModuleDeleting(false);
+    }
   };
 
   const handleEvaluate = async () => {
@@ -149,176 +328,328 @@ export function OPAPolicyManagementPanel() {
   return (
     <PageSection isWidthLimited data-cy="opa-policy-management">
       <Stack hasGutter>
-        <StackItem>
-          <Card isFlat>
-            <CardHeader>
-              <CardTitle>{t('OPA Status')}</CardTitle>
-            </CardHeader>
-            <CardBody>
-              {isLoading ? (
-                <Spinner size="md" />
-              ) : error ? (
-                <Alert variant="danger" isInline title={t('Could not load OPA policy status.')} />
-              ) : (
-                <Stack hasGutter>
-                  <StackItem>
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Enforcement')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data?.enabled ? (
-                            <Label color="green" icon={<CheckCircleIcon />}>
-                              {t('Enabled')}
-                            </Label>
-                          ) : (
-                            <Label color="grey" icon={<TimesCircleIcon />}>
-                              {t('Disabled')}
-                            </Label>
-                          )}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('OPA server')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data?.server_url ? (
-                            <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                              {data.server_url}
-                            </ClipboardCopy>
-                          ) : (
-                            t('Not configured')
-                          )}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Managed policy bundle')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data?.policy_bundle?.configured
-                            ? t('{{bytes}} bytes / {{lines}} lines configured', {
-                                bytes: data.policy_bundle.size,
-                                lines: data.policy_bundle.line_count ?? 0,
-                              })
-                            : t('No bundle text configured')}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      {data?.policy_bundle?.sha256 ? (
+        {showStatus ? (
+          <StackItem>
+            <Card isFlat>
+              <CardHeader>
+                <CardTitle>{t('OPA Status')}</CardTitle>
+              </CardHeader>
+              <CardBody>
+                {isLoading ? (
+                  <Spinner size="md" />
+                ) : error ? (
+                  <Alert variant="danger" isInline title={t('Could not load OPA policy status.')} />
+                ) : (
+                  <Stack hasGutter>
+                    <StackItem>
+                      <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>{t('Bundle checksum')}</DescriptionListTerm>
+                          <DescriptionListTerm>{t('Enforcement')}</DescriptionListTerm>
                           <DescriptionListDescription>
-                            <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                              {data.policy_bundle.sha256}
-                            </ClipboardCopy>
+                            {data?.enabled ? (
+                              <Label color="green" icon={<CheckCircleIcon />}>
+                                {t('Enabled')}
+                              </Label>
+                            ) : (
+                              <Label color="grey" icon={<TimesCircleIcon />}>
+                                {t('Disabled')}
+                              </Label>
+                            )}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
-                      ) : null}
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Decision paths')}</DescriptionListTerm>
-                        <DescriptionListDescription>{policies.length}</DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('OPA server')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data?.server_url ? (
+                              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                                {data.server_url}
+                              </ClipboardCopy>
+                            ) : (
+                              t('Not configured')
+                            )}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Managed policy bundle')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data?.policy_bundle?.configured
+                              ? t('{{bytes}} bytes / {{lines}} lines configured', {
+                                  bytes: data.policy_bundle.size,
+                                  lines: data.policy_bundle.line_count ?? 0,
+                                })
+                              : t('No bundle text configured')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        {data?.policy_bundle?.sha256 ? (
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Bundle checksum')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                                {data.policy_bundle.sha256}
+                              </ClipboardCopy>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        ) : null}
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Decision paths')}</DescriptionListTerm>
+                          <DescriptionListDescription>{policies.length}</DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </DescriptionList>
+                    </StackItem>
+                    <StackItem>
+                      <Button
+                        variant="secondary"
+                        icon={<SyncAltIcon />}
+                        onClick={() => void handleSync()}
+                        isLoading={syncLoading}
+                        isDisabled={
+                          syncLoading || !data?.enabled || !data?.policy_bundle?.configured
+                        }
+                      >
+                        {t('Sync policy bundle to OPA')}
+                      </Button>
+                    </StackItem>
+                    {syncError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={syncError} />
+                      </StackItem>
+                    ) : null}
+                    {syncResult ? (
+                      <StackItem>
+                        <Alert
+                          variant="success"
+                          isInline
+                          title={t('Policy bundle synced to {{policyId}}.', {
+                            policyId: syncResult.policy_id,
+                          })}
+                        />
+                      </StackItem>
+                    ) : null}
+                  </Stack>
+                )}
+              </CardBody>
+            </Card>
+          </StackItem>
+        ) : null}
+        {showModules ? (
+          <StackItem>
+            <Card isFlat>
+              <CardHeader>
+                <CardTitle>{t('Live OPA Policy Modules')}</CardTitle>
+              </CardHeader>
+              <CardBody>
+                {modulesResponse.isLoading ? (
+                  <Spinner size="md" />
+                ) : modulesResponse.error ? (
+                  <Alert
+                    variant="danger"
+                    isInline
+                    title={t('Could not load live OPA policy modules.')}
+                  />
+                ) : !modulesResponse.data?.enabled ? (
+                  <Alert variant="warning" isInline title={t('OPA server is not configured.')} />
+                ) : (
+                  <Stack hasGutter>
+                    <StackItem>
+                      <FormGroup label={t('Loaded module')} fieldId="opa-module-select">
+                        <FormSelect
+                          id="opa-module-select"
+                          value={selectedModuleId}
+                          onChange={(_event, value) => setSelectedModuleId(String(value))}
+                          isDisabled={moduleLoading || modules.length === 0}
+                        >
+                          {modules.length === 0 ? (
+                            <FormSelectOption value="" label={t('No live modules found')} />
+                          ) : null}
+                          {modules.map((module) => (
+                            <FormSelectOption
+                              key={module.id}
+                              value={module.id}
+                              label={`${module.id}${module.package ? ` - ${module.package}` : ''}`}
+                            />
+                          ))}
+                        </FormSelect>
+                      </FormGroup>
+                    </StackItem>
+                    <StackItem>
+                      <Button variant="secondary" icon={<PlusCircleIcon />} onClick={newModule}>
+                        {t('New module')}
+                      </Button>{' '}
+                      <Button
+                        variant="secondary"
+                        icon={<SyncAltIcon />}
+                        onClick={() => modulesResponse.refresh()}
+                        isDisabled={modulesResponse.isLoading}
+                      >
+                        {t('Refresh modules')}
+                      </Button>
+                    </StackItem>
+                    <StackItem>
+                      <FormGroup label={t('Policy ID')} fieldId="opa-module-id">
+                        <TextInput
+                          id="opa-module-id"
+                          value={moduleId}
+                          onChange={(_event, value) => setModuleId(value)}
+                          aria-label={t('Policy ID')}
+                        />
+                      </FormGroup>
+                    </StackItem>
+                    <StackItem>
+                      <FormGroup label={t('Rego module')} fieldId="opa-module-text">
+                        <TextArea
+                          id="opa-module-text"
+                          value={moduleText}
+                          rows={16}
+                          onChange={(_event, value) => setModuleText(value)}
+                          aria-label={t('Rego module')}
+                          style={{ fontFamily: 'monospace' }}
+                        />
+                      </FormGroup>
+                    </StackItem>
+                    <StackItem>
+                      <Button
+                        variant="primary"
+                        onClick={() => void handleSaveModule()}
+                        isLoading={moduleSaving}
+                        isDisabled={moduleSaving || !moduleId || !moduleText.trim()}
+                      >
+                        {t('Save to OPA')}
+                      </Button>{' '}
+                      <Button
+                        variant="danger"
+                        icon={<TrashIcon />}
+                        onClick={() => void handleDeleteModule()}
+                        isLoading={moduleDeleting}
+                        isDisabled={moduleDeleting || !moduleDetail?.id}
+                      >
+                        {t('Delete from OPA')}
+                      </Button>
+                    </StackItem>
+                    {moduleError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={moduleError} />
+                      </StackItem>
+                    ) : null}
+                    {moduleResult ? (
+                      <StackItem>
+                        <Alert variant="success" isInline title={moduleResult} />
+                      </StackItem>
+                    ) : null}
+                    {moduleDetail ? (
+                      <StackItem>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Package')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {moduleDetail.package || t('Not detected')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Rules')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {moduleDetail.rules.length
+                                ? moduleDetail.rules.join(', ')
+                                : t('Not detected')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Decision paths')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {moduleDetail.decision_paths.length
+                                ? moduleDetail.decision_paths.join(', ')
+                                : t('Not detected')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Checksum')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                                {moduleDetail.sha256}
+                              </ClipboardCopy>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </StackItem>
+                    ) : null}
+                  </Stack>
+                )}
+              </CardBody>
+            </Card>
+          </StackItem>
+        ) : null}
+        {showTester ? (
+          <StackItem>
+            <Card isFlat>
+              <CardHeader>
+                <CardTitle>{t('Policy Tester')}</CardTitle>
+              </CardHeader>
+              <CardBody>
+                <Stack hasGutter>
+                  <StackItem>
+                    <FormGroup label={t('Decision path')} fieldId="opa-policy-path">
+                      <FormSelect
+                        id="opa-policy-path"
+                        value={policyPath}
+                        onChange={(_event, value) => selectPolicy(String(value))}
+                        isDisabled={isLoading || policies.length === 0}
+                      >
+                        {policies.map((policy) => (
+                          <FormSelectOption
+                            key={policy.path}
+                            value={policy.path}
+                            label={`${policy.id} - ${policy.path}`}
+                          />
+                        ))}
+                      </FormSelect>
+                    </FormGroup>
+                  </StackItem>
+                  <StackItem>
+                    <FormGroup label={t('Input JSON')} fieldId="opa-input-json">
+                      <TextArea
+                        id="opa-input-json"
+                        value={inputJson}
+                        rows={10}
+                        onChange={(_event, value) => setInputJson(value)}
+                        aria-label={t('Input JSON')}
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </FormGroup>
                   </StackItem>
                   <StackItem>
                     <Button
-                      variant="secondary"
-                      icon={<SyncAltIcon />}
-                      onClick={() => void handleSync()}
-                      isLoading={syncLoading}
-                      isDisabled={syncLoading || !data?.enabled || !data?.policy_bundle?.configured}
+                      variant="primary"
+                      onClick={() => void handleEvaluate()}
+                      isLoading={evalLoading}
+                      isDisabled={evalLoading || !policyPath}
                     >
-                      {t('Sync policy bundle to OPA')}
+                      {t('Evaluate')}
                     </Button>
                   </StackItem>
-                  {syncError ? (
+                  {evalError ? (
                     <StackItem>
-                      <Alert variant="danger" isInline title={syncError} />
+                      <Alert variant="danger" isInline title={evalError} />
                     </StackItem>
                   ) : null}
-                  {syncResult ? (
+                  {evalResult ? (
                     <StackItem>
                       <Alert
-                        variant="success"
+                        variant={evalResult.allowed ? 'success' : 'danger'}
                         isInline
-                        title={t('Policy bundle synced to {{policyId}}.', {
-                          policyId: syncResult.policy_id,
-                        })}
+                        title={evalResult.allowed ? t('Decision: Allow') : t('Decision: Deny')}
+                        style={{ marginBottom: 12 }}
                       />
+                      <CodeBlock>
+                        <CodeBlockCode>
+                          {JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}
+                        </CodeBlockCode>
+                      </CodeBlock>
                     </StackItem>
                   ) : null}
                 </Stack>
-              )}
-            </CardBody>
-          </Card>
-        </StackItem>
-        <StackItem>
-          <Card isFlat>
-            <CardHeader>
-              <CardTitle>{t('Policy Tester')}</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <Stack hasGutter>
-                <StackItem>
-                  <FormGroup label={t('Decision path')} fieldId="opa-policy-path">
-                    <FormSelect
-                      id="opa-policy-path"
-                      value={policyPath}
-                      onChange={(_event, value) => selectPolicy(String(value))}
-                      isDisabled={isLoading || policies.length === 0}
-                    >
-                      {policies.map((policy) => (
-                        <FormSelectOption
-                          key={policy.path}
-                          value={policy.path}
-                          label={`${policy.id} - ${policy.path}`}
-                        />
-                      ))}
-                    </FormSelect>
-                  </FormGroup>
-                </StackItem>
-                <StackItem>
-                  <FormGroup label={t('Input JSON')} fieldId="opa-input-json">
-                    <TextArea
-                      id="opa-input-json"
-                      value={inputJson}
-                      rows={10}
-                      onChange={(_event, value) => setInputJson(value)}
-                      aria-label={t('Input JSON')}
-                      style={{ fontFamily: 'monospace' }}
-                    />
-                  </FormGroup>
-                </StackItem>
-                <StackItem>
-                  <Button
-                    variant="primary"
-                    onClick={() => void handleEvaluate()}
-                    isLoading={evalLoading}
-                    isDisabled={evalLoading || !policyPath}
-                  >
-                    {t('Evaluate')}
-                  </Button>
-                </StackItem>
-                {evalError ? (
-                  <StackItem>
-                    <Alert variant="danger" isInline title={evalError} />
-                  </StackItem>
-                ) : null}
-                {evalResult ? (
-                  <StackItem>
-                    <Alert
-                      variant={evalResult.allowed ? 'success' : 'danger'}
-                      isInline
-                      title={evalResult.allowed ? t('Decision: Allow') : t('Decision: Deny')}
-                      style={{ marginBottom: 12 }}
-                    />
-                    <CodeBlock>
-                      <CodeBlockCode>
-                        {JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}
-                      </CodeBlockCode>
-                    </CodeBlock>
-                  </StackItem>
-                ) : null}
-              </Stack>
-            </CardBody>
-          </Card>
-        </StackItem>
+              </CardBody>
+            </Card>
+          </StackItem>
+        ) : null}
       </Stack>
     </PageSection>
   );

@@ -41,6 +41,7 @@ import { useAwxManagementJobsRoutes } from './routes/useAwxManagementJobsRoutes'
 import { useAwxNotificationsRoutes } from './routes/useAwxNotificationsRoutes';
 import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
+import { useAwxPolicyRoutes } from './routes/useAwxPolicyRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
 import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
@@ -59,6 +60,7 @@ export function useAwxNavigation() {
   const awxTerraformRoutes = useAwxTerraformRoutes();
   const awxCatalogRoutes = useAwxCatalogRoutes();
   const awxCloudRoutes = useAwxCloudRoutes();
+  const awxPolicyRoutes = useAwxPolicyRoutes();
   const awxEdaRoutes = useAwxEdaRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
@@ -331,7 +333,7 @@ export function useAwxNavigation() {
         },
         {
           id: AwxRoute.SettingsPolicyAsCode,
-          label: t('Policy as Code'),
+          label: t('OPA Connection'),
           path: 'policy-as-code',
           children: [
             {
@@ -406,6 +408,7 @@ export function useAwxNavigation() {
     awxTerraformRoutes,
     awxCatalogRoutes,
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxCloudRoutes] : []),
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxPolicyRoutes] : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
       ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }]
       : []),

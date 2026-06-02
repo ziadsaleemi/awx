@@ -23,6 +23,7 @@ export const awxSettingsExcludeKeys: string[] = [
   'BULK_JOB_MAX_LAUNCH',
   'BULK_HOST_MAX_CREATE',
   'BULK_HOST_MAX_DELETE',
+  'OPA_POLICY_BUNDLE',
 ];
 
 export function useAwxSettingsGroupsBase() {
@@ -87,8 +88,8 @@ export function useAwxSettingsGroupsBase() {
       },
       {
         id: 'policyascode',
-        name: t('Policy as Code'),
-        description: t('OPA policy engine integration settings.'),
+        name: t('OPA Connection Settings'),
+        description: t('OPA server connection, authentication, and request settings.'),
         defaultSlugs: ['policyascode'],
         categories: [],
       },

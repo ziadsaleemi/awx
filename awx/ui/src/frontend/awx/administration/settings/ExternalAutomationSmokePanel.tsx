@@ -86,9 +86,14 @@ function StatusLabel(props: { check?: ExternalAutomationCheck }) {
   );
 }
 
-export function ExternalAutomationSmokePanel() {
+export function ExternalAutomationSmokePanel(props?: {
+  includeEda?: boolean;
+  includeOpa?: boolean;
+}) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
+  const includeEda = props?.includeEda ?? true;
+  const includeOpa = props?.includeOpa ?? true;
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,11 +107,11 @@ export function ExternalAutomationSmokePanel() {
         ExternalAutomationCheckResponse,
         ExternalAutomationCheckRequest
       >(awxAPI`/external_automation/check/`, {
-        include_eda: true,
-        include_opa: true,
-        sync_opa_policy: true,
+        include_eda: includeEda,
+        include_opa: includeOpa,
+        sync_opa_policy: includeOpa,
         opa_policy_id: 'awx/managed',
-        opa_deny_smoke: true,
+        opa_deny_smoke: includeOpa,
         start_eda_activation: false,
       });
       setResult(response);
@@ -121,7 +126,7 @@ export function ExternalAutomationSmokePanel() {
     <PageSection isWidthLimited data-cy="external-automation-smoke">
       <Card isFlat>
         <CardHeader>
-          <CardTitle>{t('External Automation Smoke')}</CardTitle>
+          <CardTitle>{includeEda ? t('External Automation Smoke') : t('OPA Smoke')}</CardTitle>
         </CardHeader>
         <CardBody>
           <Stack hasGutter>
@@ -133,7 +138,7 @@ export function ExternalAutomationSmokePanel() {
                 isLoading={loading}
                 isDisabled={loading}
               >
-                {t('Run EDA and OPA smoke')}
+                {includeEda ? t('Run EDA and OPA smoke') : t('Run OPA smoke')}
               </Button>
             </StackItem>
             {loading ? (
@@ -154,25 +159,33 @@ export function ExternalAutomationSmokePanel() {
                     isInline
                     title={
                       result.ok
-                        ? t('External automation smoke passed.')
-                        : t('External automation smoke failed.')
+                        ? includeEda
+                          ? t('External automation smoke passed.')
+                          : t('OPA smoke passed.')
+                        : includeEda
+                          ? t('External automation smoke failed.')
+                          : t('OPA smoke failed.')
                     }
                   />
                 </StackItem>
                 <StackItem>
                   <DescriptionList isHorizontal isCompact>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('EDA')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <StatusLabel check={result.checks.eda} />
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('EDA activations')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {result.checks.eda?.count ?? t('Not checked')}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
+                    {includeEda ? (
+                      <>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('EDA')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            <StatusLabel check={result.checks.eda} />
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('EDA activations')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.eda?.count ?? t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </>
+                    ) : null}
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('OPA')}</DescriptionListTerm>
                       <DescriptionListDescription>
