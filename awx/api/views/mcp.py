@@ -31,6 +31,8 @@ MCP Tool catalogue
 - list_catalog_deployments → GET /api/v2/catalog_deployments/
 - get_catalog_deployment   → GET /api/v2/catalog_deployments/<id>/
 - get_policy_context       → Retrieve configured MCP policy context
+- preview_resource_action  → Validate an AWX resource-authoring plan without saving
+- apply_resource_action    → Apply an explicit AWX resource-authoring plan
 """
 
 import hashlib
@@ -60,10 +62,25 @@ logger = logging.getLogger('awx.api.mcp')
 MCP_VERSION = '2024-11-05'
 MCP_READ_SCOPE = 'mcp:read'
 MCP_WRITE_SCOPE = 'mcp:write'
-MCP_WRITE_TOOLS = {'launch_job'}
+MCP_WRITE_TOOLS = {'apply_resource_action', 'launch_job'}
 MCP_COMPAT_READ_SCOPES = {'read', 'write'}
 MCP_COMPAT_WRITE_SCOPES = {'write'}
 MCP_TOKEN_RE = re.compile(r'[a-zA-Z0-9_]{3,}')
+MCP_RESOURCE_ACTION_TYPES = (
+    'catalog_item',
+    'constructed_inventory',
+    'credential_reference',
+    'inventory',
+    'inventory_source',
+    'job_template',
+    'project',
+    'project_file',
+    'role_assignment',
+    'schedule',
+    'smart_inventory',
+    'survey_spec',
+    'workflow_job_template',
+)
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -217,6 +234,37 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        'name': 'preview_resource_action',
+        'description': (
+            'Validate a typed AWX resource-authoring plan without saving. Supports projects, playbooks/roles via '
+            'project_file, inventories, smart/constructed inventories, inventory sources, job templates, workflow '
+            'templates, schedules, catalog items, role assignments, survey specs, and credential references.'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'plan': {'type': 'object', 'description': 'Typed AI resource-action plan to validate'},
+                'prompt': {'type': 'string', 'description': 'Optional natural-language request to turn into a plan'},
+                'context': {'type': 'object', 'description': 'Optional route/resource context for prompt-generated plans'},
+            },
+        },
+    },
+    {
+        'name': 'apply_resource_action',
+        'description': (
+            'Apply an explicit typed AWX resource-authoring plan using the same serializers, RBAC, OPA guardrails, '
+            'Activity Stream audit, and rollback behavior as /api/v2/ai/resource_actions/. Use preview_resource_action first.'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'plan': {'type': 'object', 'description': 'Typed AI resource-action plan to apply'},
+                'context': {'type': 'object', 'description': 'Optional route/resource context stored with the request'},
+            },
+            'required': ['plan'],
+        },
+    },
 ]
 
 
@@ -299,6 +347,21 @@ def _safe_argument_summary(arguments):
             summary[key] = arguments[key]
     if isinstance(arguments.get('extra_vars'), dict):
         summary['extra_var_keys'] = sorted(arguments['extra_vars'].keys())
+    if isinstance(arguments.get('prompt'), str):
+        summary['prompt_chars'] = len(arguments['prompt'])
+    if isinstance(arguments.get('plan'), dict):
+        plan = arguments['plan']
+        operations = plan.get('operations') or plan.get('actions') or []
+        if isinstance(operations, list):
+            summary['operation_count'] = len(operations)
+            resource_types = []
+            for operation in operations:
+                if isinstance(operation, dict):
+                    resource_type = operation.get('resource_type') or operation.get('resource') or operation.get('type')
+                    if isinstance(resource_type, str):
+                        resource_types.append(resource_type)
+            if resource_types:
+                summary['resource_types'] = sorted(set(resource_types))
     return summary
 
 
@@ -307,6 +370,8 @@ def _policy_query_for_request(tool_name, arguments):
         return arguments['query'].strip()
 
     query_parts = [tool_name]
+    if isinstance(arguments.get('prompt'), str) and arguments['prompt'].strip():
+        query_parts.append(arguments['prompt'][:500])
     for value in _safe_argument_summary(arguments).values():
         if isinstance(value, (str, int)):
             query_parts.append(str(value))
@@ -444,6 +509,8 @@ def _audit_related_resource(action, arguments, result):
         return 'job_template', None
     if action == 'list_terraform_templates':
         return 'terraform_job_template', None
+    if action in ('preview_resource_action', 'apply_resource_action'):
+        return 'ai_resource_action', None
     return 'mcp', None
 
 
@@ -801,6 +868,81 @@ def _handle_get_policy_context(request, params: dict):
     return {'policy_context': context, 'count': len(context)}
 
 
+def _handle_resource_action(request, params: dict, mode: str):
+    from awx.api.views.ai import (
+        AIProviderError,
+        _ai_plan_uses_operation_references,
+        _ai_provider_plan_from_prompt,
+        _apply_ai_operations_sequentially,
+        _audit_ai_resource_action,
+        _json_safe,
+        _normalize_ai_plan,
+        _public_ai_operation_result,
+        _redact_sensitive,
+        _simulate_ai_operations_for_preview,
+        _validate_ai_operations_for_preview,
+    )
+
+    if not isinstance(params, dict):
+        return {'error': 'arguments must be a JSON object'}
+
+    context = params.get('context') if isinstance(params.get('context'), dict) else {}
+    policy_context = getattr(request, 'mcp_policy_context', [])
+    if policy_context:
+        context = {**context, 'mcp_policy_context': policy_context}
+
+    generated = False
+    provider = ''
+    model = ''
+    try:
+        if params.get('plan') is not None:
+            plan = _normalize_ai_plan(params.get('plan'))
+        elif mode == 'preview':
+            prompt = params.get('prompt')
+            if not isinstance(prompt, str) or not prompt.strip():
+                return {'error': 'Provide either a plan object or a non-empty prompt.'}
+            plan, provider, model = _ai_provider_plan_from_prompt(request, prompt.strip(), context)
+            generated = True
+        else:
+            return {'error': 'apply_resource_action requires an explicit plan. Run preview_resource_action first.'}
+    except AIProviderError as exc:
+        return {'error': str(exc.detail), 'status_code': exc.status_code}
+    except (ValueError, json.JSONDecodeError) as exc:
+        return {'error': str(exc)}
+
+    if mode == 'preview':
+        if _ai_plan_uses_operation_references(plan['operations']):
+            operations = _simulate_ai_operations_for_preview(request, plan['operations'])
+        else:
+            operations = _validate_ai_operations_for_preview(request, plan['operations'])
+        can_apply = all(operation.get('valid') for operation in operations)
+    else:
+        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+
+    public_operations = [_public_ai_operation_result(operation) for operation in operations]
+    audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)
+    result = {
+        'mode': mode,
+        'generated': generated,
+        'plan': _redact_sensitive(_json_safe(plan)),
+        'operations': public_operations,
+        'can_apply': can_apply,
+        'audit': {'activity_stream_id': audit_entry.pk},
+        'supported_resource_types': list(MCP_RESOURCE_ACTION_TYPES),
+    }
+    if mode == 'apply' and not can_apply:
+        result['error'] = 'AI resource action apply failed validation.'
+    return result
+
+
+def _handle_preview_resource_action(request, params: dict):
+    return _handle_resource_action(request, params, 'preview')
+
+
+def _handle_apply_resource_action(request, params: dict):
+    return _handle_resource_action(request, params, 'apply')
+
+
 TOOL_HANDLERS = {
     'list_job_templates': _handle_list_job_templates,
     'get_job_template': _handle_get_job_template,
@@ -815,6 +957,8 @@ TOOL_HANDLERS = {
     'list_catalog_deployments': _handle_list_catalog_deployments,
     'get_catalog_deployment': _handle_get_catalog_deployment,
     'get_policy_context': _handle_get_policy_context,
+    'preview_resource_action': _handle_preview_resource_action,
+    'apply_resource_action': _handle_apply_resource_action,
 }
 
 
@@ -864,6 +1008,13 @@ class MCPManifestView(APIView):
                                 'write': sorted(MCP_COMPAT_WRITE_SCOPES),
                             },
                         }
+                    },
+                    'resource_authoring': {
+                        'enabled': True,
+                        'preview_tool': 'preview_resource_action',
+                        'apply_tool': 'apply_resource_action',
+                        'requires_explicit_plan_for_apply': True,
+                        'supported_resource_types': list(MCP_RESOURCE_ACTION_TYPES),
                     },
                     'audit': {'activity_stream': True, 'triggered_by': 'mcp_agent'},
                 },

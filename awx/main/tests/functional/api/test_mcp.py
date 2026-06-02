@@ -5,7 +5,7 @@ import pytest
 
 from awx.api.views import mcp
 from awx.api.versioning import reverse
-from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Organization
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Inventory, Organization
 
 
 def _mcp_result(response):
@@ -29,11 +29,23 @@ def test_mcp_manifest_and_tools_expose_policy_context(get, admin_user, settings)
     assert manifest.data['capabilities']['auth']['oauth2_scope_model']['write'] == 'mcp:write'
     assert manifest.data['capabilities']['policy_context']['rag']['embedding_provider'] == 'local_hash_vector'
     assert manifest.data['capabilities']['policy_context']['rag']['document_count'] == 1
+    assert manifest.data['capabilities']['resource_authoring']['preview_tool'] == 'preview_resource_action'
+    assert manifest.data['capabilities']['resource_authoring']['apply_tool'] == 'apply_resource_action'
+    assert 'project_file' in manifest.data['capabilities']['resource_authoring']['supported_resource_types']
     assert manifest.data['policy_context_enabled'] is True
     assert manifest.data['tool_count'] == len(tools.data['tools'])
     assert next(tool for tool in tools.data['tools'] if tool['name'] == 'launch_job')['mcp_scope'] == 'mcp:write'
+    assert next(tool for tool in tools.data['tools'] if tool['name'] == 'apply_resource_action')['mcp_scope'] == 'mcp:write'
+    assert next(tool for tool in tools.data['tools'] if tool['name'] == 'preview_resource_action')['mcp_scope'] == 'mcp:read'
     assert next(tool for tool in tools.data['tools'] if tool['name'] == 'get_job_status')['mcp_scope'] == 'mcp:read'
-    assert {'list_catalog_items', 'list_catalog_deployments', 'get_catalog_deployment', 'get_policy_context'} <= tool_names
+    assert {
+        'list_catalog_items',
+        'list_catalog_deployments',
+        'get_catalog_deployment',
+        'get_policy_context',
+        'preview_resource_action',
+        'apply_resource_action',
+    } <= tool_names
 
 
 @pytest.mark.django_db
@@ -116,8 +128,97 @@ def test_mcp_oauth_scope_helper_enforces_write_scope_for_launch():
     allowed, detail = mcp._check_mcp_tool_scope(read_request, 'launch_job')
     assert allowed is False
     assert 'mcp:write' in detail
+    assert mcp._check_mcp_tool_scope(read_request, 'apply_resource_action')[0] is False
     assert mcp._check_mcp_tool_scope(write_request, 'launch_job') == (True, None)
     assert mcp._check_mcp_tool_scope(legacy_write_request, 'launch_job') == (True, None)
+
+
+@pytest.mark.django_db
+def test_mcp_preview_resource_action_validates_inventory_without_saving(post, admin_user, organization):
+    before_count = Inventory.objects.count()
+
+    response = post(
+        reverse('api:mcp_invoke'),
+        {
+            'name': 'preview_resource_action',
+            'arguments': {
+                'plan': {
+                    'name': 'MCP preview inventory',
+                    'operations': [
+                        {
+                            'id': 'create-inventory',
+                            'operation': 'create',
+                            'resource_type': 'inventory',
+                            'data': {'name': 'MCP Preview Inventory', 'organization': organization.pk},
+                        }
+                    ],
+                }
+            },
+        },
+        admin_user,
+        expect=200,
+    )
+
+    result = _mcp_result(response)
+    assert response.data['isError'] is False
+    assert result['mode'] == 'preview'
+    assert result['can_apply'] is True
+    assert result['operations'][0]['valid'] is True
+    assert result['operations'][0]['resource_type'] == 'inventory'
+    assert 'project_file' in result['supported_resource_types']
+    assert Inventory.objects.count() == before_count
+
+    ai_audit = ActivityStream.objects.get(pk=result['audit']['activity_stream_id'])
+    mcp_audit = ActivityStream.objects.filter(actor=admin_user, object1='mcp', object2='ai_resource_action').last()
+    assert ai_audit.object1 == 'ai_resource_action'
+    assert mcp_audit is not None
+
+
+@pytest.mark.django_db
+def test_mcp_apply_resource_action_creates_inventory(post, admin_user, organization):
+    response = post(
+        reverse('api:mcp_invoke'),
+        {
+            'name': 'apply_resource_action',
+            'arguments': {
+                'plan': {
+                    'name': 'MCP apply inventory',
+                    'operations': [
+                        {
+                            'id': 'create-inventory',
+                            'operation': 'create',
+                            'resource_type': 'inventory',
+                            'data': {'name': 'MCP Applied Inventory', 'organization': organization.pk},
+                        }
+                    ],
+                }
+            },
+        },
+        admin_user,
+        expect=200,
+    )
+
+    result = _mcp_result(response)
+    inventory = Inventory.objects.get(name='MCP Applied Inventory')
+    assert response.data['isError'] is False
+    assert result['mode'] == 'apply'
+    assert result['can_apply'] is True
+    assert result['operations'][0]['valid'] is True
+    assert result['operations'][0]['object_id'] == inventory.pk
+
+
+@pytest.mark.django_db
+def test_mcp_apply_resource_action_requires_explicit_plan(post, admin_user):
+    response = post(
+        reverse('api:mcp_invoke'),
+        {'name': 'apply_resource_action', 'arguments': {'prompt': 'Create an inventory named missing plan.'}},
+        admin_user,
+        expect=200,
+    )
+
+    result = _mcp_result(response)
+    assert response.data['isError'] is True
+    assert 'explicit plan' in result['error']
 
 
 @pytest.mark.django_db
