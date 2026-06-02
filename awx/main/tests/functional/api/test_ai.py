@@ -16,6 +16,8 @@ from awx.main.models import (
     Inventory,
     InventorySource,
     JobTemplate,
+    Notification,
+    NotificationTemplate,
     Project,
     ProjectUpdate,
     Schedule,
@@ -380,6 +382,104 @@ def test_ai_chat_lists_visible_workflow_approvals_scoped_to_status_without_provi
     assert 'AI Pending Approval' in content
     assert f'id: {pending_approval.pk}' in content
     assert 'AI Successful Approval' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_notification_templates_without_provider(post, admin_user, organization):
+    NotificationTemplate.objects.create(
+        name='AI Webhook Notification Template',
+        organization=organization,
+        notification_type='webhook',
+        notification_configuration={'url': 'http://localhost', 'username': '', 'password': '', 'headers': {}},
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List notification templates'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 notification template visible to you in AWX:')
+    assert 'AI Webhook Notification Template' in content
+    assert 'notification type: webhook' in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_notifications_scoped_to_template_and_status_without_provider(post, admin_user, organization):
+    scoped_template = NotificationTemplate.objects.create(
+        name='AI Scoped Notification Template',
+        organization=organization,
+        notification_type='webhook',
+        notification_configuration={'url': 'http://localhost', 'username': '', 'password': '', 'headers': {}},
+    )
+    other_template = NotificationTemplate.objects.create(
+        name='AI Other Notification Template',
+        organization=organization,
+        notification_type='webhook',
+        notification_configuration={'url': 'http://localhost', 'username': '', 'password': '', 'headers': {}},
+    )
+    scoped_notification = Notification.objects.create(
+        notification_template=scoped_template,
+        status='successful',
+        notification_type='webhook',
+        subject='AI scoped notification sent',
+    )
+    other_notification = Notification.objects.create(
+        notification_template=other_template,
+        status='failed',
+        notification_type='webhook',
+        subject='AI other notification failed',
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List successful notifications for AI Scoped Notification Template'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith(
+        'There are 1 notification visible to you in AWX matching notification template "AI Scoped Notification Template", status "successful":'
+    )
+    assert f'id: {scoped_notification.pk}' in content
+    assert 'AI scoped notification sent' in content
+    assert f'id: {other_notification.pk}' not in content
+    assert 'AI other notification failed' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_activity_stream_scoped_to_actor_and_operation_without_provider(post, admin_user):
+    update_event = ActivityStream.objects.create(actor=admin_user, operation='update', object1='project', object2='AI Activity Project')
+    delete_event = ActivityStream.objects.create(actor=admin_user, operation='delete', object1='project', object2='AI Deleted Project')
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': f'List update activity stream events by {admin_user.username}'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith(f'There are 1 activity stream event visible to you in AWX matching actor "{admin_user.username}", operation "update":')
+    assert f'id: {update_event.pk}' in content
+    assert 'AI Activity Project' in content
+    assert f'id: {delete_event.pk}' not in content
+    assert 'AI Deleted Project' not in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 

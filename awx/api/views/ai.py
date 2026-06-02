@@ -1155,6 +1155,49 @@ def _visible_resource_specs():
             'fields': (('id', 'id'), ('name', 'name'), ('enabled', 'enabled'), ('unified_job_template', 'unified_job_template')),
         },
         {
+            'key': 'notification_templates',
+            'singular': 'notification template',
+            'plural': 'notification templates',
+            'patterns': (r'\bnotification templates?\b',),
+            'model': models.NotificationTemplate,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('notification_type', 'notification_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'notifications',
+            'singular': 'notification',
+            'plural': 'notifications',
+            'patterns': (r'\bnotifications?\b(?!\s+templates?\b)',),
+            'model': models.Notification,
+            'select_related': ('notification_template', 'notification_template__organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('status', 'status'),
+                ('notification_type', 'notification_type'),
+                ('notification_template', 'notification_template'),
+                ('subject', 'subject'),
+            ),
+        },
+        {
+            'key': 'activity_stream',
+            'singular': 'activity stream event',
+            'plural': 'activity stream events',
+            'patterns': (r'\bactivity stream\b', r'\baudit events?\b', r'\baudit log\b', r'\bactivity events?\b'),
+            'model': models.ActivityStream,
+            'select_related': ('actor',),
+            'order_by': ('-timestamp', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('operation', 'operation'),
+                ('object1', 'object1'),
+                ('object2', 'object2'),
+                ('actor', 'actor'),
+                ('timestamp', 'timestamp'),
+            ),
+        },
+        {
             'key': 'execution_environments',
             'singular': 'execution environment',
             'plural': 'execution environments',
@@ -1412,6 +1455,9 @@ def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, l
         'credentials': 'organization_id',
         'teams': 'organization_id',
         'execution_environments': 'organization_id',
+        'notification_templates': 'organization_id',
+        'notifications': 'notification_template__organization_id',
+        'activity_stream': 'organization__id',
         'jobs': 'organization_id',
         'workflow_jobs': 'organization_id',
         'project_updates': 'organization_id',
@@ -1434,6 +1480,11 @@ def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, l
     related_scope_by_key = {
         'credentials': ({'model': models.CredentialType, 'filter': 'credential_type_id', 'label': 'credential type', 'hints': (r'\bcredential types?\b',)},),
         'inventory_sources': ({'model': models.Project, 'filter': 'source_project_id', 'label': 'source project', 'hints': (r'\bprojects?\b',)},),
+        'notifications': ({'model': models.NotificationTemplate, 'filter': 'notification_template_id', 'label': 'notification template'},),
+        'activity_stream': (
+            {'model': models.User, 'filter': 'actor_id', 'label': 'actor', 'fields': ('id', 'username'), 'name_field': 'username'},
+            {'model': models.NotificationTemplate, 'filter': 'notification_template__id', 'label': 'notification template'},
+        ),
         'job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
         'terraform_job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
         'jobs': (
@@ -1482,6 +1533,15 @@ def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, l
             if re.search(rf'\b{re.escape(status_term)}\b', normalized):
                 filters['status'] = status_term
                 labels.append(_('status "%(status)s"') % {'status': status_term})
+                break
+
+    if 'operation' in field_paths:
+        operation_terms = ('create', 'update', 'delete', 'associate', 'disassociate')
+        normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+        for operation_term in operation_terms:
+            if re.search(rf'\b{re.escape(operation_term)}(?:d|s)?\b', normalized):
+                filters['operation'] = operation_term
+                labels.append(_('operation "%(operation)s"') % {'operation': operation_term})
                 break
 
     return filters, labels
@@ -1598,6 +1658,9 @@ def _resource_spec_match_score(message: str, spec: dict) -> int:
         'teams': r'\bteams?\b',
         'users': r'\busers?\b',
         'schedules': r'\bschedules?\b',
+        'notification_templates': r'\bnotification templates?\b',
+        'notifications': r'\bnotifications?\b(?!\s+templates?\b)',
+        'activity_stream': r'\bactivity stream\b|\baudit events?\b|\baudit log\b|\bactivity events?\b',
         'execution_environments': r'\bexecution environments?\b',
         'instance_groups': r'\binstance groups?\b',
         'instances': r'\binstances?\b|\bnodes?\b',
@@ -1613,10 +1676,11 @@ def _resource_spec_match_score(message: str, spec: dict) -> int:
         'cloud_provider_connections': r'\bcloud (?:provider )?connections?\b',
     }
     primary_pattern = primary_patterns.get(spec.get('key'))
-    if primary_pattern and re.search(primary_pattern, normalized):
-        score += 100
-        if re.search(rf'\b(?:in|from|for|under|within|on)\s+(?:{primary_pattern})', normalized):
-            score -= 60
+    if primary_pattern:
+        matches = list(re.finditer(primary_pattern, normalized))
+        if matches:
+            scoped_matches = [match for match in matches if re.search(r'\b(?:in|from|for|under|within|on)\s+[\w .:/-]{0,80}$', normalized[: match.start()])]
+            score += 40 if len(scoped_matches) == len(matches) else 100
     return score
 
 
