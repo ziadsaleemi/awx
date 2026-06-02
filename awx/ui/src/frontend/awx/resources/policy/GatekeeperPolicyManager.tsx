@@ -35,11 +35,13 @@ import {
 } from '@patternfly/react-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useGetPageUrl } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
+import { AwxRoute } from '../../main/AwxRoutes';
 import { PagePagination } from '../../../../framework/PageTable/PagePagination';
 
 type UnknownRecord = Record<string, unknown>;
@@ -51,6 +53,11 @@ interface GatekeeperTarget {
   namespace?: string;
   resource?: string;
   object_path?: string;
+}
+
+interface GatekeeperAuditRef {
+  activity_stream_id?: number;
+  activity_stream_url?: string;
 }
 
 interface GatekeeperPolicyManagerResponse {
@@ -183,10 +190,7 @@ interface GatekeeperApplyResponse {
   rollback_plan: unknown;
   opa_allowed?: boolean | null;
   kubernetes_response?: unknown;
-  audit?: {
-    activity_stream_id?: number;
-    activity_stream_url?: string;
-  } | null;
+  audit?: GatekeeperAuditRef | null;
 }
 
 type GatekeeperDeletePayload = {
@@ -206,10 +210,7 @@ interface GatekeeperAuthorResponse {
   provider: string;
   model: string;
   context: UnknownRecord;
-  audit?: {
-    activity_stream_id?: number;
-    activity_stream_url?: string;
-  } | null;
+  audit?: GatekeeperAuditRef | null;
 }
 
 const defaultGatekeeperManifest = `apiVersion: templates.gatekeeper.sh/v1
@@ -384,6 +385,27 @@ function selectedGatekeeperTarget(
     };
   }
   return undefined;
+}
+
+function GatekeeperAuditLink(props: {
+  audit?: GatekeeperAuditRef | null;
+  dataCy: string;
+  getPageUrl: ReturnType<typeof useGetPageUrl>;
+}) {
+  const { t } = useTranslation();
+  if (!props.audit?.activity_stream_id) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <Link
+        to={props.getPageUrl(AwxRoute.ActivityStream, {
+          query: { id: props.audit.activity_stream_id },
+        })}
+        data-cy={props.dataCy}
+      >
+        {t('View Activity Stream #{{id}}', { id: props.audit.activity_stream_id })}
+      </Link>
+    </div>
+  );
 }
 
 function GatekeeperTemplateDetail(props: {
@@ -611,6 +633,7 @@ function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
 
 export function GatekeeperPolicyManager() {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamString = searchParams.toString();
   const [violationFilter, setViolationFilter] = useState(
@@ -1072,6 +1095,11 @@ export function GatekeeperPolicyManager() {
                         })}
                         style={{ marginBottom: 12 }}
                       />
+                      <GatekeeperAuditLink
+                        audit={authorResult.audit}
+                        dataCy="gatekeeper-author-audit-link"
+                        getPageUrl={getPageUrl}
+                      />
                     </StackItem>
                   ) : null}
                   <StackItem>
@@ -1179,6 +1207,11 @@ export function GatekeeperPolicyManager() {
                         })}
                         style={{ marginBottom: 12 }}
                       />
+                      <GatekeeperAuditLink
+                        audit={applyResult.audit}
+                        dataCy="gatekeeper-apply-audit-link"
+                        getPageUrl={getPageUrl}
+                      />
                       <CodeBlock>
                         <CodeBlockCode>{jsonPreview(applyResult)}</CodeBlockCode>
                       </CodeBlock>
@@ -1275,6 +1308,11 @@ export function GatekeeperPolicyManager() {
                         })}
                         style={{ marginBottom: 12 }}
                       />
+                      <GatekeeperAuditLink
+                        audit={deleteResult.audit}
+                        dataCy="gatekeeper-delete-audit-link"
+                        getPageUrl={getPageUrl}
+                      />
                       <CodeBlock>
                         <CodeBlockCode>{jsonPreview(deleteResult)}</CodeBlockCode>
                       </CodeBlock>
@@ -1342,6 +1380,11 @@ export function GatekeeperPolicyManager() {
                           name: String(rollbackResult.target.name ?? ''),
                         })}
                         style={{ marginBottom: 12 }}
+                      />
+                      <GatekeeperAuditLink
+                        audit={rollbackResult.audit}
+                        dataCy="gatekeeper-rollback-audit-link"
+                        getPageUrl={getPageUrl}
                       />
                       <CodeBlock>
                         <CodeBlockCode>{jsonPreview(rollbackResult)}</CodeBlockCode>
