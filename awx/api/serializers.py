@@ -97,6 +97,7 @@ from awx.main.models import (
     CloudProviderState,
     UnifiedJob,
     UnifiedJobTemplate,
+    UserUISettings,
     WorkflowApproval,
     WorkflowApprovalTemplate,
     WorkflowJob,
@@ -1197,6 +1198,17 @@ class UserSerializer(BaseSerializer):
             )
         )
         return res
+
+
+class UserMeSerializer(UserSerializer):
+    ui_preferences = serializers.SerializerMethodField()
+
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + ('ui_preferences',)
+
+    def get_ui_preferences(self, obj):
+        settings_obj, _created = UserUISettings.objects.get_or_create(user=obj)
+        return settings_obj.ui_preferences or {}
 
 
 class UserActivityStreamSerializer(UserSerializer):

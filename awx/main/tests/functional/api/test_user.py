@@ -259,6 +259,39 @@ def test_user_verify_attribute_created(admin, get):
 
 
 @pytest.mark.django_db
+def test_me_exposes_and_updates_ui_preferences(patch, get, admin):
+    url = reverse('api:user_me_list')
+    response = patch(
+        url,
+        {
+            'ui_preferences': {
+                'theme': 'dark',
+                'tableLayout': 'compact',
+                'dateFormat': 'tomorrow',
+                'ignored': 'not persisted',
+            }
+        },
+        admin,
+        expect=200,
+    )
+
+    assert response.data['ui_preferences'] == {'theme': 'dark', 'tableLayout': 'compact'}
+    assert admin.ui_settings.ui_preferences == {'theme': 'dark', 'tableLayout': 'compact'}
+
+    response = get(url, admin, expect=200)
+    assert response.data['results'][0]['ui_preferences'] == {
+        'theme': 'dark',
+        'tableLayout': 'compact',
+    }
+
+
+@pytest.mark.django_db
+def test_me_rejects_non_object_ui_preferences(patch, admin):
+    response = patch(reverse('api:user_me_list'), {'ui_preferences': ['dark']}, admin, expect=400)
+    assert 'ui_preferences must be an object' in str(response.data['detail'])
+
+
+@pytest.mark.django_db
 def test_org_not_shown_in_admin_user_sublists(admin_user, get, organization):
     for view_name in ('user_admin_of_organizations_list', 'user_organizations_list'):
         url = reverse(f'api:{view_name}', kwargs={'pk': admin_user.pk})

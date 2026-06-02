@@ -1247,13 +1247,44 @@ class UserList(ListCreateAPIView):
 
 class UserMeList(ListAPIView):
     model = models.User
-    serializer_class = serializers.UserSerializer
+    serializer_class = serializers.UserMeSerializer
     name = _('Me')
     ordering = ('username',)
     resource_purpose = 'current authenticated user'
 
     def get_queryset(self):
         return self.model.objects.filter(pk=self.request.user.pk)
+
+    def patch(self, request, *args, **kwargs):
+        allowed_values = {
+            'refreshInterval': {0, 5, 10, 30, 60, 300},
+            'theme': {'system', 'light', 'dark'},
+            'tableLayout': {'compact', 'comfortable'},
+            'formColumns': {'single', 'multiple'},
+            'formLayout': {'vertical', 'horizontal'},
+            'dateFormat': {'since', 'date-time'},
+            'dataEditorFormat': {'yaml', 'json'},
+        }
+        preferences = request.data.get('ui_preferences')
+        if preferences is None:
+            preferences = request.data
+        if not isinstance(preferences, dict):
+            raise ParseError(_('ui_preferences must be an object.'))
+
+        settings_obj, _created = models.UserUISettings.objects.get_or_create(user=request.user)
+        current = settings_obj.ui_preferences or {}
+        updated = {}
+        for key, value in preferences.items():
+            allowed = allowed_values.get(key)
+            if key == 'refreshInterval' and type(value) is int and value in allowed:
+                updated[key] = value
+            elif isinstance(value, str) and allowed and value in allowed:
+                updated[key] = value
+        current.update(updated)
+        settings_obj.ui_preferences = current
+        settings_obj.save(update_fields=['ui_preferences'])
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
 
 
 class UserTeamsList(SubListAPIView):
