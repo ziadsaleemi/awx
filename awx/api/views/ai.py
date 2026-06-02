@@ -4297,6 +4297,34 @@ def _rollback_ai_project_file_operations(operations: list):
             _rollback_ai_project_file_operation(operation)
 
 
+def _ai_project_file_restore_rollback(validation: dict, rollback: dict) -> dict | None:
+    backup = rollback.get('backup')
+    if not isinstance(backup, bytes):
+        return None
+    if len(backup) > _AI_PROJECT_FILE_MAX_BYTES:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content exceeds the AI rollback plan limit.'))
+        return None
+    try:
+        content = backup.decode('utf-8')
+    except UnicodeDecodeError:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content is not valid UTF-8 and cannot be copied into rollback plans.'))
+        return None
+    if '\x00' in content:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content contains null bytes and cannot be copied into rollback plans.'))
+        return None
+    return {
+        'id': f"rollback-{validation.get('id') or 'project-file'}",
+        'operation': 'update',
+        'resource_type': 'project_file',
+        'data': {
+            'project': validation['project_id'],
+            'path': validation['path'],
+            'content': content,
+            'overwrite': True,
+        },
+    }
+
+
 def _save_ai_project_file_operation(request, validation: dict) -> dict:
     if not validation.get('_project_file_applied'):
         _apply_ai_project_file_operation(validation)
@@ -4311,7 +4339,7 @@ def _save_ai_project_file_operation(request, validation: dict) -> dict:
     validation['object_id'] = project.pk
     validation['project_id'] = project.pk
     if rollback.get('existed'):
-        validation['rollback_unsupported_reason'] = str(_('Existing project file content is not copied into audit rollback plans.'))
+        validation['rollback'] = _ai_project_file_restore_rollback(validation, rollback)
     elif validation.get('operation') != 'delete':
         validation['rollback'] = {
             'id': f"rollback-{validation.get('id') or 'project-file'}",

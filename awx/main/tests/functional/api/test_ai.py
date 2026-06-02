@@ -1380,6 +1380,66 @@ def test_ai_resource_action_apply_writes_project_file_then_creates_job_template(
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_project_file_update_returns_applicable_restore_rollback(post, admin_user, organization, tmp_path):
+    project_dir = tmp_path / 'ai-content'
+    project_dir.mkdir()
+    playbook_path = project_dir / 'playbooks' / 'site.yml'
+    playbook_path.parent.mkdir()
+    old_content = '---\n- hosts: all\n  gather_facts: false\n'
+    new_content = '---\n- hosts: all\n  gather_facts: true\n'
+    playbook_path.write_text(old_content, encoding='utf-8')
+    project = Project.objects.create(name='AI Content Project', organization=organization, scm_type='', local_path='ai-content')
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': {
+                    'name': 'Update existing playbook',
+                    'operations': [
+                        {
+                            'id': 'update-playbook',
+                            'operation': 'update',
+                            'resource_type': 'project_file',
+                            'data': {'project': project.pk, 'path': 'playbooks/site.yml', 'content': new_content},
+                        }
+                    ],
+                },
+            },
+            user=admin_user,
+            expect=201,
+        )
+
+        assert playbook_path.read_text(encoding='utf-8') == new_content
+        rollback_plan = response.data['rollback_plan']
+        rollback_operation = rollback_plan['operations'][0]
+        assert rollback_operation['operation'] == 'update'
+        assert rollback_operation['resource_type'] == 'project_file'
+        assert rollback_operation['data'] == {
+            'project': project.pk,
+            'path': 'playbooks/site.yml',
+            'content': old_content,
+            'overwrite': True,
+        }
+
+        audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+        changes = _activity_changes(audit_entry)
+        assert changes['rollback_available'] is True
+        assert changes['rollback_plan']['operations'][0]['data']['content'] == old_content
+
+        rollback_response = post(
+            reverse('api:ai_resource_actions'),
+            data={'mode': 'apply', 'plan': rollback_plan},
+            user=admin_user,
+            expect=201,
+        )
+
+    assert rollback_response.data['can_apply'] is True
+    assert playbook_path.read_text(encoding='utf-8') == old_content
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_rejects_project_file_path_traversal(post, admin_user, organization, tmp_path):
     project_dir = tmp_path / 'ai-content'
     project_dir.mkdir()
