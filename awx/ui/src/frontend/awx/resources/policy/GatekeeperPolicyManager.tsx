@@ -176,6 +176,21 @@ spec:
         package k8srequiredlabels
 `;
 
+const defaultRollbackPlan = JSON.stringify(
+  {
+    operation: 'delete',
+    target: {
+      api_version: 'templates.gatekeeper.sh/v1',
+      kind: 'ConstraintTemplate',
+      name: 'k8srequiredlabels',
+      resource: 'constrainttemplates',
+      object_path: '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+    },
+  },
+  null,
+  2
+);
+
 function EnforcementLabel(props: { action: string }) {
   const action = props.action || 'deny';
   const color = action === 'deny' ? 'red' : action === 'dryrun' ? 'orange' : 'grey';
@@ -461,6 +476,15 @@ export function GatekeeperPolicyManager() {
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<GatekeeperApplyResponse | null>(null);
+  const [deleteMode, setDeleteMode] = useState('preview');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteResult, setDeleteResult] = useState<GatekeeperApplyResponse | null>(null);
+  const [rollbackMode, setRollbackMode] = useState('preview');
+  const [rollbackPlan, setRollbackPlan] = useState(defaultRollbackPlan);
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackError, setRollbackError] = useState<string | null>(null);
+  const [rollbackResult, setRollbackResult] = useState<GatekeeperApplyResponse | null>(null);
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
@@ -505,6 +529,9 @@ export function GatekeeperPolicyManager() {
         human_approved: applyMode === 'apply',
       });
       setApplyResult(response);
+      if (response.rollback_plan) {
+        setRollbackPlan(JSON.stringify(response.rollback_plan, null, 2));
+      }
       if (response.persisted) void refresh();
     } catch (err) {
       setApplyError(
@@ -514,6 +541,68 @@ export function GatekeeperPolicyManager() {
       );
     } finally {
       setApplyLoading(false);
+    }
+  };
+
+  const handleDeleteManifest = async () => {
+    setDeleteLoading(true);
+    setDeleteError(null);
+    setDeleteResult(null);
+    try {
+      const response = await postRequest<
+        GatekeeperApplyResponse,
+        { mode: string; manifest: string; human_approved: boolean }
+      >(awxAPI`/opa/gatekeeper/delete/`, {
+        mode: deleteMode,
+        manifest: applyManifest,
+        human_approved: deleteMode === 'delete',
+      });
+      setDeleteResult(response);
+      if (response.rollback_plan) {
+        setRollbackPlan(JSON.stringify(response.rollback_plan, null, 2));
+      }
+      if (response.persisted) void refresh();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error
+          ? err.message
+          : t('Gatekeeper delete failed. Check connection and policy guardrails.')
+      );
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleRollback = async () => {
+    setRollbackLoading(true);
+    setRollbackError(null);
+    setRollbackResult(null);
+    try {
+      let parsedPlan: unknown;
+      try {
+        parsedPlan = JSON.parse(rollbackPlan);
+      } catch {
+        setRollbackError(t('Rollback plan JSON is invalid.'));
+        return;
+      }
+      const response = await postRequest<
+        GatekeeperApplyResponse,
+        { mode: string; rollback_plan: unknown; human_approved: boolean }
+      >(awxAPI`/opa/gatekeeper/rollback/`, {
+        mode: rollbackMode,
+        rollback_plan: parsedPlan,
+        human_approved: rollbackMode === 'apply',
+      });
+      setRollbackResult(response);
+      if (response.persisted) void refresh();
+    } catch (err) {
+      setRollbackError(
+        err instanceof Error
+          ? err.message
+          : t('Gatekeeper rollback failed. Check connection and policy guardrails.')
+      );
+    } finally {
+      setRollbackLoading(false);
     }
   };
 
@@ -568,7 +657,7 @@ export function GatekeeperPolicyManager() {
           <StackItem>
             <Card isFlat>
               <CardHeader>
-                <CardTitle>{t('Governed apply')}</CardTitle>
+                <CardTitle>{t('Governed changes')}</CardTitle>
               </CardHeader>
               <CardBody>
                 <Stack hasGutter>
@@ -584,7 +673,7 @@ export function GatekeeperPolicyManager() {
                   <StackItem>
                     <Grid hasGutter>
                       <GridItem span={3}>
-                        <FormGroup label={t('Mode')} fieldId="gatekeeper-apply-mode">
+                        <FormGroup label={t('Apply mode')} fieldId="gatekeeper-apply-mode">
                           <FormSelect
                             id="gatekeeper-apply-mode"
                             value={applyMode}
@@ -655,6 +744,130 @@ export function GatekeeperPolicyManager() {
                       />
                       <CodeBlock>
                         <CodeBlockCode>{jsonPreview(applyResult)}</CodeBlockCode>
+                      </CodeBlock>
+                    </StackItem>
+                  ) : null}
+                  <StackItem>
+                    <Grid hasGutter>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Delete mode')} fieldId="gatekeeper-delete-mode">
+                          <FormSelect
+                            id="gatekeeper-delete-mode"
+                            value={deleteMode}
+                            onChange={(_event, value) => setDeleteMode(String(value))}
+                          >
+                            <FormSelectOption value="preview" label={t('Preview')} />
+                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                            <FormSelectOption value="delete" label={t('Delete')} />
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                    </Grid>
+                  </StackItem>
+                  <StackItem>
+                    <Button
+                      variant={deleteMode === 'delete' ? 'danger' : 'secondary'}
+                      onClick={() => void handleDeleteManifest()}
+                      isLoading={deleteLoading}
+                      isDisabled={deleteLoading || !data.configured || !applyManifest.trim()}
+                    >
+                      {deleteMode === 'preview'
+                        ? t('Preview delete')
+                        : deleteMode === 'dry_run'
+                          ? t('Dry-run delete')
+                          : t('Delete')}
+                    </Button>
+                  </StackItem>
+                  {deleteError ? (
+                    <StackItem>
+                      <Alert variant="danger" isInline title={deleteError} />
+                    </StackItem>
+                  ) : null}
+                  {deleteResult ? (
+                    <StackItem>
+                      <Alert
+                        variant={
+                          deleteResult.persisted || deleteResult.dry_run ? 'success' : 'info'
+                        }
+                        isInline
+                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                          mode: deleteResult.mode,
+                          operation: deleteResult.operation,
+                          kind: String(deleteResult.target.kind ?? ''),
+                          name: String(deleteResult.target.name ?? ''),
+                        })}
+                        style={{ marginBottom: 12 }}
+                      />
+                      <CodeBlock>
+                        <CodeBlockCode>{jsonPreview(deleteResult)}</CodeBlockCode>
+                      </CodeBlock>
+                    </StackItem>
+                  ) : null}
+                  <StackItem>
+                    <Grid hasGutter>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Rollback mode')} fieldId="gatekeeper-rollback-mode">
+                          <FormSelect
+                            id="gatekeeper-rollback-mode"
+                            value={rollbackMode}
+                            onChange={(_event, value) => setRollbackMode(String(value))}
+                          >
+                            <FormSelectOption value="preview" label={t('Preview')} />
+                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                            <FormSelectOption value="apply" label={t('Apply')} />
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                    </Grid>
+                  </StackItem>
+                  <StackItem>
+                    <FormGroup label={t('Rollback plan')} fieldId="gatekeeper-rollback-plan">
+                      <TextArea
+                        id="gatekeeper-rollback-plan"
+                        value={rollbackPlan}
+                        rows={8}
+                        onChange={(_event, value) => setRollbackPlan(value)}
+                        aria-label={t('Gatekeeper rollback plan')}
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </FormGroup>
+                  </StackItem>
+                  <StackItem>
+                    <Button
+                      variant={rollbackMode === 'apply' ? 'danger' : 'secondary'}
+                      onClick={() => void handleRollback()}
+                      isLoading={rollbackLoading}
+                      isDisabled={rollbackLoading || !data.configured || !rollbackPlan.trim()}
+                    >
+                      {rollbackMode === 'preview'
+                        ? t('Preview rollback')
+                        : rollbackMode === 'dry_run'
+                          ? t('Dry-run rollback')
+                          : t('Apply rollback')}
+                    </Button>
+                  </StackItem>
+                  {rollbackError ? (
+                    <StackItem>
+                      <Alert variant="danger" isInline title={rollbackError} />
+                    </StackItem>
+                  ) : null}
+                  {rollbackResult ? (
+                    <StackItem>
+                      <Alert
+                        variant={
+                          rollbackResult.persisted || rollbackResult.dry_run ? 'success' : 'info'
+                        }
+                        isInline
+                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                          mode: rollbackResult.mode,
+                          operation: rollbackResult.operation,
+                          kind: String(rollbackResult.target.kind ?? ''),
+                          name: String(rollbackResult.target.name ?? ''),
+                        })}
+                        style={{ marginBottom: 12 }}
+                      />
+                      <CodeBlock>
+                        <CodeBlockCode>{jsonPreview(rollbackResult)}</CodeBlockCode>
                       </CodeBlock>
                     </StackItem>
                   ) : null}

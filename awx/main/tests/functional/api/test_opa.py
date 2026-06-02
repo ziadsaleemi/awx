@@ -594,6 +594,101 @@ def test_gatekeeper_apply_opa_denial_blocks_kubernetes_write_and_audits(post, ad
 
 
 @pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_delete_dry_run_uses_kubernetes_dry_run_and_audits(post, admin_user):
+    existing = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
+    }
+    delete_response = {'kind': 'Status', 'status': 'Success'}
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_response(existing)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(delete_response)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_delete'),
+            data={'mode': 'dry_run', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['dry_run'] is True
+    assert response.data['operation'] == 'delete'
+    assert response.data['rollback_plan']['operation'] == 'restore'
+    assert response.data['opa_allowed'] is True
+    check_policy.assert_called_once()
+    assert check_policy.call_args.args[0] == 'awx/gatekeeper_resource/allow'
+    requests_request.assert_called_once_with(
+        'DELETE',
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        headers={'Accept': 'application/json'},
+        params={'dryRun': 'All'},
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.operation == 'delete'
+    assert audit.object1 == 'gatekeeper_resource'
+    assert '"source": "gatekeeper_delete"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_rollback_restore_apply_writes_manifest_and_audits(post, admin_user):
+    current = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
+    }
+    restored = {**current, 'status': {'created': True}}
+    rollback_plan = {
+        'operation': 'restore',
+        'manifest': current,
+        'target': {
+            'api_version': 'templates.gatekeeper.sh/v1',
+            'kind': 'ConstraintTemplate',
+            'name': 'k8srequiredlabels',
+            'resource': 'constrainttemplates',
+            'object_path': '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        },
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_response(current)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(restored)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_rollback'),
+            data={'mode': 'apply', 'rollback_plan': rollback_plan, 'human_approved': True},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['persisted'] is True
+    assert response.data['operation'] == 'rollback_restore'
+    assert response.data['opa_allowed'] is True
+    check_policy.assert_called_once()
+    requests_request.assert_called_once_with(
+        'PUT',
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        json=current,
+        params=None,
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.operation == 'update'
+    assert audit.object1 == 'gatekeeper_resource'
+    assert '"source": "gatekeeper_rollback"' in audit.changes
+
+
+@pytest.mark.django_db
 @override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
 def test_opa_policy_module_detail_returns_raw_rego(get, admin_user):
     opa_response = mock.Mock()
