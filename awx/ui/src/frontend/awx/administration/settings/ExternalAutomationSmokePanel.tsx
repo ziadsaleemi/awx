@@ -20,8 +20,11 @@ import {
 import { CheckCircleIcon, SyncAltIcon, TimesCircleIcon } from '@patternfly/react-icons';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { useGetPageUrl } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
+import { AwxRoute } from '../../main/AwxRoutes';
 
 interface ExternalAutomationCheck {
   ok: boolean;
@@ -85,6 +88,7 @@ function StatusLabel(props: { check?: ExternalAutomationCheck }) {
 
 export function ExternalAutomationSmokePanel() {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -196,7 +200,18 @@ export function ExternalAutomationSmokePanel() {
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('Activity Stream ID')}</DescriptionListTerm>
                       <DescriptionListDescription>
-                        {result.audit?.activity_stream_id ?? t('Not recorded')}
+                        {result.audit?.activity_stream_id ? (
+                          <Link
+                            to={getPageUrl(AwxRoute.ActivityStream, {
+                              query: { id: result.audit.activity_stream_id },
+                            })}
+                            data-cy="external-automation-audit-link"
+                          >
+                            {result.audit.activity_stream_id}
+                          </Link>
+                        ) : (
+                          t('Not recorded')
+                        )}
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                   </DescriptionList>

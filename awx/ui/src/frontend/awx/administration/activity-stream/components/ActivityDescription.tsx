@@ -82,6 +82,9 @@ export const ActivityDescription: React.FC<ActivityStreamDescriptionProps> = ({
       case 'create':
       case 'update':
       case 'delete': {
+        if (object1 === 'external_automation') {
+          return `${operationText} external automation check`;
+        }
         if (sourceResourceRoute && sourceResourceObj) {
           // handle 'job' and 'workflow_job' and redirect to job output page
           switch (object1) {
