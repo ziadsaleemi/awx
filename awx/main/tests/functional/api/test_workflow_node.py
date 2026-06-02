@@ -38,6 +38,15 @@ def approval_node(workflow_job_template, admin_user):
     return WorkflowJobTemplateNode.objects.create(workflow_job_template=workflow_job_template)
 
 
+def eda_response(mocker, payload):
+    response = mocker.Mock()
+    response.status_code = 200
+    response.content = b'{}'
+    response.raise_for_status.return_value = None
+    response.json.return_value = payload
+    return response
+
+
 @pytest.mark.django_db
 def test_node_rejects_unprompted_fields(inventory, project, workflow_job_template, post, admin_user):
     job_template = JobTemplate.objects.create(inventory=inventory, project=project, playbook='helloworld.yml', ask_limit_on_launch=False)
@@ -147,16 +156,19 @@ def test_launch_eda_rulebook_node_completes_as_virtual_success(post, admin_user,
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
 def test_launch_eda_rulebook_node_syncs_controller_status(post, admin_user, controlplane_instance_group, mocker):
-    controller_response = mocker.Mock()
-    controller_response.raise_for_status.return_value = None
-    controller_response.json.return_value = {
-        'id': 'activation-1',
-        'name': 'ops-alerts',
-        'status': 'running',
-        'rulebook_name': 'ops-alerts.yml',
-        'event_source': 'webhook',
-    }
-    get_mock = mocker.patch('awx.main.utils.eda.requests.get', return_value=controller_response)
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(
+            mocker,
+            {
+                'id': 'activation-1',
+                'name': 'ops-alerts',
+                'status': 'running',
+                'rulebook_name': 'ops-alerts.yml',
+                'event_source': 'webhook',
+            },
+        ),
+    )
     workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow controller sync')
     WorkflowJobTemplateNode.objects.create(
         workflow_job_template=workflow_job_template,
@@ -181,7 +193,48 @@ def test_launch_eda_rulebook_node_syncs_controller_status(post, admin_user, cont
     assert node.ancestor_artifacts['awx_eda']['source'] == 'eda_controller'
     assert node.ancestor_artifacts['awx_eda']['controller_status'] == 'ok'
     assert node.ancestor_artifacts['awx_eda']['activation']['rulebook'] == 'ops-alerts.yml'
-    assert get_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
+    assert node.ancestor_artifacts['awx_eda']['actions'] == ['found', 'polled']
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_VERIFY_SSL=False)
+def test_launch_eda_rulebook_node_creates_starts_and_polls_activation(post, admin_user, controlplane_instance_group, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 0, 'results': []}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'created', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'results': [{'id': 'event-1', 'message': 'activation started'}]}),
+        ],
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow controller start')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='ops-alerts',
+        eda_event_source='webhook',
+        eda_event_source_status='planned',
+        identifier='ops-alerts',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ops-alerts')
+
+    assert node.bypassed_job_status == 'successful'
+    assert node.eda_activation_id == 'created-1'
+    assert node.eda_event_source_status == 'running'
+    assert node.ancestor_artifacts['awx_eda']['actions'] == ['created', 'started', 'polled', 'events']
+    assert node.ancestor_artifacts['awx_eda']['events'][0]['message'] == 'activation started'
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET']
+    assert request_mock.call_args_list[1].kwargs['json']['event_source'] == 'webhook'
 
 
 @pytest.mark.django_db

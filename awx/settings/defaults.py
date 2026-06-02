@@ -205,6 +205,10 @@ EDA_AUTH_TOKEN = ''
 EDA_VERIFY_SSL = True
 EDA_REQUEST_TIMEOUT = 5
 EDA_ACTIVATIONS_API_PATH = '/api/eda/v1/activations/'
+EDA_ACTIVATION_START_API_PATH = '/api/eda/v1/activations/{activation_id}/start/'
+EDA_ACTIVATION_EVENTS_API_PATH = '/api/eda/v1/activations/{activation_id}/events/'
+EDA_ACTIVATION_POLL_ATTEMPTS = 1
+EDA_ACTIVATION_POLL_INTERVAL = 0
 
 # The maximum size of the ansible callback event's res data structure
 # beyond this limit and the value will be removed

@@ -368,9 +368,16 @@ class WorkflowJobNode(WorkflowNodeBase):
         if client.is_configured:
             source = 'eda_controller'
             try:
-                activation = client.find_activation(self.eda_activation_id, self.eda_rulebook_name)
+                result = client.ensure_activation_started(
+                    self.eda_rulebook_name,
+                    activation_id=self.eda_activation_id,
+                    event_source=self.eda_event_source,
+                )
+                activation = result['activation']
                 if activation:
                     controller_status = 'ok'
+                    if activation.get('id'):
+                        self.eda_activation_id = activation['id']
                     activation_status = activation.get('status') or activation_status
                 else:
                     controller_status = 'not_found'
@@ -392,10 +399,12 @@ class WorkflowJobNode(WorkflowNodeBase):
         }
         if activation:
             artifacts['awx_eda']['activation'] = activation
+            artifacts['awx_eda']['actions'] = result.get('actions', [])
+            artifacts['awx_eda']['events'] = result.get('events', [])
         self.ancestor_artifacts = artifacts
         self.eda_event_source_status = activation_status
         self.bypassed_job_status = workflow_status
-        self.save(update_fields=['ancestor_artifacts', 'eda_event_source_status', 'bypassed_job_status'])
+        self.save(update_fields=['ancestor_artifacts', 'eda_activation_id', 'eda_event_source_status', 'bypassed_job_status'])
         return self
 
     def mark_eda_rulebook_successful(self):

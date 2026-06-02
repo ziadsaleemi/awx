@@ -3,11 +3,12 @@
 
 from django.urls import re_path
 
-from awx.api.views.eda import EDAActivationListView, EDAStatusView
+from awx.api.views.eda import EDAActivationListView, EDAActivationStartView, EDAStatusView
 
 
 eda_urls = [
     re_path(r'^status/$', EDAStatusView.as_view(), name='eda_status'),
+    re_path(r'^activations/start/$', EDAActivationStartView.as_view(), name='eda_activation_start'),
     re_path(r'^activations/$', EDAActivationListView.as_view(), name='eda_activation_list'),
 ]
 

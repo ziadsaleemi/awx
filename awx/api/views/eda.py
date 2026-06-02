@@ -4,9 +4,11 @@
 from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext_lazy as _
+from rest_framework import status as http_status
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
+from awx.api.permissions import IsSystemAdmin
 from awx.api.versioning import reverse
 from awx.main import models
 from awx.main.access import get_user_queryset
@@ -59,6 +61,10 @@ class EDAStatusView(APIView):
                 'verify_ssl': client.verify_ssl,
                 'request_timeout': client.timeout,
                 'activations_api_path': client.activations_path,
+                'activation_start_api_path': client.activation_start_path,
+                'activation_events_api_path': client.activation_events_path,
+                'activation_poll_attempts': client.poll_attempts,
+                'activation_poll_interval': client.poll_interval,
                 'message': _('EDA Controller URL is configured.') if status == 'configured' else _('EDA Controller URL is not configured.'),
                 'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'eda'}, request=request),
                 'activations_url': reverse('api:eda_activation_list', request=request),
@@ -124,4 +130,48 @@ class EDAActivationListView(APIView):
                 'controller_error': controller_error,
                 'results': results,
             }
+        )
+
+
+class EDAActivationStartView(APIView):
+    name = _('EDA Activation Start')
+    resource_purpose = 'event-driven ansible activation create/start'
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, format=None):
+        data = request.data if isinstance(request.data, dict) else {}
+        rulebook_name = str(data.get('rulebook_name') or data.get('name') or '').strip()
+        activation_id = str(data.get('activation_id') or data.get('id') or '').strip()
+        event_source = str(data.get('event_source') or '').strip()
+        extra_data = data.get('extra_data') if isinstance(data.get('extra_data'), dict) else {}
+        poll = bool(data.get('poll', True))
+        include_events = bool(data.get('include_events', True))
+
+        if not rulebook_name and not activation_id:
+            return Response({'detail': _('Provide rulebook_name or activation_id.')}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        client = EDAControllerClient()
+        try:
+            result = client.ensure_activation_started(
+                rulebook_name or activation_id,
+                activation_id=activation_id,
+                event_source=event_source,
+                extra_data=extra_data,
+                poll=poll,
+                include_events=include_events,
+            )
+        except EDAControllerError as exc:
+            response_status = (
+                http_status.HTTP_400_BAD_REQUEST if exc.status in ('invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+            return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+
+        return Response(
+            {
+                'source': 'eda_controller',
+                'activation': result['activation'],
+                'actions': result['actions'],
+                'events': result['events'],
+            },
+            status=http_status.HTTP_200_OK,
         )

@@ -38,6 +38,10 @@ interface EDAStatus {
   message: string;
   settings_url: string;
   activations_url: string;
+  activation_start_api_path?: string;
+  activation_events_api_path?: string;
+  activation_poll_attempts?: number;
+  activation_poll_interval?: number;
 }
 
 interface EDAActivationsResponse {

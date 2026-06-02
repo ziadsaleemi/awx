@@ -271,6 +271,50 @@ register(
 )
 
 register(
+    'EDA_ACTIVATION_START_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/{activation_id}/start/',
+    allow_blank=False,
+    label=_('EDA activation start API path'),
+    help_text=_('Relative API path used to start an Event-Driven Ansible Controller rulebook activation. Supports {activation_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_EVENTS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/{activation_id}/events/',
+    allow_blank=False,
+    label=_('EDA activation events API path'),
+    help_text=_('Relative API path used to read Event-Driven Ansible Controller activation events/logs. Supports {activation_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_POLL_ATTEMPTS',
+    field_class=fields.IntegerField,
+    default=1,
+    min_value=0,
+    label=_('EDA activation poll attempts'),
+    help_text=_('Number of activation status reads after AWX creates or starts an EDA activation.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_POLL_INTERVAL',
+    field_class=fields.IntegerField,
+    default=0,
+    min_value=0,
+    label=_('EDA activation poll interval'),
+    help_text=_('Seconds to wait between EDA activation status reads.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
     'AWX_ANALYTICS_CANDLEPIN_CA',
     field_class=fields.CharField,
     default='/etc/rhsm/ca/redhat-uep.pem',

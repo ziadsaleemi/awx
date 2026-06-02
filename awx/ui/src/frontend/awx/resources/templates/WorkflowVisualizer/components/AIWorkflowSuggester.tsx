@@ -84,6 +84,10 @@ interface EDAStatusResponse {
   configured: boolean;
   status: string;
   controller_url: string;
+  activation_start_api_path?: string;
+  activation_events_api_path?: string;
+  activation_poll_attempts?: number;
+  activation_poll_interval?: number;
 }
 
 interface EDAActivationSummary {
@@ -146,7 +150,7 @@ Schema:
 }
 Use only available AWX template ids/names from context for executable nodes.
 Use workflow_approval for human gates.
-Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX persists these nodes and syncs activation status from the configured EDA Controller at runtime.
+Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX persists these nodes and can create/start/poll activation status from the configured EDA Controller at runtime.
 Use ai_task only when user explicitly asks for runtime AI behavior; these are preview-only until AWX persistence supports them.
 List at most 8 nodes.`;
 
