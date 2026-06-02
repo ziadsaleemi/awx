@@ -459,15 +459,17 @@ def _get_policy_or_none(engine, policy_id):
         raise
 
 
-def _audit_opa_policy_module(request, operation, policy_id, before=None, after=None, error=''):
+def _audit_opa_policy_module(request, operation, policy_id, before=None, after=None, error='', source='opa_policy_modules', extra=None):
     changes = {
         'triggered_by': 'opa_policy_module_manager',
-        'source': 'opa_policy_modules',
+        'source': source,
         'policy_id': policy_id,
         'is_error': bool(error),
-        'before': _opa_policy_module_summary(before) if before else None,
-        'after': _opa_policy_module_summary(after) if after else None,
+        'before': _opa_policy_module_summary(before, include_raw=True) if before else None,
+        'after': _opa_policy_module_summary(after, include_raw=True) if after else None,
     }
+    if extra:
+        changes.update(extra)
     if error:
         changes['error'] = str(error)
     entry = ActivityStream.objects.create(
@@ -482,6 +484,55 @@ def _audit_opa_policy_module(request, operation, policy_id, before=None, after=N
         'activity_stream_id': entry.pk,
         'activity_stream_url': f'/api/v2/activity_stream/{entry.pk}/',
     }
+
+
+def _opa_policy_module_activity_changes(entry):
+    changes = entry.changes
+    if isinstance(changes, dict):
+        return changes
+    if not changes:
+        return {}
+    try:
+        parsed = json.loads(changes)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _opa_policy_module_snapshot_summary(snapshot, include_raw=False):
+    if not isinstance(snapshot, dict):
+        return None
+    if 'raw' in snapshot:
+        return _opa_policy_module_summary(snapshot, include_raw=include_raw)
+
+    allowed = {'id', 'package', 'rules', 'decision_paths', 'size', 'line_count', 'sha256', 'awx_managed'}
+    return {key: snapshot.get(key) for key in allowed if key in snapshot}
+
+
+def _public_opa_policy_module_version(entry):
+    changes = _opa_policy_module_activity_changes(entry)
+    before = changes.get('before') if isinstance(changes.get('before'), dict) else None
+    after = changes.get('after') if isinstance(changes.get('after'), dict) else None
+    actor = getattr(entry, 'actor', None)
+    return {
+        'activity_stream_id': entry.pk,
+        'operation': entry.operation,
+        'timestamp': entry.timestamp.isoformat() if getattr(entry, 'timestamp', None) else '',
+        'actor': {'id': actor.pk, 'username': actor.username} if actor else None,
+        'before': _opa_policy_module_snapshot_summary(before),
+        'after': _opa_policy_module_snapshot_summary(after),
+        'can_restore_before': bool(before and before.get('raw')),
+        'can_restore_after': bool(after and after.get('raw')),
+    }
+
+
+def _opa_policy_module_history(policy_id, limit=25):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 25
+    limit = min(max(limit, 1), 100)
+    return ActivityStream.objects.filter(object1='opa_policy_module', object2=policy_id).order_by('-timestamp', '-id')[:limit]
 
 
 def _save_opa_policy_module(request, policy_id, policy_text):
@@ -763,6 +814,106 @@ class OPAPolicyModuleDetailView(APIView):
                 'changed': True,
                 'policy_id': policy_id,
                 'previous': _opa_policy_module_summary(before) if before else None,
+                'opa_response': opa_response,
+                'audit': audit,
+            }
+        )
+
+
+class OPAPolicyModuleVersionsView(APIView):
+    """
+    GET /api/v2/opa/policy-modules/<policy_id>/versions/
+
+    Return Activity Stream-backed OPA Rego module history. Raw Rego stays redacted
+    from this list; rollback endpoints restore from audited snapshots server-side.
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def get(self, request, policy_id=None, *args, **kwargs):
+        policy_id, error = _validate_policy_id(policy_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        versions = [_public_opa_policy_module_version(entry) for entry in _opa_policy_module_history(policy_id, request.query_params.get('limit'))]
+        return Response({'policy_id': policy_id, 'count': len(versions), 'versions': versions})
+
+
+class OPAPolicyModuleRollbackView(APIView):
+    """
+    POST /api/v2/opa/policy-modules/<policy_id>/rollback/
+
+    Restore a previous audited Rego snapshot to live OPA.
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def post(self, request, policy_id=None, *args, **kwargs):
+        policy_id, error = _validate_policy_id(policy_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        activity_stream_id = request.data.get('activity_stream_id')
+        version = request.data.get('version', 'before')
+        if version not in {'before', 'after'}:
+            return Response({'detail': _('version must be "before" or "after".')}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            activity_stream_id = int(activity_stream_id)
+        except (TypeError, ValueError):
+            return Response({'detail': _('activity_stream_id must be an integer.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        entry = ActivityStream.objects.filter(pk=activity_stream_id, object1='opa_policy_module', object2=policy_id).first()
+        if entry is None:
+            return Response({'detail': _('OPA policy module version was not found.')}, status=status.HTTP_404_NOT_FOUND)
+
+        changes = _opa_policy_module_activity_changes(entry)
+        snapshot = changes.get(version)
+        raw = snapshot.get('raw') if isinstance(snapshot, dict) else None
+        if not raw:
+            return Response({'detail': _('Selected OPA policy version does not include restorable raw Rego.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = OPAPolicyEngine()
+        if not engine.is_available():
+            return Response({'detail': _('OPA is not enabled or configured.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        before = None
+        try:
+            before = _get_policy_or_none(engine, policy_id)
+            opa_response = engine.put_policy(policy_id, raw)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            _audit_opa_policy_module(
+                request,
+                'update',
+                policy_id,
+                before=before,
+                error=exc,
+                source='opa_policy_module_rollback',
+                extra={'rollback_source_activity_stream_id': activity_stream_id, 'rollback_version': version},
+            )
+            payload, status_code = _opa_http_error_payload(exc)
+            return Response(payload, status=status_code)
+
+        after = {'id': policy_id, 'raw': raw, 'ast': snapshot.get('ast') if isinstance(snapshot.get('ast'), dict) else {}}
+        audit = _audit_opa_policy_module(
+            request,
+            'update' if before else 'create',
+            policy_id,
+            before=before,
+            after=after,
+            source='opa_policy_module_rollback',
+            extra={'rollback_source_activity_stream_id': activity_stream_id, 'rollback_version': version},
+        )
+        return Response(
+            {
+                'changed': True,
+                'policy_id': policy_id,
+                'version': version,
+                'source_activity_stream_id': activity_stream_id,
+                'module': _opa_policy_module_summary(after, include_raw=True),
+                'previous_sha256': _opa_policy_module_summary(before)['sha256'] if before else '',
+                'restored_sha256': _opa_policy_module_summary(after)['sha256'],
                 'opa_response': opa_response,
                 'audit': audit,
             }

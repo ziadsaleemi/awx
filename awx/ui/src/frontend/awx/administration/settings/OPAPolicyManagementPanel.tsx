@@ -118,6 +118,40 @@ interface OPAPolicyModuleDeleteResponse {
   };
 }
 
+interface OPAPolicyModuleVersion {
+  activity_stream_id: number;
+  operation: string;
+  timestamp: string;
+  actor?: { id: number; username: string } | null;
+  before?: OPAPolicyModuleSummary | null;
+  after?: OPAPolicyModuleSummary | null;
+  can_restore_before: boolean;
+  can_restore_after: boolean;
+}
+
+interface OPAPolicyModuleVersionsResponse {
+  policy_id: string;
+  count: number;
+  versions: OPAPolicyModuleVersion[];
+}
+
+type OPAPolicyModuleVersionSide = 'before' | 'after';
+
+interface OPAPolicyModuleRollbackResponse {
+  changed: boolean;
+  policy_id: string;
+  version: OPAPolicyModuleVersionSide;
+  source_activity_stream_id: number;
+  module: OPAPolicyModuleDetail;
+  previous_sha256: string;
+  restored_sha256: string;
+  opa_response: unknown;
+  audit?: {
+    activity_stream_id?: number;
+    activity_stream_url?: string;
+  };
+}
+
 const fallbackInput = {
   action: 'launch',
   source: 'api',
@@ -136,6 +170,11 @@ allow if {
 
 function formatInput(policy?: OPAPolicy) {
   return JSON.stringify(policy?.input_example ?? fallbackInput, null, 2);
+}
+
+function formatVersionLabel(version: OPAPolicyModuleVersion) {
+  const date = version.timestamp ? new Date(version.timestamp).toLocaleString() : '';
+  return `#${version.activity_stream_id} - ${version.operation}${date ? ` - ${date}` : ''}`;
 }
 
 type OPAPolicyManagementSection = 'status' | 'modules' | 'tester';
@@ -170,6 +209,22 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   const [moduleDeleting, setModuleDeleting] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [moduleResult, setModuleResult] = useState<string | null>(null);
+  const [moduleVersions, setModuleVersions] = useState<OPAPolicyModuleVersion[]>([]);
+  const [moduleVersionsLoading, setModuleVersionsLoading] = useState(false);
+  const [moduleVersionError, setModuleVersionError] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState('');
+  const [selectedVersionSide, setSelectedVersionSide] =
+    useState<OPAPolicyModuleVersionSide>('before');
+  const [moduleRollbackLoading, setModuleRollbackLoading] = useState(false);
+  const selectedVersion = useMemo(
+    () =>
+      moduleVersions.find((version) => String(version.activity_stream_id) === selectedVersionId),
+    [moduleVersions, selectedVersionId]
+  );
+  const selectedVersionCanRestore =
+    selectedVersionSide === 'before'
+      ? Boolean(selectedVersion?.can_restore_before)
+      : Boolean(selectedVersion?.can_restore_after);
 
   useEffect(() => {
     if (!policies.length) return;
@@ -207,6 +262,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
       setModuleDetail(detail);
       setModuleId(detail.id);
       setModuleText(detail.raw ?? '');
+      void loadModuleVersions(detail.id);
     } catch (err) {
       setModuleError(
         err instanceof Error
@@ -218,6 +274,37 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     }
   }
 
+  async function loadModuleVersions(id: string) {
+    if (!id) return;
+    setModuleVersionsLoading(true);
+    setModuleVersionError(null);
+    try {
+      const response = await requestGet<OPAPolicyModuleVersionsResponse>(
+        awxAPI`/opa/policy-modules/${id}/versions/`
+      );
+      const versions = response.versions ?? [];
+      const restorable = versions.find(
+        (version) => version.can_restore_before || version.can_restore_after
+      );
+      setModuleVersions(versions);
+      if (restorable) {
+        setSelectedVersionId(String(restorable.activity_stream_id));
+        setSelectedVersionSide(restorable.can_restore_before ? 'before' : 'after');
+      } else {
+        setSelectedVersionId(versions[0] ? String(versions[0].activity_stream_id) : '');
+        setSelectedVersionSide('before');
+      }
+    } catch (err) {
+      setModuleVersions([]);
+      setSelectedVersionId('');
+      setModuleVersionError(
+        err instanceof Error ? err.message : t('Policy module version history load failed.')
+      );
+    } finally {
+      setModuleVersionsLoading(false);
+    }
+  }
+
   const newModule = () => {
     setSelectedModuleId('');
     setModuleDetail(null);
@@ -225,6 +312,9 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleText(defaultModuleText);
     setModuleError(null);
     setModuleResult(null);
+    setModuleVersions([]);
+    setSelectedVersionId('');
+    setModuleVersionError(null);
   };
 
   const handleSaveModule = async () => {
@@ -247,6 +337,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
           : t('Policy module updated and validated by OPA.')
       );
       modulesResponse.refresh();
+      void loadModuleVersions(response.module.id);
     } catch (err) {
       setModuleError(
         err instanceof Error
@@ -281,6 +372,41 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
       );
     } finally {
       setModuleDeleting(false);
+    }
+  };
+
+  const handleRollbackModule = async () => {
+    if (!moduleId || !selectedVersionId || !selectedVersionCanRestore) return;
+    setModuleRollbackLoading(true);
+    setModuleError(null);
+    setModuleResult(null);
+    try {
+      const response = await postRequest<
+        OPAPolicyModuleRollbackResponse,
+        { activity_stream_id: number; version: OPAPolicyModuleVersionSide }
+      >(awxAPI`/opa/policy-modules/${moduleId}/rollback/`, {
+        activity_stream_id: Number(selectedVersionId),
+        version: selectedVersionSide,
+      });
+      setModuleDetail(response.module);
+      setModuleId(response.module.id);
+      setModuleText(response.module.raw ?? '');
+      setSelectedModuleId(response.module.id);
+      setModuleResult(
+        t('Policy module restored from Activity Stream #{{activityStreamId}}.', {
+          activityStreamId: response.source_activity_stream_id,
+        })
+      );
+      modulesResponse.refresh();
+      void loadModuleVersions(response.module.id);
+    } catch (err) {
+      setModuleError(
+        err instanceof Error
+          ? err.message
+          : t('Policy module rollback failed. Check OPA settings and version history.')
+      );
+    } finally {
+      setModuleRollbackLoading(false);
     }
   };
 
@@ -569,6 +695,113 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                             </DescriptionListDescription>
                           </DescriptionListGroup>
                         </DescriptionList>
+                      </StackItem>
+                    ) : null}
+                    {moduleDetail ? (
+                      <StackItem>
+                        <Stack hasGutter>
+                          <StackItem>
+                            <FormGroup label={t('Version history')} fieldId="opa-module-version">
+                              {moduleVersionsLoading ? (
+                                <Spinner size="md" />
+                              ) : (
+                                <FormSelect
+                                  id="opa-module-version"
+                                  value={selectedVersionId}
+                                  onChange={(_event, value) => {
+                                    const nextId = String(value);
+                                    const nextVersion = moduleVersions.find(
+                                      (version) => String(version.activity_stream_id) === nextId
+                                    );
+                                    setSelectedVersionId(nextId);
+                                    setSelectedVersionSide(
+                                      nextVersion?.can_restore_before ? 'before' : 'after'
+                                    );
+                                  }}
+                                  isDisabled={moduleVersions.length === 0 || moduleRollbackLoading}
+                                >
+                                  {moduleVersions.length === 0 ? (
+                                    <FormSelectOption
+                                      value=""
+                                      label={t('No audited versions found')}
+                                    />
+                                  ) : null}
+                                  {moduleVersions.map((version) => (
+                                    <FormSelectOption
+                                      key={version.activity_stream_id}
+                                      value={String(version.activity_stream_id)}
+                                      label={formatVersionLabel(version)}
+                                    />
+                                  ))}
+                                </FormSelect>
+                              )}
+                            </FormGroup>
+                          </StackItem>
+                          {moduleVersionError ? (
+                            <StackItem>
+                              <Alert variant="danger" isInline title={moduleVersionError} />
+                            </StackItem>
+                          ) : null}
+                          {selectedVersion ? (
+                            <StackItem>
+                              <DescriptionList isHorizontal isCompact>
+                                <DescriptionListGroup>
+                                  <DescriptionListTerm>{t('Changed by')}</DescriptionListTerm>
+                                  <DescriptionListDescription>
+                                    {selectedVersion.actor?.username ?? t('Unknown')}
+                                  </DescriptionListDescription>
+                                </DescriptionListGroup>
+                                <DescriptionListGroup>
+                                  <DescriptionListTerm>{t('Before checksum')}</DescriptionListTerm>
+                                  <DescriptionListDescription>
+                                    {selectedVersion.before?.sha256 || t('None')}
+                                  </DescriptionListDescription>
+                                </DescriptionListGroup>
+                                <DescriptionListGroup>
+                                  <DescriptionListTerm>{t('After checksum')}</DescriptionListTerm>
+                                  <DescriptionListDescription>
+                                    {selectedVersion.after?.sha256 || t('None')}
+                                  </DescriptionListDescription>
+                                </DescriptionListGroup>
+                              </DescriptionList>
+                            </StackItem>
+                          ) : null}
+                          <StackItem>
+                            <FormGroup label={t('Restore snapshot')} fieldId="opa-module-restore">
+                              <FormSelect
+                                id="opa-module-restore"
+                                value={selectedVersionSide}
+                                onChange={(_event, value) =>
+                                  setSelectedVersionSide(
+                                    String(value) as OPAPolicyModuleVersionSide
+                                  )
+                                }
+                                isDisabled={!selectedVersion || moduleRollbackLoading}
+                              >
+                                <FormSelectOption
+                                  value="before"
+                                  label={t('Before change')}
+                                  isDisabled={!selectedVersion?.can_restore_before}
+                                />
+                                <FormSelectOption
+                                  value="after"
+                                  label={t('After change')}
+                                  isDisabled={!selectedVersion?.can_restore_after}
+                                />
+                              </FormSelect>
+                            </FormGroup>
+                          </StackItem>
+                          <StackItem>
+                            <Button
+                              variant="secondary"
+                              onClick={() => void handleRollbackModule()}
+                              isLoading={moduleRollbackLoading}
+                              isDisabled={moduleRollbackLoading || !selectedVersionCanRestore}
+                            >
+                              {t('Rollback version')}
+                            </Button>
+                          </StackItem>
+                        </Stack>
                       </StackItem>
                     ) : null}
                   </Stack>

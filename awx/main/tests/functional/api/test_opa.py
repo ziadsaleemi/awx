@@ -1,4 +1,5 @@
 import hashlib
+import json
 from unittest import mock
 
 import pytest
@@ -226,6 +227,13 @@ def test_opa_policy_modules_list_live_modules(get, admin_user):
 def test_opa_policy_modules_require_system_admin(get, post, delete, rando):
     get(reverse('api:opa_policy_modules'), user=rando, expect=403)
     post(reverse('api:opa_policy_modules'), data={'policy_id': 'awx/managed', 'policy_text': 'package awx'}, user=rando, expect=403)
+    get(reverse('api:opa_policy_module_versions', kwargs={'policy_id': 'awx/managed'}), user=rando, expect=403)
+    post(
+        reverse('api:opa_policy_module_rollback', kwargs={'policy_id': 'awx/managed'}),
+        data={'activity_stream_id': 1, 'version': 'before'},
+        user=rando,
+        expect=403,
+    )
     delete(reverse('api:opa_policy_module_detail', kwargs={'policy_id': 'awx/managed'}), user=rando, expect=403)
 
 
@@ -948,6 +956,9 @@ def test_opa_policy_module_upsert_writes_live_module_and_audits(post, admin_user
     assert audit.object1 == 'opa_policy_module'
     assert audit.object2 == 'awx/managed'
     assert '"triggered_by": "opa_policy_module_manager"' in audit.changes
+    changes = json.loads(audit.changes)
+    assert changes['before']['raw'] == previous_raw
+    assert changes['after']['raw'] == next_raw
 
 
 @pytest.mark.django_db
@@ -1000,6 +1011,106 @@ def test_opa_policy_module_upsert_surfaces_opa_compile_error(post, admin_user):
     assert response.data['detail'] == 'OPA policy module operation failed.'
     assert response.data['opa_error'] == {'code': 'invalid_parameter', 'message': 'rego_parse_error'}
     assert ActivityStream.objects.filter(object1='opa_policy_module', object2='awx/managed').count() == 1
+
+
+@pytest.mark.django_db
+def test_opa_policy_module_versions_list_redacts_raw_rego(get, admin_user):
+    previous_raw = 'package awx\nallow := false\n'
+    next_raw = 'package awx\nallow := true\n'
+    entry = ActivityStream.objects.create(
+        operation='update',
+        object1='opa_policy_module',
+        object2='awx/managed',
+        actor=admin_user,
+        changes=json.dumps(
+            {
+                'triggered_by': 'opa_policy_module_manager',
+                'source': 'opa_policy_modules',
+                'policy_id': 'awx/managed',
+                'before': {'id': 'awx/managed', 'raw': previous_raw, 'ast': {}},
+                'after': {'id': 'awx/managed', 'raw': next_raw, 'ast': {}},
+            }
+        ),
+    )
+    entry.user.add(admin_user)
+
+    response = get(reverse('api:opa_policy_module_versions', kwargs={'policy_id': 'awx/managed'}), user=admin_user, expect=200)
+
+    assert response.data['policy_id'] == 'awx/managed'
+    assert response.data['count'] == 1
+    version = response.data['versions'][0]
+    assert version['activity_stream_id'] == entry.pk
+    assert version['operation'] == 'update'
+    assert version['actor']['username'] == admin_user.username
+    assert version['before']['sha256'] == hashlib.sha256(previous_raw.encode()).hexdigest()
+    assert version['after']['sha256'] == hashlib.sha256(next_raw.encode()).hexdigest()
+    assert 'raw' not in version['before']
+    assert 'raw' not in version['after']
+    assert version['can_restore_before'] is True
+    assert version['can_restore_after'] is True
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_rollback_restores_audited_raw_rego(post, admin_user):
+    previous_raw = 'package awx\nallow := false\n'
+    live_raw = 'package awx\nallow := true\n'
+    entry = ActivityStream.objects.create(
+        operation='update',
+        object1='opa_policy_module',
+        object2='awx/managed',
+        actor=admin_user,
+        changes=json.dumps(
+            {
+                'triggered_by': 'opa_policy_module_manager',
+                'source': 'opa_policy_modules',
+                'policy_id': 'awx/managed',
+                'before': {'id': 'awx/managed', 'raw': previous_raw, 'ast': {}},
+                'after': {'id': 'awx/managed', 'raw': live_raw, 'ast': {}},
+            }
+        ),
+    )
+    entry.user.add(admin_user)
+    get_response = mock.Mock()
+    get_response.json.return_value = {'result': {'id': 'awx/managed', 'raw': live_raw, 'ast': {}}}
+    get_response.raise_for_status.return_value = None
+    put_response = mock.Mock()
+    put_response.status_code = 200
+    put_response.content = b'{}'
+    put_response.json.return_value = {}
+    put_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.put', return_value=put_response
+    ) as requests_put:
+        response = post(
+            reverse('api:opa_policy_module_rollback', kwargs={'policy_id': 'awx/managed'}),
+            data={'activity_stream_id': entry.pk, 'version': 'before'},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['version'] == 'before'
+    assert response.data['source_activity_stream_id'] == entry.pk
+    assert response.data['module']['raw'] == previous_raw
+    assert response.data['previous_sha256'] == hashlib.sha256(live_raw.encode()).hexdigest()
+    assert response.data['restored_sha256'] == hashlib.sha256(previous_raw.encode()).hexdigest()
+    requests_put.assert_called_once_with(
+        'http://opa.example.com:8181/v1/policies/awx/managed',
+        data=previous_raw,
+        timeout=2.5,
+        headers={'Content-Type': 'text/plain'},
+        cert=None,
+        verify=False,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = json.loads(audit.changes)
+    assert audit.object1 == 'opa_policy_module'
+    assert audit.object2 == 'awx/managed'
+    assert changes['source'] == 'opa_policy_module_rollback'
+    assert changes['rollback_source_activity_stream_id'] == entry.pk
+    assert changes['rollback_version'] == 'before'
 
 
 @pytest.mark.django_db
