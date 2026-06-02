@@ -199,7 +199,7 @@ export function ExternalAutomationSmokePanel(props?: {
   };
 
   return (
-    <PageSection isWidthLimited data-cy="external-automation-smoke">
+    <PageSection data-cy="external-automation-smoke">
       <Card isFlat>
         <CardHeader>
           <CardTitle>{title}</CardTitle>

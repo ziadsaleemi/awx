@@ -1009,7 +1009,7 @@ export function GatekeeperPolicyManager() {
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
   return (
-    <PageSection isWidthLimited data-cy="gatekeeper-policy-manager">
+    <PageSection data-cy="gatekeeper-policy-manager">
       {isLoading || !data ? (
         <Spinner size="md" />
       ) : (
@@ -1048,7 +1048,7 @@ export function GatekeeperPolicyManager() {
           ) : null}
           <StackItem>
             <Grid hasGutter>
-              <GridItem span={3}>
+              <GridItem sm={12} md={4} xl={3}>
                 <FormGroup label={t('Context')} fieldId="gatekeeper-context">
                   <FormSelect
                     id="gatekeeper-context"
@@ -1073,7 +1073,7 @@ export function GatekeeperPolicyManager() {
                   </FormSelect>
                 </FormGroup>
               </GridItem>
-              <GridItem span={9}>
+              <GridItem sm={12} md={8} xl={9} style={{ alignSelf: 'end' }}>
                 <Button
                   variant="secondary"
                   icon={<SyncAltIcon />}
@@ -1159,7 +1159,7 @@ export function GatekeeperPolicyManager() {
                   ) : null}
                   <StackItem>
                     <Grid hasGutter>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={6} xl={3}>
                         <FormGroup label={t('Apply mode')} fieldId="gatekeeper-apply-mode">
                           <FormSelect
                             id="gatekeeper-apply-mode"
@@ -1172,7 +1172,7 @@ export function GatekeeperPolicyManager() {
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={6} xl={3}>
                         <FormGroup label={t('Strategy')} fieldId="gatekeeper-apply-strategy">
                           <FormSelect
                             id="gatekeeper-apply-strategy"
@@ -1184,7 +1184,7 @@ export function GatekeeperPolicyManager() {
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
-                      <GridItem span={4}>
+                      <GridItem sm={12} md={6} xl={4}>
                         <FormGroup label={t('Field manager')} fieldId="gatekeeper-field-manager">
                           <TextInput
                             id="gatekeeper-field-manager"
@@ -1194,7 +1194,7 @@ export function GatekeeperPolicyManager() {
                           />
                         </FormGroup>
                       </GridItem>
-                      <GridItem span={2}>
+                      <GridItem sm={12} md={6} xl={2}>
                         <FormGroup label={t('Conflicts')} fieldId="gatekeeper-force-conflicts">
                           <Checkbox
                             id="gatekeeper-force-conflicts"
@@ -1279,7 +1279,7 @@ export function GatekeeperPolicyManager() {
                   ) : null}
                   <StackItem>
                     <Grid hasGutter>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={4} xl={3}>
                         <FormGroup label={t('Delete mode')} fieldId="gatekeeper-delete-mode">
                           <FormSelect
                             id="gatekeeper-delete-mode"
@@ -1292,7 +1292,7 @@ export function GatekeeperPolicyManager() {
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
-                      <GridItem span={9}>
+                      <GridItem sm={12} md={8} xl={9}>
                         <FormGroup label={t('Delete target')} fieldId="gatekeeper-delete-target">
                           <Stack hasGutter>
                             <StackItem>
@@ -1385,7 +1385,7 @@ export function GatekeeperPolicyManager() {
                   ) : null}
                   <StackItem>
                     <Grid hasGutter>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={4} xl={3}>
                         <FormGroup label={t('Rollback mode')} fieldId="gatekeeper-rollback-mode">
                           <FormSelect
                             id="gatekeeper-rollback-mode"
@@ -1510,7 +1510,7 @@ export function GatekeeperPolicyManager() {
           </StackItem>
           <StackItem>
             <Grid hasGutter>
-              <GridItem span={6}>
+              <GridItem sm={12} xl={6}>
                 <Card isFlat>
                   <CardHeader>
                     <CardTitle>{t('Cluster')}</CardTitle>
@@ -1539,7 +1539,7 @@ export function GatekeeperPolicyManager() {
                   </CardBody>
                 </Card>
               </GridItem>
-              <GridItem span={6}>
+              <GridItem sm={12} xl={6}>
                 <Card isFlat>
                   <CardHeader>
                     <CardTitle>{t('Inventory')}</CardTitle>
@@ -1714,29 +1714,36 @@ export function GatekeeperPolicyManager() {
                 <Stack hasGutter>
                   <StackItem>
                     <Grid hasGutter>
-                      <GridItem span={6}>
-                        <SearchInput
-                          placeholder={t('Search violations')}
-                          value={violationFilter}
-                          onChange={(_event, value) => {
-                            setViolationFilter(value);
-                            setViolationPage(1);
-                            syncGatekeeperRoute(
-                              { detail: selectedDetail, violationSearch: value, violationPage: 1 },
-                              true
-                            );
-                          }}
-                          onClear={() => {
-                            setViolationFilter('');
-                            setViolationPage(1);
-                            syncGatekeeperRoute(
-                              { detail: selectedDetail, violationSearch: '', violationPage: 1 },
-                              true
-                            );
-                          }}
-                        />
+                      <GridItem sm={12} lg={6}>
+                        <FormGroup label={t('Search')} fieldId="gatekeeper-violation-search">
+                          <SearchInput
+                            id="gatekeeper-violation-search"
+                            placeholder={t('Search violations')}
+                            value={violationFilter}
+                            onChange={(_event, value) => {
+                              setViolationFilter(value);
+                              setViolationPage(1);
+                              syncGatekeeperRoute(
+                                {
+                                  detail: selectedDetail,
+                                  violationSearch: value,
+                                  violationPage: 1,
+                                },
+                                true
+                              );
+                            }}
+                            onClear={() => {
+                              setViolationFilter('');
+                              setViolationPage(1);
+                              syncGatekeeperRoute(
+                                { detail: selectedDetail, violationSearch: '', violationPage: 1 },
+                                true
+                              );
+                            }}
+                          />
+                        </FormGroup>
                       </GridItem>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={6} lg={3}>
                         <FormGroup label={t('Sort')} fieldId="gatekeeper-violation-sort">
                           <FormSelect
                             id="gatekeeper-violation-sort"
@@ -1762,7 +1769,7 @@ export function GatekeeperPolicyManager() {
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
-                      <GridItem span={3}>
+                      <GridItem sm={12} md={6} lg={3}>
                         <FormGroup label={t('Per page')} fieldId="gatekeeper-violation-limit">
                           <FormSelect
                             id="gatekeeper-violation-limit"

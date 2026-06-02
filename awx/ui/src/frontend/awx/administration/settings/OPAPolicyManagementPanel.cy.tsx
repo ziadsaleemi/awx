@@ -87,6 +87,9 @@ describe('OPAPolicyManagementPanel', () => {
     );
 
     cy.wait(['@modules', '@moduleDetail', '@versions']);
+    cy.getByDataCy('opa-policy-management')
+      .should('be.visible')
+      .and('not.have.class', 'pf-m-limit-width');
     cy.getByDataCy('opa-module-selected-version-audit-link')
       .should('be.visible')
       .and('have.attr', 'href', '/activity-stream?id=77');

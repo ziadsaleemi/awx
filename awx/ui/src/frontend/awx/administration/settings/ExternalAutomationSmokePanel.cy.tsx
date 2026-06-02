@@ -67,6 +67,9 @@ describe('ExternalAutomationSmokePanel', () => {
       </SeedNavigation>
     );
 
+    cy.getByDataCy('external-automation-smoke')
+      .should('be.visible')
+      .and('not.have.class', 'pf-m-limit-width');
     cy.get('#external-automation-check-opa').should('be.checked');
     cy.get('#external-automation-check-gatekeeper').should('be.checked');
     cy.getByDataCy('external-automation-gatekeeper-context').type('prod');

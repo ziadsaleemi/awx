@@ -103,6 +103,18 @@ function mountGatekeeper(response = gatekeeperResponse) {
 }
 
 describe('GatekeeperPolicyManager', () => {
+  it('uses full-width policy layout with aligned violation filters', () => {
+    mountGatekeeper();
+
+    cy.get('[data-cy="gatekeeper-policy-manager"]')
+      .should('exist')
+      .and('not.have.class', 'pf-m-limit-width');
+    cy.contains('label', 'Search').should('exist');
+    cy.get('#gatekeeper-violation-search').should('exist');
+    cy.contains('label', 'Sort').should('exist');
+    cy.contains('label', 'Per page').should('exist');
+  });
+
   it('links the unconfigured Gatekeeper state to Policy Connections settings', () => {
     mountGatekeeper({
       ...gatekeeperResponse,

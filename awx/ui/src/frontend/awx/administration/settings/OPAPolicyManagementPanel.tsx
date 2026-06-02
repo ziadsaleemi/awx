@@ -498,7 +498,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   };
 
   return (
-    <PageSection isWidthLimited data-cy="opa-policy-management">
+    <PageSection data-cy="opa-policy-management">
       <Stack hasGutter>
         {showStatus ? (
           <StackItem>
