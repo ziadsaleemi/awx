@@ -239,6 +239,29 @@ register(
 )
 
 register(
+    'EDA_USERNAME',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('EDA Controller username'),
+    help_text=_('Username used for basic authentication when EDA Controller API token is not set.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_PASSWORD',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('EDA Controller password'),
+    help_text=_('Password used for basic authentication when EDA Controller API token is not set.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
     'EDA_VERIFY_SSL',
     field_class=fields.BooleanField,
     default=True,

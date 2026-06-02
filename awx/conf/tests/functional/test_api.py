@@ -68,6 +68,8 @@ def test_eda_settings_category_is_registered(api_request):
     assert response.status_code == 200
     assert response.data['EDA_SERVER_URL'] == ''
     assert response.data['EDA_AUTH_TOKEN'] == ''
+    assert response.data['EDA_USERNAME'] == ''
+    assert response.data['EDA_PASSWORD'] == ''
     assert response.data['EDA_VERIFY_SSL'] is True
     assert response.data['EDA_REQUEST_TIMEOUT'] == 5
     assert response.data['EDA_ACTIVATIONS_API_PATH'] == '/api/eda/v1/activations/'

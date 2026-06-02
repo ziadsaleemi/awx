@@ -100,7 +100,39 @@ def test_eda_activations_are_read_from_controller(get, admin_user, mocker):
     request_mock.assert_called_once()
     assert request_mock.call_args.args[0] == 'GET'
     assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
+    assert request_mock.call_args.kwargs['auth'] is None
     assert request_mock.call_args.kwargs['verify'] is False
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='', EDA_USERNAME='admin', EDA_PASSWORD='eda-pass')
+def test_eda_activations_support_basic_auth(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 0, 'next': None, 'previous': None, 'results': []}),
+    )
+
+    response = get(reverse('api:eda_activation_list'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['count'] == 0
+    assert request_mock.call_args.kwargs['auth'] == ('admin', 'eda-pass')
+    assert 'Authorization' not in request_mock.call_args.kwargs['headers']
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_USERNAME='admin', EDA_PASSWORD='eda-pass')
+def test_eda_bearer_token_takes_precedence_over_basic_auth(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 0, 'next': None, 'previous': None, 'results': []}),
+    )
+
+    response = get(reverse('api:eda_activation_list'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
+    assert request_mock.call_args.kwargs['auth'] is None
 
 
 @pytest.mark.django_db

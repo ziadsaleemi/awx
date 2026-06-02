@@ -101,6 +101,8 @@ class EDAControllerClient:
         self.controller_url = configured_url()
         self.status = connection_status(self.controller_url)
         self.auth_token = getattr(settings, 'EDA_AUTH_TOKEN', '') or ''
+        self.username = getattr(settings, 'EDA_USERNAME', '') or ''
+        self.password = getattr(settings, 'EDA_PASSWORD', '') or ''
         self.verify_ssl = bool(getattr(settings, 'EDA_VERIFY_SSL', True))
         self.timeout = max(int(getattr(settings, 'EDA_REQUEST_TIMEOUT', 5) or 5), 1)
         self.activations_path = (getattr(settings, 'EDA_ACTIVATIONS_API_PATH', '') or '/api/eda/v1/activations/').strip() or '/api/eda/v1/activations/'
@@ -122,13 +124,20 @@ class EDAControllerClient:
 
     @property
     def auth_configured(self):
-        return bool(self.auth_token)
+        return bool(self.auth_token or (self.username and self.password))
 
     def headers(self):
         headers = {'Accept': 'application/json'}
         if self.auth_token:
             headers['Authorization'] = f'Bearer {self.auth_token}'
         return headers
+
+    def auth(self):
+        if self.auth_token:
+            return None
+        if self.username and self.password:
+            return (self.username, self.password)
+        return None
 
     def _url(self, path):
         if path.startswith('http://') or path.startswith('https://'):
@@ -143,6 +152,7 @@ class EDAControllerClient:
                 method,
                 self._url(path),
                 headers=self.headers(),
+                auth=self.auth(),
                 params=params,
                 json=payload,
                 timeout=self.timeout,

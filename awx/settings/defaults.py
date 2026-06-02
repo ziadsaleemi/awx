@@ -202,6 +202,8 @@ UI_LIVE_UPDATES_ENABLED = True
 # Optional Event-Driven Ansible controller integration.
 EDA_SERVER_URL = ''
 EDA_AUTH_TOKEN = ''
+EDA_USERNAME = ''
+EDA_PASSWORD = ''
 EDA_VERIFY_SSL = True
 EDA_REQUEST_TIMEOUT = 5
 EDA_ACTIVATIONS_API_PATH = '/api/eda/v1/activations/'
