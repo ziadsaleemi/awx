@@ -382,6 +382,49 @@ def test_ai_resource_action_apply_creates_inventory_and_audits_relation(post, ad
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_apply_marks_destructive_human_approval_for_opa(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI OPA Source', organization=organization)
+    policy_inputs = []
+
+    def allow_when_human_approved(policy_path, input_data):
+        policy_inputs.append(input_data)
+        assert policy_path == 'awx/ai_action/allow'
+        return input_data['human_approved']
+
+    plan = {
+        'name': 'Rename inventory',
+        'operations': [
+            {
+                'id': 'rename-inventory',
+                'operation': 'update',
+                'resource_type': 'inventory',
+                'object_id': inventory.pk,
+                'data': {'name': 'AI OPA Renamed'},
+            }
+        ],
+    }
+
+    with mock.patch('awx.api.views.ai.check_opa_policy', side_effect=allow_when_human_approved):
+        denied = post(
+            reverse('api:ai_resource_actions'),
+            data={'mode': 'apply', 'human_approved': False, 'plan': plan},
+            user=admin_user,
+            expect=400,
+        )
+        allowed = post(reverse('api:ai_resource_actions'), data={'mode': 'apply', 'plan': plan}, user=admin_user, expect=201)
+
+    inventory.refresh_from_db()
+    assert denied.data['operations'][0]['errors']['opa']
+    assert allowed.data['can_apply'] is True
+    assert inventory.name == 'AI OPA Renamed'
+    assert policy_inputs[0]['source'] == 'api'
+    assert policy_inputs[0]['mode'] == 'apply'
+    assert policy_inputs[0]['destructive'] is True
+    assert policy_inputs[0]['human_approved'] is False
+    assert policy_inputs[1]['human_approved'] is True
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_creates_inventory_source_and_audits_relation(post, admin_user, organization):
     inventory = Inventory.objects.create(name='AI Source Inventory', organization=organization)
 

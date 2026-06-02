@@ -362,6 +362,71 @@ def test_launch_ai_task_node_waits_for_resource_action_approval(post, admin_user
 
 
 @pytest.mark.django_db
+def test_approved_ai_task_resource_action_sends_human_approval_to_opa(post, admin_user, organization, controlplane_instance_group, mocker):
+    inventory = Inventory.objects.create(name='AI OPA Workflow Source', organization=organization)
+    policy_inputs = []
+
+    def deny_apply_without_human_approval(policy_path, input_data):
+        policy_inputs.append(input_data)
+        assert policy_path == 'awx/ai_action/allow'
+        if input_data['mode'] == 'apply' and input_data['destructive']:
+            return input_data['human_approved']
+        return True
+
+    mocker.patch('awx.api.views.ai.check_opa_policy', side_effect=deny_apply_without_human_approval)
+    mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"name":"Rename inventory","operations":[{"id":"inv","operation":"update","resource_type":"inventory","object_id":%s,"data":{"name":"AI OPA Workflow Renamed"}}]}'
+            % inventory.pk,
+            'plan': {
+                'name': 'Rename inventory',
+                'operations': [
+                    {
+                        'id': 'inv',
+                        'operation': 'update',
+                        'resource_type': 'inventory',
+                        'object_id': inventory.pk,
+                        'data': {'name': 'AI OPA Workflow Renamed'},
+                    }
+                ],
+            },
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow opa approval')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Rename inventory',
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+    assert node.ai_task_status == 'awaiting_approval'
+
+    post(reverse('api:workflow_job_node_apply_ai_plan', kwargs={'pk': node.pk}), user=admin_user, expect=201)
+
+    inventory.refresh_from_db()
+    apply_input = next(input_data for input_data in policy_inputs if input_data['mode'] == 'apply')
+    assert inventory.name == 'AI OPA Workflow Renamed'
+    assert apply_input['source'] == 'workflow_ai_task'
+    assert apply_input['destructive'] is True
+    assert apply_input['human_approved'] is True
+    assert apply_input['approval']['workflow_job_node'] == node.pk
+    assert apply_input['approval']['approved_by'] == admin_user.pk
+
+
+@pytest.mark.django_db
 def test_launch_ai_task_node_auto_applies_resource_action_when_approval_disabled(post, admin_user, organization, controlplane_instance_group, mocker):
     mocker.patch(
         'awx.main.models.workflow.run_ai_workflow_task',

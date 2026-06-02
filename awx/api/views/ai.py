@@ -85,6 +85,8 @@ _AI_PROJECT_FILE_ALLOWED_SUFFIXES = {'.cfg', '.ini', '.j2', '.json', '.md', '.to
 _AI_PROJECT_FILE_BLOCKED_PARTS = {'.git', '.hg', '.svn', '__pycache__'}
 _AI_PROJECT_LOCAL_PATH_MAX_LENGTH = 128
 _AI_PROJECT_WORKSPACE_FLAGS = ('create_local_path', 'create_workspace', 'create_project_workspace')
+_AI_DESTRUCTIVE_OPERATIONS = {'delete', 'detach', 'update'}
+_AI_PRIVILEGED_RESOURCE_TYPES = {'credential_reference', 'role_assignment'}
 
 _CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
     'input_inventories',
@@ -1426,6 +1428,66 @@ def _redact_sensitive(value):
     return value
 
 
+def _ai_policy_context(context: dict | None) -> dict:
+    context = context if isinstance(context, dict) else {}
+    approval = context.get('approval') if isinstance(context.get('approval'), dict) else {}
+    return {
+        'source': str(context.get('source') or 'api'),
+        'mode': str(context.get('mode') or ''),
+        'human_approved': bool(context.get('human_approved')),
+        'approval_required': bool(context.get('approval_required')),
+        'approval': _redact_sensitive(_json_safe(approval)),
+    }
+
+
+def _ai_operation_is_destructive(operation: dict, resource_type: str | None, action: str | None, data: dict | None = None) -> bool:
+    data = data if isinstance(data, dict) else {}
+    if action in _AI_DESTRUCTIVE_OPERATIONS:
+        return True
+    if resource_type == 'project_file' and data.get('overwrite'):
+        return True
+    return False
+
+
+def _ai_action_opa_input(
+    request,
+    operation: dict,
+    context: dict | None = None,
+    *,
+    resource_type: str | None = None,
+    action: str | None = None,
+    object_id=None,
+    target_resource_type: str | None = None,
+    target_id=None,
+    data: dict | None = None,
+    extra: dict | None = None,
+) -> dict:
+    policy_context = _ai_policy_context(context)
+    resource_type = resource_type or operation.get('resource_type')
+    action = action or operation.get('operation')
+    data = _redact_sensitive(_json_safe(data if data is not None else operation.get('data') or {}))
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'source': policy_context['source'],
+        'mode': policy_context['mode'],
+        'human_approved': policy_context['human_approved'],
+        'approval_required': policy_context['approval_required'],
+        'approval': policy_context['approval'],
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': resource_type,
+        'object_id': object_id,
+        'target_resource_type': target_resource_type,
+        'target_id': target_id,
+        'destructive': _ai_operation_is_destructive(operation, resource_type, action, data),
+        'privileged': resource_type in _AI_PRIVILEGED_RESOURCE_TYPES,
+        'data': data,
+    }
+    if extra:
+        opa_input.update(_redact_sensitive(_json_safe(extra)))
+    return opa_input
+
+
 def _normalize_resource_type(resource_type: str | None) -> str | None:
     if not isinstance(resource_type, str):
         return None
@@ -2034,7 +2096,7 @@ def _resolve_ai_project_file_path(project, relative_path: str) -> tuple[Path | N
     return base_path, target_path, None
 
 
-def _validate_ai_project_file_operation(request, operation: dict) -> dict:
+def _validate_ai_project_file_operation(request, operation: dict, context: dict | None = None) -> dict:
     action = operation.get('operation')
     payload = _project_file_payload(operation)
     overwrite = _coerce_ai_bool(payload['overwrite'], default=(action == 'update'))
@@ -2102,14 +2164,15 @@ def _validate_ai_project_file_operation(request, operation: dict) -> dict:
         result['errors'] = {'path': [_('Project file already exists; use update or set overwrite=true.')]}
         return result
 
-    opa_input = {
-        'triggered_by': 'ai_resource_action',
-        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
-        'operation': action,
-        'resource_type': 'project_file',
-        'object_id': project.pk,
-        'data': {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
-    }
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='project_file',
+        action=action,
+        object_id=project.pk,
+        data={'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
+    )
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
         return result
@@ -2531,7 +2594,7 @@ def _actor_summary(actor_type: str, actor) -> dict:
     }
 
 
-def _validate_ai_credential_reference_operation(request, operation: dict) -> dict:
+def _validate_ai_credential_reference_operation(request, operation: dict, context: dict | None = None) -> dict:
     action = operation.get('operation')
     payload = _credential_reference_payload(operation)
     result = {
@@ -2588,15 +2651,17 @@ def _validate_ai_credential_reference_operation(request, operation: dict) -> dic
         result['errors'] = _json_safe(relation_errors)
         return result
 
-    opa_input = {
-        'triggered_by': 'ai_resource_action',
-        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
-        'operation': action,
-        'resource_type': 'credential_reference',
-        'object_id': payload['target_id'],
-        'target_resource_type': payload['target_resource_type'],
-        'credential_id': payload['credential_id'],
-    }
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='credential_reference',
+        action=action,
+        object_id=payload['target_id'],
+        target_resource_type=payload['target_resource_type'],
+        target_id=payload['target_id'],
+        extra={'credential_id': payload['credential_id']},
+    )
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
         return result
@@ -2610,7 +2675,7 @@ def _validate_ai_credential_reference_operation(request, operation: dict) -> dic
     return result
 
 
-def _validate_ai_role_assignment_operation(request, operation: dict) -> dict:
+def _validate_ai_role_assignment_operation(request, operation: dict, context: dict | None = None) -> dict:
     action = operation.get('operation')
     payload = _role_assignment_payload(operation)
     result = {
@@ -2717,18 +2782,17 @@ def _validate_ai_role_assignment_operation(request, operation: dict) -> dict:
         result['errors'] = {'permission': [_('You do not have permission to apply this role assignment operation.')]}
         return result
 
-    opa_input = {
-        'triggered_by': 'ai_resource_action',
-        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
-        'operation': action,
-        'resource_type': 'role_assignment',
-        'object_id': payload['target_id'],
-        'target_resource_type': payload['target_resource_type'],
-        'role_id': role.pk,
-        'role_field': role.role_field,
-        'actor_type': actor_type,
-        'actor_id': actor.pk,
-    }
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='role_assignment',
+        action=action,
+        object_id=payload['target_id'],
+        target_resource_type=payload['target_resource_type'],
+        target_id=payload['target_id'],
+        extra={'role_id': role.pk, 'role_field': role.role_field, 'actor_type': actor_type, 'actor_id': actor.pk},
+    )
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
         return result
@@ -2750,7 +2814,7 @@ def _validate_ai_role_assignment_operation(request, operation: dict) -> dict:
     return result
 
 
-def _validate_ai_survey_spec_operation(request, operation: dict) -> dict:
+def _validate_ai_survey_spec_operation(request, operation: dict, context: dict | None = None) -> dict:
     action = operation.get('operation')
     payload = _survey_spec_payload(operation)
     result = {
@@ -2801,15 +2865,17 @@ def _validate_ai_survey_spec_operation(request, operation: dict) -> dict:
         result['errors'] = {'permission': [_('You do not have permission to apply this survey spec operation.')]}
         return result
 
-    opa_input = {
-        'triggered_by': 'ai_resource_action',
-        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
-        'operation': action,
-        'resource_type': 'survey_spec',
-        'object_id': target.pk,
-        'target_resource_type': payload['target_resource_type'],
-        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
-    }
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='survey_spec',
+        action=action,
+        object_id=target.pk,
+        target_resource_type=payload['target_resource_type'],
+        target_id=target.pk,
+        data=operation.get('data') or {},
+    )
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
         return result
@@ -2851,13 +2917,13 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
     }
 
     if resource_type == 'credential_reference':
-        return _validate_ai_credential_reference_operation(request, operation)
+        return _validate_ai_credential_reference_operation(request, operation, context=context)
     if resource_type == 'role_assignment':
-        return _validate_ai_role_assignment_operation(request, operation)
+        return _validate_ai_role_assignment_operation(request, operation, context=context)
     if resource_type == 'survey_spec':
-        return _validate_ai_survey_spec_operation(request, operation)
+        return _validate_ai_survey_spec_operation(request, operation, context=context)
     if resource_type == 'project_file':
-        return _validate_ai_project_file_operation(request, operation)
+        return _validate_ai_project_file_operation(request, operation, context=context)
 
     if resource_type not in _AI_RESOURCE_TYPES:
         result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
@@ -2936,14 +3002,15 @@ def _validate_ai_operation(request, operation: dict, context: dict | None = None
         result['errors'] = {'permission': [_('You do not have permission to apply this operation.')]}
         return result
 
-    opa_input = {
-        'triggered_by': 'ai_resource_action',
-        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
-        'operation': action,
-        'resource_type': resource_type,
-        'object_id': object_id,
-        'data': _redact_sensitive(_json_safe(serializer_data)),
-    }
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type=resource_type,
+        action=action,
+        object_id=object_id,
+        data=serializer_data,
+    )
     if not check_opa_policy('awx/ai_action/allow', opa_input):
         result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
         return result
@@ -3281,16 +3348,16 @@ def _ai_plan_uses_operation_references(operations: list) -> bool:
     return False
 
 
-def _validate_ai_operations_for_preview(request, operations: list) -> list:
-    context = {'mode': 'preview', 'workspace_rollbacks': []}
+def _validate_ai_operations_for_preview(request, operations: list, policy_context: dict | None = None) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': [], **(policy_context or {})}
     try:
         return [_validate_ai_operation(request, operation, context=context) for operation in operations]
     finally:
         _rollback_ai_project_workspaces(context)
 
 
-def _simulate_ai_operations_for_preview(request, operations: list) -> list:
-    context = {'mode': 'preview', 'workspace_rollbacks': []}
+def _simulate_ai_operations_for_preview(request, operations: list, policy_context: dict | None = None) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': [], **(policy_context or {})}
     references = {}
     validated_operations = []
     try:
@@ -3328,8 +3395,8 @@ def _simulate_ai_operations_for_preview(request, operations: list) -> list:
     return validated_operations
 
 
-def _apply_ai_operations_sequentially(request, operations: list) -> tuple[list, bool]:
-    context = {'mode': 'apply', 'workspace_rollbacks': []}
+def _apply_ai_operations_sequentially(request, operations: list, policy_context: dict | None = None) -> tuple[list, bool]:
+    context = {'mode': 'apply', 'workspace_rollbacks': [], **(policy_context or {})}
     references = {}
     applied_operations = []
     try:
@@ -3404,14 +3471,20 @@ class AIResourceActionView(APIView):
         except (ValueError, json.JSONDecodeError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        policy_context = {
+            'source': 'api',
+            'approval_required': mode == 'apply',
+            'human_approved': _coerce_ai_bool(request.data.get('human_approved'), default=(mode == 'apply')),
+            'approval': {'method': 'api_resource_action_apply'} if mode == 'apply' else {},
+        }
         if mode == 'preview':
             if _ai_plan_uses_operation_references(plan['operations']):
-                operations = _simulate_ai_operations_for_preview(request, plan['operations'])
+                operations = _simulate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
             else:
-                operations = _validate_ai_operations_for_preview(request, plan['operations'])
+                operations = _validate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
             can_apply = all(operation.get('valid') for operation in operations)
         else:
-            operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+            operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
 
         if mode == 'apply' and not can_apply:
             audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model)

@@ -910,14 +910,20 @@ def _handle_resource_action(request, params: dict, mode: str):
     except (ValueError, json.JSONDecodeError) as exc:
         return {'error': str(exc)}
 
+    resource_policy_context = {
+        'source': 'mcp',
+        'approval_required': mode == 'apply',
+        'human_approved': False,
+        'approval': {'method': 'mcp_resource_action', 'tool': f'{mode}_resource_action'},
+    }
     if mode == 'preview':
         if _ai_plan_uses_operation_references(plan['operations']):
-            operations = _simulate_ai_operations_for_preview(request, plan['operations'])
+            operations = _simulate_ai_operations_for_preview(request, plan['operations'], policy_context=resource_policy_context)
         else:
-            operations = _validate_ai_operations_for_preview(request, plan['operations'])
+            operations = _validate_ai_operations_for_preview(request, plan['operations'], policy_context=resource_policy_context)
         can_apply = all(operation.get('valid') for operation in operations)
     else:
-        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=resource_policy_context)
 
     public_operations = [_public_ai_operation_result(operation) for operation in operations]
     audit_entry = _audit_ai_resource_action(request, mode, plan, public_operations, provider=provider, model=model)

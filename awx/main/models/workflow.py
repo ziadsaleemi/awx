@@ -615,10 +615,20 @@ class WorkflowJobNode(WorkflowNodeBase):
         )
 
         request = _ai_resource_action_request(self.workflow_job.created_by)
+        policy_context = {
+            'source': 'workflow_ai_task',
+            'approval_required': self.ai_task_approval_required,
+            'human_approved': False,
+            'approval': {
+                'workflow_job_node': self.pk,
+                'workflow_job': self.workflow_job_id,
+                'workflow_job_template': getattr(self.workflow_job, 'workflow_job_template_id', None),
+            },
+        }
         operations = (
-            _simulate_ai_operations_for_preview(request, plan['operations'])
+            _simulate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
             if _ai_plan_uses_operation_references(plan['operations'])
-            else _validate_ai_operations_for_preview(request, plan['operations'])
+            else _validate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
         )
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
         audit_entry = _audit_ai_resource_action(
@@ -637,7 +647,7 @@ class WorkflowJobNode(WorkflowNodeBase):
             'audit': {'activity_stream_id': audit_entry.pk},
         }
 
-    def apply_ai_resource_action_plan(self, plan=None, provider_result=None, user=None):
+    def apply_ai_resource_action_plan(self, plan=None, provider_result=None, user=None, human_approved=False):
         from awx.api.views.ai import (
             _apply_ai_operations_sequentially,
             _audit_ai_resource_action,
@@ -650,7 +660,18 @@ class WorkflowJobNode(WorkflowNodeBase):
         if not plan:
             raise AIWorkflowTaskError(_('AI task result does not contain an applicable resource action plan.'))
         request = _ai_resource_action_request(user)
-        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+        policy_context = {
+            'source': 'workflow_ai_task',
+            'approval_required': self.ai_task_approval_required,
+            'human_approved': human_approved,
+            'approval': {
+                'workflow_job_node': self.pk,
+                'workflow_job': self.workflow_job_id,
+                'workflow_job_template': getattr(self.workflow_job, 'workflow_job_template_id', None),
+                'approved_by': getattr(user, 'pk', None) if human_approved else None,
+            },
+        }
+        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
         public_operations = [_public_ai_operation_result(operation) for operation in operations]
         provider_result = provider_result or self.ai_task_result
         audit_entry = _audit_ai_resource_action(
@@ -670,7 +691,7 @@ class WorkflowJobNode(WorkflowNodeBase):
         }
 
     def approve_ai_resource_action_plan(self, user):
-        resource_action = self.apply_ai_resource_action_plan(user=user)
+        resource_action = self.apply_ai_resource_action_plan(user=user, human_approved=True)
         ai_status = 'applied' if resource_action['can_apply'] else 'failed'
         workflow_status = 'successful' if resource_action['can_apply'] else 'failed'
         error = '' if resource_action['can_apply'] else _('AI resource action plan failed to apply.')
