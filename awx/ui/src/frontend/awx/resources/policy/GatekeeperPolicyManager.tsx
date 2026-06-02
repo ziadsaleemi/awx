@@ -35,6 +35,7 @@ import {
 } from '@patternfly/react-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
@@ -258,6 +259,50 @@ type GatekeeperDetail =
   | { type: 'constraint'; kind: string; name: string }
   | { type: 'violation'; key: string }
   | { type: 'config'; name: string };
+
+function gatekeeperDetailFromSearchParams(params: URLSearchParams): GatekeeperDetail | undefined {
+  const type = params.get('detail') || '';
+  if (type === 'template' && params.get('name')) {
+    return { type, name: params.get('name') || '' };
+  }
+  if (type === 'constraint' && params.get('kind') && params.get('name')) {
+    return { type, kind: params.get('kind') || '', name: params.get('name') || '' };
+  }
+  if (type === 'violation' && params.get('key')) {
+    return { type, key: params.get('key') || '' };
+  }
+  if (type === 'config' && params.get('name')) {
+    return { type, name: params.get('name') || '' };
+  }
+  return undefined;
+}
+
+function gatekeeperDetailKey(detail?: GatekeeperDetail) {
+  if (!detail) return '';
+  if (detail.type === 'constraint') return `${detail.type}/${detail.kind}/${detail.name}`;
+  if (detail.type === 'violation') return `${detail.type}/${detail.key}`;
+  return `${detail.type}/${detail.name}`;
+}
+
+function setGatekeeperDetailSearchParams(
+  params: URLSearchParams,
+  detail: GatekeeperDetail | undefined
+) {
+  params.delete('detail');
+  params.delete('kind');
+  params.delete('name');
+  params.delete('key');
+  if (!detail) return;
+  params.set('detail', detail.type);
+  if (detail.type === 'constraint') {
+    params.set('kind', detail.kind);
+    params.set('name', detail.name);
+  } else if (detail.type === 'violation') {
+    params.set('key', detail.key);
+  } else {
+    params.set('name', detail.name);
+  }
+}
 
 function violationKey(violation: GatekeeperViolation) {
   return [
@@ -497,11 +542,21 @@ function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
 
 export function GatekeeperPolicyManager() {
   const { t } = useTranslation();
-  const [violationFilter, setViolationFilter] = useState('');
-  const [violationSort, setViolationSort] = useState('constraint');
-  const [violationLimit, setViolationLimit] = useState('50');
-  const [selectedContext, setSelectedContext] = useState('');
-  const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchParamString = searchParams.toString();
+  const [violationFilter, setViolationFilter] = useState(
+    () => searchParams.get('violation_search') || ''
+  );
+  const [violationSort, setViolationSort] = useState(
+    () => searchParams.get('violation_sort') || 'constraint'
+  );
+  const [violationLimit, setViolationLimit] = useState(
+    () => searchParams.get('violation_limit') || '50'
+  );
+  const [selectedContext, setSelectedContext] = useState(() => searchParams.get('context') || '');
+  const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail | undefined>(() =>
+    gatekeeperDetailFromSearchParams(searchParams)
+  );
   const [applyMode, setApplyMode] = useState('preview');
   const [applyStrategy, setApplyStrategy] = useState('update');
   const [fieldManager, setFieldManager] = useState('awx');
@@ -535,10 +590,66 @@ export function GatekeeperPolicyManager() {
   const { data, isLoading, error, refresh } =
     useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
   const activeContext = selectedContext || data?.cluster.context || '';
+  const syncGatekeeperRoute = (
+    next: {
+      context?: string;
+      detail?: GatekeeperDetail;
+      violationSearch?: string;
+      violationSort?: string;
+      violationLimit?: string;
+    },
+    replace = false
+  ) => {
+    const params = new URLSearchParams(searchParams);
+    const context = next.context ?? selectedContext;
+    const search = next.violationSearch ?? violationFilter;
+    const sort = next.violationSort ?? violationSort;
+    const limit = next.violationLimit ?? violationLimit;
+    if (context) params.set('context', context);
+    else params.delete('context');
+    if (search.trim()) params.set('violation_search', search.trim());
+    else params.delete('violation_search');
+    params.set('violation_sort', sort || 'constraint');
+    params.set('violation_limit', limit || '50');
+    setGatekeeperDetailSearchParams(params, next.detail);
+    if (params.toString() !== searchParamString) {
+      setSearchParams(params, { replace });
+    }
+  };
+  const selectGatekeeperDetail = (detail: GatekeeperDetail | undefined) => {
+    setSelectedDetail(detail);
+    syncGatekeeperRoute({ context: activeContext, detail });
+  };
+  useEffect(() => {
+    const params = new URLSearchParams(searchParamString);
+    const nextSearch = params.get('violation_search') || '';
+    const nextSort = params.get('violation_sort') || 'constraint';
+    const nextLimit = params.get('violation_limit') || '50';
+    const nextContext = params.get('context') || '';
+    const nextDetail = gatekeeperDetailFromSearchParams(params);
+    if (nextSearch !== violationFilter) setViolationFilter(nextSearch);
+    if (nextSort !== violationSort) setViolationSort(nextSort);
+    if (nextLimit !== violationLimit) setViolationLimit(nextLimit);
+    if (nextContext !== selectedContext) setSelectedContext(nextContext);
+    if (gatekeeperDetailKey(nextDetail) !== gatekeeperDetailKey(selectedDetail)) {
+      setSelectedDetail(nextDetail);
+    }
+  }, [
+    searchParamString,
+    selectedContext,
+    selectedDetail,
+    violationFilter,
+    violationLimit,
+    violationSort,
+  ]);
   useEffect(() => {
     if (selectedContext || !data?.contexts?.length) return;
     const active = data.contexts.find((context) => context.selected) || data.contexts[0];
-    if (active?.name) setSelectedContext(active.name);
+    if (active?.name) {
+      setSelectedContext(active.name);
+      syncGatekeeperRoute({ context: active.name, detail: selectedDetail }, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.contexts, selectedContext]);
   const selectedTemplate = useMemo(() => {
     if (selectedDetail?.type !== 'template') return undefined;
@@ -781,8 +892,10 @@ export function GatekeeperPolicyManager() {
                     id="gatekeeper-context"
                     value={activeContext}
                     onChange={(_event, value) => {
-                      setSelectedContext(String(value));
+                      const nextContext = String(value);
+                      setSelectedContext(nextContext);
                       setSelectedDetail(undefined);
+                      syncGatekeeperRoute({ context: nextContext, detail: undefined });
                       setApplyResult(null);
                       setDeleteResult(null);
                       setRollbackResult(null);
@@ -1207,7 +1320,7 @@ export function GatekeeperPolicyManager() {
                               variant="link"
                               isInline
                               onClick={() =>
-                                setSelectedDetail({ type: 'template', name: template.name })
+                                selectGatekeeperDetail({ type: 'template', name: template.name })
                               }
                             >
                               {template.name}
@@ -1244,7 +1357,7 @@ export function GatekeeperPolicyManager() {
               <GatekeeperTemplateDetail
                 template={selectedTemplate}
                 onSelectConstraint={(kind, name) =>
-                  setSelectedDetail({ type: 'constraint', kind, name })
+                  selectGatekeeperDetail({ type: 'constraint', kind, name })
                 }
               />
             </StackItem>
@@ -1268,7 +1381,7 @@ export function GatekeeperPolicyManager() {
                               variant="link"
                               isInline
                               onClick={() =>
-                                setSelectedDetail({
+                                selectGatekeeperDetail({
                                   type: 'constraint',
                                   kind: constraint.kind,
                                   name: constraint.name,
@@ -1325,8 +1438,20 @@ export function GatekeeperPolicyManager() {
                         <SearchInput
                           placeholder={t('Search violations')}
                           value={violationFilter}
-                          onChange={(_event, value) => setViolationFilter(value)}
-                          onClear={() => setViolationFilter('')}
+                          onChange={(_event, value) => {
+                            setViolationFilter(value);
+                            syncGatekeeperRoute(
+                              { detail: selectedDetail, violationSearch: value },
+                              true
+                            );
+                          }}
+                          onClear={() => {
+                            setViolationFilter('');
+                            syncGatekeeperRoute(
+                              { detail: selectedDetail, violationSearch: '' },
+                              true
+                            );
+                          }}
                         />
                       </GridItem>
                       <GridItem span={3}>
@@ -1334,7 +1459,14 @@ export function GatekeeperPolicyManager() {
                           <FormSelect
                             id="gatekeeper-violation-sort"
                             value={violationSort}
-                            onChange={(_event, value) => setViolationSort(String(value))}
+                            onChange={(_event, value) => {
+                              const nextSort = String(value);
+                              setViolationSort(nextSort);
+                              syncGatekeeperRoute(
+                                { detail: selectedDetail, violationSort: nextSort },
+                                true
+                              );
+                            }}
                           >
                             <FormSelectOption value="constraint" label={t('Constraint')} />
                             <FormSelectOption value="resource" label={t('Resource')} />
@@ -1348,7 +1480,14 @@ export function GatekeeperPolicyManager() {
                           <FormSelect
                             id="gatekeeper-violation-limit"
                             value={violationLimit}
-                            onChange={(_event, value) => setViolationLimit(String(value))}
+                            onChange={(_event, value) => {
+                              const nextLimit = String(value);
+                              setViolationLimit(nextLimit);
+                              syncGatekeeperRoute(
+                                { detail: selectedDetail, violationLimit: nextLimit },
+                                true
+                              );
+                            }}
                           >
                             {[25, 50, 100, 200].map((limit) => (
                               <FormSelectOption
@@ -1380,7 +1519,7 @@ export function GatekeeperPolicyManager() {
                               variant="link"
                               isInline
                               onClick={() =>
-                                setSelectedDetail({
+                                selectGatekeeperDetail({
                                   type: 'violation',
                                   key: violationKey(violation),
                                 })
@@ -1435,7 +1574,7 @@ export function GatekeeperPolicyManager() {
                               variant="link"
                               isInline
                               onClick={() =>
-                                setSelectedDetail({ type: 'config', name: config.name })
+                                selectGatekeeperDetail({ type: 'config', name: config.name })
                               }
                             >
                               {config.name}
