@@ -175,6 +175,47 @@ def _violation_summary(constraint, violation):
     }
 
 
+def _violation_search_text(violation):
+    return ' '.join(
+        str(violation.get(key) or '')
+        for key in (
+            'constraint_kind',
+            'constraint_name',
+            'enforcement_action',
+            'message',
+            'resource_kind',
+            'resource_namespace',
+            'resource_name',
+            'resource_group',
+            'resource_version',
+        )
+    ).lower()
+
+
+def _sort_violations(violations, sort_key):
+    sort_map = {
+        'constraint': lambda item: (item['constraint_kind'], item['constraint_name'], item['resource_namespace'], item['resource_name']),
+        'resource': lambda item: (item['resource_kind'], item['resource_namespace'], item['resource_name'], item['constraint_kind'], item['constraint_name']),
+        'namespace': lambda item: (item['resource_namespace'], item['resource_kind'], item['resource_name'], item['constraint_kind'], item['constraint_name']),
+        'enforcement': lambda item: (
+            item['enforcement_action'],
+            item['constraint_kind'],
+            item['constraint_name'],
+            item['resource_namespace'],
+            item['resource_name'],
+        ),
+    }
+    violations.sort(key=sort_map.get(sort_key, sort_map['constraint']))
+
+
+def _positive_int_query(request, name, default, maximum):
+    try:
+        value = int(request.query_params.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, maximum))
+
+
 def _config_summary(config):
     spec = config.get('spec') or {}
     sync_only = ((spec.get('sync') or {}).get('syncOnly')) or []
@@ -251,7 +292,14 @@ class GatekeeperPolicyManagerView(APIView):
                         'constraint_templates': 0,
                         'constraints': 0,
                         'violations': 0,
+                        'filtered_violations': 0,
                         'configs': 0,
+                    },
+                    'violation_query': {
+                        'search': '',
+                        'sort': 'constraint',
+                        'limit': 50,
+                        'returned': 0,
                     },
                     'constraint_templates': [],
                     'constraints': [],
@@ -277,17 +325,17 @@ class GatekeeperPolicyManagerView(APIView):
             return _gatekeeper_http_error_response(exc)
 
         constraint_summaries = [_constraint_summary(constraint) for constraint in constraints]
-        violations = [
+        violations_all = [
             _violation_summary(constraint, violation) for constraint in constraints for violation in ((constraint.get('status') or {}).get('violations') or [])
         ]
-        violations.sort(
-            key=lambda item: (
-                item['constraint_kind'],
-                item['constraint_name'],
-                item['resource_namespace'],
-                item['resource_name'],
-            )
-        )
+        violation_search = (request.query_params.get('violation_search') or '').strip().lower()
+        violation_sort = (request.query_params.get('violation_sort') or 'constraint').strip().lower()
+        violation_limit = _positive_int_query(request, 'violation_limit', 50, 500)
+        if violation_search:
+            violations = [violation for violation in violations_all if violation_search in _violation_search_text(violation)]
+        else:
+            violations = list(violations_all)
+        _sort_violations(violations, violation_sort)
         constraint_summaries.sort(key=lambda item: (-int(item.get('total_violations') or 0), item['kind'], item['name']))
 
         return Response(
@@ -306,15 +354,22 @@ class GatekeeperPolicyManagerView(APIView):
                 'counts': {
                     'constraint_templates': len(templates),
                     'constraints': len(constraint_summaries),
-                    'violations': len(violations),
+                    'violations': len(violations_all),
+                    'filtered_violations': len(violations),
                     'configs': len(configs),
+                },
+                'violation_query': {
+                    'search': violation_search,
+                    'sort': violation_sort,
+                    'limit': violation_limit,
+                    'returned': min(len(violations), violation_limit),
                 },
                 'constraint_templates': sorted(
                     [_template_summary(template, constraint_summaries) for template in templates],
                     key=lambda item: item['name'],
                 ),
                 'constraints': constraint_summaries,
-                'violations': violations,
+                'violations': violations[:violation_limit],
                 'configs': sorted([_config_summary(config) for config in configs], key=lambda item: item['name']),
                 'errors': errors,
             }

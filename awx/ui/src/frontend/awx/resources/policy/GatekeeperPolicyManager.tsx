@@ -11,6 +11,9 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  FormGroup,
+  FormSelect,
+  FormSelectOption,
   Grid,
   GridItem,
   Label,
@@ -52,7 +55,14 @@ interface GatekeeperPolicyManagerResponse {
     constraint_templates: number;
     constraints: number;
     violations: number;
+    filtered_violations: number;
     configs: number;
+  };
+  violation_query: {
+    search: string;
+    sort: string;
+    limit: number;
+    returned: number;
   };
   constraint_templates: GatekeeperConstraintTemplate[];
   constraints: GatekeeperConstraint[];
@@ -67,8 +77,10 @@ interface GatekeeperConstraintTemplate {
   api_version: string;
   created: boolean;
   observed_generation?: number;
+  by_pod: unknown[];
   constraint_count: number;
   errors: unknown[];
+  schema: unknown;
   targets: {
     target: string;
     rego: string;
@@ -89,6 +101,7 @@ interface GatekeeperConstraint {
   parameters: UnknownRecord;
   total_violations: number;
   audit_timestamp: string;
+  by_pod: unknown[];
   violations: unknown[];
 }
 
@@ -100,6 +113,7 @@ interface GatekeeperViolation {
   resource_kind: string;
   resource_namespace: string;
   resource_name: string;
+  resource_api_version: string;
   resource_group: string;
   resource_version: string;
 }
@@ -110,7 +124,9 @@ interface GatekeeperConfig {
   sync_only_count: number;
   sync_only: unknown[];
   match: unknown[];
+  readiness?: unknown;
   readiness_stats_enabled?: boolean;
+  status?: unknown;
 }
 
 interface GatekeeperError {
@@ -152,35 +168,283 @@ function downloadReport(data: GatekeeperPolicyManagerResponse) {
   URL.revokeObjectURL(url);
 }
 
-function violationText(violation: GatekeeperViolation) {
+type GatekeeperDetail =
+  | { type: 'template'; name: string }
+  | { type: 'constraint'; kind: string; name: string }
+  | { type: 'violation'; key: string }
+  | { type: 'config'; name: string };
+
+function violationKey(violation: GatekeeperViolation) {
   return [
     violation.constraint_kind,
     violation.constraint_name,
-    violation.enforcement_action,
-    violation.message,
     violation.resource_kind,
     violation.resource_namespace,
     violation.resource_name,
+    violation.message,
   ]
     .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+    .join('/');
+}
+
+function GatekeeperTemplateDetail(props: {
+  template: GatekeeperConstraintTemplate;
+  onSelectConstraint: (kind: string, name: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { template } = props;
+  return (
+    <Card isFlat>
+      <CardHeader>
+        <CardTitle>{t('ConstraintTemplate detail')}</CardTitle>
+      </CardHeader>
+      <CardBody>
+        <Stack hasGutter>
+          <StackItem>
+            <DescriptionList isHorizontal isCompact>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Name')}</DescriptionListTerm>
+                <DescriptionListDescription>{template.name}</DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Kind')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {template.kind || t('Unknown')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Observed generation')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {template.observed_generation ?? t('Not reported')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Constraints')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {template.constraints.length === 0 ? t('None') : null}
+                  {template.constraints.map((constraint) => (
+                    <Button
+                      key={`${constraint.kind}/${constraint.name}`}
+                      variant="link"
+                      isInline
+                      onClick={() => props.onSelectConstraint(constraint.kind, constraint.name)}
+                    >
+                      {constraint.kind}/{constraint.name}
+                    </Button>
+                  ))}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </DescriptionList>
+          </StackItem>
+          <StackItem>
+            <CodeBlock>
+              <CodeBlockCode>
+                {jsonPreview({
+                  by_pod: template.by_pod,
+                  errors: template.errors,
+                  schema: template.schema,
+                  targets: template.targets,
+                })}
+              </CodeBlockCode>
+            </CodeBlock>
+          </StackItem>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+function GatekeeperConstraintDetail(props: { constraint: GatekeeperConstraint }) {
+  const { t } = useTranslation();
+  const { constraint } = props;
+  return (
+    <Card isFlat>
+      <CardHeader>
+        <CardTitle>{t('Constraint detail')}</CardTitle>
+      </CardHeader>
+      <CardBody>
+        <Stack hasGutter>
+          <StackItem>
+            <DescriptionList isHorizontal isCompact>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Name')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {constraint.kind}/{constraint.name}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Enforcement')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <EnforcementLabel action={constraint.enforcement_action} />
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Violations')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {constraint.total_violations}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Audit')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {constraint.audit_timestamp || t('Not reported')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </DescriptionList>
+          </StackItem>
+          <StackItem>
+            <CodeBlock>
+              <CodeBlockCode>
+                {jsonPreview({
+                  match: constraint.match,
+                  parameters: constraint.parameters,
+                  by_pod: constraint.by_pod,
+                  violations: constraint.violations,
+                })}
+              </CodeBlockCode>
+            </CodeBlock>
+          </StackItem>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+function GatekeeperViolationDetail(props: { violation: GatekeeperViolation }) {
+  const { t } = useTranslation();
+  const { violation } = props;
+  return (
+    <Card isFlat>
+      <CardHeader>
+        <CardTitle>{t('Violation detail')}</CardTitle>
+      </CardHeader>
+      <CardBody>
+        <DescriptionList isHorizontal isCompact>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Resource')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {violation.resource_namespace
+                ? `${violation.resource_namespace}/${violation.resource_name}`
+                : violation.resource_name || t('Unknown resource')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Kind')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {violation.resource_kind || t('Unknown')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Constraint')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {violation.constraint_kind}/{violation.constraint_name}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Enforcement')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              <EnforcementLabel action={violation.enforcement_action} />
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('API')}</DescriptionListTerm>
+            <DescriptionListDescription>
+              {violation.resource_api_version ||
+                [violation.resource_group, violation.resource_version].filter(Boolean).join('/') ||
+                t('Not reported')}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>{t('Message')}</DescriptionListTerm>
+            <DescriptionListDescription>{violation.message}</DescriptionListDescription>
+          </DescriptionListGroup>
+        </DescriptionList>
+      </CardBody>
+    </Card>
+  );
+}
+
+function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
+  const { t } = useTranslation();
+  const { config } = props;
+  return (
+    <Card isFlat>
+      <CardHeader>
+        <CardTitle>{t('Config detail')}</CardTitle>
+      </CardHeader>
+      <CardBody>
+        <Stack hasGutter>
+          <StackItem>
+            <DescriptionList isHorizontal isCompact>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Name')}</DescriptionListTerm>
+                <DescriptionListDescription>{config.name}</DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Synced kinds')}</DescriptionListTerm>
+                <DescriptionListDescription>{config.sync_only_count}</DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Readiness stats')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {config.readiness_stats_enabled ? t('Enabled') : t('Disabled')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </DescriptionList>
+          </StackItem>
+          <StackItem>
+            <CodeBlock>
+              <CodeBlockCode>
+                {jsonPreview({
+                  match: config.match,
+                  sync_only: config.sync_only,
+                  readiness: config.readiness,
+                  status: config.status,
+                })}
+              </CodeBlockCode>
+            </CodeBlock>
+          </StackItem>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
 }
 
 export function GatekeeperPolicyManager() {
   const { t } = useTranslation();
   const [violationFilter, setViolationFilter] = useState('');
-  const { data, isLoading, error, refresh } = useGet<GatekeeperPolicyManagerResponse>(
-    awxAPI`/opa/gatekeeper/`
-  );
-  const normalizedViolationFilter = violationFilter.trim().toLowerCase();
-  const violations = useMemo(() => {
-    if (!data?.violations) return [];
-    if (!normalizedViolationFilter) return data.violations;
-    return data.violations.filter((violation) =>
-      violationText(violation).includes(normalizedViolationFilter)
+  const [violationSort, setViolationSort] = useState('constraint');
+  const [violationLimit, setViolationLimit] = useState('50');
+  const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail>();
+  const gatekeeperUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    const search = violationFilter.trim();
+    if (search) params.set('violation_search', search);
+    params.set('violation_sort', violationSort);
+    params.set('violation_limit', violationLimit);
+    return `${awxAPI`/opa/gatekeeper/`}?${params.toString()}`;
+  }, [violationFilter, violationLimit, violationSort]);
+  const { data, isLoading, error, refresh } =
+    useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
+  const selectedTemplate = useMemo(() => {
+    if (selectedDetail?.type !== 'template') return undefined;
+    return data?.constraint_templates.find((template) => template.name === selectedDetail.name);
+  }, [data?.constraint_templates, selectedDetail]);
+  const selectedConstraint = useMemo(() => {
+    if (selectedDetail?.type !== 'constraint') return undefined;
+    return data?.constraints.find(
+      (constraint) =>
+        constraint.kind === selectedDetail.kind && constraint.name === selectedDetail.name
     );
-  }, [data?.violations, normalizedViolationFilter]);
+  }, [data?.constraints, selectedDetail]);
+  const selectedViolation = useMemo(() => {
+    if (selectedDetail?.type !== 'violation') return undefined;
+    return data?.violations.find((violation) => violationKey(violation) === selectedDetail.key);
+  }, [data?.violations, selectedDetail]);
+  const selectedConfig = useMemo(() => {
+    if (selectedDetail?.type !== 'config') return undefined;
+    return data?.configs.find((config) => config.name === selectedDetail.name);
+  }, [data?.configs, selectedDetail]);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
@@ -269,7 +533,7 @@ export function GatekeeperPolicyManager() {
                   <CardBody>
                     <DescriptionList isHorizontal isCompact>
                       <DescriptionListGroup>
-                        <DescriptionListTerm>{t('ConstraintTemplates')}</DescriptionListTerm>
+                        <DescriptionListTerm>{t('Templates')}</DescriptionListTerm>
                         <DescriptionListDescription>
                           {data.counts.constraint_templates}
                         </DescriptionListDescription>
@@ -284,6 +548,11 @@ export function GatekeeperPolicyManager() {
                         <DescriptionListTerm>{t('Violations')}</DescriptionListTerm>
                         <DescriptionListDescription>
                           {data.counts.violations}
+                          {data.counts.filtered_violations !== data.counts.violations
+                            ? t(' ({{count}} filtered)', {
+                                count: data.counts.filtered_violations,
+                              })
+                            : null}
                         </DescriptionListDescription>
                       </DescriptionListGroup>
                       <DescriptionListGroup>
@@ -312,7 +581,17 @@ export function GatekeeperPolicyManager() {
                     <StackItem key={template.name}>
                       <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>{template.name}</DescriptionListTerm>
+                          <DescriptionListTerm>
+                            <Button
+                              variant="link"
+                              isInline
+                              onClick={() =>
+                                setSelectedDetail({ type: 'template', name: template.name })
+                              }
+                            >
+                              {template.name}
+                            </Button>
+                          </DescriptionListTerm>
                           <DescriptionListDescription>
                             <StatusLabel
                               ok={template.created}
@@ -339,6 +618,16 @@ export function GatekeeperPolicyManager() {
               </CardBody>
             </Card>
           </StackItem>
+          {selectedTemplate ? (
+            <StackItem>
+              <GatekeeperTemplateDetail
+                template={selectedTemplate}
+                onSelectConstraint={(kind, name) =>
+                  setSelectedDetail({ type: 'constraint', kind, name })
+                }
+              />
+            </StackItem>
+          ) : null}
           <StackItem>
             <Card isFlat>
               <CardHeader>
@@ -354,7 +643,19 @@ export function GatekeeperPolicyManager() {
                       <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
                           <DescriptionListTerm>
-                            {constraint.kind}/{constraint.name}
+                            <Button
+                              variant="link"
+                              isInline
+                              onClick={() =>
+                                setSelectedDetail({
+                                  type: 'constraint',
+                                  kind: constraint.kind,
+                                  name: constraint.name,
+                                })
+                              }
+                            >
+                              {constraint.kind}/{constraint.name}
+                            </Button>
                           </DescriptionListTerm>
                           <DescriptionListDescription>
                             <EnforcementLabel action={constraint.enforcement_action} />{' '}
@@ -385,6 +686,11 @@ export function GatekeeperPolicyManager() {
               </CardBody>
             </Card>
           </StackItem>
+          {selectedConstraint ? (
+            <StackItem>
+              <GatekeeperConstraintDetail constraint={selectedConstraint} />
+            </StackItem>
+          ) : null}
           <StackItem>
             <Card isFlat>
               <CardHeader>
@@ -393,26 +699,76 @@ export function GatekeeperPolicyManager() {
               <CardBody>
                 <Stack hasGutter>
                   <StackItem>
-                    <SearchInput
-                      placeholder={t('Search violations')}
-                      value={violationFilter}
-                      onChange={(_event, value) => setViolationFilter(value)}
-                      onClear={() => setViolationFilter('')}
-                    />
+                    <Grid hasGutter>
+                      <GridItem span={6}>
+                        <SearchInput
+                          placeholder={t('Search violations')}
+                          value={violationFilter}
+                          onChange={(_event, value) => setViolationFilter(value)}
+                          onClear={() => setViolationFilter('')}
+                        />
+                      </GridItem>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Sort')} fieldId="gatekeeper-violation-sort">
+                          <FormSelect
+                            id="gatekeeper-violation-sort"
+                            value={violationSort}
+                            onChange={(_event, value) => setViolationSort(String(value))}
+                          >
+                            <FormSelectOption value="constraint" label={t('Constraint')} />
+                            <FormSelectOption value="resource" label={t('Resource')} />
+                            <FormSelectOption value="namespace" label={t('Namespace')} />
+                            <FormSelectOption value="enforcement" label={t('Enforcement')} />
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Limit')} fieldId="gatekeeper-violation-limit">
+                          <FormSelect
+                            id="gatekeeper-violation-limit"
+                            value={violationLimit}
+                            onChange={(_event, value) => setViolationLimit(String(value))}
+                          >
+                            {[25, 50, 100, 200].map((limit) => (
+                              <FormSelectOption
+                                key={limit}
+                                value={String(limit)}
+                                label={String(limit)}
+                              />
+                            ))}
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                    </Grid>
                   </StackItem>
-                  {violations.length === 0 ? (
+                  <StackItem>
+                    {t('{{returned}} of {{filtered}} matching violations shown.', {
+                      returned: data.violation_query.returned,
+                      filtered: data.counts.filtered_violations,
+                    })}
+                  </StackItem>
+                  {data.violations.length === 0 ? (
                     <StackItem>{t('No violations found.')}</StackItem>
                   ) : null}
-                  {violations.slice(0, 50).map((violation, index) => (
-                    <StackItem
-                      key={`${violation.constraint_kind}/${violation.constraint_name}/${index}`}
-                    >
+                  {data.violations.map((violation) => (
+                    <StackItem key={violationKey(violation)}>
                       <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
                           <DescriptionListTerm>
-                            {violation.resource_namespace
-                              ? `${violation.resource_namespace}/${violation.resource_name}`
-                              : violation.resource_name || t('Unknown resource')}
+                            <Button
+                              variant="link"
+                              isInline
+                              onClick={() =>
+                                setSelectedDetail({
+                                  type: 'violation',
+                                  key: violationKey(violation),
+                                })
+                              }
+                            >
+                              {violation.resource_namespace
+                                ? `${violation.resource_namespace}/${violation.resource_name}`
+                                : violation.resource_name || t('Unknown resource')}
+                            </Button>
                           </DescriptionListTerm>
                           <DescriptionListDescription>
                             <EnforcementLabel action={violation.enforcement_action} />{' '}
@@ -434,6 +790,11 @@ export function GatekeeperPolicyManager() {
               </CardBody>
             </Card>
           </StackItem>
+          {selectedViolation ? (
+            <StackItem>
+              <GatekeeperViolationDetail violation={selectedViolation} />
+            </StackItem>
+          ) : null}
           <StackItem>
             <Card isFlat>
               <CardHeader>
@@ -448,7 +809,17 @@ export function GatekeeperPolicyManager() {
                     <StackItem key={config.name}>
                       <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>{config.name}</DescriptionListTerm>
+                          <DescriptionListTerm>
+                            <Button
+                              variant="link"
+                              isInline
+                              onClick={() =>
+                                setSelectedDetail({ type: 'config', name: config.name })
+                              }
+                            >
+                              {config.name}
+                            </Button>
+                          </DescriptionListTerm>
                           <DescriptionListDescription>
                             {t('{{count}} synced kinds', { count: config.sync_only_count })}
                           </DescriptionListDescription>
@@ -469,6 +840,11 @@ export function GatekeeperPolicyManager() {
               </CardBody>
             </Card>
           </StackItem>
+          {selectedConfig ? (
+            <StackItem>
+              <GatekeeperConfigDetail config={selectedConfig} />
+            </StackItem>
+          ) : null}
         </Stack>
       )}
     </PageSection>

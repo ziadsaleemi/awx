@@ -231,7 +231,14 @@ def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user)
         'constraint_templates': 0,
         'constraints': 0,
         'violations': 0,
+        'filtered_violations': 0,
         'configs': 0,
+    }
+    assert response.data['violation_query'] == {
+        'search': '',
+        'sort': 'constraint',
+        'limit': 50,
+        'returned': 0,
     }
     assert response.data['constraint_templates'] == []
     assert response.data['message'] == 'Configure the Gatekeeper Kubernetes API connection in Settings.'
@@ -242,16 +249,8 @@ def test_gatekeeper_policy_manager_requires_system_admin(get, rando):
     get(reverse('api:opa_gatekeeper'), user=rando, expect=403)
 
 
-@pytest.mark.django_db
-@override_settings(
-    GATEKEEPER_K8S_API_URL='https://kube.example.test',
-    GATEKEEPER_K8S_AUTH_TOKEN='secret-token',
-    GATEKEEPER_K8S_CONTEXT='prod',
-    GATEKEEPER_K8S_VERIFY_SSL=False,
-    GATEKEEPER_K8S_REQUEST_TIMEOUT=7,
-)
-def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_violations(get, admin_user):
-    responses = [
+def _gatekeeper_policy_manager_responses():
+    return [
         _json_response(
             {
                 'items': [
@@ -308,6 +307,7 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
                         'status': {
                             'totalViolations': 1,
                             'auditTimestamp': '2026-06-02T00:00:00Z',
+                            'byPod': [{'id': 'gatekeeper-a', 'observedGeneration': 3}],
                             'violations': [
                                 {
                                     'message': 'missing team label',
@@ -319,7 +319,31 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
                                 }
                             ],
                         },
-                    }
+                    },
+                    {
+                        'apiVersion': 'constraints.gatekeeper.sh/v1beta1',
+                        'kind': 'K8sRequiredLabels',
+                        'metadata': {'name': 'require-owner'},
+                        'spec': {
+                            'enforcementAction': 'deny',
+                            'match': {'kinds': [{'apiGroups': [''], 'kinds': ['Namespace']}]},
+                            'parameters': {'labels': ['owner']},
+                        },
+                        'status': {
+                            'totalViolations': 1,
+                            'auditTimestamp': '2026-06-02T01:00:00Z',
+                            'violations': [
+                                {
+                                    'message': 'missing owner label',
+                                    'kind': 'Namespace',
+                                    'namespace': '',
+                                    'name': 'payments',
+                                    'group': '',
+                                    'version': 'v1',
+                                }
+                            ],
+                        },
+                    },
                 ]
             }
         ),
@@ -340,6 +364,18 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
         ),
     ]
 
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_AUTH_TOKEN='secret-token',
+    GATEKEEPER_K8S_CONTEXT='prod',
+    GATEKEEPER_K8S_VERIFY_SSL=False,
+    GATEKEEPER_K8S_REQUEST_TIMEOUT=7,
+)
+def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_violations(get, admin_user):
+    responses = _gatekeeper_policy_manager_responses()
+
     with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=responses) as requests_get:
         response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
 
@@ -352,21 +388,28 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
     assert response.data['api_versions']['constraint_templates'] == 'v1'
     assert response.data['counts'] == {
         'constraint_templates': 1,
-        'constraints': 1,
-        'violations': 1,
+        'constraints': 2,
+        'violations': 2,
+        'filtered_violations': 2,
         'configs': 1,
+    }
+    assert response.data['violation_query'] == {
+        'search': '',
+        'sort': 'constraint',
+        'limit': 50,
+        'returned': 2,
     }
     template = response.data['constraint_templates'][0]
     assert template['name'] == 'k8srequiredlabels'
     assert template['kind'] == 'K8sRequiredLabels'
     assert template['created'] is True
-    assert template['constraint_count'] == 1
+    assert template['constraint_count'] == 2
     assert template['targets'][0]['rego'].startswith('package k8srequiredlabels')
-    constraint = response.data['constraints'][0]
+    constraint = next(item for item in response.data['constraints'] if item['name'] == 'require-team')
     assert constraint['name'] == 'require-team'
     assert constraint['enforcement_action'] == 'dryrun'
     assert constraint['total_violations'] == 1
-    assert response.data['violations'][0]['message'] == 'missing team label'
+    assert any(violation['message'] == 'missing team label' for violation in response.data['violations'])
     assert response.data['configs'][0]['sync_only_count'] == 1
     assert response.data['errors'] == []
     requests_get.assert_any_call(
@@ -375,6 +418,29 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
         verify=False,
         timeout=7.0,
     )
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_policy_manager_filters_sorts_and_limits_violations(get, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()):
+        response = get(
+            reverse('api:opa_gatekeeper') + '?violation_search=owner&violation_sort=resource&violation_limit=1',
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['counts']['violations'] == 2
+    assert response.data['counts']['filtered_violations'] == 1
+    assert response.data['violation_query'] == {
+        'search': 'owner',
+        'sort': 'resource',
+        'limit': 1,
+        'returned': 1,
+    }
+    assert len(response.data['violations']) == 1
+    assert response.data['violations'][0]['constraint_name'] == 'require-owner'
+    assert response.data['violations'][0]['resource_name'] == 'payments'
 
 
 @pytest.mark.django_db
