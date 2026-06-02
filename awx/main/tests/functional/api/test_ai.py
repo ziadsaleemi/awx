@@ -574,6 +574,137 @@ def test_ai_chat_answers_eda_activations_unconfigured_without_provider(post, adm
 
 
 @pytest.mark.django_db
+@override_settings(
+    AI_ENABLED=True,
+    AI_PROVIDER='openai',
+    AI_API_KEY='api-key',
+    AI_MODEL_NAME='gpt-4o',
+    OPA_HOST='opa.example.com',
+    OPA_PORT=8181,
+    OPA_SSL=True,
+    OPA_POLICY_BUNDLE='package awx\nallow := true',
+)
+def test_ai_chat_answers_opa_status_without_provider(post, admin_user):
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'What is OPA guardrail status?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('OPA guardrails are enabled in AWX. Server URL: https://opa.example.com:8181.')
+    assert 'Managed policy bundle: configured (2 lines' in content
+    assert 'Registered policy paths: job_launch, inventory_access, credential_use, ai_action.' in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_opa_policy_paths_without_provider(post, admin_user):
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List OPA policy paths'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 4 OPA policy paths registered in AWX:')
+    assert '- job_launch (path: awx/job_launch/allow' in content
+    assert '- ai_action (path: awx/ai_action/allow' in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_opa_guardrail_audit_without_provider(post, admin_user):
+    entry = ActivityStream.objects.create(
+        actor=admin_user,
+        operation='create',
+        object1='ai_resource_action',
+        object2='apply',
+        changes=json.dumps(
+            {
+                'mode': 'apply',
+                'plan_name': 'Rename inventory',
+                'operation_count': 1,
+                'operations': [
+                    {
+                        'id': 'rename-inventory',
+                        'operation': 'update',
+                        'resource_type': 'inventory',
+                        'valid': False,
+                        'errors': {'opa': ['This AI operation was denied by an OPA policy guardrail.']},
+                    }
+                ],
+            }
+        ),
+    )
+    entry.user.add(admin_user)
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List OPA guardrail decision history'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 recent OPA guardrail audit events visible to you in AWX:')
+    assert f'id: {entry.pk}' in content
+    assert 'status: denied' in content
+    assert 'plan: Rename inventory' in content
+    assert 'denials: update inventory: This AI operation was denied by an OPA policy guardrail.' in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_counts_opa_denials_without_provider(post, admin_user):
+    allowed = ActivityStream.objects.create(
+        actor=admin_user,
+        operation='create',
+        object1='ai_resource_action',
+        object2='preview',
+        changes=json.dumps({'mode': 'preview', 'operation_count': 1, 'operations': [{'operation': 'create', 'resource_type': 'inventory'}]}),
+    )
+    denied = ActivityStream.objects.create(
+        actor=admin_user,
+        operation='create',
+        object1='ai_resource_action',
+        object2='apply',
+        changes=json.dumps(
+            {
+                'mode': 'apply',
+                'operation_count': 1,
+                'operations': [{'operation': 'delete', 'resource_type': 'inventory', 'errors': {'opa': ['blocked']}}],
+            }
+        ),
+    )
+    allowed.user.add(admin_user)
+    denied.user.add(admin_user)
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many OPA denials do we have?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 1 recent denied OPA guardrail audit events visible to you in AWX.'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
 @override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
 def test_ai_chat_provider_prompt_includes_visible_awx_resource_rows(post, admin_user, organization):
     inventory = Inventory.objects.create(name='source-inv', organization=organization)

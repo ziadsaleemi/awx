@@ -45,7 +45,7 @@ from awx.api.serializers import (
     WorkflowJobTemplateNodeDetailSerializer,
     WorkflowJobTemplateSerializer,
 )
-from awx.api.views.opa import check_opa_policy
+from awx.api.views.opa import DEFAULT_POLICIES, OPAPolicyEngine, check_opa_policy
 from awx.conf.models import Setting
 from awx.main import models
 from awx.main.access import get_user_queryset
@@ -1855,6 +1855,174 @@ def _try_answer_eda_fact_question(messages: list) -> str | None:
         return _answer_eda_activation_list()
     if re.search(r'\b(status|configured|connected|connection|health|url)\b', normalized):
         return _answer_eda_status()
+    return None
+
+
+def _opa_message_pattern() -> str:
+    return r'\bopa\b|\bopen policy agent\b|\bpolicy guardrails?\b|\bguardrails?\b'
+
+
+def _opa_policy_bundle_summary() -> dict:
+    policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
+    configured = bool(policy_bundle.strip())
+    return {
+        'configured': configured,
+        'size': len(policy_bundle),
+        'line_count': policy_bundle.count('\n') + 1 if configured else 0,
+    }
+
+
+def _answer_opa_status() -> str:
+    engine = OPAPolicyEngine()
+    bundle = _opa_policy_bundle_summary()
+    bundle_status = f"configured ({bundle['line_count']} lines, {bundle['size']} bytes)" if bundle['configured'] else 'not configured'
+    policy_ids = ', '.join(policy['id'] for policy in DEFAULT_POLICIES)
+    if engine.is_available():
+        return (
+            f'OPA guardrails are enabled in AWX. Server URL: {engine.base_url}. '
+            f'Managed policy bundle: {bundle_status}. Registered policy paths: {policy_ids}.'
+        )
+    return f'OPA guardrails are disabled in AWX because OPA_HOST is not configured. Managed policy bundle: {bundle_status}.'
+
+
+def _answer_opa_policy_count() -> str:
+    return f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX.'
+
+
+def _answer_opa_policy_list() -> str:
+    lines = [f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX:']
+    lines.extend(f"- {policy['id']} (path: {policy['path']}, purpose: {policy['description']})" for policy in DEFAULT_POLICIES)
+    return '\n'.join(lines)
+
+
+def _activity_stream_changes(entry) -> dict:
+    changes = entry.changes
+    if isinstance(changes, dict):
+        return changes
+    if isinstance(changes, str) and changes.strip():
+        try:
+            parsed = json.loads(changes)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _opa_guardrail_audit_queryset(user):
+    return get_user_queryset(user, models.ActivityStream).filter(object1='ai_resource_action').select_related('actor').order_by('-timestamp', '-id')
+
+
+def _opa_guardrail_audit_rows(user, *, denied_only=False, limit=_AI_RESOURCE_PREVIEW_LIMIT) -> tuple[list[dict], int]:
+    rows = []
+    scanned = 0
+    for entry in _opa_guardrail_audit_queryset(user)[:_AI_DIRECT_LIST_LIMIT]:
+        scanned += 1
+        changes = _activity_stream_changes(entry)
+        operations = changes.get('operations') if isinstance(changes.get('operations'), list) else []
+        denied_operations = []
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            errors = operation.get('errors') if isinstance(operation.get('errors'), dict) else {}
+            opa_errors = errors.get('opa') if isinstance(errors, dict) else None
+            if opa_errors:
+                denied_operations.append(
+                    {
+                        'operation': operation.get('operation'),
+                        'resource_type': operation.get('resource_type'),
+                        'errors': opa_errors,
+                    }
+                )
+        if denied_only and not denied_operations:
+            continue
+        rows.append(
+            {
+                'id': entry.pk,
+                'timestamp': entry.timestamp,
+                'actor': _related_context(getattr(entry, 'actor', None)),
+                'mode': changes.get('mode') or entry.object2,
+                'plan_name': changes.get('plan_name') or '',
+                'operation_count': changes.get('operation_count') or len(operations),
+                'status': 'denied' if denied_operations else 'allowed',
+                'denied_operations': denied_operations,
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows, scanned
+
+
+def _format_opa_error_messages(errors) -> str:
+    if isinstance(errors, (list, tuple, set)):
+        return ', '.join(str(error) for error in errors)
+    return str(errors)
+
+
+def _format_opa_guardrail_audit_item(row: dict) -> str:
+    detail_parts = [
+        f"id: {row['id']}",
+        f"status: {row['status']}",
+        f"mode: {row['mode']}",
+        f"operations: {row['operation_count']}",
+    ]
+    actor = _format_context_value(row.get('actor'))
+    if actor:
+        detail_parts.append(f'actor: {actor}')
+    if row.get('plan_name'):
+        detail_parts.append(f"plan: {row['plan_name']}")
+    if row.get('denied_operations'):
+        denials = []
+        for operation in row['denied_operations']:
+            operation_label = ' '.join(str(part) for part in (operation.get('operation'), operation.get('resource_type')) if part)
+            denials.append(f"{operation_label}: {_format_opa_error_messages(operation.get('errors'))}")
+        detail_parts.append(f"denials: {'; '.join(denials)}")
+    return f"- {row['timestamp']} ({', '.join(str(part) for part in detail_parts)})"
+
+
+def _answer_opa_guardrail_audit_count(user, *, denied_only=False) -> str:
+    rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only, limit=_AI_DIRECT_LIST_LIMIT)
+    qualifier = 'denied ' if denied_only else ''
+    if scanned >= _AI_DIRECT_LIST_LIMIT:
+        return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX among the last {scanned} AI resource-action audits.'
+    return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+
+
+def _answer_opa_guardrail_audit_list(user, *, denied_only=False) -> str:
+    rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only)
+    qualifier = 'denied ' if denied_only else ''
+    if not rows:
+        return f'There are no recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+
+    lines = [f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX:']
+    lines.extend(_format_opa_guardrail_audit_item(row) for row in rows)
+    if scanned >= _AI_DIRECT_LIST_LIMIT:
+        lines.append(f'- Scanned the last {scanned} AI resource-action audit events. Narrow the question for older history.')
+    return '\n'.join(lines)
+
+
+def _try_answer_opa_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if not re.search(_opa_message_pattern(), normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author)\b', normalized):
+        return None
+    if not user.is_superuser:
+        return 'OPA guardrail details require system administrator access in AWX.'
+
+    policy_pattern = r'\bpolic(?:y|ies)\b|\bpolicy paths?\b|\brules?\b'
+    audit_pattern = r'\bdecisions?\b|\bhistory\b|\baudit\b|\bdenials?\b|\bdenied\b|\bguardrail events?\b'
+    denied_only = bool(re.search(r'\bdenials?\b|\bdenied\b|\bblocked\b', normalized))
+    if _is_count_question(latest_message, audit_pattern):
+        return _answer_opa_guardrail_audit_count(user, denied_only=denied_only)
+    if _is_list_question(latest_message, audit_pattern):
+        return _answer_opa_guardrail_audit_list(user, denied_only=denied_only)
+    if _is_count_question(latest_message, policy_pattern):
+        return _answer_opa_policy_count()
+    if _is_list_question(latest_message, policy_pattern):
+        return _answer_opa_policy_list()
+    if re.search(r'\b(status|configured|enabled|disabled|connected|connection|server|url|bundle)\b', normalized):
+        return _answer_opa_status()
     return None
 
 
@@ -4436,7 +4604,11 @@ class AIChatView(APIView):
                 )
             system_prompt = system_override
         else:
-            builtin_answer = _try_answer_eda_fact_question(messages) or _try_answer_awx_fact_question(request.user, messages)
+            builtin_answer = (
+                _try_answer_opa_fact_question(request.user, messages)
+                or _try_answer_eda_fact_question(messages)
+                or _try_answer_awx_fact_question(request.user, messages)
+            )
             if builtin_answer is not None:
                 return Response(
                     {
