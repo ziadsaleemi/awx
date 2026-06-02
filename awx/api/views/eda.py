@@ -8,12 +8,11 @@ from rest_framework import status as http_status
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
-from awx.api.permissions import IsSystemAdmin
+from awx.api.permissions import IsSystemAdmin, IsSystemAdminOrAuditor
 from awx.api.versioning import reverse
 from awx.main import models
 from awx.main.access import get_user_queryset
 from awx.main.utils.eda import EDAControllerClient, EDAControllerError, configured_url, connection_status
-
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
 
@@ -133,6 +132,64 @@ class EDAActivationListView(APIView):
         )
 
 
+def _eda_error_response(exc):
+    response_status = http_status.HTTP_400_BAD_REQUEST if exc.status in ('invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
+    return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+
+
+class EDAActivationDetailView(APIView):
+    name = _('EDA Activation Detail')
+    resource_purpose = 'event-driven ansible activation detail'
+    permission_classes = [IsSystemAdminOrAuditor]
+
+    def get(self, request, pk, format=None):
+        client = EDAControllerClient()
+        try:
+            activation = client.get_activation(pk)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(activation)
+
+    def delete(self, request, pk, format=None):
+        if not request.user.is_superuser:
+            return Response({'detail': _('You do not have permission to delete EDA activations.')}, status=http_status.HTTP_403_FORBIDDEN)
+        client = EDAControllerClient()
+        try:
+            result = client.delete_activation(pk)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(result, status=http_status.HTTP_202_ACCEPTED)
+
+
+class EDAActivationEventsView(APIView):
+    name = _('EDA Activation Events')
+    resource_purpose = 'event-driven ansible activation events'
+    permission_classes = [IsSystemAdminOrAuditor]
+
+    def get(self, request, pk, format=None):
+        limit = _parse_positive_int(request.query_params.get('page_size') or request.query_params.get('limit'), 20, maximum=200)
+        client = EDAControllerClient()
+        try:
+            events = client.activation_events(pk, limit=limit)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response({'count': len(events), 'next': None, 'previous': None, 'results': events})
+
+
+class EDAActivationActionView(APIView):
+    name = _('EDA Activation Action')
+    resource_purpose = 'event-driven ansible activation action'
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, pk, action, format=None):
+        client = EDAControllerClient()
+        try:
+            activation = client.control_activation(pk, action)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response({'source': 'eda_controller', 'activation': activation, 'actions': [action]})
+
+
 class EDAActivationStartView(APIView):
     name = _('EDA Activation Start')
     resource_purpose = 'event-driven ansible activation create/start'
@@ -161,10 +218,7 @@ class EDAActivationStartView(APIView):
                 include_events=include_events,
             )
         except EDAControllerError as exc:
-            response_status = (
-                http_status.HTTP_400_BAD_REQUEST if exc.status in ('invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
-            )
-            return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+            return _eda_error_response(exc)
 
         return Response(
             {

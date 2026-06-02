@@ -133,9 +133,79 @@ def test_eda_activation_start_creates_starts_polls_and_reads_events(post, admin_
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_activation_detail_reads_controller_activation(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'id': 42, 'name': 'Restart web on alert', 'status': 'running', 'rulebook_name': 'restart-web.yml'}),
+    )
+
+    response = get(reverse('api:eda_activation_detail', kwargs={'pk': '42'}), user=admin_user, expect=200)
+
+    assert response.data['id'] == 42
+    assert response.data['name'] == 'Restart web on alert'
+    assert response.data['status'] == 'running'
+    assert request_mock.call_args.args[0] == 'GET'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/activations/42/'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_activation_events_reads_controller_events(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'results': [{'id': 9, 'event_type': 'rule', 'message': 'activation started'}]}),
+    )
+
+    response = get(reverse('api:eda_activation_events', kwargs={'pk': '42'}), {'page_size': '5'}, user=admin_user, expect=200)
+
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['id'] == 9
+    assert response.data['results'][0]['message'] == 'activation started'
+    assert request_mock.call_args.args[0] == 'GET'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/activations/42/events/'
+    assert request_mock.call_args.kwargs['params'] == {'page_size': 5}
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_activation_action_posts_controller_action(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'id': 42, 'name': 'Restart web on alert', 'status': 'running'}),
+    )
+
+    response = post(reverse('api:eda_activation_action', kwargs={'pk': '42', 'action': 'restart'}), {}, user=admin_user, expect=200)
+
+    assert response.data['activation']['id'] == 42
+    assert response.data['actions'] == ['restart']
+    assert request_mock.call_args.args[0] == 'POST'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/activations/42/restart/'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_activation_delete_proxies_to_controller(delete, admin_user, mocker):
+    request_mock = mocker.patch('awx.main.utils.eda.requests.request', return_value=eda_response(mocker, {}))
+
+    response = delete(reverse('api:eda_activation_detail', kwargs={'pk': '42'}), user=admin_user, expect=202)
+
+    assert response.data == {'id': '42', 'status': 'deleted'}
+    assert request_mock.call_args.args[0] == 'DELETE'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/activations/42/'
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_activation_start_rejects_non_admin(post, rando):
     response = post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=403)
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_activation_action_rejects_non_admin(post, rando):
+    response = post(reverse('api:eda_activation_action', kwargs={'pk': '42', 'action': 'restart'}), {}, user=rando, expect=403)
     assert response.status_code == 403
 
 

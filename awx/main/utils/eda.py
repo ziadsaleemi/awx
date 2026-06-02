@@ -7,7 +7,6 @@ from urllib.parse import urljoin, urlparse
 import requests
 from django.conf import settings
 
-
 EDA_SUCCESS_STATUSES = {'active', 'completed', 'complete', 'enabled', 'ok', 'running', 'started', 'success', 'successful'}
 EDA_FAILURE_STATUSES = {'canceled', 'cancelled', 'deleted', 'disabled', 'error', 'failed', 'failure', 'missing', 'not_found', 'stopped', 'unreachable'}
 EDA_STARTABLE_STATUSES = {'created', 'disabled', 'idle', 'new', 'pending', 'planned', 'ready', 'stopped', 'unknown'}
@@ -150,11 +149,35 @@ class EDAControllerClient:
     def post_json(self, path, payload=None):
         return self._request_json('POST', path, payload=payload or {})
 
+    def delete_json(self, path):
+        return self._request_json('DELETE', path)
+
     def _activation_path(self, activation_id):
         return f'{self.activations_path.rstrip("/")}/{activation_id}/'
 
     def _format_activation_path(self, path_template, activation_id):
         return path_template.format(activation_id=activation_id)
+
+    def get_activation(self, activation_id):
+        if not activation_id:
+            raise EDAControllerError('EDA activation id is required.', 'missing')
+        return self.normalize_activation(self.get_json(self._activation_path(activation_id)))
+
+    def delete_activation(self, activation_id):
+        if not activation_id:
+            raise EDAControllerError('EDA activation id is required.', 'missing')
+        self.delete_json(self._activation_path(activation_id))
+        return {'id': activation_id, 'status': 'deleted'}
+
+    def control_activation(self, activation_id, action):
+        if not activation_id:
+            raise EDAControllerError('EDA activation id is required.', 'missing')
+        action = str(action or '').strip().lower()
+        if action not in ('enable', 'disable', 'restart'):
+            raise EDAControllerError('EDA activation action is invalid.', 'invalid')
+        response = self.post_json(f'{self._activation_path(activation_id)}{action}/', {})
+        normalized = self.normalize_activation(_coerce_activation_payload(response))
+        return normalized if normalized.get('id') or normalized.get('status') != 'unknown' else self.get_activation(activation_id)
 
     def list_activations(self, page=1, page_size=20):
         payload = self.get_json(self.activations_path, params={'page': page, 'page_size': page_size})
@@ -300,9 +323,9 @@ class EDAControllerClient:
             'event_source': event_source or '',
             'source': 'eda_controller',
             'related': {
-                'controller_activation': self._url(f'{self.activations_path.rstrip("/")}/{activation_id}/')
-                if activation_id
-                else self._url(self.activations_path),
+                'controller_activation': (
+                    self._url(f'{self.activations_path.rstrip("/")}/{activation_id}/') if activation_id else self._url(self.activations_path)
+                ),
             },
         }
 

@@ -196,6 +196,11 @@ export enum AwxRoute {
   CloudConnections = 'awx-cloud-connections',
   CloudProviderSettings = 'awx-cloud-provider-settings',
 
+  // Event-Driven Ansible
+  EventDriven = 'awx-event-driven',
+  EdaActivations = 'awx-eda-activations',
+  EdaActivationPage = 'awx-eda-activation-page',
+
   // Access
   Access = 'awx-access',
 

@@ -4,6 +4,7 @@ import {
   ChartBarIcon,
   CogIcon,
   HomeIcon,
+  ProcessAutomationIcon,
   ServerIcon,
   UsersIcon,
 } from '@patternfly/react-icons';
@@ -44,6 +45,7 @@ import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
 import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
 import { useAwxCloudRoutes } from './routes/useAwxCloudRoutes';
+import { useAwxEdaRoutes } from './routes/useAwxEdaRoutes';
 import { useAwxTeamsRoutes } from './routes/useAwxTeamsRoutes';
 import { useAwxTemplateRoutes } from './routes/useAwxTemplateRoutes';
 import { useAwxUsersRoutes } from './routes/useAwxUsersRoutes';
@@ -57,6 +59,7 @@ export function useAwxNavigation() {
   const awxTerraformRoutes = useAwxTerraformRoutes();
   const awxCatalogRoutes = useAwxCatalogRoutes();
   const awxCloudRoutes = useAwxCloudRoutes();
+  const awxEdaRoutes = useAwxEdaRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
   const awxWorkflowApprovalRoutes = useAwxWorkflowApprovalRoutes();
@@ -382,9 +385,7 @@ export function useAwxNavigation() {
           children: [
             {
               path: '',
-              element: (
-                <AwxSettings filterGroups={(g) => g.id === 'other'} title={t('Other')} />
-              ),
+              element: <AwxSettings filterGroups={(g) => g.id === 'other'} title={t('Other')} />,
             },
           ],
         },
@@ -404,8 +405,9 @@ export function useAwxNavigation() {
     awxProjectRoutes,
     awxTerraformRoutes,
     awxCatalogRoutes,
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxCloudRoutes] : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
-      ? [awxCloudRoutes]
+      ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }]
       : []),
     ...infrastructureItems,
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? analyticsItems : []),
