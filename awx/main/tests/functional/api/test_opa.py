@@ -254,6 +254,9 @@ def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user)
         'search': '',
         'sort': 'constraint',
         'limit': 50,
+        'page': 1,
+        'offset': 0,
+        'total_pages': 1,
         'returned': 0,
     }
     assert response.data['constraint_templates'] == []
@@ -413,6 +416,9 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
         'search': '',
         'sort': 'constraint',
         'limit': 50,
+        'page': 1,
+        'offset': 0,
+        'total_pages': 1,
         'returned': 2,
     }
     template = response.data['constraint_templates'][0]
@@ -509,11 +515,40 @@ def test_gatekeeper_policy_manager_filters_sorts_and_limits_violations(get, admi
         'search': 'owner',
         'sort': 'resource',
         'limit': 1,
+        'page': 1,
+        'offset': 0,
+        'total_pages': 1,
         'returned': 1,
     }
     assert len(response.data['violations']) == 1
     assert response.data['violations'][0]['constraint_name'] == 'require-owner'
     assert response.data['violations'][0]['resource_name'] == 'payments'
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_policy_manager_paginates_violations(get, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()):
+        response = get(
+            reverse('api:opa_gatekeeper') + '?violation_sort=constraint&violation_limit=1&violation_page=2',
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['counts']['violations'] == 2
+    assert response.data['counts']['filtered_violations'] == 2
+    assert response.data['violation_query'] == {
+        'search': '',
+        'sort': 'constraint',
+        'limit': 1,
+        'page': 2,
+        'offset': 1,
+        'total_pages': 2,
+        'returned': 1,
+    }
+    assert len(response.data['violations']) == 1
+    assert response.data['violations'][0]['constraint_name'] == 'require-team'
+    assert response.data['violations'][0]['resource_name'] == 'nginx'
 
 
 @pytest.mark.django_db

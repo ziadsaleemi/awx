@@ -40,6 +40,7 @@ import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
+import { PagePagination } from '../../../../framework/PageTable/PagePagination';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -68,6 +69,9 @@ interface GatekeeperPolicyManagerResponse {
     search: string;
     sort: string;
     limit: number;
+    page: number;
+    offset: number;
+    total_pages: number;
     returned: number;
   };
   constraint_templates: GatekeeperConstraintTemplate[];
@@ -553,6 +557,9 @@ export function GatekeeperPolicyManager() {
   const [violationLimit, setViolationLimit] = useState(
     () => searchParams.get('violation_limit') || '50'
   );
+  const [violationPage, setViolationPage] = useState(
+    () => Number(searchParams.get('violation_page') || '1') || 1
+  );
   const [selectedContext, setSelectedContext] = useState(() => searchParams.get('context') || '');
   const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail | undefined>(() =>
     gatekeeperDetailFromSearchParams(searchParams)
@@ -585,8 +592,9 @@ export function GatekeeperPolicyManager() {
     if (search) params.set('violation_search', search);
     params.set('violation_sort', violationSort);
     params.set('violation_limit', violationLimit);
+    params.set('violation_page', String(violationPage));
     return `${awxAPI`/opa/gatekeeper/`}?${params.toString()}`;
-  }, [selectedContext, violationFilter, violationLimit, violationSort]);
+  }, [selectedContext, violationFilter, violationLimit, violationPage, violationSort]);
   const { data, isLoading, error, refresh } =
     useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
   const activeContext = selectedContext || data?.cluster.context || '';
@@ -597,6 +605,7 @@ export function GatekeeperPolicyManager() {
       violationSearch?: string;
       violationSort?: string;
       violationLimit?: string;
+      violationPage?: number;
     },
     replace = false
   ) => {
@@ -605,12 +614,14 @@ export function GatekeeperPolicyManager() {
     const search = next.violationSearch ?? violationFilter;
     const sort = next.violationSort ?? violationSort;
     const limit = next.violationLimit ?? violationLimit;
+    const page = next.violationPage ?? violationPage;
     if (context) params.set('context', context);
     else params.delete('context');
     if (search.trim()) params.set('violation_search', search.trim());
     else params.delete('violation_search');
     params.set('violation_sort', sort || 'constraint');
     params.set('violation_limit', limit || '50');
+    params.set('violation_page', String(page || 1));
     setGatekeeperDetailSearchParams(params, next.detail);
     if (params.toString() !== searchParamString) {
       setSearchParams(params, { replace });
@@ -625,11 +636,13 @@ export function GatekeeperPolicyManager() {
     const nextSearch = params.get('violation_search') || '';
     const nextSort = params.get('violation_sort') || 'constraint';
     const nextLimit = params.get('violation_limit') || '50';
+    const nextPage = Number(params.get('violation_page') || '1') || 1;
     const nextContext = params.get('context') || '';
     const nextDetail = gatekeeperDetailFromSearchParams(params);
     if (nextSearch !== violationFilter) setViolationFilter(nextSearch);
     if (nextSort !== violationSort) setViolationSort(nextSort);
     if (nextLimit !== violationLimit) setViolationLimit(nextLimit);
+    if (nextPage !== violationPage) setViolationPage(nextPage);
     if (nextContext !== selectedContext) setSelectedContext(nextContext);
     if (gatekeeperDetailKey(nextDetail) !== gatekeeperDetailKey(selectedDetail)) {
       setSelectedDetail(nextDetail);
@@ -640,6 +653,7 @@ export function GatekeeperPolicyManager() {
     selectedDetail,
     violationFilter,
     violationLimit,
+    violationPage,
     violationSort,
   ]);
   useEffect(() => {
@@ -1440,15 +1454,17 @@ export function GatekeeperPolicyManager() {
                           value={violationFilter}
                           onChange={(_event, value) => {
                             setViolationFilter(value);
+                            setViolationPage(1);
                             syncGatekeeperRoute(
-                              { detail: selectedDetail, violationSearch: value },
+                              { detail: selectedDetail, violationSearch: value, violationPage: 1 },
                               true
                             );
                           }}
                           onClear={() => {
                             setViolationFilter('');
+                            setViolationPage(1);
                             syncGatekeeperRoute(
-                              { detail: selectedDetail, violationSearch: '' },
+                              { detail: selectedDetail, violationSearch: '', violationPage: 1 },
                               true
                             );
                           }}
@@ -1462,8 +1478,13 @@ export function GatekeeperPolicyManager() {
                             onChange={(_event, value) => {
                               const nextSort = String(value);
                               setViolationSort(nextSort);
+                              setViolationPage(1);
                               syncGatekeeperRoute(
-                                { detail: selectedDetail, violationSort: nextSort },
+                                {
+                                  detail: selectedDetail,
+                                  violationSort: nextSort,
+                                  violationPage: 1,
+                                },
                                 true
                               );
                             }}
@@ -1476,15 +1497,20 @@ export function GatekeeperPolicyManager() {
                         </FormGroup>
                       </GridItem>
                       <GridItem span={3}>
-                        <FormGroup label={t('Limit')} fieldId="gatekeeper-violation-limit">
+                        <FormGroup label={t('Per page')} fieldId="gatekeeper-violation-limit">
                           <FormSelect
                             id="gatekeeper-violation-limit"
                             value={violationLimit}
                             onChange={(_event, value) => {
                               const nextLimit = String(value);
                               setViolationLimit(nextLimit);
+                              setViolationPage(1);
                               syncGatekeeperRoute(
-                                { detail: selectedDetail, violationLimit: nextLimit },
+                                {
+                                  detail: selectedDetail,
+                                  violationLimit: nextLimit,
+                                  violationPage: 1,
+                                },
                                 true
                               );
                             }}
@@ -1502,7 +1528,52 @@ export function GatekeeperPolicyManager() {
                     </Grid>
                   </StackItem>
                   <StackItem>
-                    {t('{{returned}} of {{filtered}} matching violations shown.', {
+                    {t(
+                      'Page {{page}} of {{totalPages}} - {{returned}} of {{filtered}} matching violations shown.',
+                      {
+                        page: data.violation_query.page,
+                        totalPages: data.violation_query.total_pages,
+                        returned: data.violation_query.returned,
+                        filtered: data.counts.filtered_violations,
+                      }
+                    )}
+                  </StackItem>
+                  <StackItem>
+                    <PagePagination
+                      itemCount={data.counts.filtered_violations}
+                      page={data.violation_query.page}
+                      perPage={data.violation_query.limit}
+                      setPage={(page) => {
+                        setViolationPage(page);
+                        syncGatekeeperRoute({
+                          detail: selectedDetail,
+                          violationPage: page,
+                        });
+                      }}
+                      setPerPage={(perPage) => {
+                        const nextLimit = String(perPage);
+                        setViolationLimit(nextLimit);
+                        setViolationPage(1);
+                        syncGatekeeperRoute(
+                          {
+                            detail: selectedDetail,
+                            violationLimit: nextLimit,
+                            violationPage: 1,
+                          },
+                          true
+                        );
+                      }}
+                      perPageOptions={[25, 50, 100, 200].map((limit) => ({
+                        title: String(limit),
+                        value: limit,
+                      }))}
+                    />
+                  </StackItem>
+                  <StackItem>
+                    {t('{{start}}-{{end}} of {{filtered}} matching violations.', {
+                      start:
+                        data.counts.filtered_violations === 0 ? 0 : data.violation_query.offset + 1,
+                      end: data.violation_query.offset + data.violation_query.returned,
                       returned: data.violation_query.returned,
                       filtered: data.counts.filtered_violations,
                     })}

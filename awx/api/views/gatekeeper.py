@@ -947,6 +947,9 @@ class GatekeeperPolicyManagerView(APIView):
                         'search': '',
                         'sort': 'constraint',
                         'limit': 50,
+                        'page': 1,
+                        'offset': 0,
+                        'total_pages': 1,
                         'returned': 0,
                     },
                     'constraint_templates': [],
@@ -979,11 +982,16 @@ class GatekeeperPolicyManagerView(APIView):
         violation_search = (request.query_params.get('violation_search') or '').strip().lower()
         violation_sort = (request.query_params.get('violation_sort') or 'constraint').strip().lower()
         violation_limit = _positive_int_query(request, 'violation_limit', 50, 500)
+        violation_page = _positive_int_query(request, 'violation_page', 1, 100000)
         if violation_search:
             violations = [violation for violation in violations_all if violation_search in _violation_search_text(violation)]
         else:
             violations = list(violations_all)
         _sort_violations(violations, violation_sort)
+        violation_total_pages = max(1, (len(violations) + violation_limit - 1) // violation_limit)
+        violation_page = min(violation_page, violation_total_pages)
+        violation_offset = (violation_page - 1) * violation_limit
+        page_violations = violations[violation_offset : violation_offset + violation_limit]
         constraint_summaries.sort(key=lambda item: (-int(item.get('total_violations') or 0), item['kind'], item['name']))
 
         return Response(
@@ -1011,14 +1019,17 @@ class GatekeeperPolicyManagerView(APIView):
                     'search': violation_search,
                     'sort': violation_sort,
                     'limit': violation_limit,
-                    'returned': min(len(violations), violation_limit),
+                    'page': violation_page,
+                    'offset': violation_offset,
+                    'total_pages': violation_total_pages,
+                    'returned': len(page_violations),
                 },
                 'constraint_templates': sorted(
                     [_template_summary(template, constraint_summaries) for template in templates],
                     key=lambda item: item['name'],
                 ),
                 'constraints': constraint_summaries,
-                'violations': violations[:violation_limit],
+                'violations': page_violations,
                 'configs': sorted([_config_summary(config) for config in configs], key=lambda item: item['name']),
                 'errors': errors,
             }
