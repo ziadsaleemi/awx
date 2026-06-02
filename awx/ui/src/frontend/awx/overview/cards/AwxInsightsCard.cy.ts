@@ -3,11 +3,20 @@ import {
   formatSeconds,
   getInventoryDrift,
   getJobStatistics,
+  getListResults,
   getRecommendations,
   getRuntimeAnomalies,
 } from './AwxInsightsCard';
 
 describe('AwxInsightsCard metrics', () => {
+  it('normalizes malformed list responses to an empty result set', () => {
+    expect(getListResults(undefined)).to.deep.equal([]);
+    expect(getListResults({ count: 1 })).to.deep.equal([]);
+    expect(getListResults({ count: 1, results: [{ name: 'Demo' }] })).to.deep.equal([
+      { name: 'Demo' },
+    ]);
+  });
+
   it('aggregates recent job failures by template', () => {
     const stats = getJobStatistics([
       {

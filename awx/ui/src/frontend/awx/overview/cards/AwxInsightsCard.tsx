@@ -147,6 +147,10 @@ async function fetchJson<T>(url: string): Promise<ListResponse<T>> {
   return (await response.json()) as ListResponse<T>;
 }
 
+export function getListResults<T>(data?: Partial<ListResponse<T>> | null): T[] {
+  return Array.isArray(data?.results) ? data.results : [];
+}
+
 function getDateValue(value?: string) {
   if (!value) return undefined;
   const time = new Date(value).getTime();
@@ -371,51 +375,75 @@ export function buildInsightSignals(stats: AggregatedStats) {
   return signals;
 }
 
-function useInsightsData(): { stats: AggregatedStats | null; isLoading: boolean } {
+function useInsightsData(): {
+  stats: AggregatedStats | null;
+  isLoading: boolean;
+  hasError: boolean;
+} {
   const swrOptions = { refreshInterval };
-  const { data: recentJobs, isLoading: jobsLoading } = useSWR<ListResponse<UnifiedJob>>(
+  const recentJobsState = useSWR<ListResponse<UnifiedJob>>(
     awxAPI`/unified_jobs/?page_size=200&order_by=-finished`,
     fetchJson,
     swrOptions
   );
-  const { data: projects, isLoading: projectsLoading } = useSWR<ListResponse<ProjectSummary>>(
+  const projectsState = useSWR<ListResponse<ProjectSummary>>(
     awxAPI`/projects/?page_size=100&order_by=-modified`,
     fetchJson,
     swrOptions
   );
-  const { data: inventories, isLoading: inventoriesLoading } = useSWR<
-    ListResponse<InventorySummary>
-  >(awxAPI`/inventories/?page_size=100&order_by=-modified`, fetchJson, swrOptions);
-  const { data: inventorySources, isLoading: sourcesLoading } = useSWR<
-    ListResponse<InventorySourceSummary>
-  >(awxAPI`/inventory_sources/?page_size=100&order_by=-modified`, fetchJson, swrOptions);
+  const inventoriesState = useSWR<ListResponse<InventorySummary>>(
+    awxAPI`/inventories/?page_size=100&order_by=-modified`,
+    fetchJson,
+    swrOptions
+  );
+  const inventorySourcesState = useSWR<ListResponse<InventorySourceSummary>>(
+    awxAPI`/inventory_sources/?page_size=100&order_by=-modified`,
+    fetchJson,
+    swrOptions
+  );
 
-  const isLoading = jobsLoading || projectsLoading || inventoriesLoading || sourcesLoading;
+  const recentJobs = recentJobsState.data;
+  const projects = projectsState.data;
+  const inventories = inventoriesState.data;
+  const inventorySources = inventorySourcesState.data;
+  const isLoading =
+    recentJobsState.isLoading ||
+    projectsState.isLoading ||
+    inventoriesState.isLoading ||
+    inventorySourcesState.isLoading;
+  const hasError = Boolean(
+    recentJobsState.error ||
+      projectsState.error ||
+      inventoriesState.error ||
+      inventorySourcesState.error
+  );
 
   const stats = useMemo<AggregatedStats | null>(() => {
-    if (!recentJobs || !projects || !inventories || !inventorySources || isLoading) return null;
+    if (!recentJobs || !projects || !inventories || !inventorySources || isLoading || hasError) {
+      return null;
+    }
 
-    const jobStatistics = getJobStatistics(recentJobs.results);
-    const runtimeAnomalies = getRuntimeAnomalies(recentJobs.results);
-    const inventoryDrift = getInventoryDrift(
-      inventories.results,
-      inventorySources.results,
-      new Date()
-    );
-    const projectFailures = projects.results.filter(
+    const recentJobResults = getListResults(recentJobs);
+    const projectResults = getListResults(projects);
+    const inventoryResults = getListResults(inventories);
+    const inventorySourceResults = getListResults(inventorySources);
+    const jobStatistics = getJobStatistics(recentJobResults);
+    const runtimeAnomalies = getRuntimeAnomalies(recentJobResults);
+    const inventoryDrift = getInventoryDrift(inventoryResults, inventorySourceResults, new Date());
+    const projectFailures = projectResults.filter(
       (project) =>
         project.last_job_failed ||
         project.last_update_failed ||
         unhealthyStatuses.has(project.status ?? '')
     ).length;
-    const inventorySourceFailures = inventorySources.results.filter(
+    const inventorySourceFailures = inventorySourceResults.filter(
       (source) =>
         source.last_job_failed ||
         source.last_update_failed ||
         unhealthyStatuses.has(source.status ?? '')
     ).length;
     const staleSources = inventoryDrift.filter((signal) => signal.reason.includes('stale')).length;
-    const hostsWithFailures = inventorySources.results.reduce(
+    const hostsWithFailures = inventorySourceResults.reduce(
       (total, source) =>
         total + (source.summary_fields?.inventory?.hosts_with_active_failures ?? 0),
       0
@@ -429,12 +457,12 @@ function useInsightsData(): { stats: AggregatedStats | null; isLoading: boolean 
     const aggregatedStats: AggregatedStats = {
       ...partialStats,
       projects: {
-        total: projects.results.length,
+        total: projectResults.length,
         failed: projectFailures,
-        successful: projects.results.filter((project) => project.status === 'successful').length,
+        successful: projectResults.filter((project) => project.status === 'successful').length,
       },
       inventories: {
-        total: inventories.results.length,
+        total: inventoryResults.length,
         sourceFailures: inventorySourceFailures,
         staleSources,
         hostsWithFailures,
@@ -450,14 +478,14 @@ function useInsightsData(): { stats: AggregatedStats | null; isLoading: boolean 
       ...aggregatedStats,
       signals: buildInsightSignals(aggregatedStats),
     };
-  }, [inventories, inventorySources, isLoading, projects, recentJobs]);
+  }, [hasError, inventories, inventorySources, isLoading, projects, recentJobs]);
 
-  return { stats, isLoading };
+  return { stats, isLoading, hasError };
 }
 
 export function AwxInsightsCard() {
   const { t } = useTranslation();
-  const { stats, isLoading } = useInsightsData();
+  const { stats, isLoading, hasError } = useInsightsData();
   const { enabled: aiEnabled, configured: aiConfigured } = useAIAssistantEnabled();
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -535,6 +563,13 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
       <CardBody>
         {isLoading ? (
           <Spinner size="lg" />
+        ) : hasError ? (
+          <Alert
+            variant="warning"
+            isInline
+            isPlain
+            title={t('Automation insights data is temporarily unavailable')}
+          />
         ) : (
           <Stack hasGutter>
             {stats?.signals.length ? (
