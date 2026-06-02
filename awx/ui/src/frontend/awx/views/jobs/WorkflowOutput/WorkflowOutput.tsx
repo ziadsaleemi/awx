@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Alert, Button, Stack, StackItem } from '@patternfly/react-core';
 import {
   ComponentFactory,
   DagreLayout,
@@ -35,6 +36,7 @@ import { useAwxGetAllPages } from '../../../common/useAwxGetAllPages';
 import { secondsToHHMMSS } from '../../../../../framework/utils/dateTimeHelpers';
 import { Job } from '../../../interfaces/Job';
 import { WorkflowOutputNode } from './WorkflowOutputNode';
+import { postRequest } from '../../../../common/crud/Data';
 
 export const graphModel: Model = {
   nodes: [],
@@ -59,9 +61,37 @@ export const WorkflowOutput = (props: {
 }) => {
   const { t } = useTranslation();
   const createEdge = useCreateEdge();
+  const [applyingAiNodeId, setApplyingAiNodeId] = useState<number | null>(null);
+  const [aiApplyError, setAiApplyError] = useState('');
 
-  const { results: workflowNodes } = useAwxGetAllPages<WorkflowNode>(
+  const { results: workflowNodes, refresh: refreshWorkflowNodes } = useAwxGetAllPages<WorkflowNode>(
     awxAPI`/workflow_jobs/${props.job.id.toString() || ''}/workflow_nodes/`
+  );
+  const awaitingAiNodes =
+    workflowNodes?.filter(
+      (node) =>
+        node.node_type === 'ai_task' &&
+        node.ai_task_status === 'awaiting_approval' &&
+        node.related.apply_ai_plan
+    ) || [];
+
+  const applyAiPlan = useCallback(
+    async (node: WorkflowNode) => {
+      if (!node.related.apply_ai_plan) return;
+      setApplyingAiNodeId(node.id);
+      setAiApplyError('');
+      try {
+        await postRequest<WorkflowNode, object>(node.related.apply_ai_plan, {});
+        refreshWorkflowNodes();
+        props.reloadJob();
+        props.refreshNodeStatus();
+      } catch (error) {
+        setAiApplyError(error instanceof Error ? error.message : t('Failed to apply AI plan.'));
+      } finally {
+        setApplyingAiNodeId(null);
+      }
+    },
+    [props, refreshWorkflowNodes, t]
   );
   const baselineComponentFactory: ComponentFactory = useCallback(
     (kind: ModelKind, type: string) => {
@@ -125,7 +155,11 @@ export const WorkflowOutput = (props: {
       const nodeId = n.id.toString();
       const nodeType = 'node';
       const nodeName =
-        n.summary_fields?.unified_job_template?.name || n.summary_fields?.eda_rulebook?.name || '';
+        n.summary_fields?.unified_job_template?.name ||
+        n.summary_fields?.eda_rulebook?.name ||
+        n.summary_fields?.ai_task?.prompt?.split('\n')[0].slice(0, 60) ||
+        n.ai_task_prompt?.split('\n')[0].slice(0, 60) ||
+        '';
       const nodeLabel = getNodeLabel(nodeName, n.identifier) || t('Deleted');
 
       n.success_nodes.forEach((id) => {
@@ -141,9 +175,17 @@ export const WorkflowOutput = (props: {
       if (n?.summary_fields?.job?.elapsed) {
         time = secondsToHHMMSS(n?.summary_fields?.job?.elapsed);
       }
+      const aiStatus = n.summary_fields.ai_task?.status;
       const status =
         (n.summary_fields.job?.status as NodeStatus) ||
         (n.summary_fields.eda_rulebook?.status as NodeStatus) ||
+        (aiStatus === 'awaiting_approval'
+          ? NodeStatus.warning
+          : aiStatus === 'applied' || aiStatus === 'successful'
+            ? NodeStatus.success
+            : aiStatus === 'failed'
+              ? NodeStatus.danger
+              : undefined) ||
         undefined;
       const node = {
         id: nodeId,
@@ -189,12 +231,45 @@ export const WorkflowOutput = (props: {
   }, [t, visualization, createEdge, workflowNodes]);
 
   return (
-    <VisualizationProvider controller={visualization}>
-      <WorkflowOutputGraph
-        job={props.job}
-        reloadJob={props.reloadJob}
-        refreshNodeStatus={props.refreshNodeStatus}
-      />
-    </VisualizationProvider>
+    <>
+      {(awaitingAiNodes.length > 0 || aiApplyError) && (
+        <Stack hasGutter style={{ padding: '16px' }} data-cy="workflow-ai-plan-approvals">
+          {aiApplyError && (
+            <StackItem>
+              <Alert isInline variant="danger" title={aiApplyError} />
+            </StackItem>
+          )}
+          {awaitingAiNodes.map((node) => (
+            <StackItem key={node.id}>
+              <Alert
+                isInline
+                variant="warning"
+                title={t('AI plan awaiting approval')}
+                data-cy="workflow-ai-plan-approval"
+              >
+                <div>{node.summary_fields.ai_task?.prompt || node.ai_task_prompt}</div>
+                <Button
+                  style={{ marginTop: '8px' }}
+                  variant="primary"
+                  isLoading={applyingAiNodeId === node.id}
+                  isDisabled={applyingAiNodeId !== null}
+                  onClick={() => void applyAiPlan(node)}
+                  data-cy="workflow-ai-plan-apply"
+                >
+                  {t('Apply AI plan')}
+                </Button>
+              </Alert>
+            </StackItem>
+          ))}
+        </Stack>
+      )}
+      <VisualizationProvider controller={visualization}>
+        <WorkflowOutputGraph
+          job={props.job}
+          reloadJob={props.reloadJob}
+          refreshNodeStatus={props.refreshNodeStatus}
+        />
+      </VisualizationProvider>
+    </>
   );
 };

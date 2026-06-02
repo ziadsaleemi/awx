@@ -27,6 +27,8 @@ export interface WorkflowNode {
     always_nodes: string;
     unified_job_template?: string;
     workflow_job_template: string;
+    workflow_job?: string;
+    apply_ai_plan?: string;
   };
   summary_fields: {
     job?: {
@@ -117,6 +119,12 @@ export interface WorkflowNode {
     plan?: object | null;
     error?: string;
     approval_required?: boolean;
+    resource_action?: {
+      mode?: string;
+      can_apply?: boolean;
+      operations?: object[];
+      audit?: { activity_stream_id?: number };
+    };
   };
   success_nodes: number[];
   failure_nodes: number[];

@@ -4713,6 +4713,8 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             res['job'] = obj.job.get_absolute_url(self.context.get('request'))
         if obj.workflow_job:
             res['workflow_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.workflow_job.pk})
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK and obj.ai_task_status == 'awaiting_approval':
+            res['apply_ai_plan'] = self.reverse('api:workflow_job_node_apply_ai_plan', kwargs={'pk': obj.pk})
         return res
 
     def get_summary_fields(self, obj):

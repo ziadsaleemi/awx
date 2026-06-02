@@ -5,6 +5,7 @@
 import json
 import logging
 import re
+from types import SimpleNamespace
 from uuid import uuid4
 from copy import copy
 from urllib.parse import urljoin
@@ -76,6 +77,20 @@ class AIWorkflowTaskError(Exception):
     pass
 
 
+class AIWorkflowTaskRequest(SimpleNamespace):
+    path_info = '/api/v2/workflow_job_nodes/'
+    path = '/api/v2/workflow_job_nodes/'
+    method = 'POST'
+    GET = {}
+    query_params = {}
+
+    def get_full_path(self):
+        return self.path_info
+
+    def build_absolute_uri(self, location=None):
+        return location or self.path_info
+
+
 def _extract_ai_plan(value):
     source = str(value or '').strip()
     if not source:
@@ -109,7 +124,11 @@ def run_ai_workflow_task(prompt, parent_artifacts=None, model_name=''):
     artifacts_json = json.dumps(parent_artifacts or {}, default=str, sort_keys=True)[:12000]
     system_prompt = (
         'You are an AWX runtime workflow planner. Generate an execution plan for the requested automation. '
-        'Do not mutate AWX resources or claim that actions were executed. Return concise JSON when possible.'
+        'Do not mutate AWX resources or claim that actions were executed. Return concise JSON when possible. '
+        'When the task should create or update AWX resources, return a resource-action plan shaped as '
+        '{"name": "...", "operations": [{"id": "op-1", "operation": "create|update", '
+        '"resource_type": "inventory|smart_inventory|constructed_inventory|project|job_template|workflow_job_template|schedule|catalog_item", '
+        '"object_id": 123, "data": {}}]}. AWX will validate and require approval before applying by default.'
     )
     messages = [
         {
@@ -135,6 +154,23 @@ def run_ai_workflow_task(prompt, parent_artifacts=None, model_name=''):
         'response': response,
         'plan': _extract_ai_plan(response),
     }
+
+
+def _ai_resource_action_plan(value):
+    if not isinstance(value, dict) or not isinstance(value.get('operations'), list):
+        return None
+    from awx.api.views.ai import _normalize_ai_plan
+
+    try:
+        return _normalize_ai_plan(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _ai_resource_action_request(user):
+    if not user:
+        raise AIWorkflowTaskError(_('AI resource action plans require a workflow launch user.'))
+    return AIWorkflowTaskRequest(user=user)
 
 
 class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
@@ -497,10 +533,14 @@ class WorkflowJobNode(WorkflowNodeBase):
         return self.sync_eda_rulebook_activation()
 
     def sync_ai_task(self):
+        if self.ai_task_status == 'awaiting_approval':
+            return self
+
         artifacts = self._build_parent_artifacts()
         ai_status = 'planned'
         workflow_status = 'failed'
         error = ''
+        resource_action = None
         result = {
             'provider': '',
             'model': self.ai_task_model,
@@ -514,8 +554,24 @@ class WorkflowJobNode(WorkflowNodeBase):
             result = run_ai_workflow_task(self.ai_task_prompt, copy(artifacts), self.ai_task_model)
             ai_status = 'successful'
             workflow_status = 'successful'
+            resource_action_plan = _ai_resource_action_plan(result.get('plan'))
+            if resource_action_plan:
+                resource_action = self.preview_ai_resource_action_plan(resource_action_plan, result)
+                if not resource_action['can_apply']:
+                    ai_status = 'failed'
+                    workflow_status = 'failed'
+                    error = _('AI resource action plan failed validation.')
+                elif self.ai_task_approval_required:
+                    ai_status = 'awaiting_approval'
+                    workflow_status = ''
+                else:
+                    resource_action = self.apply_ai_resource_action_plan(resource_action_plan, result, user=self.workflow_job.created_by)
+                    ai_status = 'applied' if resource_action['can_apply'] else 'failed'
+                    workflow_status = 'successful' if resource_action['can_apply'] else 'failed'
+                    error = '' if resource_action['can_apply'] else _('AI resource action plan failed to apply.')
         except AIWorkflowTaskError as exc:
             ai_status = 'failed'
+            workflow_status = 'failed'
             error = str(exc)
 
         self.ai_task_status = ai_status
@@ -528,6 +584,8 @@ class WorkflowJobNode(WorkflowNodeBase):
             'error': error,
             'approval_required': self.ai_task_approval_required,
         }
+        if resource_action:
+            self.ai_task_result['resource_action'] = resource_action
         artifacts['awx_ai'] = {
             'prompt': self.ai_task_prompt,
             'status': ai_status,
@@ -537,12 +595,110 @@ class WorkflowJobNode(WorkflowNodeBase):
             'plan': self.ai_task_result['plan'],
             'error': error,
             'approval_required': self.ai_task_approval_required,
+            'resource_action': resource_action,
             'source': 'ai_provider',
         }
         self.ancestor_artifacts = artifacts
         self.bypassed_job_status = workflow_status
         self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
         return self
+
+    def preview_ai_resource_action_plan(self, plan, provider_result):
+        from awx.api.views.ai import (
+            _ai_plan_uses_operation_references,
+            _audit_ai_resource_action,
+            _public_ai_operation_result,
+            _redact_sensitive,
+            _simulate_ai_operations_for_preview,
+            _validate_ai_operations_for_preview,
+            _json_safe,
+        )
+
+        request = _ai_resource_action_request(self.workflow_job.created_by)
+        operations = (
+            _simulate_ai_operations_for_preview(request, plan['operations'])
+            if _ai_plan_uses_operation_references(plan['operations'])
+            else _validate_ai_operations_for_preview(request, plan['operations'])
+        )
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        audit_entry = _audit_ai_resource_action(
+            request,
+            'preview',
+            plan,
+            public_operations,
+            provider=provider_result.get('provider', ''),
+            model=provider_result.get('model', ''),
+        )
+        return {
+            'mode': 'preview',
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': all(operation.get('valid') for operation in public_operations),
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+
+    def apply_ai_resource_action_plan(self, plan=None, provider_result=None, user=None):
+        from awx.api.views.ai import (
+            _apply_ai_operations_sequentially,
+            _audit_ai_resource_action,
+            _public_ai_operation_result,
+            _redact_sensitive,
+            _json_safe,
+        )
+
+        plan = _ai_resource_action_plan(plan or self.ai_task_result.get('plan'))
+        if not plan:
+            raise AIWorkflowTaskError(_('AI task result does not contain an applicable resource action plan.'))
+        request = _ai_resource_action_request(user)
+        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'])
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        provider_result = provider_result or self.ai_task_result
+        audit_entry = _audit_ai_resource_action(
+            request,
+            'apply',
+            plan,
+            public_operations,
+            provider=provider_result.get('provider', ''),
+            model=provider_result.get('model', ''),
+        )
+        return {
+            'mode': 'apply',
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': can_apply,
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+
+    def approve_ai_resource_action_plan(self, user):
+        resource_action = self.apply_ai_resource_action_plan(user=user)
+        ai_status = 'applied' if resource_action['can_apply'] else 'failed'
+        workflow_status = 'successful' if resource_action['can_apply'] else 'failed'
+        error = '' if resource_action['can_apply'] else _('AI resource action plan failed to apply.')
+        result = copy(self.ai_task_result or {})
+        result.update(
+            {
+                'status': ai_status,
+                'error': error,
+                'resource_action': resource_action,
+            }
+        )
+        artifacts = copy(self.ancestor_artifacts or {})
+        awx_ai = copy(artifacts.get('awx_ai') or {})
+        awx_ai.update(
+            {
+                'status': ai_status,
+                'error': error,
+                'resource_action': resource_action,
+            }
+        )
+        artifacts['awx_ai'] = awx_ai
+        self.ai_task_status = ai_status
+        self.ai_task_result = result
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        ScheduleWorkflowManager().schedule()
+        return resource_action
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)

@@ -55,6 +55,9 @@ class WorkflowDAG(SimpleDAG):
     def _is_ai_task_node(self, obj):
         return getattr(obj, 'node_type', None) == WORKFLOW_NODE_TYPE_AI_TASK
 
+    def _is_ai_task_waiting_for_approval(self, obj):
+        return self._is_ai_task_node(obj) and getattr(obj, 'ai_task_status', None) == 'awaiting_approval'
+
     def _is_virtual_node(self, obj):
         return self._is_eda_rulebook_node(obj) or self._is_ai_task_node(obj)
 
@@ -132,6 +135,8 @@ class WorkflowDAG(SimpleDAG):
                 elif obj.job.status == 'successful':
                     nodes.extend(self.get_children(obj, 'success_nodes') + self.get_children(obj, 'always_nodes'))
             elif self._is_virtual_node(obj):
+                if self._is_ai_task_waiting_for_approval(obj):
+                    continue
                 if not obj.all_parents_must_converge and self._are_relevant_parents_finished(n):
                     nodes_found.append(n)
                 elif obj.all_parents_must_converge and self._are_relevant_parents_finished(n):

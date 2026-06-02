@@ -1794,15 +1794,11 @@ class CredentialExternalTest(OIDCCredentialTestMixin, SubDetailAPIView):
     obj_permission_type = 'use'
     resource_purpose = 'test external credential'
 
-    @extend_schema_if_available(
-        extensions={
-            "x-ai-description": """Test update the input values and metadata of an external credential.
+    @extend_schema_if_available(extensions={"x-ai-description": """Test update the input values and metadata of an external credential.
         This endpoint supports testing credentials that connect to external secret management systems
         such as CyberArk AIM, CyberArk Conjur, HashiCorp Vault, AWS Secrets Manager, Azure Key Vault,
         Centrify Vault, Thycotic DevOps Secrets Vault, and GitHub App Installation Access Token Lookup.
-        It does not support standard credential types such as Machine, SCM, and Cloud."""
-        }
-    )
+        It does not support standard credential types such as Machine, SCM, and Cloud."""})
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
         if obj.credential_type.kind != 'external':
@@ -3294,6 +3290,35 @@ class WorkflowJobNodeDetail(RetrieveAPIView):
     model = models.WorkflowJobNode
     serializer_class = serializers.WorkflowJobNodeDetailSerializer
     resource_purpose = 'workflow job node detail'
+
+
+class WorkflowJobNodeApplyAIPlan(RetrieveAPIView):
+    model = models.WorkflowJobNode
+    serializer_class = serializers.WorkflowJobNodeDetailSerializer
+    resource_purpose = 'apply an approved AI resource action plan for a workflow job node'
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Apply an approved AI resource action plan for a workflow job node"})
+    def post(self, request, *args, **kwargs):
+        from awx.main.models.workflow import AIWorkflowTaskError
+
+        obj = self.get_object()
+        if not obj.is_ai_task_node:
+            return Response({'detail': _('Only AI task workflow nodes can apply AI plans.')}, status=status.HTTP_400_BAD_REQUEST)
+        if obj.ai_task_status != 'awaiting_approval':
+            return Response({'detail': _('AI task node is not awaiting approval.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        workflow_template = obj.workflow_job.workflow_job_template
+        if not (request.user.is_superuser or (workflow_template and request.user in workflow_template.approval_role)):
+            raise PermissionDenied(_('You do not have permission to approve this AI resource action plan.'))
+
+        try:
+            resource_action = obj.approve_ai_resource_action_plan(request.user)
+        except AIWorkflowTaskError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializers.WorkflowJobNodeDetailSerializer(obj, context=self.get_serializer_context()).data
+        data['ai_resource_action'] = resource_action
+        return Response(data, status=status.HTTP_201_CREATED if resource_action.get('can_apply') else status.HTTP_400_BAD_REQUEST)
 
 
 class WorkflowJobNodeCredentialsList(SubListAPIView):
