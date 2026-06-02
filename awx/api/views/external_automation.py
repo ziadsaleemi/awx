@@ -8,7 +8,63 @@ from rest_framework.response import Response
 
 from awx.api.generics import APIView
 from awx.api.permissions import IsSystemAdmin
+from awx.api.versioning import reverse
+from awx.main.models import ActivityStream
 from awx.main.management.commands.check_external_automation import run_external_automation_checks
+
+
+def _safe_check_summary(result):
+    checks = result.get('checks', {}) if isinstance(result, dict) else {}
+    summary = {}
+    for name, check in checks.items():
+        if not isinstance(check, dict):
+            continue
+        entry = {
+            'ok': bool(check.get('ok')),
+            'status': str(check.get('status') or ''),
+        }
+        for key in ('count', 'allowed', 'health_status_code'):
+            if key in check:
+                entry[key] = check[key]
+        policy_sync = check.get('policy_sync')
+        if isinstance(policy_sync, dict):
+            entry['policy_sync'] = {
+                'requested': bool(policy_sync.get('requested')),
+                'ok': bool(policy_sync.get('ok')) if 'ok' in policy_sync else None,
+                'status': str(policy_sync.get('status') or ''),
+                'policy_id': str(policy_sync.get('policy_id') or ''),
+            }
+        deny_smoke = check.get('deny_smoke')
+        if isinstance(deny_smoke, dict):
+            entry['deny_smoke'] = {
+                'requested': bool(deny_smoke.get('requested')),
+                'ok': bool(deny_smoke.get('ok')) if 'ok' in deny_smoke else None,
+                'status': str(deny_smoke.get('status') or ''),
+                'allowed': deny_smoke.get('allowed'),
+            }
+        summary[name] = entry
+    return summary
+
+
+def _audit_external_automation_check(request, result):
+    changes = {
+        'triggered_by': 'settings_external_automation_smoke',
+        'source': 'external_automation_check',
+        'is_error': not bool(result.get('ok')),
+        'checks': _safe_check_summary(result),
+    }
+    entry = ActivityStream.objects.create(
+        operation='create',
+        object1='external_automation',
+        object2='check',
+        changes=json.dumps(changes),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+    return {
+        'activity_stream_id': entry.pk,
+        'activity_stream_url': reverse('api:activity_stream_detail', kwargs={'pk': entry.pk}, request=request),
+    }
 
 
 class ExternalAutomationCheckView(APIView):
@@ -33,4 +89,5 @@ class ExternalAutomationCheckView(APIView):
             opa_deny_smoke=bool(data.get('opa_deny_smoke', False)),
             opa_deny_policy_id=str(data.get('opa_deny_policy_id') or 'awx/codex_deny_smoke'),
         )
+        result['audit'] = _audit_external_automation_check(request, result)
         return Response(result)

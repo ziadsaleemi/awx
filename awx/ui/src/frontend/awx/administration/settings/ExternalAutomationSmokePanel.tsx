@@ -48,6 +48,10 @@ interface ExternalAutomationCheckResponse {
     eda?: ExternalAutomationCheck;
     opa?: ExternalAutomationCheck;
   };
+  audit?: {
+    activity_stream_id: number;
+    activity_stream_url: string;
+  };
 }
 
 interface ExternalAutomationCheckRequest {
@@ -187,6 +191,12 @@ export function ExternalAutomationSmokePanel() {
                       <DescriptionListTerm>{t('OPA policy sync')}</DescriptionListTerm>
                       <DescriptionListDescription>
                         {result.checks.opa?.policy_sync?.status ?? t('Not checked')}
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>{t('Activity Stream ID')}</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        {result.audit?.activity_stream_id ?? t('Not recorded')}
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                   </DescriptionList>
