@@ -18,6 +18,8 @@ import {
   Grid,
   GridItem,
   Label,
+  Modal,
+  ModalVariant,
   PageSection,
   SearchInput,
   Spinner,
@@ -200,6 +202,8 @@ type GatekeeperDeletePayload = {
   manifest?: string;
   target?: GatekeeperTarget;
 };
+
+type GatekeeperLiveAction = 'apply' | 'delete' | 'rollback';
 
 interface GatekeeperAuthorResponse {
   generated: boolean;
@@ -385,6 +389,25 @@ function selectedGatekeeperTarget(
     };
   }
   return undefined;
+}
+
+function gatekeeperLiveActionTitle(t: (value: string) => string, action: GatekeeperLiveAction) {
+  if (action === 'delete') return t('Delete Gatekeeper resource');
+  if (action === 'rollback') return t('Apply Gatekeeper rollback');
+  return t('Apply Gatekeeper manifest');
+}
+
+function gatekeeperLiveActionDescription(
+  t: (value: string) => string,
+  action: GatekeeperLiveAction
+) {
+  if (action === 'delete') {
+    return t('This sends a live delete request to the Kubernetes API after RBAC and OPA checks.');
+  }
+  if (action === 'rollback') {
+    return t('This applies the rollback plan to the Kubernetes API after RBAC and OPA checks.');
+  }
+  return t('This applies the manifest to the Kubernetes API after RBAC and OPA checks.');
 }
 
 function GatekeeperAuditLink(props: {
@@ -670,6 +693,7 @@ export function GatekeeperPolicyManager() {
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [rollbackResult, setRollbackResult] = useState<GatekeeperApplyResponse | null>(null);
+  const [confirmLiveAction, setConfirmLiveAction] = useState<GatekeeperLiveAction | null>(null);
   const [authorPrompt, setAuthorPrompt] = useState('');
   const [authorLoading, setAuthorLoading] = useState(false);
   const [authorError, setAuthorError] = useState<string | null>(null);
@@ -961,6 +985,27 @@ export function GatekeeperPolicyManager() {
     }
   };
 
+  const handleConfirmLiveAction = async () => {
+    const action = confirmLiveAction;
+    setConfirmLiveAction(null);
+    if (action === 'apply') {
+      await handleApplyManifest();
+    } else if (action === 'delete') {
+      await handleDeleteManifest();
+    } else if (action === 'rollback') {
+      await handleRollback();
+    }
+  };
+
+  const confirmLiveTarget =
+    confirmLiveAction === 'delete'
+      ? deleteTarget
+        ? gatekeeperTargetDisplay(deleteTarget)
+        : t('Manifest textarea resource')
+      : confirmLiveAction === 'rollback'
+        ? t('Rollback plan')
+        : t('Manifest textarea resource');
+
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
   return (
@@ -1178,9 +1223,14 @@ export function GatekeeperPolicyManager() {
                   <StackItem>
                     <Button
                       variant={applyMode === 'apply' ? 'danger' : 'primary'}
-                      onClick={() => void handleApplyManifest()}
+                      onClick={() =>
+                        applyMode === 'apply'
+                          ? setConfirmLiveAction('apply')
+                          : void handleApplyManifest()
+                      }
                       isLoading={applyLoading}
                       isDisabled={applyLoading || !data.configured || !applyManifest.trim()}
+                      data-cy="gatekeeper-apply-button"
                     >
                       {applyMode === 'preview'
                         ? t('Preview')
@@ -1273,13 +1323,18 @@ export function GatekeeperPolicyManager() {
                   <StackItem>
                     <Button
                       variant={deleteMode === 'delete' ? 'danger' : 'secondary'}
-                      onClick={() => void handleDeleteManifest()}
+                      onClick={() =>
+                        deleteMode === 'delete'
+                          ? setConfirmLiveAction('delete')
+                          : void handleDeleteManifest()
+                      }
                       isLoading={deleteLoading}
                       isDisabled={
                         deleteLoading ||
                         !data.configured ||
                         (!deleteTarget && !applyManifest.trim())
                       }
+                      data-cy="gatekeeper-delete-button"
                     >
                       {deleteMode === 'preview'
                         ? t('Preview delete')
@@ -1350,9 +1405,14 @@ export function GatekeeperPolicyManager() {
                   <StackItem>
                     <Button
                       variant={rollbackMode === 'apply' ? 'danger' : 'secondary'}
-                      onClick={() => void handleRollback()}
+                      onClick={() =>
+                        rollbackMode === 'apply'
+                          ? setConfirmLiveAction('rollback')
+                          : void handleRollback()
+                      }
                       isLoading={rollbackLoading}
                       isDisabled={rollbackLoading || !data.configured || !rollbackPlan.trim()}
+                      data-cy="gatekeeper-rollback-button"
                     >
                       {rollbackMode === 'preview'
                         ? t('Preview rollback')
@@ -1392,6 +1452,49 @@ export function GatekeeperPolicyManager() {
                     </StackItem>
                   ) : null}
                 </Stack>
+                {confirmLiveAction ? (
+                  <Modal
+                    titleIconVariant="danger"
+                    title={gatekeeperLiveActionTitle(t, confirmLiveAction)}
+                    variant={ModalVariant.small}
+                    description={gatekeeperLiveActionDescription(t, confirmLiveAction)}
+                    isOpen
+                    onClose={() => setConfirmLiveAction(null)}
+                    data-cy="gatekeeper-live-action-confirm-dialog"
+                    actions={[
+                      <Button
+                        key="confirm"
+                        variant="danger"
+                        onClick={() => void handleConfirmLiveAction()}
+                        data-cy="gatekeeper-live-action-confirm-button"
+                        aria-label={t('Confirm Gatekeeper live action')}
+                      >
+                        {t('Confirm')}
+                      </Button>,
+                      <Button
+                        key="cancel"
+                        variant="link"
+                        onClick={() => setConfirmLiveAction(null)}
+                        data-cy="gatekeeper-live-action-cancel-button"
+                      >
+                        {t('Cancel')}
+                      </Button>,
+                    ]}
+                  >
+                    <DescriptionList isHorizontal isCompact>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {activeContext || t('Default')}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Target')}</DescriptionListTerm>
+                        <DescriptionListDescription>{confirmLiveTarget}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                    </DescriptionList>
+                  </Modal>
+                ) : null}
               </CardBody>
             </Card>
           </StackItem>
