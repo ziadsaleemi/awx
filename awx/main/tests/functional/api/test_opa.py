@@ -876,6 +876,49 @@ def test_gatekeeper_delete_dry_run_uses_kubernetes_dry_run_and_audits(post, admi
 
 @pytest.mark.django_db
 @override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_delete_preview_accepts_target_payload_without_manifest(post, admin_user):
+    existing = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_response(existing)) as requests_get, mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy') as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_delete'),
+            data={
+                'mode': 'preview',
+                'target': {
+                    'api_version': 'templates.gatekeeper.sh/v1',
+                    'kind': 'ConstraintTemplate',
+                    'name': 'k8srequiredlabels',
+                    'resource': 'constrainttemplates',
+                },
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['operation'] == 'delete'
+    assert response.data['target']['object_path'] == '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels'
+    assert response.data['rollback_plan']['operation'] == 'restore'
+    requests_get.assert_called_once_with(
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        headers={'Accept': 'application/json'},
+        verify=False,
+        timeout=7.0,
+    )
+    requests_request.assert_not_called()
+    check_policy.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
 def test_gatekeeper_rollback_restore_apply_writes_manifest_and_audits(post, admin_user):
     current = {
         'apiVersion': 'templates.gatekeeper.sh/v1',

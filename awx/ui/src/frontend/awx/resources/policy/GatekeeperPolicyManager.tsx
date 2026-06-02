@@ -44,6 +44,15 @@ import { PagePagination } from '../../../../framework/PageTable/PagePagination';
 
 type UnknownRecord = Record<string, unknown>;
 
+interface GatekeeperTarget {
+  api_version: string;
+  kind: string;
+  name: string;
+  namespace?: string;
+  resource?: string;
+  object_path?: string;
+}
+
 interface GatekeeperPolicyManagerResponse {
   configured: boolean;
   message?: string;
@@ -115,6 +124,8 @@ interface GatekeeperConstraint {
   kind: string;
   name: string;
   api_version: string;
+  resource?: string;
+  version?: string;
   enforcement_action: string;
   match: UnknownRecord;
   parameters: UnknownRecord;
@@ -161,7 +172,7 @@ interface GatekeeperApplyResponse {
   dry_run: boolean;
   mode: string;
   operation: string;
-  target: UnknownRecord;
+  target: GatekeeperTarget;
   apply_strategy?: string | null;
   field_manager?: string | null;
   force_conflicts?: boolean | null;
@@ -177,6 +188,14 @@ interface GatekeeperApplyResponse {
     activity_stream_url?: string;
   } | null;
 }
+
+type GatekeeperDeletePayload = {
+  mode: string;
+  human_approved: boolean;
+  context_name: string;
+  manifest?: string;
+  target?: GatekeeperTarget;
+};
 
 interface GatekeeperAuthorResponse {
   generated: boolean;
@@ -319,6 +338,52 @@ function violationKey(violation: GatekeeperViolation) {
   ]
     .filter(Boolean)
     .join('/');
+}
+
+function gatekeeperTargetDisplay(target?: GatekeeperTarget) {
+  if (!target) return '';
+  const namespace = target.namespace ? `${target.namespace}/` : '';
+  return `${target.kind}/${namespace}${target.name}`;
+}
+
+function selectedGatekeeperTarget(
+  data: GatekeeperPolicyManagerResponse | undefined,
+  selectedDetail: GatekeeperDetail | undefined
+): GatekeeperTarget | undefined {
+  if (!data || !selectedDetail) return undefined;
+  if (selectedDetail.type === 'template') {
+    const template = data.constraint_templates.find((item) => item.name === selectedDetail.name);
+    if (!template) return undefined;
+    return {
+      api_version: template.api_version,
+      kind: 'ConstraintTemplate',
+      name: template.name,
+      resource: 'constrainttemplates',
+    };
+  }
+  if (selectedDetail.type === 'constraint') {
+    const constraint = data.constraints.find(
+      (item) => item.kind === selectedDetail.kind && item.name === selectedDetail.name
+    );
+    if (!constraint) return undefined;
+    return {
+      api_version: constraint.api_version,
+      kind: constraint.kind,
+      name: constraint.name,
+      resource: constraint.resource,
+    };
+  }
+  if (selectedDetail.type === 'config') {
+    const config = data.configs.find((item) => item.name === selectedDetail.name);
+    if (!config) return undefined;
+    return {
+      api_version: config.api_version,
+      kind: 'Config',
+      name: config.name,
+      resource: 'configs',
+    };
+  }
+  return undefined;
 }
 
 function GatekeeperTemplateDetail(props: {
@@ -576,6 +641,7 @@ export function GatekeeperPolicyManager() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteResult, setDeleteResult] = useState<GatekeeperApplyResponse | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GatekeeperTarget | undefined>();
   const [rollbackMode, setRollbackMode] = useState('preview');
   const [rollbackPlan, setRollbackPlan] = useState(defaultRollbackPlan);
   const [rollbackLoading, setRollbackLoading] = useState(false);
@@ -684,6 +750,10 @@ export function GatekeeperPolicyManager() {
     if (selectedDetail?.type !== 'config') return undefined;
     return data?.configs.find((config) => config.name === selectedDetail.name);
   }, [data?.configs, selectedDetail]);
+  const selectedDeleteTarget = useMemo(
+    () => selectedGatekeeperTarget(data, selectedDetail),
+    [data, selectedDetail]
+  );
   const authorContext = useMemo(
     () => ({
       context_name: activeContext,
@@ -798,15 +868,15 @@ export function GatekeeperPolicyManager() {
     setDeleteError(null);
     setDeleteResult(null);
     try {
-      const response = await postRequest<
-        GatekeeperApplyResponse,
-        { mode: string; manifest: string; human_approved: boolean; context_name: string }
-      >(awxAPI`/opa/gatekeeper/delete/`, {
-        mode: deleteMode,
-        manifest: applyManifest,
-        human_approved: deleteMode === 'delete',
-        context_name: activeContext,
-      });
+      const response = await postRequest<GatekeeperApplyResponse, GatekeeperDeletePayload>(
+        awxAPI`/opa/gatekeeper/delete/`,
+        {
+          mode: deleteMode,
+          human_approved: deleteMode === 'delete',
+          context_name: activeContext,
+          ...(deleteTarget ? { target: deleteTarget } : { manifest: applyManifest }),
+        }
+      );
       setDeleteResult(response);
       if (response.rollback_plan) {
         setRollbackPlan(JSON.stringify(response.rollback_plan, null, 2));
@@ -1129,6 +1199,42 @@ export function GatekeeperPolicyManager() {
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
+                      <GridItem span={9}>
+                        <FormGroup label={t('Delete target')} fieldId="gatekeeper-delete-target">
+                          <Stack hasGutter>
+                            <StackItem>
+                              {deleteTarget
+                                ? t('Selected resource: {{target}}', {
+                                    target: gatekeeperTargetDisplay(deleteTarget),
+                                  })
+                                : t('Manifest textarea resource')}
+                            </StackItem>
+                            <StackItem>
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  setDeleteTarget(selectedDeleteTarget);
+                                  setDeleteResult(null);
+                                }}
+                                isDisabled={!selectedDeleteTarget}
+                              >
+                                {t('Use selected resource')}
+                              </Button>{' '}
+                              <Button
+                                variant="link"
+                                isInline
+                                onClick={() => {
+                                  setDeleteTarget(undefined);
+                                  setDeleteResult(null);
+                                }}
+                                isDisabled={!deleteTarget}
+                              >
+                                {t('Use manifest instead')}
+                              </Button>
+                            </StackItem>
+                          </Stack>
+                        </FormGroup>
+                      </GridItem>
                     </Grid>
                   </StackItem>
                   <StackItem>
@@ -1136,7 +1242,11 @@ export function GatekeeperPolicyManager() {
                       variant={deleteMode === 'delete' ? 'danger' : 'secondary'}
                       onClick={() => void handleDeleteManifest()}
                       isLoading={deleteLoading}
-                      isDisabled={deleteLoading || !data.configured || !applyManifest.trim()}
+                      isDisabled={
+                        deleteLoading ||
+                        !data.configured ||
+                        (!deleteTarget && !applyManifest.trim())
+                      }
                     >
                       {deleteMode === 'preview'
                         ? t('Preview delete')
