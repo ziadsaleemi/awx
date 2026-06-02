@@ -23,16 +23,19 @@ OPA input schema for job launch checks:
 """
 
 import logging
+import json
 import re
 
 import requests
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import PermissionDenied
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from awx.api.permissions import IsSystemAdmin as IsSuperUser
+from awx.main import models
 from awx.main.tasks.policy import OPA_AUTH_TYPES, opa_cert_file
 
 logger = logging.getLogger('awx.api.opa')
@@ -150,6 +153,106 @@ def opa_response_allows(opa_response: dict) -> bool:
     return bool(result)
 
 
+def _safe_opa_id(value):
+    return getattr(value, 'pk', value)
+
+
+def _extra_var_keys(raw_extra_vars):
+    if isinstance(raw_extra_vars, dict):
+        return sorted(str(key) for key in raw_extra_vars.keys())
+    if isinstance(raw_extra_vars, str) and raw_extra_vars.strip().startswith('{'):
+        try:
+            parsed = json.loads(raw_extra_vars)
+        except ValueError:
+            return []
+        if isinstance(parsed, dict):
+            return sorted(str(key) for key in parsed.keys())
+    return []
+
+
+def _inventory_summary(inventory):
+    if inventory is None:
+        return None
+    return {
+        'id': inventory.pk,
+        'name': inventory.name,
+        'organization': _safe_opa_id(getattr(inventory, 'organization_id', None)),
+    }
+
+
+def _template_summary(template):
+    return {
+        'id': template.pk,
+        'name': getattr(template, 'name', ''),
+        'type': template._meta.model_name,
+        'organization': _safe_opa_id(getattr(template, 'organization_id', None)),
+        'playbook': getattr(template, 'playbook', ''),
+        'job_type': getattr(template, 'job_type', ''),
+        'terraform_operation': getattr(template, 'terraform_operation', ''),
+    }
+
+
+def build_opa_launch_input(request, template, launch_kwargs=None, source='api', action='launch', metadata=None):
+    """
+    Build a secret-safe OPA input for any AWX launch surface.
+
+    OPA gets stable context: user, template, inventory, credential ids/types,
+    launch intent, and extra-var keys. Launch values are intentionally omitted.
+    """
+    launch_kwargs = launch_kwargs or {}
+    inventory = launch_kwargs.get('inventory') or launch_kwargs.get('target_inventory') or getattr(template, 'inventory', None)
+    inventory_id = launch_kwargs.get('inventory_id') or launch_kwargs.get('target_inventory_id')
+    if inventory is None and inventory_id:
+        inventory = models.Inventory.objects.filter(pk=inventory_id).first()
+    credentials = []
+    if hasattr(template, 'credentials'):
+        credentials = [
+            {
+                'id': credential.pk,
+                'name': credential.name,
+                'credential_type': getattr(credential.credential_type, 'name', ''),
+                'credential_type_id': credential.credential_type_id,
+            }
+            for credential in template.credentials.all()
+        ]
+
+    return {
+        'action': action,
+        'source': source,
+        'user': {
+            'id': request.user.pk,
+            'username': request.user.username,
+            'is_superuser': request.user.is_superuser,
+        },
+        'template': _template_summary(template),
+        'inventory': _inventory_summary(inventory),
+        'credentials': credentials,
+        'launch': {
+            'extra_var_keys': _extra_var_keys(launch_kwargs.get('extra_vars')),
+            'limit': launch_kwargs.get('limit', ''),
+            'verbosity': launch_kwargs.get('verbosity', ''),
+            'job_type': launch_kwargs.get('job_type', ''),
+            'terraform_operation': launch_kwargs.get('terraform_operation', ''),
+            'inventory': _safe_opa_id(launch_kwargs.get('inventory_id') or launch_kwargs.get('target_inventory_id')),
+        },
+        'metadata': metadata or {},
+    }
+
+
+def enforce_opa_launch_policy(request, template, launch_kwargs=None, source='api', action='launch', metadata=None):
+    input_data = build_opa_launch_input(
+        request,
+        template,
+        launch_kwargs=launch_kwargs,
+        source=source,
+        action=action,
+        metadata=metadata,
+    )
+    if not check_opa_policy('awx/job_launch/allow', input_data):
+        raise PermissionDenied(_('This launch was denied by an OPA policy guardrail.'))
+    return input_data
+
+
 # ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
@@ -166,11 +269,16 @@ class OPAPolicyListView(APIView):
 
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
+        policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
         return Response(
             {
                 'enabled': engine.is_available(),
                 'server_url': engine.base_url,
                 'policies': DEFAULT_POLICIES,
+                'policy_bundle': {
+                    'configured': bool(policy_bundle.strip()),
+                    'size': len(policy_bundle),
+                },
             }
         )
 

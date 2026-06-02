@@ -91,6 +91,7 @@ from awx.api.generics import (
     SubListCreateAttachDetachAPIView,
     SubListDestroyAPIView,
 )
+from awx.api.views.opa import enforce_opa_launch_policy
 from awx.api.views.labels import LabelSubListCreateAttachDetachView
 from awx.api.versioning import reverse
 from awx.main import models
@@ -2768,6 +2769,7 @@ class JobTemplateLaunch(RetrieveAPIView):
             raise PermissionDenied()
 
         passwords = serializer.validated_data.pop('credential_passwords', {})
+        enforce_opa_launch_policy(request, obj, serializer.validated_data, source='api', action='launch')
         new_job = obj.create_unified_job(**serializer.validated_data)
         result = new_job.signal_start(**passwords)
 
@@ -3629,6 +3631,7 @@ class WorkflowJobTemplateLaunch(RetrieveAPIView):
         if not request.user.can_access(models.JobLaunchConfig, 'add', serializer.validated_data, template=obj):
             raise PermissionDenied()
 
+        enforce_opa_launch_policy(request, obj, serializer.validated_data, source='api', action='launch')
         new_job = obj.create_unified_job(**serializer.validated_data)
         new_job.signal_start()
 
@@ -3899,7 +3902,9 @@ class SystemJobTemplateLaunch(GenericAPIView):
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
 
-        new_job = obj.create_unified_job(extra_vars=request.data.get('extra_vars', {}))
+        launch_kwargs = {'extra_vars': request.data.get('extra_vars', {})}
+        enforce_opa_launch_policy(request, obj, launch_kwargs, source='api', action='launch')
+        new_job = obj.create_unified_job(**launch_kwargs)
         new_job.signal_start()
         data = OrderedDict()
         data['system_job'] = new_job.id
@@ -5181,6 +5186,7 @@ class TerraformJobTemplateLaunch(GenericAPIView):
         if obj.ask_terraform_operation_on_launch and 'terraform_operation' in request.data:
             launch_kwargs['terraform_operation'] = request.data['terraform_operation']
 
+        enforce_opa_launch_policy(request, obj, launch_kwargs, source='api', action='launch')
         new_job = obj.create_unified_job(**launch_kwargs)
         new_job.signal_start()
         data = OrderedDict()
@@ -5682,16 +5688,24 @@ class CatalogItemDeploy(GenericAPIView):
 
         workflow_job = None
         terraform_job = None
+        catalog_opa_metadata = {
+            'catalog_item': item.pk,
+            'catalog_item_name': item.name,
+            'target_provider': target_provider or '',
+            'deployment_name': name,
+        }
         if resolved_workflow:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
+            enforce_opa_launch_policy(request, resolved_workflow, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             workflow_job = resolved_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
         elif resolved_tft:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
+            enforce_opa_launch_policy(request, resolved_tft, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
         elif item.provision_workflow:
@@ -5702,6 +5716,7 @@ class CatalogItemDeploy(GenericAPIView):
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
+            enforce_opa_launch_policy(request, item.provision_workflow, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 

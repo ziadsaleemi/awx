@@ -1255,6 +1255,7 @@ OPA_AUTH_CA_CERT = ''  # The content of the CA certificate for mTLS authenticati
 OPA_AUTH_CUSTOM_HEADERS = {}  # Optional custom headers included in requests to the OPA server. Defaults to empty dictionary ({}).
 OPA_REQUEST_TIMEOUT = 1.5  # The number of seconds after which the connection to the OPA server will time out. Defaults to 1.5 seconds.
 OPA_REQUEST_RETRIES = 2  # The number of retry attempts for connecting to the OPA server. Default is 2.
+OPA_POLICY_BUNDLE = ''  # Optional Rego policy bundle text stored in AWX settings for admin-managed policy-as-code workflows.
 
 # AI Assistant settings
 AI_ENABLED = False

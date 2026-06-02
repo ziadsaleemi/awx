@@ -1313,6 +1313,19 @@ register(
     category_slug='policyascode',
 )
 
+register(
+    'OPA_POLICY_BUNDLE',
+    field_class=fields.CharField,
+    label=_('OPA policy bundle'),
+    default='',
+    help_text=_(
+        'Optional Rego policy bundle text stored in AWX. Use this as the editable source of truth for Policy as Code, then sync it to the configured OPA server.'
+    ),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+    allow_blank=True,
+)
+
 
 def policy_as_code_validate(serializer, attrs):
     opa_host = attrs.get('OPA_HOST', '')
