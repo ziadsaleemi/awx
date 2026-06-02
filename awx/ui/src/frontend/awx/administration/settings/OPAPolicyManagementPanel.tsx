@@ -32,9 +32,12 @@ import {
 } from '@patternfly/react-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { useGetPageUrl } from '../../../../framework';
 import { postRequest, requestDelete, requestGet } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
+import { AwxRoute } from '../../main/AwxRoutes';
 
 interface OPAPolicy {
   id: string;
@@ -101,10 +104,7 @@ interface OPAPolicyModuleSaveResponse {
   module: OPAPolicyModuleDetail;
   previous_sha256: string;
   opa_response: unknown;
-  audit?: {
-    activity_stream_id?: number;
-    activity_stream_url?: string;
-  };
+  audit?: OPAAuditRef;
 }
 
 interface OPAPolicyModuleDeleteResponse {
@@ -112,10 +112,12 @@ interface OPAPolicyModuleDeleteResponse {
   policy_id: string;
   previous?: OPAPolicyModuleSummary;
   opa_response: unknown;
-  audit?: {
-    activity_stream_id?: number;
-    activity_stream_url?: string;
-  };
+  audit?: OPAAuditRef;
+}
+
+interface OPAAuditRef {
+  activity_stream_id?: number;
+  activity_stream_url?: string;
 }
 
 interface OPAPolicyModuleVersion {
@@ -146,10 +148,7 @@ interface OPAPolicyModuleRollbackResponse {
   previous_sha256: string;
   restored_sha256: string;
   opa_response: unknown;
-  audit?: {
-    activity_stream_id?: number;
-    activity_stream_url?: string;
-  };
+  audit?: OPAAuditRef;
 }
 
 const fallbackInput = {
@@ -177,10 +176,33 @@ function formatVersionLabel(version: OPAPolicyModuleVersion) {
   return `#${version.activity_stream_id} - ${version.operation}${date ? ` - ${date}` : ''}`;
 }
 
+function OPAAuditLink(props: {
+  audit?: OPAAuditRef | null;
+  activityStreamId?: number | null;
+  dataCy: string;
+  getPageUrl: ReturnType<typeof useGetPageUrl>;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  const activityStreamId = props.audit?.activity_stream_id ?? props.activityStreamId;
+  if (!activityStreamId) return null;
+  return (
+    <Link
+      to={props.getPageUrl(AwxRoute.ActivityStream, {
+        query: { id: activityStreamId },
+      })}
+      data-cy={props.dataCy}
+    >
+      {props.label ?? t('View Activity Stream #{{id}}', { id: activityStreamId })}
+    </Link>
+  );
+}
+
 type OPAPolicyManagementSection = 'status' | 'modules' | 'tester';
 
 export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagementSection[] }) {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   const sections = props?.sections ?? ['status', 'modules', 'tester'];
   const showStatus = sections.includes('status');
   const showModules = sections.includes('modules');
@@ -209,6 +231,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
   const [moduleDeleting, setModuleDeleting] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [moduleResult, setModuleResult] = useState<string | null>(null);
+  const [moduleAudit, setModuleAudit] = useState<OPAAuditRef | null>(null);
+  const [moduleSourceAuditId, setModuleSourceAuditId] = useState<number | null>(null);
   const [moduleVersions, setModuleVersions] = useState<OPAPolicyModuleVersion[]>([]);
   const [moduleVersionsLoading, setModuleVersionsLoading] = useState(false);
   const [moduleVersionError, setModuleVersionError] = useState<string | null>(null);
@@ -257,6 +281,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleLoading(true);
     setModuleError(null);
     setModuleResult(null);
+    setModuleAudit(null);
+    setModuleSourceAuditId(null);
     try {
       const detail = await requestGet<OPAPolicyModuleDetail>(awxAPI`/opa/policy-modules/${id}/`);
       setModuleDetail(detail);
@@ -312,6 +338,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleText(defaultModuleText);
     setModuleError(null);
     setModuleResult(null);
+    setModuleAudit(null);
+    setModuleSourceAuditId(null);
     setModuleVersions([]);
     setSelectedVersionId('');
     setModuleVersionError(null);
@@ -321,6 +349,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleSaving(true);
     setModuleError(null);
     setModuleResult(null);
+    setModuleAudit(null);
+    setModuleSourceAuditId(null);
     try {
       const response = await postRequest<
         OPAPolicyModuleSaveResponse,
@@ -336,6 +366,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
           ? t('Policy module created and validated by OPA.')
           : t('Policy module updated and validated by OPA.')
       );
+      setModuleAudit(response.audit ?? null);
       modulesResponse.refresh();
       void loadModuleVersions(response.module.id);
     } catch (err) {
@@ -354,6 +385,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleDeleting(true);
     setModuleError(null);
     setModuleResult(null);
+    setModuleAudit(null);
+    setModuleSourceAuditId(null);
     try {
       const response = await requestDelete<OPAPolicyModuleDeleteResponse>(
         awxAPI`/opa/policy-modules/${moduleId}/`,
@@ -363,6 +396,7 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
       setModuleResult(
         t('Policy module {{policyId}} deleted from OPA.', { policyId: response.policy_id })
       );
+      setModuleAudit(response.audit ?? null);
       modulesResponse.refresh();
     } catch (err) {
       setModuleError(
@@ -380,6 +414,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
     setModuleRollbackLoading(true);
     setModuleError(null);
     setModuleResult(null);
+    setModuleAudit(null);
+    setModuleSourceAuditId(null);
     try {
       const response = await postRequest<
         OPAPolicyModuleRollbackResponse,
@@ -397,6 +433,8 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
           activityStreamId: response.source_activity_stream_id,
         })
       );
+      setModuleAudit(response.audit ?? null);
+      setModuleSourceAuditId(response.source_activity_stream_id);
       modulesResponse.refresh();
       void loadModuleVersions(response.module.id);
     } catch (err) {
@@ -659,6 +697,27 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                     {moduleResult ? (
                       <StackItem>
                         <Alert variant="success" isInline title={moduleResult} />
+                        {moduleAudit?.activity_stream_id ? (
+                          <div style={{ marginTop: 8 }}>
+                            <OPAAuditLink
+                              audit={moduleAudit}
+                              dataCy="opa-module-action-audit-link"
+                              getPageUrl={getPageUrl}
+                            />
+                          </div>
+                        ) : null}
+                        {moduleSourceAuditId ? (
+                          <div style={{ marginTop: 8 }}>
+                            <OPAAuditLink
+                              activityStreamId={moduleSourceAuditId}
+                              dataCy="opa-module-rollback-source-audit-link"
+                              getPageUrl={getPageUrl}
+                              label={t('View restored snapshot #{{id}}', {
+                                id: moduleSourceAuditId,
+                              })}
+                            />
+                          </div>
+                        ) : null}
                       </StackItem>
                     ) : null}
                     {moduleDetail ? (
@@ -745,6 +804,16 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                           {selectedVersion ? (
                             <StackItem>
                               <DescriptionList isHorizontal isCompact>
+                                <DescriptionListGroup>
+                                  <DescriptionListTerm>{t('Activity Stream')}</DescriptionListTerm>
+                                  <DescriptionListDescription>
+                                    <OPAAuditLink
+                                      activityStreamId={selectedVersion.activity_stream_id}
+                                      dataCy="opa-module-selected-version-audit-link"
+                                      getPageUrl={getPageUrl}
+                                    />
+                                  </DescriptionListDescription>
+                                </DescriptionListGroup>
                                 <DescriptionListGroup>
                                   <DescriptionListTerm>{t('Changed by')}</DescriptionListTerm>
                                   <DescriptionListDescription>
