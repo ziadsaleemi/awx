@@ -46,29 +46,21 @@ class Command(BaseCommand):
         parser.add_argument('--fail-on-unavailable', action='store_true', help='Return nonzero when a checked service is unavailable.')
 
     def handle(self, *args, **options):
-        checks = {}
-        if not options['skip_eda']:
-            checks['eda'] = self._check_eda(
-                start_activation=options['start_eda_activation'],
-                rulebook_name=options['eda_rulebook_name'],
-                activation_id=options['eda_activation_id'],
-                event_source=options['eda_event_source'],
-                extra_data_json=options['eda_activation_extra_data'],
-                include_events=options['eda_include_events'],
-                cleanup=options['cleanup_eda_activation'],
-            )
-        if not options['skip_opa']:
-            checks['opa'] = self._check_opa(
-                sync_policy=options['sync_opa_policy'],
-                policy_id=options['opa_policy_id'],
-                deny_smoke=options['opa_deny_smoke'],
-                deny_policy_id=options['opa_deny_policy_id'],
-            )
-
-        result = {
-            'ok': all(check['ok'] for check in checks.values()) if checks else True,
-            'checks': checks,
-        }
+        result = run_external_automation_checks(
+            include_eda=not options['skip_eda'],
+            include_opa=not options['skip_opa'],
+            start_eda_activation=options['start_eda_activation'],
+            eda_rulebook_name=options['eda_rulebook_name'],
+            eda_activation_id=options['eda_activation_id'],
+            eda_event_source=options['eda_event_source'],
+            eda_activation_extra_data=options['eda_activation_extra_data'],
+            eda_include_events=options['eda_include_events'],
+            cleanup_eda_activation=options['cleanup_eda_activation'],
+            sync_opa_policy=options['sync_opa_policy'],
+            opa_policy_id=options['opa_policy_id'],
+            opa_deny_smoke=options['opa_deny_smoke'],
+            opa_deny_policy_id=options['opa_deny_policy_id'],
+        )
 
         if options['json_output']:
             self.stdout.write(json.dumps(result, indent=2, sort_keys=True))
@@ -301,3 +293,43 @@ class Command(BaseCommand):
         self.stdout.write(f"Overall: {'ok' if result['ok'] else 'failed'}")
         for name, check in result['checks'].items():
             self.stdout.write(f"{name.upper()}: {check['status']}")
+
+
+def run_external_automation_checks(
+    include_eda=True,
+    include_opa=True,
+    start_eda_activation=False,
+    eda_rulebook_name='codex-smoke.yml',
+    eda_activation_id='',
+    eda_event_source='',
+    eda_activation_extra_data='{}',
+    eda_include_events=False,
+    cleanup_eda_activation=False,
+    sync_opa_policy=False,
+    opa_policy_id='awx/managed',
+    opa_deny_smoke=False,
+    opa_deny_policy_id=OPA_DENY_SMOKE_POLICY_ID,
+):
+    checker = Command()
+    checks = {}
+    if include_eda:
+        checks['eda'] = checker._check_eda(
+            start_activation=start_eda_activation,
+            rulebook_name=eda_rulebook_name,
+            activation_id=eda_activation_id,
+            event_source=eda_event_source,
+            extra_data_json=eda_activation_extra_data,
+            include_events=eda_include_events,
+            cleanup=cleanup_eda_activation,
+        )
+    if include_opa:
+        checks['opa'] = checker._check_opa(
+            sync_policy=sync_opa_policy,
+            policy_id=opa_policy_id,
+            deny_smoke=opa_deny_smoke,
+            deny_policy_id=opa_deny_policy_id,
+        )
+    return {
+        'ok': all(check['ok'] for check in checks.values()) if checks else True,
+        'checks': checks,
+    }

@@ -85,6 +85,7 @@ from .ai import ai_urls
 from .eda import eda_urls
 from .mcp import mcp_urls
 from .opa import opa_urls
+from .external_automation import external_automation_urls
 from .marketplace import marketplace_urls
 
 v2_urls = [
@@ -161,6 +162,7 @@ v2_urls = [
     re_path(r'^eda/', include(eda_urls)),
     re_path(r'^mcp/', include(mcp_urls)),
     re_path(r'^opa/', include(opa_urls)),
+    re_path(r'^external_automation/', include(external_automation_urls)),
     re_path(r'^marketplace/', include(marketplace_urls)),
 ]
 

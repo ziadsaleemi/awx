@@ -21,6 +21,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxSettingsOptionsAction } from './AwxSettingsForm';
+import { ExternalAutomationSmokePanel } from './ExternalAutomationSmokePanel';
 import { OPAPolicyManagementPanel } from './OPAPolicyManagementPanel';
 import { useAwxSettingsGroups, useAwxSettingsGroupsBase } from './useAwxSettingsGroups';
 
@@ -81,6 +82,9 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
       />
       <AwxSettingsCategoryDetails options={categoryOptions} data={all.data} />
       {categoryId === 'policyascode' ? <OPAPolicyManagementPanel /> : null}
+      {categoryId === 'policyascode' || categoryId === 'eda' ? (
+        <ExternalAutomationSmokePanel />
+      ) : null}
     </PageLayout>
   );
 }
