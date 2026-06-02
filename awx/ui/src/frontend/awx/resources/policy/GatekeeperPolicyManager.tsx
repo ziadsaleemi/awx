@@ -5,6 +5,7 @@ import {
   CardBody,
   CardHeader,
   CardTitle,
+  Checkbox,
   CodeBlock,
   CodeBlockCode,
   DescriptionList,
@@ -23,6 +24,7 @@ import {
   Stack,
   StackItem,
   TextArea,
+  TextInput,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -145,6 +147,9 @@ interface GatekeeperApplyResponse {
   mode: string;
   operation: string;
   target: UnknownRecord;
+  apply_strategy?: string | null;
+  field_manager?: string | null;
+  force_conflicts?: boolean | null;
   before_exists: boolean;
   before_sha256: string;
   after_sha256: string;
@@ -472,6 +477,9 @@ export function GatekeeperPolicyManager() {
   const [violationLimit, setViolationLimit] = useState('50');
   const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail>();
   const [applyMode, setApplyMode] = useState('preview');
+  const [applyStrategy, setApplyStrategy] = useState('update');
+  const [fieldManager, setFieldManager] = useState('awx');
+  const [forceConflicts, setForceConflicts] = useState(false);
   const [applyManifest, setApplyManifest] = useState(defaultGatekeeperManifest);
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
@@ -522,11 +530,21 @@ export function GatekeeperPolicyManager() {
     try {
       const response = await postRequest<
         GatekeeperApplyResponse,
-        { mode: string; manifest: string; human_approved: boolean }
+        {
+          mode: string;
+          manifest: string;
+          human_approved: boolean;
+          apply_strategy: string;
+          field_manager: string;
+          force_conflicts: boolean;
+        }
       >(awxAPI`/opa/gatekeeper/apply/`, {
         mode: applyMode,
         manifest: applyManifest,
         human_approved: applyMode === 'apply',
+        apply_strategy: applyStrategy,
+        field_manager: fieldManager,
+        force_conflicts: forceConflicts,
       });
       setApplyResult(response);
       if (response.rollback_plan) {
@@ -587,11 +605,21 @@ export function GatekeeperPolicyManager() {
       }
       const response = await postRequest<
         GatekeeperApplyResponse,
-        { mode: string; rollback_plan: unknown; human_approved: boolean }
+        {
+          mode: string;
+          rollback_plan: unknown;
+          human_approved: boolean;
+          apply_strategy: string;
+          field_manager: string;
+          force_conflicts: boolean;
+        }
       >(awxAPI`/opa/gatekeeper/rollback/`, {
         mode: rollbackMode,
         rollback_plan: parsedPlan,
         human_approved: rollbackMode === 'apply',
+        apply_strategy: applyStrategy,
+        field_manager: fieldManager,
+        force_conflicts: forceConflicts,
       });
       setRollbackResult(response);
       if (response.persisted) void refresh();
@@ -683,6 +711,39 @@ export function GatekeeperPolicyManager() {
                             <FormSelectOption value="dry_run" label={t('Dry-run')} />
                             <FormSelectOption value="apply" label={t('Apply')} />
                           </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Strategy')} fieldId="gatekeeper-apply-strategy">
+                          <FormSelect
+                            id="gatekeeper-apply-strategy"
+                            value={applyStrategy}
+                            onChange={(_event, value) => setApplyStrategy(String(value))}
+                          >
+                            <FormSelectOption value="update" label={t('Update')} />
+                            <FormSelectOption value="server_side" label={t('Server-side apply')} />
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                      <GridItem span={4}>
+                        <FormGroup label={t('Field manager')} fieldId="gatekeeper-field-manager">
+                          <TextInput
+                            id="gatekeeper-field-manager"
+                            value={fieldManager}
+                            onChange={(_event, value) => setFieldManager(value)}
+                            isDisabled={applyStrategy !== 'server_side'}
+                          />
+                        </FormGroup>
+                      </GridItem>
+                      <GridItem span={2}>
+                        <FormGroup label={t('Conflicts')} fieldId="gatekeeper-force-conflicts">
+                          <Checkbox
+                            id="gatekeeper-force-conflicts"
+                            label={t('Force')}
+                            isChecked={forceConflicts}
+                            onChange={(_event, checked) => setForceConflicts(checked)}
+                            isDisabled={applyStrategy !== 'server_side'}
+                          />
                         </FormGroup>
                       </GridItem>
                     </Grid>

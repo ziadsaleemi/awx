@@ -3,6 +3,7 @@
 import difflib
 import hashlib
 import json
+import re
 from urllib.parse import urljoin
 
 import requests
@@ -24,6 +25,8 @@ GATEKEEPER_CONSTRAINT_GROUP_PATH = '/apis/constraints.gatekeeper.sh'
 GATEKEEPER_APPLY_MODES = ('preview', 'dry_run', 'apply')
 GATEKEEPER_DELETE_MODES = ('preview', 'dry_run', 'delete')
 GATEKEEPER_ROLLBACK_MODES = ('preview', 'dry_run', 'apply')
+GATEKEEPER_APPLY_STRATEGIES = ('update', 'server_side')
+GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
 
 
 class GatekeeperKubernetesClient:
@@ -51,16 +54,23 @@ class GatekeeperKubernetesClient:
         response.raise_for_status()
         return response.json()
 
-    def write(self, method, path, payload, dry_run=False):
+    def write(self, method, path, payload, dry_run=False, content_type='application/json', field_manager='', force_conflicts=False):
         url = urljoin(f'{self.server_url}/', path.lstrip('/'))
         headers = self._headers()
-        headers['Content-Type'] = 'application/json'
+        headers['Content-Type'] = content_type
+        params = {}
+        if dry_run:
+            params['dryRun'] = 'All'
+        if field_manager:
+            params['fieldManager'] = field_manager
+        if force_conflicts:
+            params['force'] = 'true'
         response = requests.request(
             method,
             url,
             headers=headers,
             json=payload,
-            params={'dryRun': 'All'} if dry_run else None,
+            params=params or None,
             verify=self.verify_ssl,
             timeout=self.timeout,
         )
@@ -455,9 +465,52 @@ def _safe_gatekeeper_target(target):
     }
 
 
-def _gatekeeper_opa_input(request, mode, operation, target, manifest=None, source='gatekeeper_apply'):
-    manifest = manifest or {}
+def _bool_from_request(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
+
+
+def _gatekeeper_apply_options(request):
+    strategy = str(request.data.get('apply_strategy') or 'update').strip().lower()
+    if strategy not in GATEKEEPER_APPLY_STRATEGIES:
+        return None, _('apply_strategy must be update or server_side.')
+
+    field_manager = str(request.data.get('field_manager') or 'awx').strip()
+    if not GATEKEEPER_FIELD_MANAGER_RE.match(field_manager):
+        return None, _('field_manager must be 1-128 characters and may only contain letters, numbers, dot, dash, underscore, colon, or slash.')
+
     return {
+        'strategy': strategy,
+        'field_manager': field_manager,
+        'force_conflicts': _bool_from_request(request.data.get('force_conflicts', False)),
+    }, None
+
+
+def _gatekeeper_write_manifest(client, target, manifest, before, mode, apply_options):
+    if apply_options['strategy'] == 'server_side':
+        return client.write(
+            'PATCH',
+            target['object_path'],
+            manifest,
+            dry_run=mode == 'dry_run',
+            content_type='application/apply-patch+yaml',
+            field_manager=apply_options['field_manager'],
+            force_conflicts=apply_options['force_conflicts'],
+        )
+    return client.write(
+        'PUT' if before else 'POST',
+        target['object_path'] if before else target['collection_path'],
+        manifest,
+        dry_run=mode == 'dry_run',
+    )
+
+
+def _gatekeeper_opa_input(request, mode, operation, target, manifest=None, source='gatekeeper_apply', apply_options=None):
+    manifest = manifest or {}
+    data = {
         'triggered_by': 'gatekeeper_policy_manager',
         'source': source,
         'mode': mode,
@@ -482,9 +535,14 @@ def _gatekeeper_opa_input(request, mode, operation, target, manifest=None, sourc
             },
         },
     }
+    if apply_options:
+        data['apply_options'] = apply_options
+    return data
 
 
-def _audit_gatekeeper_apply(request, mode, operation, target, before=None, after=None, error='', opa_allowed=True, source='gatekeeper_apply'):
+def _audit_gatekeeper_apply(
+    request, mode, operation, target, before=None, after=None, error='', opa_allowed=True, source='gatekeeper_apply', apply_options=None
+):
     changes = {
         'triggered_by': 'gatekeeper_policy_manager',
         'source': source,
@@ -500,6 +558,8 @@ def _audit_gatekeeper_apply(request, mode, operation, target, before=None, after
             'target': _safe_gatekeeper_target(target),
         },
     }
+    if apply_options:
+        changes['apply_options'] = apply_options
     if error:
         changes['error'] = str(error)
     activity_operation = 'delete' if 'delete' in operation else 'create' if operation == 'create' else 'update'
@@ -644,6 +704,10 @@ class GatekeeperPolicyApplyView(APIView):
         if mode not in GATEKEEPER_APPLY_MODES:
             return Response({'detail': _('mode must be preview, dry_run, or apply.')}, status=status.HTTP_400_BAD_REQUEST)
 
+        apply_options, error = _gatekeeper_apply_options(request)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
         manifest, error = _load_gatekeeper_manifest(request.data.get('manifest'))
         if error:
             return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
@@ -663,7 +727,7 @@ class GatekeeperPolicyApplyView(APIView):
         audit = None
 
         if mode in ('dry_run', 'apply'):
-            opa_input = _gatekeeper_opa_input(request, mode, operation, target, manifest)
+            opa_input = _gatekeeper_opa_input(request, mode, operation, target, manifest, apply_options=apply_options)
             opa_allowed = check_opa_policy('awx/gatekeeper_resource/allow', opa_input)
             if not opa_allowed:
                 audit = _audit_gatekeeper_apply(
@@ -675,6 +739,7 @@ class GatekeeperPolicyApplyView(APIView):
                     after=manifest,
                     error='Denied by OPA policy guardrail.',
                     opa_allowed=False,
+                    apply_options=apply_options,
                 )
                 return Response(
                     {
@@ -682,6 +747,9 @@ class GatekeeperPolicyApplyView(APIView):
                         'mode': mode,
                         'operation': operation,
                         'target': _safe_gatekeeper_target(target),
+                        'apply_strategy': apply_options['strategy'],
+                        'field_manager': apply_options['field_manager'],
+                        'force_conflicts': apply_options['force_conflicts'],
                         'opa_allowed': False,
                         'audit': audit,
                     },
@@ -691,12 +759,7 @@ class GatekeeperPolicyApplyView(APIView):
         kubernetes_response = None
         if mode in ('dry_run', 'apply'):
             try:
-                kubernetes_response = client.write(
-                    'PUT' if before else 'POST',
-                    target['object_path'] if before else target['collection_path'],
-                    manifest,
-                    dry_run=mode == 'dry_run',
-                )
+                kubernetes_response = _gatekeeper_write_manifest(client, target, manifest, before, mode, apply_options)
             except requests.RequestException as exc:
                 _audit_gatekeeper_apply(
                     request,
@@ -707,6 +770,7 @@ class GatekeeperPolicyApplyView(APIView):
                     after=manifest,
                     error=exc,
                     opa_allowed=opa_allowed is not False,
+                    apply_options=apply_options,
                 )
                 return _gatekeeper_http_error_response(exc)
 
@@ -718,6 +782,7 @@ class GatekeeperPolicyApplyView(APIView):
                 before=before,
                 after=kubernetes_response if mode == 'apply' else manifest,
                 opa_allowed=opa_allowed is not False,
+                apply_options=apply_options,
             )
 
         return Response(
@@ -728,6 +793,9 @@ class GatekeeperPolicyApplyView(APIView):
                 'mode': mode,
                 'operation': operation,
                 'target': _safe_gatekeeper_target(target),
+                'apply_strategy': apply_options['strategy'],
+                'field_manager': apply_options['field_manager'],
+                'force_conflicts': apply_options['force_conflicts'],
                 'before_exists': before is not None,
                 'before_sha256': _json_sha256(before),
                 'after_sha256': _json_sha256(manifest),
@@ -874,6 +942,10 @@ class GatekeeperPolicyRollbackView(APIView):
         if mode not in GATEKEEPER_ROLLBACK_MODES:
             return Response({'detail': _('mode must be preview, dry_run, or apply.')}, status=status.HTTP_400_BAD_REQUEST)
 
+        apply_options, error = _gatekeeper_apply_options(request)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
         plan = request.data.get('rollback_plan')
         if not isinstance(plan, dict):
             return Response({'detail': _('rollback_plan must be a JSON object.')}, status=status.HTTP_400_BAD_REQUEST)
@@ -907,7 +979,15 @@ class GatekeeperPolicyRollbackView(APIView):
         kubernetes_response = None
 
         if mode in ('dry_run', 'apply'):
-            opa_input = _gatekeeper_opa_input(request, mode, operation, target, manifest or before, source='gatekeeper_rollback')
+            opa_input = _gatekeeper_opa_input(
+                request,
+                mode,
+                operation,
+                target,
+                manifest or before,
+                source='gatekeeper_rollback',
+                apply_options=apply_options if plan_operation == 'restore' else None,
+            )
             opa_allowed = check_opa_policy('awx/gatekeeper_resource/allow', opa_input)
             if not opa_allowed:
                 audit = _audit_gatekeeper_apply(
@@ -920,6 +1000,7 @@ class GatekeeperPolicyRollbackView(APIView):
                     error='Denied by OPA policy guardrail.',
                     opa_allowed=False,
                     source='gatekeeper_rollback',
+                    apply_options=apply_options if plan_operation == 'restore' else None,
                 )
                 return Response(
                     {
@@ -927,6 +1008,9 @@ class GatekeeperPolicyRollbackView(APIView):
                         'mode': mode,
                         'operation': operation,
                         'target': _safe_gatekeeper_target(target),
+                        'apply_strategy': apply_options['strategy'] if plan_operation == 'restore' else None,
+                        'field_manager': apply_options['field_manager'] if plan_operation == 'restore' else None,
+                        'force_conflicts': apply_options['force_conflicts'] if plan_operation == 'restore' else None,
                         'opa_allowed': False,
                         'audit': audit,
                     },
@@ -935,12 +1019,7 @@ class GatekeeperPolicyRollbackView(APIView):
 
             try:
                 if plan_operation == 'restore':
-                    kubernetes_response = client.write(
-                        'PUT' if before else 'POST',
-                        target['object_path'] if before else target['collection_path'],
-                        manifest,
-                        dry_run=mode == 'dry_run',
-                    )
+                    kubernetes_response = _gatekeeper_write_manifest(client, target, manifest, before, mode, apply_options)
                 elif before:
                     kubernetes_response = client.delete(target['object_path'], dry_run=mode == 'dry_run')
                 else:
@@ -956,6 +1035,7 @@ class GatekeeperPolicyRollbackView(APIView):
                     error=exc,
                     opa_allowed=opa_allowed is not False,
                     source='gatekeeper_rollback',
+                    apply_options=apply_options if plan_operation == 'restore' else None,
                 )
                 return _gatekeeper_http_error_response(exc)
 
@@ -968,6 +1048,7 @@ class GatekeeperPolicyRollbackView(APIView):
                 after=kubernetes_response if mode == 'apply' and plan_operation == 'restore' else after,
                 opa_allowed=opa_allowed is not False,
                 source='gatekeeper_rollback',
+                apply_options=apply_options if plan_operation == 'restore' else None,
             )
 
         return Response(
@@ -978,6 +1059,9 @@ class GatekeeperPolicyRollbackView(APIView):
                 'mode': mode,
                 'operation': operation,
                 'target': _safe_gatekeeper_target(target),
+                'apply_strategy': apply_options['strategy'] if plan_operation == 'restore' else None,
+                'field_manager': apply_options['field_manager'] if plan_operation == 'restore' else None,
+                'force_conflicts': apply_options['force_conflicts'] if plan_operation == 'restore' else None,
                 'before_exists': before is not None,
                 'before_sha256': _json_sha256(before),
                 'after_sha256': _json_sha256(after),

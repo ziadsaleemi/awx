@@ -504,6 +504,24 @@ def test_gatekeeper_apply_requires_configured_kubernetes_api(post, admin_user):
 
 @pytest.mark.django_db
 @override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_apply_rejects_invalid_field_manager(post, admin_user):
+    response = post(
+        reverse('api:opa_gatekeeper_apply'),
+        data={
+            'mode': 'preview',
+            'manifest': GATEKEEPER_TEMPLATE_MANIFEST,
+            'apply_strategy': 'server_side',
+            'field_manager': 'bad field manager',
+        },
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['detail'] == 'field_manager must be 1-128 characters and may only contain letters, numbers, dot, dash, underscore, colon, or slash.'
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
 def test_gatekeeper_apply_preview_returns_diff_without_kubernetes_write(post, admin_user):
     with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
         'awx.api.views.gatekeeper.requests.request'
@@ -570,6 +588,61 @@ def test_gatekeeper_apply_dry_run_uses_kubernetes_dry_run_and_audits(post, admin
     assert audit.object1 == 'gatekeeper_resource'
     assert audit.object2 == 'ConstraintTemplate/k8srequiredlabels'
     assert '"mode": "dry_run"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_apply_server_side_apply_uses_field_manager_force_and_audits(post, admin_user):
+    applied = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
+        'status': {'created': True},
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(applied)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_apply'),
+            data={
+                'mode': 'apply',
+                'manifest': GATEKEEPER_TEMPLATE_MANIFEST,
+                'human_approved': True,
+                'apply_strategy': 'server_side',
+                'field_manager': 'awx-gatekeeper',
+                'force_conflicts': True,
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['persisted'] is True
+    assert response.data['operation'] == 'create'
+    assert response.data['apply_strategy'] == 'server_side'
+    assert response.data['field_manager'] == 'awx-gatekeeper'
+    assert response.data['force_conflicts'] is True
+    check_policy.assert_called_once()
+    assert check_policy.call_args.args[1]['apply_options'] == {
+        'strategy': 'server_side',
+        'field_manager': 'awx-gatekeeper',
+        'force_conflicts': True,
+    }
+    requests_request.assert_called_once_with(
+        'PATCH',
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/apply-patch+yaml'},
+        json=mock.ANY,
+        params={'fieldManager': 'awx-gatekeeper', 'force': 'true'},
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.operation == 'create'
+    assert audit.object1 == 'gatekeeper_resource'
+    assert '"strategy": "server_side"' in audit.changes
 
 
 @pytest.mark.django_db
