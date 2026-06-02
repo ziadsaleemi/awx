@@ -33,7 +33,7 @@ import {
   SyncAltIcon,
   TimesCircleIcon,
 } from '@patternfly/react-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
@@ -45,6 +45,7 @@ type UnknownRecord = Record<string, unknown>;
 interface GatekeeperPolicyManagerResponse {
   configured: boolean;
   message?: string;
+  contexts: GatekeeperContextOption[];
   cluster: {
     server_url: string;
     context: string;
@@ -73,6 +74,15 @@ interface GatekeeperPolicyManagerResponse {
   violations: GatekeeperViolation[];
   configs: GatekeeperConfig[];
   errors: GatekeeperError[];
+}
+
+interface GatekeeperContextOption {
+  name: string;
+  selected: boolean;
+  configured: boolean;
+  server_url: string;
+  verify_ssl: boolean;
+  source: string;
 }
 
 interface GatekeeperConstraintTemplate {
@@ -490,6 +500,7 @@ export function GatekeeperPolicyManager() {
   const [violationFilter, setViolationFilter] = useState('');
   const [violationSort, setViolationSort] = useState('constraint');
   const [violationLimit, setViolationLimit] = useState('50');
+  const [selectedContext, setSelectedContext] = useState('');
   const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail>();
   const [applyMode, setApplyMode] = useState('preview');
   const [applyStrategy, setApplyStrategy] = useState('update');
@@ -515,13 +526,20 @@ export function GatekeeperPolicyManager() {
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
+    if (selectedContext) params.set('context', selectedContext);
     if (search) params.set('violation_search', search);
     params.set('violation_sort', violationSort);
     params.set('violation_limit', violationLimit);
     return `${awxAPI`/opa/gatekeeper/`}?${params.toString()}`;
-  }, [violationFilter, violationLimit, violationSort]);
+  }, [selectedContext, violationFilter, violationLimit, violationSort]);
   const { data, isLoading, error, refresh } =
     useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
+  const activeContext = selectedContext || data?.cluster.context || '';
+  useEffect(() => {
+    if (selectedContext || !data?.contexts?.length) return;
+    const active = data.contexts.find((context) => context.selected) || data.contexts[0];
+    if (active?.name) setSelectedContext(active.name);
+  }, [data?.contexts, selectedContext]);
   const selectedTemplate = useMemo(() => {
     if (selectedDetail?.type !== 'template') return undefined;
     return data?.constraint_templates.find((template) => template.name === selectedDetail.name);
@@ -543,6 +561,7 @@ export function GatekeeperPolicyManager() {
   }, [data?.configs, selectedDetail]);
   const authorContext = useMemo(
     () => ({
+      context_name: activeContext,
       selected_detail: selectedDetail,
       counts: data?.counts,
       violation_query: data?.violation_query,
@@ -572,6 +591,7 @@ export function GatekeeperPolicyManager() {
       data?.counts,
       data?.violation_query,
       data?.violations,
+      activeContext,
       selectedDetail,
     ]
   );
@@ -583,10 +603,11 @@ export function GatekeeperPolicyManager() {
     try {
       const response = await postRequest<
         GatekeeperAuthorResponse,
-        { prompt: string; context: UnknownRecord }
+        { prompt: string; context: UnknownRecord; context_name: string }
       >(awxAPI`/opa/gatekeeper/author/`, {
         prompt: authorPrompt,
         context: authorContext,
+        context_name: activeContext,
       });
       setAuthorResult(response);
       if (response.manifest) {
@@ -620,6 +641,7 @@ export function GatekeeperPolicyManager() {
           apply_strategy: string;
           field_manager: string;
           force_conflicts: boolean;
+          context_name: string;
         }
       >(awxAPI`/opa/gatekeeper/apply/`, {
         mode: applyMode,
@@ -628,6 +650,7 @@ export function GatekeeperPolicyManager() {
         apply_strategy: applyStrategy,
         field_manager: fieldManager,
         force_conflicts: forceConflicts,
+        context_name: activeContext,
       });
       setApplyResult(response);
       if (response.rollback_plan) {
@@ -652,11 +675,12 @@ export function GatekeeperPolicyManager() {
     try {
       const response = await postRequest<
         GatekeeperApplyResponse,
-        { mode: string; manifest: string; human_approved: boolean }
+        { mode: string; manifest: string; human_approved: boolean; context_name: string }
       >(awxAPI`/opa/gatekeeper/delete/`, {
         mode: deleteMode,
         manifest: applyManifest,
         human_approved: deleteMode === 'delete',
+        context_name: activeContext,
       });
       setDeleteResult(response);
       if (response.rollback_plan) {
@@ -695,6 +719,7 @@ export function GatekeeperPolicyManager() {
           apply_strategy: string;
           field_manager: string;
           force_conflicts: boolean;
+          context_name: string;
         }
       >(awxAPI`/opa/gatekeeper/rollback/`, {
         mode: rollbackMode,
@@ -703,6 +728,7 @@ export function GatekeeperPolicyManager() {
         apply_strategy: applyStrategy,
         field_manager: fieldManager,
         force_conflicts: forceConflicts,
+        context_name: activeContext,
       });
       setRollbackResult(response);
       if (response.persisted) void refresh();
@@ -748,22 +774,49 @@ export function GatekeeperPolicyManager() {
             </StackItem>
           ) : null}
           <StackItem>
-            <Button
-              variant="secondary"
-              icon={<SyncAltIcon />}
-              onClick={() => void refresh()}
-              isDisabled={isLoading}
-            >
-              {t('Refresh')}
-            </Button>{' '}
-            <Button
-              variant="secondary"
-              icon={<DownloadIcon />}
-              onClick={() => downloadReport(data)}
-              isDisabled={!data.configured}
-            >
-              {t('Download report')}
-            </Button>
+            <Grid hasGutter>
+              <GridItem span={3}>
+                <FormGroup label={t('Context')} fieldId="gatekeeper-context">
+                  <FormSelect
+                    id="gatekeeper-context"
+                    value={activeContext}
+                    onChange={(_event, value) => {
+                      setSelectedContext(String(value));
+                      setSelectedDetail(undefined);
+                      setApplyResult(null);
+                      setDeleteResult(null);
+                      setRollbackResult(null);
+                    }}
+                  >
+                    {(data.contexts || []).map((context) => (
+                      <FormSelectOption
+                        key={context.name}
+                        value={context.name}
+                        label={`${context.name}${context.configured ? '' : ` (${t('not configured')})`}`}
+                      />
+                    ))}
+                  </FormSelect>
+                </FormGroup>
+              </GridItem>
+              <GridItem span={9}>
+                <Button
+                  variant="secondary"
+                  icon={<SyncAltIcon />}
+                  onClick={() => void refresh()}
+                  isDisabled={isLoading}
+                >
+                  {t('Refresh')}
+                </Button>{' '}
+                <Button
+                  variant="secondary"
+                  icon={<DownloadIcon />}
+                  onClick={() => downloadReport(data)}
+                  isDisabled={!data.configured}
+                >
+                  {t('Download report')}
+                </Button>
+              </GridItem>
+            </Grid>
           </StackItem>
           <StackItem>
             <Card isFlat>

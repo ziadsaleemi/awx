@@ -1384,6 +1384,19 @@ register(
 )
 
 register(
+    'GATEKEEPER_K8S_CONTEXTS',
+    field_class=fields.DictField,
+    default={},
+    encrypted=True,
+    label=_('Gatekeeper Kubernetes context map'),
+    help_text=_(
+        'Optional named Gatekeeper Kubernetes contexts. JSON object keyed by context name. Each value may include server_url, auth_token, verify_ssl, and request_timeout.'
+    ),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
     'GATEKEEPER_K8S_VERIFY_SSL',
     field_class=fields.BooleanField,
     default=True,

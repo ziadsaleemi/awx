@@ -39,18 +39,95 @@ GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
 GATEKEEPER_AI_PROMPT_LIMIT = 4000
 
 
+def _gatekeeper_bool(value, default=True):
+    if isinstance(value, bool):
+        return value
+    if value in (None, ''):
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
+
+
+def _gatekeeper_context_map():
+    configured = getattr(settings, 'GATEKEEPER_K8S_CONTEXTS', {}) or {}
+    if not isinstance(configured, dict):
+        return {}
+
+    contexts = {}
+    for raw_name, raw_config in configured.items():
+        name = str(raw_name or '').strip()
+        if not name or not isinstance(raw_config, dict):
+            continue
+        contexts[name] = {
+            'server_url': str(raw_config.get('server_url') or raw_config.get('api_url') or raw_config.get('url') or '').strip().rstrip('/'),
+            'auth_token': str(raw_config.get('auth_token') or raw_config.get('token') or '').strip(),
+            'verify_ssl': _gatekeeper_bool(raw_config.get('verify_ssl'), default=True),
+            'timeout': max(
+                float(raw_config.get('request_timeout') or raw_config.get('timeout') or getattr(settings, 'GATEKEEPER_K8S_REQUEST_TIMEOUT', 5) or 5), 1
+            ),
+            'source': 'context_map',
+        }
+    return contexts
+
+
+def _requested_gatekeeper_context(request):
+    if request.method == 'GET':
+        value = request.query_params.get('context')
+    else:
+        value = request.data.get('context_name') if isinstance(request.data, dict) else ''
+        value = value or request.query_params.get('context')
+    return str(value or '').strip()
+
+
 class GatekeeperKubernetesClient:
     """Small Kubernetes API client for Gatekeeper CRD reads."""
 
-    def __init__(self):
-        self.server_url = (getattr(settings, 'GATEKEEPER_K8S_API_URL', '') or '').strip().rstrip('/')
-        self.auth_token = getattr(settings, 'GATEKEEPER_K8S_AUTH_TOKEN', '') or ''
-        self.context = getattr(settings, 'GATEKEEPER_K8S_CONTEXT', '') or ''
-        self.verify_ssl = bool(getattr(settings, 'GATEKEEPER_K8S_VERIFY_SSL', True))
-        self.timeout = max(float(getattr(settings, 'GATEKEEPER_K8S_REQUEST_TIMEOUT', 5) or 5), 1)
+    def __init__(self, context_name=''):
+        default_context = str(getattr(settings, 'GATEKEEPER_K8S_CONTEXT', '') or '').strip() or 'default'
+        contexts = {
+            default_context: {
+                'server_url': (getattr(settings, 'GATEKEEPER_K8S_API_URL', '') or '').strip().rstrip('/'),
+                'auth_token': getattr(settings, 'GATEKEEPER_K8S_AUTH_TOKEN', '') or '',
+                'verify_ssl': bool(getattr(settings, 'GATEKEEPER_K8S_VERIFY_SSL', True)),
+                'timeout': max(float(getattr(settings, 'GATEKEEPER_K8S_REQUEST_TIMEOUT', 5) or 5), 1),
+                'source': 'settings',
+            }
+        }
+        contexts.update(_gatekeeper_context_map())
+
+        requested_context = str(context_name or '').strip()
+        selected_context = requested_context or default_context
+        self.context_error = ''
+        if selected_context not in contexts:
+            self.context_error = _('Gatekeeper Kubernetes context "%(context)s" is not configured.') % {'context': selected_context}
+            selected_context = default_context
+
+        config = contexts.get(selected_context) or contexts[default_context]
+        self.contexts = contexts
+        self.context = selected_context
+        self.server_url = config['server_url']
+        self.auth_token = config['auth_token']
+        self.verify_ssl = bool(config['verify_ssl'])
+        self.timeout = max(float(config['timeout'] or 5), 1)
 
     def is_configured(self):
         return bool(self.server_url)
+
+    def context_options(self):
+        options = []
+        for name, config in self.contexts.items():
+            options.append(
+                {
+                    'name': name,
+                    'selected': name == self.context,
+                    'configured': bool(config.get('server_url')),
+                    'server_url': config.get('server_url') or '',
+                    'verify_ssl': bool(config.get('verify_ssl')),
+                    'source': config.get('source') or 'settings',
+                }
+            )
+        return options
 
     def _headers(self):
         headers = {'Accept': 'application/json'}
@@ -788,7 +865,9 @@ class GatekeeperPolicyAuthorView(APIView):
         if len(prompt) > GATEKEEPER_AI_PROMPT_LIMIT:
             return Response({'detail': _('prompt is too long.')}, status=status.HTTP_400_BAD_REQUEST)
 
-        client = GatekeeperKubernetesClient()
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         ui_context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
         gatekeeper_context = _gatekeeper_context_for_ai(client)
 
@@ -844,11 +923,14 @@ class GatekeeperPolicyManagerView(APIView):
     permission_classes = [IsSuperUser]
 
     def get(self, request, *args, **kwargs):
-        client = GatekeeperKubernetesClient()
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         if not client.is_configured():
             return Response(
                 {
                     'configured': False,
+                    'contexts': client.context_options(),
                     'cluster': {
                         'server_url': '',
                         'context': client.context,
@@ -907,6 +989,7 @@ class GatekeeperPolicyManagerView(APIView):
         return Response(
             {
                 'configured': True,
+                'contexts': client.context_options(),
                 'cluster': {
                     'server_url': client.server_url,
                     'context': client.context,
@@ -952,7 +1035,9 @@ class GatekeeperPolicyApplyView(APIView):
     permission_classes = [IsSuperUser]
 
     def post(self, request, *args, **kwargs):
-        client = GatekeeperKubernetesClient()
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         if not client.is_configured():
             return Response({'detail': _('Configure the Gatekeeper Kubernetes API connection in Settings.')}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1074,7 +1159,9 @@ class GatekeeperPolicyDeleteView(APIView):
     permission_classes = [IsSuperUser]
 
     def post(self, request, *args, **kwargs):
-        client = GatekeeperKubernetesClient()
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         if not client.is_configured():
             return Response({'detail': _('Configure the Gatekeeper Kubernetes API connection in Settings.')}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1190,7 +1277,9 @@ class GatekeeperPolicyRollbackView(APIView):
     permission_classes = [IsSuperUser]
 
     def post(self, request, *args, **kwargs):
-        client = GatekeeperKubernetesClient()
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         if not client.is_configured():
             return Response({'detail': _('Configure the Gatekeeper Kubernetes API connection in Settings.')}, status=status.HTTP_400_BAD_REQUEST)
 

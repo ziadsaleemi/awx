@@ -429,6 +429,63 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
 
 
 @pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.default.test',
+    GATEKEEPER_K8S_CONTEXT='default',
+    GATEKEEPER_K8S_CONTEXTS={
+        'prod': {
+            'server_url': 'https://kube.prod.test',
+            'auth_token': 'prod-token',
+            'verify_ssl': False,
+            'request_timeout': 9,
+        }
+    },
+)
+def test_gatekeeper_policy_manager_selects_named_context(get, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get:
+        response = get(reverse('api:opa_gatekeeper') + '?context=prod', user=admin_user, expect=200)
+
+    assert response.data['cluster'] == {
+        'server_url': 'https://kube.prod.test',
+        'context': 'prod',
+        'verify_ssl': False,
+    }
+    assert response.data['contexts'] == [
+        {
+            'name': 'default',
+            'selected': False,
+            'configured': True,
+            'server_url': 'https://kube.default.test',
+            'verify_ssl': True,
+            'source': 'settings',
+        },
+        {
+            'name': 'prod',
+            'selected': True,
+            'configured': True,
+            'server_url': 'https://kube.prod.test',
+            'verify_ssl': False,
+            'source': 'context_map',
+        },
+    ]
+    requests_get.assert_any_call(
+        'https://kube.prod.test/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer prod-token'},
+        verify=False,
+        timeout=9.0,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.default.test', GATEKEEPER_K8S_CONTEXT='default')
+def test_gatekeeper_policy_manager_rejects_unknown_context(get, admin_user):
+    response = get(reverse('api:opa_gatekeeper') + '?context=missing', user=admin_user, expect=400)
+
+    assert response.data['detail'] == 'Gatekeeper Kubernetes context "missing" is not configured.'
+    assert response.data['contexts'][0]['name'] == 'default'
+
+
+@pytest.mark.django_db
 @override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
 def test_gatekeeper_policy_manager_filters_sorts_and_limits_violations(get, admin_user):
     with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()):
