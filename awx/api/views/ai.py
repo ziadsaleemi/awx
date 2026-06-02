@@ -54,6 +54,12 @@ from awx.main.models.rbac import give_creator_permissions
 from awx.main.tasks.system import clear_setting_cache
 from awx.main.utils import parse_yaml_or_json
 from awx.main.utils.encryption import encrypt_value
+from awx.main.utils.eda import (
+    EDAControllerClient,
+    EDAControllerError,
+    configured_url as eda_configured_url,
+    connection_status as eda_connection_status,
+)
 from awx.main.utils.filters import SmartFilter
 
 logger = logging.getLogger('awx.api.views.ai')
@@ -1758,6 +1764,97 @@ def _try_answer_awx_fact_question(user, messages: list) -> str | None:
         if answer_type == 'count':
             return _answer_resource_count(user, spec, latest_message)
         return _answer_resource_list(user, spec, latest_message)
+    return None
+
+
+def _eda_message_pattern() -> str:
+    return r'\beda\b|\bevent[- ]driven\b|\brulebook activations?\b|\beda activations?\b'
+
+
+def _format_eda_activation_item(row: dict) -> str:
+    label = row.get('name') or row.get('rulebook') or row.get('id') or 'unnamed activation'
+    detail_parts = []
+    for key in ('id', 'status', 'rulebook', 'event_source', 'started', 'finished'):
+        value = row.get(key)
+        if value not in (None, ''):
+            detail_parts.append(f"{key.replace('_', ' ')}: {value}")
+    if detail_parts:
+        return f"- {label} ({', '.join(str(part) for part in detail_parts)})"
+    return f"- {label}"
+
+
+def _answer_eda_status() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status == 'configured':
+        return f'EDA Controller is configured in AWX. URL: {controller_url}.'
+    if controller_status == 'invalid':
+        return 'EDA Controller URL is invalid in AWX settings.'
+    return 'EDA Controller is not configured in AWX.'
+
+
+def _answer_eda_activation_count() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status != 'configured':
+        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+
+    try:
+        data = EDAControllerClient().list_activations(page=1, page_size=1)
+    except EDAControllerError as exc:
+        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+
+    try:
+        count = int(data.get('count') or 0)
+    except (TypeError, ValueError):
+        count = 0
+    noun = 'EDA activation' if count == 1 else 'EDA activations'
+    return f'There are {count} {noun} visible through AWX EDA Controller.'
+
+
+def _answer_eda_activation_list() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status != 'configured':
+        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+
+    try:
+        data = EDAControllerClient().list_activations(page=1, page_size=_AI_DIRECT_LIST_LIMIT)
+    except EDAControllerError as exc:
+        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+
+    try:
+        count = int(data.get('count') or 0)
+    except (TypeError, ValueError):
+        count = 0
+    rows = data.get('results') if isinstance(data.get('results'), list) else []
+    if count == 0:
+        return 'There are no EDA activations visible through AWX EDA Controller.'
+
+    noun = 'EDA activation' if count == 1 else 'EDA activations'
+    lines = [f'There are {count} {noun} visible through AWX EDA Controller:']
+    lines.extend(_format_eda_activation_item(row) for row in rows[:_AI_DIRECT_LIST_LIMIT] if isinstance(row, dict))
+    if count > len(rows):
+        lines.append(f'- Showing the first {len(rows)} of {count}.')
+    return '\n'.join(lines)
+
+
+def _try_answer_eda_fact_question(messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    eda_pattern = _eda_message_pattern()
+    if not re.search(eda_pattern, normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup|start|stop|restart|delete|remove)\b', normalized):
+        return None
+
+    activation_pattern = r'\beda activations?\b|\brulebook activations?\b|\bactivations?\b'
+    if _is_count_question(latest_message, activation_pattern):
+        return _answer_eda_activation_count()
+    if _is_list_question(latest_message, activation_pattern):
+        return _answer_eda_activation_list()
+    if re.search(r'\b(status|configured|connected|connection|health|url)\b', normalized):
+        return _answer_eda_status()
     return None
 
 
@@ -4339,7 +4436,7 @@ class AIChatView(APIView):
                 )
             system_prompt = system_override
         else:
-            builtin_answer = _try_answer_awx_fact_question(request.user, messages)
+            builtin_answer = _try_answer_eda_fact_question(messages) or _try_answer_awx_fact_question(request.user, messages)
             if builtin_answer is not None:
                 return Response(
                     {

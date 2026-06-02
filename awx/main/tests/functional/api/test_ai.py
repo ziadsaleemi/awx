@@ -64,6 +64,13 @@ def _activity_changes(entry):
     return json.loads(entry.changes)
 
 
+@pytest.fixture(autouse=True)
+def clear_ai_rate_limit_store():
+    from awx.api.views import ai
+
+    ai._rate_limit_store.clear()
+
+
 @pytest.mark.django_db
 @override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
 def test_ai_chat_openai_api_key_provider_still_uses_chat_completions(post, admin_user):
@@ -481,6 +488,88 @@ def test_ai_chat_lists_visible_activity_stream_scoped_to_actor_and_operation_wit
     assert f'id: {delete_event.pk}' not in content
     assert 'AI Deleted Project' not in content
     assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o', EDA_SERVER_URL='https://eda.example')
+def test_ai_chat_answers_eda_status_without_provider(post, admin_user):
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'What is EDA controller status?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'EDA Controller is configured in AWX. URL: https://eda.example.'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o', EDA_SERVER_URL='https://eda.example')
+def test_ai_chat_counts_eda_activations_without_provider(post, admin_user):
+    client = mock.Mock()
+    client.list_activations.return_value = {'count': 2, 'results': [{'id': 101, 'name': 'Deploy EDA', 'status': 'running'}]}
+
+    with mock.patch('awx.api.views.ai.EDAControllerClient', return_value=client), mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'How many EDA activations do we have?'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'There are 2 EDA activations visible through AWX EDA Controller.'
+    assert response.data['provider'] == 'awx'
+    client.list_activations.assert_called_once_with(page=1, page_size=1)
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o', EDA_SERVER_URL='https://eda.example')
+def test_ai_chat_lists_eda_activations_without_provider(post, admin_user):
+    client = mock.Mock()
+    client.list_activations.return_value = {
+        'count': 2,
+        'results': [
+            {'id': 101, 'name': 'Deploy EDA', 'status': 'running', 'rulebook': 'deploy.yml', 'event_source': 'webhook'},
+            {'id': 102, 'name': 'Audit EDA', 'status': 'disabled', 'rulebook': 'audit.yml'},
+        ],
+    }
+
+    with mock.patch('awx.api.views.ai.EDAControllerClient', return_value=client), mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List EDA activations'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 2 EDA activations visible through AWX EDA Controller:')
+    assert '- Deploy EDA (id: 101, status: running, rulebook: deploy.yml, event source: webhook)' in content
+    assert '- Audit EDA (id: 102, status: disabled, rulebook: audit.yml)' in content
+    assert response.data['provider'] == 'awx'
+    client.list_activations.assert_called_once_with(page=1, page_size=200)
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o', EDA_SERVER_URL='')
+def test_ai_chat_answers_eda_activations_unconfigured_without_provider(post, admin_user):
+    with mock.patch('awx.api.views.ai.EDAControllerClient') as client, mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List EDA activations'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['message']['content'] == 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+    assert response.data['provider'] == 'awx'
+    client.assert_not_called()
     requests_post.assert_not_called()
 
 
