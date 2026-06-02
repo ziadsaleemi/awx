@@ -104,6 +104,30 @@ DEFAULT_POLICIES = [
             'data': {'name': 'Production'},
         },
     },
+    {
+        'id': 'gatekeeper_resource',
+        'path': 'awx/gatekeeper_resource/allow',
+        'description': 'Controls dry-run and apply actions for Gatekeeper ConstraintTemplates, Constraints, and Configs',
+        'input_example': {
+            'triggered_by': 'gatekeeper_policy_manager',
+            'source': 'gatekeeper_apply',
+            'mode': 'apply',
+            'human_approved': True,
+            'approval_required': True,
+            'user': {'id': 1, 'username': 'admin', 'is_superuser': True},
+            'operation': 'update',
+            'resource_type': 'gatekeeper_resource',
+            'destructive': True,
+            'privileged': True,
+            'target': {
+                'api_version': 'templates.gatekeeper.sh/v1',
+                'kind': 'ConstraintTemplate',
+                'name': 'k8srequiredlabels',
+                'resource': 'constrainttemplates',
+                'object_path': '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+            },
+        },
+    },
 ]
 
 

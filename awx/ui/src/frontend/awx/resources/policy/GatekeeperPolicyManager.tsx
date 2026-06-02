@@ -22,6 +22,7 @@ import {
   Spinner,
   Stack,
   StackItem,
+  TextArea,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
@@ -32,6 +33,7 @@ import {
 } from '@patternfly/react-icons';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
@@ -135,6 +137,44 @@ interface GatekeeperError {
   detail: unknown;
   version?: string;
 }
+
+interface GatekeeperApplyResponse {
+  changed: boolean;
+  persisted: boolean;
+  dry_run: boolean;
+  mode: string;
+  operation: string;
+  target: UnknownRecord;
+  before_exists: boolean;
+  before_sha256: string;
+  after_sha256: string;
+  diff: string;
+  rollback_plan: unknown;
+  opa_allowed?: boolean | null;
+  kubernetes_response?: unknown;
+  audit?: {
+    activity_stream_id?: number;
+    activity_stream_url?: string;
+  } | null;
+}
+
+const defaultGatekeeperManifest = `apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+`;
 
 function EnforcementLabel(props: { action: string }) {
   const action = props.action || 'deny';
@@ -416,6 +456,11 @@ export function GatekeeperPolicyManager() {
   const [violationSort, setViolationSort] = useState('constraint');
   const [violationLimit, setViolationLimit] = useState('50');
   const [selectedDetail, setSelectedDetail] = useState<GatekeeperDetail>();
+  const [applyMode, setApplyMode] = useState('preview');
+  const [applyManifest, setApplyManifest] = useState(defaultGatekeeperManifest);
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<GatekeeperApplyResponse | null>(null);
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
@@ -445,6 +490,32 @@ export function GatekeeperPolicyManager() {
     if (selectedDetail?.type !== 'config') return undefined;
     return data?.configs.find((config) => config.name === selectedDetail.name);
   }, [data?.configs, selectedDetail]);
+
+  const handleApplyManifest = async () => {
+    setApplyLoading(true);
+    setApplyError(null);
+    setApplyResult(null);
+    try {
+      const response = await postRequest<
+        GatekeeperApplyResponse,
+        { mode: string; manifest: string; human_approved: boolean }
+      >(awxAPI`/opa/gatekeeper/apply/`, {
+        mode: applyMode,
+        manifest: applyManifest,
+        human_approved: applyMode === 'apply',
+      });
+      setApplyResult(response);
+      if (response.persisted) void refresh();
+    } catch (err) {
+      setApplyError(
+        err instanceof Error
+          ? err.message
+          : t('Gatekeeper manifest operation failed. Check connection and policy guardrails.')
+      );
+    } finally {
+      setApplyLoading(false);
+    }
+  };
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
@@ -493,6 +564,103 @@ export function GatekeeperPolicyManager() {
             >
               {t('Download report')}
             </Button>
+          </StackItem>
+          <StackItem>
+            <Card isFlat>
+              <CardHeader>
+                <CardTitle>{t('Governed apply')}</CardTitle>
+              </CardHeader>
+              <CardBody>
+                <Stack hasGutter>
+                  {!data.configured ? (
+                    <StackItem>
+                      <Alert
+                        isInline
+                        variant="warning"
+                        title={t('Configure Gatekeeper before dry-run or apply.')}
+                      />
+                    </StackItem>
+                  ) : null}
+                  <StackItem>
+                    <Grid hasGutter>
+                      <GridItem span={3}>
+                        <FormGroup label={t('Mode')} fieldId="gatekeeper-apply-mode">
+                          <FormSelect
+                            id="gatekeeper-apply-mode"
+                            value={applyMode}
+                            onChange={(_event, value) => setApplyMode(String(value))}
+                          >
+                            <FormSelectOption value="preview" label={t('Preview')} />
+                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                            <FormSelectOption value="apply" label={t('Apply')} />
+                          </FormSelect>
+                        </FormGroup>
+                      </GridItem>
+                    </Grid>
+                  </StackItem>
+                  <StackItem>
+                    <FormGroup label={t('Manifest')} fieldId="gatekeeper-apply-manifest">
+                      <TextArea
+                        id="gatekeeper-apply-manifest"
+                        value={applyManifest}
+                        rows={12}
+                        onChange={(_event, value) => setApplyManifest(value)}
+                        aria-label={t('Gatekeeper manifest')}
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </FormGroup>
+                  </StackItem>
+                  {applyMode === 'apply' ? (
+                    <StackItem>
+                      <Alert
+                        isInline
+                        variant="warning"
+                        title={t(
+                          'Apply persists the manifest if RBAC, OPA, and Kubernetes admission allow it.'
+                        )}
+                      />
+                    </StackItem>
+                  ) : null}
+                  <StackItem>
+                    <Button
+                      variant={applyMode === 'apply' ? 'danger' : 'primary'}
+                      onClick={() => void handleApplyManifest()}
+                      isLoading={applyLoading}
+                      isDisabled={applyLoading || !data.configured || !applyManifest.trim()}
+                    >
+                      {applyMode === 'preview'
+                        ? t('Preview')
+                        : applyMode === 'dry_run'
+                          ? t('Dry-run')
+                          : t('Apply')}
+                    </Button>
+                  </StackItem>
+                  {applyError ? (
+                    <StackItem>
+                      <Alert variant="danger" isInline title={applyError} />
+                    </StackItem>
+                  ) : null}
+                  {applyResult ? (
+                    <StackItem>
+                      <Alert
+                        variant={applyResult.persisted || applyResult.dry_run ? 'success' : 'info'}
+                        isInline
+                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                          mode: applyResult.mode,
+                          operation: applyResult.operation,
+                          kind: String(applyResult.target.kind ?? ''),
+                          name: String(applyResult.target.name ?? ''),
+                        })}
+                        style={{ marginBottom: 12 }}
+                      />
+                      <CodeBlock>
+                        <CodeBlockCode>{jsonPreview(applyResult)}</CodeBlockCode>
+                      </CodeBlock>
+                    </StackItem>
+                  ) : null}
+                </Stack>
+              </CardBody>
+            </Card>
           </StackItem>
           <StackItem>
             <Grid hasGutter>

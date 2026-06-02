@@ -19,6 +19,14 @@ def _json_response(data, status_code=200):
     return response
 
 
+def _json_error_response(data, status_code=400, message='request failed'):
+    response = _json_response(data, status_code=status_code)
+    error = requests.HTTPError(message)
+    error.response = response
+    response.raise_for_status.side_effect = error
+    return response
+
+
 @pytest.mark.django_db
 @override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=True, OPA_POLICY_BUNDLE='package awx\nallow := true')
 def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
@@ -459,6 +467,130 @@ def test_gatekeeper_policy_manager_surfaces_kubernetes_auth_error(get, admin_use
     assert response.data['detail'] == 'Gatekeeper Kubernetes API request failed.'
     assert response.data['error']['status_code'] == 403
     assert response.data['error']['detail'] == {'message': 'forbidden'}
+
+
+GATEKEEPER_TEMPLATE_MANIFEST = """
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+"""
+
+
+@pytest.mark.django_db
+def test_gatekeeper_apply_requires_system_admin(post, rando):
+    post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='')
+def test_gatekeeper_apply_requires_configured_kubernetes_api(post, admin_user):
+    response = post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=admin_user, expect=400)
+
+    assert response.data['detail'] == 'Configure the Gatekeeper Kubernetes API connection in Settings.'
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_apply_preview_returns_diff_without_kubernetes_write(post, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request:
+        response = post(
+            reverse('api:opa_gatekeeper_apply'),
+            data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['dry_run'] is False
+    assert response.data['operation'] == 'create'
+    assert response.data['target']['object_path'] == '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels'
+    assert response.data['rollback_plan']['operation'] == 'delete'
+    assert response.data['audit'] is None
+    requests_request.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_apply_dry_run_uses_kubernetes_dry_run_and_audits(post, admin_user):
+    existing = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
+    }
+    dry_run_response = {
+        **existing,
+        'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}, 'status': {'dryRun': True}},
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_response(existing)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(dry_run_response)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_apply'),
+            data={'mode': 'dry_run', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['dry_run'] is True
+    assert response.data['operation'] == 'update'
+    assert response.data['opa_allowed'] is True
+    assert response.data['audit']['activity_stream_id']
+    check_policy.assert_called_once()
+    assert check_policy.call_args.args[0] == 'awx/gatekeeper_resource/allow'
+    requests_request.assert_called_once_with(
+        'PUT',
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        json=mock.ANY,
+        params={'dryRun': 'All'},
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_resource'
+    assert audit.object2 == 'ConstraintTemplate/k8srequiredlabels'
+    assert '"mode": "dry_run"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_apply_opa_denial_blocks_kubernetes_write_and_audits(post, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=False):
+        response = post(
+            reverse('api:opa_gatekeeper_apply'),
+            data={'mode': 'apply', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST},
+            user=admin_user,
+            expect=403,
+        )
+
+    assert response.data['detail'] == 'Gatekeeper change denied by OPA policy guardrail.'
+    assert response.data['opa_allowed'] is False
+    requests_request.assert_not_called()
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_resource'
+    assert '"opa_allowed": false' in audit.changes
 
 
 @pytest.mark.django_db
