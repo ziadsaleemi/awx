@@ -5,6 +5,7 @@ import {
   CardBody,
   CardHeader,
   CardTitle,
+  Checkbox,
   CodeBlock,
   CodeBlockCode,
   DescriptionList,
@@ -78,6 +79,11 @@ interface ExternalAutomationCheckRequest {
   gatekeeper_context: string;
 }
 
+interface PolicySmokeSelection {
+  includeOpa: boolean;
+  includeGatekeeper: boolean;
+}
+
 function StatusLabel(props: { check?: ExternalAutomationCheck }) {
   const { t } = useTranslation();
   if (!props.check) {
@@ -108,10 +114,22 @@ export function ExternalAutomationSmokePanel(props?: {
   const includeEda = props?.includeEda ?? true;
   const includeOpa = props?.includeOpa ?? true;
   const includeGatekeeper = props?.includeGatekeeper ?? false;
+  const policySelectionEnabled = !includeEda && includeGatekeeper;
+  const [policyCheckOpa, setPolicyCheckOpa] = useState(includeOpa);
+  const [policyCheckGatekeeper, setPolicyCheckGatekeeper] = useState(includeGatekeeper);
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
+  const [lastRunChecks, setLastRunChecks] = useState<PolicySmokeSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gatekeeperContext, setGatekeeperContext] = useState('');
   const [loading, setLoading] = useState(false);
+  const selectedIncludeOpa = policySelectionEnabled ? policyCheckOpa : includeOpa;
+  const selectedIncludeGatekeeper = policySelectionEnabled
+    ? policyCheckGatekeeper
+    : includeGatekeeper;
+  const resultIncludeOpa = lastRunChecks?.includeOpa ?? selectedIncludeOpa;
+  const resultIncludeGatekeeper = lastRunChecks?.includeGatekeeper ?? selectedIncludeGatekeeper;
+  const showOpaResult = Boolean(result?.checks.opa) || resultIncludeOpa;
+  const showGatekeeperResult = Boolean(result?.checks.gatekeeper) || resultIncludeGatekeeper;
 
   const title = includeEda
     ? t('External Automation Smoke')
@@ -120,21 +138,41 @@ export function ExternalAutomationSmokePanel(props?: {
       : t('OPA Smoke');
   const buttonLabel = includeEda
     ? t('Run EDA and OPA smoke')
-    : includeGatekeeper
+    : selectedIncludeOpa && selectedIncludeGatekeeper
       ? t('Run OPA and Gatekeeper smoke')
-      : t('Run OPA smoke');
+      : selectedIncludeGatekeeper
+        ? t('Run Gatekeeper smoke')
+        : selectedIncludeOpa
+          ? t('Run OPA smoke')
+          : t('Run policy smoke');
   const passedTitle = includeEda
     ? t('External automation smoke passed.')
-    : includeGatekeeper
+    : resultIncludeOpa && resultIncludeGatekeeper
       ? t('Policy smoke passed.')
-      : t('OPA smoke passed.');
+      : resultIncludeGatekeeper
+        ? t('Gatekeeper smoke passed.')
+        : t('OPA smoke passed.');
   const failedTitle = includeEda
     ? t('External automation smoke failed.')
-    : includeGatekeeper
+    : resultIncludeOpa && resultIncludeGatekeeper
       ? t('Policy smoke failed.')
-      : t('OPA smoke failed.');
+      : resultIncludeGatekeeper
+        ? t('Gatekeeper smoke failed.')
+        : t('OPA smoke failed.');
 
   const runSmoke = async () => {
+    const runChecks = {
+      includeOpa: selectedIncludeOpa,
+      includeGatekeeper: selectedIncludeGatekeeper,
+    };
+
+    if (!includeEda && !runChecks.includeOpa && !runChecks.includeGatekeeper) {
+      setResult(null);
+      setError(t('Select at least one policy check.'));
+      return;
+    }
+
+    setLastRunChecks(runChecks);
     setLoading(true);
     setError(null);
     setResult(null);
@@ -144,13 +182,13 @@ export function ExternalAutomationSmokePanel(props?: {
         ExternalAutomationCheckRequest
       >(awxAPI`/external_automation/check/`, {
         include_eda: includeEda,
-        include_opa: includeOpa,
-        sync_opa_policy: includeOpa,
+        include_opa: runChecks.includeOpa,
+        sync_opa_policy: runChecks.includeOpa,
         opa_policy_id: 'awx/managed',
-        opa_deny_smoke: includeOpa,
+        opa_deny_smoke: runChecks.includeOpa,
         start_eda_activation: false,
-        include_gatekeeper: includeGatekeeper,
-        gatekeeper_context: gatekeeperContext.trim(),
+        include_gatekeeper: runChecks.includeGatekeeper,
+        gatekeeper_context: runChecks.includeGatekeeper ? gatekeeperContext.trim() : '',
       });
       setResult(response);
     } catch {
@@ -168,7 +206,29 @@ export function ExternalAutomationSmokePanel(props?: {
         </CardHeader>
         <CardBody>
           <Stack hasGutter>
-            {includeGatekeeper ? (
+            {policySelectionEnabled ? (
+              <StackItem>
+                <FormGroup label={t('Policy checks')} fieldId="external-automation-policy-checks">
+                  <Checkbox
+                    id="external-automation-check-opa"
+                    label={t('OPA')}
+                    isChecked={policyCheckOpa}
+                    onChange={(_event, checked) => setPolicyCheckOpa(checked)}
+                    isDisabled={loading}
+                    data-cy="external-automation-check-opa"
+                  />
+                  <Checkbox
+                    id="external-automation-check-gatekeeper"
+                    label={t('Gatekeeper')}
+                    isChecked={policyCheckGatekeeper}
+                    onChange={(_event, checked) => setPolicyCheckGatekeeper(checked)}
+                    isDisabled={loading}
+                    data-cy="external-automation-check-gatekeeper"
+                  />
+                </FormGroup>
+              </StackItem>
+            ) : null}
+            {selectedIncludeGatekeeper ? (
               <StackItem>
                 <FormGroup
                   label={t('Gatekeeper context')}
@@ -234,31 +294,35 @@ export function ExternalAutomationSmokePanel(props?: {
                         </DescriptionListGroup>
                       </>
                     ) : null}
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('OPA')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <StatusLabel check={result.checks.opa} />
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('OPA allow')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {result.checks.opa?.allowed === true ? t('Allowed') : t('Not allowed')}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('OPA deny smoke')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {result.checks.opa?.deny_smoke?.status ?? t('Not checked')}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('OPA policy sync')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        {result.checks.opa?.policy_sync?.status ?? t('Not checked')}
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                    {includeGatekeeper ? (
+                    {showOpaResult ? (
+                      <>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('OPA')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            <StatusLabel check={result.checks.opa} />
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('OPA allow')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.opa?.allowed === true ? t('Allowed') : t('Not allowed')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('OPA deny smoke')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.opa?.deny_smoke?.status ?? t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('OPA policy sync')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.opa?.policy_sync?.status ?? t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </>
+                    ) : null}
+                    {showGatekeeperResult ? (
                       <>
                         <DescriptionListGroup>
                           <DescriptionListTerm>{t('Gatekeeper')}</DescriptionListTerm>
