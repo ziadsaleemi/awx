@@ -163,6 +163,21 @@ interface GatekeeperApplyResponse {
   } | null;
 }
 
+interface GatekeeperAuthorResponse {
+  generated: boolean;
+  prompt_summary: string;
+  manifest: string;
+  manifest_json: UnknownRecord;
+  target?: UnknownRecord | null;
+  provider: string;
+  model: string;
+  context: UnknownRecord;
+  audit?: {
+    activity_stream_id?: number;
+    activity_stream_url?: string;
+  } | null;
+}
+
 const defaultGatekeeperManifest = `apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
@@ -493,6 +508,10 @@ export function GatekeeperPolicyManager() {
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [rollbackResult, setRollbackResult] = useState<GatekeeperApplyResponse | null>(null);
+  const [authorPrompt, setAuthorPrompt] = useState('');
+  const [authorLoading, setAuthorLoading] = useState(false);
+  const [authorError, setAuthorError] = useState<string | null>(null);
+  const [authorResult, setAuthorResult] = useState<GatekeeperAuthorResponse | null>(null);
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
@@ -522,6 +541,70 @@ export function GatekeeperPolicyManager() {
     if (selectedDetail?.type !== 'config') return undefined;
     return data?.configs.find((config) => config.name === selectedDetail.name);
   }, [data?.configs, selectedDetail]);
+  const authorContext = useMemo(
+    () => ({
+      selected_detail: selectedDetail,
+      counts: data?.counts,
+      violation_query: data?.violation_query,
+      constraint_templates: (data?.constraint_templates || []).map((template) => ({
+        name: template.name,
+        kind: template.kind,
+        constraint_count: template.constraint_count,
+      })),
+      constraints: (data?.constraints || []).map((constraint) => ({
+        kind: constraint.kind,
+        name: constraint.name,
+        enforcement_action: constraint.enforcement_action,
+        total_violations: constraint.total_violations,
+      })),
+      violations: (data?.violations || []).map((violation) => ({
+        constraint_kind: violation.constraint_kind,
+        constraint_name: violation.constraint_name,
+        resource_kind: violation.resource_kind,
+        resource_namespace: violation.resource_namespace,
+        resource_name: violation.resource_name,
+        message: violation.message,
+      })),
+    }),
+    [
+      data?.constraint_templates,
+      data?.constraints,
+      data?.counts,
+      data?.violation_query,
+      data?.violations,
+      selectedDetail,
+    ]
+  );
+
+  const handleAuthorManifest = async () => {
+    setAuthorLoading(true);
+    setAuthorError(null);
+    setAuthorResult(null);
+    try {
+      const response = await postRequest<
+        GatekeeperAuthorResponse,
+        { prompt: string; context: UnknownRecord }
+      >(awxAPI`/opa/gatekeeper/author/`, {
+        prompt: authorPrompt,
+        context: authorContext,
+      });
+      setAuthorResult(response);
+      if (response.manifest) {
+        setApplyManifest(response.manifest);
+        setApplyMode('preview');
+        setApplyResult(null);
+        setDeleteResult(null);
+      }
+    } catch (err) {
+      setAuthorError(
+        err instanceof Error
+          ? err.message
+          : t('Gatekeeper AI authoring failed. Check AI settings and try again.')
+      );
+    } finally {
+      setAuthorLoading(false);
+    }
+  };
 
   const handleApplyManifest = async () => {
     setApplyLoading(true);
@@ -695,6 +778,49 @@ export function GatekeeperPolicyManager() {
                         isInline
                         variant="warning"
                         title={t('Configure Gatekeeper before dry-run or apply.')}
+                      />
+                    </StackItem>
+                  ) : null}
+                  <StackItem>
+                    <FormGroup label={t('AI authoring prompt')} fieldId="gatekeeper-author-prompt">
+                      <TextArea
+                        id="gatekeeper-author-prompt"
+                        value={authorPrompt}
+                        rows={3}
+                        onChange={(_event, value) => setAuthorPrompt(value)}
+                        aria-label={t('Gatekeeper AI authoring prompt')}
+                      />
+                    </FormGroup>
+                  </StackItem>
+                  <StackItem>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void handleAuthorManifest()}
+                      isLoading={authorLoading}
+                      isDisabled={authorLoading || !authorPrompt.trim()}
+                    >
+                      {t('Generate manifest')}
+                    </Button>
+                  </StackItem>
+                  {authorError ? (
+                    <StackItem>
+                      <Alert variant="danger" isInline title={authorError} />
+                    </StackItem>
+                  ) : null}
+                  {authorResult ? (
+                    <StackItem>
+                      <Alert
+                        variant="success"
+                        isInline
+                        title={t('Generated {{kind}}/{{name}} with {{provider}}.', {
+                          kind: String(authorResult.manifest_json.kind ?? ''),
+                          name: String(
+                            (authorResult.manifest_json.metadata as UnknownRecord | undefined)
+                              ?.name ?? ''
+                          ),
+                          provider: authorResult.provider,
+                        })}
+                        style={{ marginBottom: 12 }}
                       />
                     </StackItem>
                   ) : null}

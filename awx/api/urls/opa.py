@@ -2,11 +2,18 @@
 
 from django.urls import re_path
 
-from awx.api.views.gatekeeper import GatekeeperPolicyApplyView, GatekeeperPolicyDeleteView, GatekeeperPolicyManagerView, GatekeeperPolicyRollbackView
+from awx.api.views.gatekeeper import (
+    GatekeeperPolicyApplyView,
+    GatekeeperPolicyAuthorView,
+    GatekeeperPolicyDeleteView,
+    GatekeeperPolicyManagerView,
+    GatekeeperPolicyRollbackView,
+)
 from awx.api.views.opa import OPAPolicyEvaluateView, OPAPolicyListView, OPAPolicyModuleDetailView, OPAPolicyModuleListView, OPAPolicySyncView
 
 opa_urls = [
     re_path(r'^gatekeeper/$', GatekeeperPolicyManagerView.as_view(), name='opa_gatekeeper'),
+    re_path(r'^gatekeeper/author/$', GatekeeperPolicyAuthorView.as_view(), name='opa_gatekeeper_author'),
     re_path(r'^gatekeeper/apply/$', GatekeeperPolicyApplyView.as_view(), name='opa_gatekeeper_apply'),
     re_path(r'^gatekeeper/delete/$', GatekeeperPolicyDeleteView.as_view(), name='opa_gatekeeper_delete'),
     re_path(r'^gatekeeper/rollback/$', GatekeeperPolicyRollbackView.as_view(), name='opa_gatekeeper_rollback'),

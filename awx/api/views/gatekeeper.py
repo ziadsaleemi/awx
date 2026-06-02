@@ -15,6 +15,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from awx.api.permissions import IsSystemAdmin as IsSuperUser
+from awx.api.views.ai import (
+    AIProviderError,
+    _PROVIDER_DEFAULTS,
+    _ai_authoring_context,
+    _call_ai_provider,
+    _check_rate_limit,
+    _json_safe,
+    _openai_codex_effective_default_model,
+)
 from awx.api.views.opa import check_opa_policy
 from awx.main.models import ActivityStream
 
@@ -27,6 +36,7 @@ GATEKEEPER_DELETE_MODES = ('preview', 'dry_run', 'delete')
 GATEKEEPER_ROLLBACK_MODES = ('preview', 'dry_run', 'apply')
 GATEKEEPER_APPLY_STRATEGIES = ('update', 'server_side')
 GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
+GATEKEEPER_AI_PROMPT_LIMIT = 4000
 
 
 class GatekeeperKubernetesClient:
@@ -575,6 +585,252 @@ def _audit_gatekeeper_apply(
         'activity_stream_id': entry.pk,
         'activity_stream_url': f'/api/v2/activity_stream/{entry.pk}/',
     }
+
+
+def _strip_gatekeeper_ai_fences(text):
+    text = (text or '').strip()
+    if text.startswith('```'):
+        lines = text.splitlines()
+        if lines and lines[0].startswith('```'):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        text = '\n'.join(lines).strip()
+    return text
+
+
+def _gatekeeper_manifest_yaml(manifest):
+    return yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False).strip()
+
+
+def _summarize_gatekeeper_prompt(prompt):
+    prompt = ' '.join(str(prompt or '').split())
+    if len(prompt) > 240:
+        return f'{prompt[:237]}...'
+    return prompt
+
+
+def _gatekeeper_context_for_ai(client):
+    context = {
+        'configured': client.is_configured(),
+        'cluster': {
+            'server_url': client.server_url if client.is_configured() else '',
+            'context': client.context,
+            'verify_ssl': client.verify_ssl,
+        },
+        'counts': {
+            'constraint_templates': 0,
+            'constraints': 0,
+            'violations': 0,
+            'configs': 0,
+        },
+        'constraint_templates': [],
+        'constraints': [],
+        'violations': [],
+        'configs': [],
+        'errors': [],
+    }
+    if not client.is_configured():
+        context['message'] = _('Configure the Gatekeeper Kubernetes API connection in Settings.')
+        return context
+
+    try:
+        template_version, templates = client.list_constraint_templates()
+        constraints, errors = client.list_constraint_resources()
+        try:
+            configs = client.list_configs()
+        except requests.HTTPError as exc:
+            response = getattr(exc, 'response', None)
+            if response is None or response.status_code != 404:
+                raise
+            configs = []
+            errors.append(_gatekeeper_error('configs', exc))
+    except requests.RequestException as exc:
+        context['errors'].append(_gatekeeper_error('gatekeeper', exc))
+        return context
+
+    constraint_summaries = [_constraint_summary(constraint) for constraint in constraints]
+    violations = [
+        _violation_summary(constraint, violation) for constraint in constraints for violation in ((constraint.get('status') or {}).get('violations') or [])
+    ]
+    _sort_violations(violations, 'constraint')
+    template_summaries = [_template_summary(template, constraint_summaries) for template in templates]
+
+    context.update(
+        {
+            'api_versions': {
+                'constraint_templates': template_version,
+                'constraints': sorted({constraint.get('version') for constraint in constraint_summaries if constraint.get('version')}),
+                'configs': 'v1alpha1',
+            },
+            'counts': {
+                'constraint_templates': len(template_summaries),
+                'constraints': len(constraint_summaries),
+                'violations': len(violations),
+                'configs': len(configs),
+            },
+            'constraint_templates': [
+                {
+                    'name': template['name'],
+                    'kind': template['kind'],
+                    'constraint_count': template['constraint_count'],
+                    'targets': [target.get('target') for target in template.get('targets') or [] if target.get('target')],
+                    'errors': template.get('errors') or [],
+                }
+                for template in sorted(template_summaries, key=lambda item: item['name'])[:20]
+            ],
+            'constraints': [
+                {
+                    'kind': constraint['kind'],
+                    'name': constraint['name'],
+                    'enforcement_action': constraint['enforcement_action'],
+                    'total_violations': constraint['total_violations'],
+                    'parameters': constraint['parameters'],
+                    'match': constraint['match'],
+                }
+                for constraint in sorted(constraint_summaries, key=lambda item: (-int(item.get('total_violations') or 0), item['kind'], item['name']))[:40]
+            ],
+            'violations': violations[:40],
+            'configs': [_config_summary(config) for config in configs[:10]],
+            'errors': errors,
+        }
+    )
+    return context
+
+
+def _gatekeeper_ai_system_prompt(user, gatekeeper_context, ui_context):
+    awx_context = _ai_authoring_context(user)
+    return (
+        'You author Open Policy Agent Gatekeeper Kubernetes manifests for AWX. '
+        'Return only one YAML Kubernetes object. No markdown fences. No prose.\n\n'
+        'Supported objects: templates.gatekeeper.sh/v1 or v1beta1 ConstraintTemplate, constraints.gatekeeper.sh constraints, '
+        'and config.gatekeeper.sh/v1alpha1 Config. Do not return lists, Helm charts, kubectl commands, or placeholders.\n'
+        'Use existing ConstraintTemplate kinds from Gatekeeper context when writing Constraints. If creating a new policy, prefer a '
+        'ConstraintTemplate with a clear Rego package, input.review checks, and an openAPIV3Schema for parameters. '
+        'Use enforcementAction deny unless the user explicitly asks for dryrun or warn. Do not include secrets, tokens, kubeconfig data, '
+        'private keys, or credential values. Scope matches and parameters to visible AWX/Gatekeeper context when relevant.\n\n'
+        f'Visible AWX context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
+        f'Visible Gatekeeper context:\n{json.dumps(_json_safe(gatekeeper_context), indent=2)}\n\n'
+        f'UI context:\n{json.dumps(_json_safe(ui_context or {}), indent=2)}'
+    )
+
+
+def _gatekeeper_ai_provider_response(request, prompt, gatekeeper_context, ui_context):
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIProviderError(
+            _('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        raise AIProviderError(_('Rate limit exceeded. Please wait before sending another message.'), status.HTTP_429_TOO_MANY_REQUESTS)
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIProviderError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'), status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    content = _call_ai_provider(
+        provider,
+        model,
+        [{'role': 'user', 'content': prompt}],
+        min(getattr(settings, 'AI_MAX_TOKENS', 2048), 4096),
+        _gatekeeper_ai_system_prompt(request.user, gatekeeper_context, ui_context),
+        api_key,
+        getattr(settings, 'AI_API_URL', ''),
+    )
+    return content, provider, model
+
+
+def _audit_gatekeeper_ai_author(request, prompt_summary, manifest, target, provider, model, gatekeeper_context):
+    changes = {
+        'triggered_by': 'gatekeeper_policy_manager',
+        'source': 'gatekeeper_ai_author',
+        'prompt_summary': prompt_summary,
+        'provider': provider,
+        'model': model,
+        'target': _safe_gatekeeper_target(target) if target else None,
+        'manifest_sha256': _json_sha256(manifest),
+        'gatekeeper_counts': gatekeeper_context.get('counts') or {},
+        'is_error': False,
+    }
+    entry = ActivityStream.objects.create(
+        operation='create',
+        object1='gatekeeper_resource',
+        object2=f"ai_author:{manifest.get('kind')}/{_object_name(manifest)}",
+        changes=json.dumps(_json_safe(changes)),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+    return {
+        'activity_stream_id': entry.pk,
+        'activity_stream_url': f'/api/v2/activity_stream/{entry.pk}/',
+    }
+
+
+class GatekeeperPolicyAuthorView(APIView):
+    """
+    POST /api/v2/opa/gatekeeper/author/
+
+    Generate one Gatekeeper manifest from AI using visible AWX and Gatekeeper context.
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def post(self, request, *args, **kwargs):
+        prompt = request.data.get('prompt')
+        if not isinstance(prompt, str) or not prompt.strip():
+            return Response({'detail': _('prompt must be a non-empty string.')}, status=status.HTTP_400_BAD_REQUEST)
+        prompt = prompt.strip()
+        if len(prompt) > GATEKEEPER_AI_PROMPT_LIMIT:
+            return Response({'detail': _('prompt is too long.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = GatekeeperKubernetesClient()
+        ui_context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
+        gatekeeper_context = _gatekeeper_context_for_ai(client)
+
+        try:
+            content, provider, model = _gatekeeper_ai_provider_response(request, prompt, gatekeeper_context, ui_context)
+        except AIProviderError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+
+        manifest_text = _strip_gatekeeper_ai_fences(content)
+        manifest, error = _load_gatekeeper_manifest(manifest_text)
+        if error:
+            return Response({'detail': _('AI generated invalid Gatekeeper manifest: %(error)s') % {'error': error}}, status=status.HTTP_400_BAD_REQUEST)
+
+        target = None
+        if client.is_configured():
+            try:
+                target = _gatekeeper_target(client, manifest)
+            except (ValueError, requests.RequestException) as exc:
+                return Response({'detail': _('AI generated unsupported Gatekeeper manifest: %(error)s') % {'error': exc}}, status=status.HTTP_400_BAD_REQUEST)
+
+        prompt_summary = _summarize_gatekeeper_prompt(prompt)
+        audit = _audit_gatekeeper_ai_author(request, prompt_summary, manifest, target, provider, model, gatekeeper_context)
+
+        return Response(
+            {
+                'generated': True,
+                'prompt_summary': prompt_summary,
+                'manifest': _gatekeeper_manifest_yaml(manifest),
+                'manifest_json': manifest,
+                'target': _safe_gatekeeper_target(target) if target else None,
+                'provider': provider,
+                'model': model,
+                'context': {
+                    'gatekeeper': {
+                        'configured': gatekeeper_context.get('configured'),
+                        'counts': gatekeeper_context.get('counts') or {},
+                        'errors': gatekeeper_context.get('errors') or [],
+                    }
+                },
+                'audit': audit,
+            }
+        )
 
 
 class GatekeeperPolicyManagerView(APIView):

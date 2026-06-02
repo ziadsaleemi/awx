@@ -469,6 +469,71 @@ def test_gatekeeper_policy_manager_surfaces_kubernetes_auth_error(get, admin_use
     assert response.data['error']['detail'] == {'message': 'forbidden'}
 
 
+@pytest.mark.django_db
+def test_gatekeeper_author_requires_system_admin(post, rando):
+    post(reverse('api:opa_gatekeeper_author'), data={'prompt': 'Create a required labels policy.'}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o', GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_author_uses_visible_context_and_returns_valid_manifest(post, admin_user):
+    generated_manifest = """```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+        violation[{"msg": msg}] {
+          msg := "missing required labels"
+        }
+```"""
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get, mock.patch(
+        'awx.api.views.gatekeeper._call_ai_provider', return_value=generated_manifest
+    ) as call_provider:
+        response = post(
+            reverse('api:opa_gatekeeper_author'),
+            data={
+                'prompt': 'Create a required labels Gatekeeper template for namespaces.',
+                'context': {'selected_detail': {'type': 'constraint', 'kind': 'K8sRequiredLabels', 'name': 'require-owner'}},
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['generated'] is True
+    assert response.data['provider'] == 'openai'
+    assert response.data['model'] == 'gpt-4o'
+    assert response.data['manifest_json']['kind'] == 'ConstraintTemplate'
+    assert response.data['manifest'].startswith('apiVersion: templates.gatekeeper.sh/v1')
+    assert '```' not in response.data['manifest']
+    assert response.data['target']['object_path'] == '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels'
+    assert response.data['context']['gatekeeper']['counts']['constraints'] == 2
+    assert response.data['audit']['activity_stream_id']
+    requests_get.assert_called()
+    system_prompt = call_provider.call_args.args[4]
+    assert 'Visible AWX context' in system_prompt
+    assert 'Visible Gatekeeper context' in system_prompt
+    assert 'k8srequiredlabels' in system_prompt
+    assert 'require-owner' in system_prompt
+    assert 'selected_detail' in system_prompt
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_resource'
+    assert audit.object2 == 'ai_author:ConstraintTemplate/k8srequiredlabels'
+    assert '"source": "gatekeeper_ai_author"' in audit.changes
+
+
 GATEKEEPER_TEMPLATE_MANIFEST = """
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
