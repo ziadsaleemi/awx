@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import json
 import time
 from urllib.parse import urljoin, urlparse
 
@@ -13,6 +14,33 @@ EDA_STARTABLE_STATUSES = {'created', 'disabled', 'idle', 'new', 'pending', 'plan
 EDA_RUNNING_STATUSES = {'active', 'enabled', 'ok', 'running', 'started', 'successful'}
 DEFAULT_ACTIVATION_START_PATH = '/api/eda/v1/activations/{activation_id}/enable/'
 DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH = '/api/eda/v1/activation-instances/{activation_instance_id}/logs/'
+DEFAULT_RULEBOOKS_PATH = '/api/eda/v1/rulebooks/'
+DEFAULT_DECISION_ENVIRONMENTS_PATH = '/api/eda/v1/decision-environments/'
+DEFAULT_ORGANIZATIONS_PATH = '/api/eda/v1/organizations/'
+UPSTREAM_ACTIVATION_FIELDS = {
+    'name',
+    'description',
+    'is_enabled',
+    'restart_on_project_update',
+    'decision_environment_id',
+    'rulebook_id',
+    'extra_var',
+    'organization_id',
+    'restart_policy',
+    'awx_token_id',
+    'log_level',
+    'eda_credentials',
+    'k8s_service_name',
+    'source_mappings',
+    'skip_audit_events',
+    'enable_persistence',
+    'rule_engine_credential_id',
+    'k8s_pod_service_account_name',
+    'k8s_pod_labels',
+    'k8s_pod_annotations',
+    'k8s_pod_node_selector',
+    'k8s_pod_tolerations',
+}
 
 
 class EDAControllerError(Exception):
@@ -165,8 +193,15 @@ class EDAControllerClient:
         except requests.Timeout as exc:
             raise EDAControllerError('EDA Controller request timed out.', 'timeout') from exc
         except requests.RequestException as exc:
-            status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
-            raise EDAControllerError(f'EDA Controller request failed: {status_code or exc}', 'unreachable') from exc
+            response = getattr(exc, 'response', None)
+            status_code = getattr(response, 'status_code', None)
+            detail = ''
+            if response is not None:
+                detail = _short_text(getattr(response, 'text', '') or getattr(response, 'content', '') or '', 500)
+            message = f'EDA Controller request failed: {status_code or exc}'
+            if detail:
+                message = f'{message}: {detail}'
+            raise EDAControllerError(message, 'bad_request' if status_code == 400 else 'unreachable') from exc
         except ValueError as exc:
             raise EDAControllerError('EDA Controller returned invalid JSON.', 'invalid_response') from exc
 
@@ -272,9 +307,55 @@ class EDAControllerClient:
             payload.setdefault('event_source', event_source)
         return payload
 
+    def upstream_activation_payload(self, rulebook_name, activation_id='', event_source='', extra_data=None):
+        payload = {key: value for key, value in dict(extra_data or {}).items() if key in UPSTREAM_ACTIVATION_FIELDS}
+        payload.setdefault('name', rulebook_name or activation_id)
+        payload.setdefault('is_enabled', False)
+        if 'extra_var' in payload and isinstance(payload['extra_var'], (dict, list)):
+            payload['extra_var'] = json.dumps(payload['extra_var'])
+        if 'rulebook_id' not in payload:
+            rulebook_id = self.find_controller_item_id(DEFAULT_RULEBOOKS_PATH, rulebook_name)
+            if rulebook_id:
+                payload['rulebook_id'] = rulebook_id
+        if 'decision_environment_id' not in payload:
+            decision_environment_id = self.find_controller_item_id(DEFAULT_DECISION_ENVIRONMENTS_PATH)
+            if decision_environment_id:
+                payload['decision_environment_id'] = decision_environment_id
+        if 'organization_id' not in payload:
+            organization_id = self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH, 'Default') or self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH)
+            if organization_id:
+                payload['organization_id'] = organization_id
+        if event_source and 'source_mappings' not in payload:
+            payload.setdefault('description', f'Event source: {event_source}')
+        return payload
+
+    def find_controller_item_id(self, path, name=''):
+        try:
+            payload = self.get_json(path, params={'page': 1, 'page_size': 200})
+        except EDAControllerError:
+            return ''
+        items = [item for item in _coerce_items(payload) if isinstance(item, dict)]
+        if not items:
+            return ''
+        normalized_name = str(name or '').strip().lower()
+        if normalized_name:
+            for item in items:
+                item_name = str(_pick_first(item, ('name', 'rulebook_name', 'id'))).strip().lower()
+                if item_name == normalized_name:
+                    return _pick_first(item, ('id', 'uuid', 'pk'))
+        return _pick_first(items[0], ('id', 'uuid', 'pk'))
+
     def create_activation(self, rulebook_name, activation_id='', event_source='', extra_data=None):
         payload = self.activation_payload(rulebook_name, activation_id, event_source, extra_data)
-        response = self.post_json(self.activations_path, payload)
+        try:
+            response = self.post_json(self.activations_path, payload)
+        except EDAControllerError as exc:
+            if exc.status != 'bad_request':
+                raise
+            upstream_payload = self.upstream_activation_payload(rulebook_name, activation_id, event_source, extra_data)
+            if upstream_payload == payload:
+                raise
+            response = self.post_json(self.activations_path, upstream_payload)
         return self.normalize_activation(_coerce_activation_payload(response))
 
     def should_start_activation(self, activation):

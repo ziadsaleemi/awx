@@ -50,6 +50,50 @@ def test_check_external_automation_json_success(mocker):
     assert requests_get.call_args.args[0] == 'http://opa.example.test:8181/health'
 
 
+@override_settings(EDA_SERVER_URL='https://eda.example.test', OPA_HOST='')
+def test_check_external_automation_can_start_eda_activation(mocker):
+    eda_client = mocker.Mock()
+    eda_client.status = 'configured'
+    eda_client.controller_url = 'https://eda.example.test'
+    eda_client.auth_configured = True
+    eda_client.is_configured = True
+    eda_client.list_activations.return_value = {'count': 0, 'results': []}
+    eda_client.ensure_activation_started.return_value = {
+        'activation': {'id': 42, 'name': 'codex-smoke.yml', 'status': 'running'},
+        'actions': ['created', 'started'],
+        'events': [],
+    }
+    eda_client.delete_activation.return_value = {'id': 42, 'status': 'deleted'}
+    mocker.patch('awx.main.management.commands.check_external_automation.EDAControllerClient', return_value=eda_client)
+
+    output = StringIO()
+    call_command(
+        'check_external_automation',
+        '--json',
+        '--skip-opa',
+        '--start-eda-activation',
+        '--eda-rulebook-name=codex-smoke.yml',
+        '--eda-activation-extra-data={"organization_id":1}',
+        '--cleanup-eda-activation',
+        stdout=output,
+    )
+    payload = json.loads(output.getvalue())
+
+    assert payload['ok'] is True
+    assert payload['checks']['eda']['activation_start']['status'] == 'started'
+    assert payload['checks']['eda']['activation_start']['actions'] == ['created', 'started']
+    assert payload['checks']['eda']['activation_start']['cleanup'] == {'id': 42, 'status': 'deleted'}
+    eda_client.ensure_activation_started.assert_called_once_with(
+        'codex-smoke.yml',
+        activation_id='',
+        event_source='',
+        extra_data={'organization_id': 1},
+        poll=True,
+        include_events=False,
+    )
+    eda_client.delete_activation.assert_called_once_with(42)
+
+
 @override_settings(
     EDA_SERVER_URL='',
     OPA_HOST='opa.example.test',

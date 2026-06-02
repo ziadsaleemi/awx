@@ -14,6 +14,15 @@ def eda_response(mocker, payload):
     return response
 
 
+def eda_error_response(mocker, status_code, text):
+    response = mocker.Mock()
+    response.status_code = status_code
+    response.text = text
+    response.content = text.encode()
+    response.raise_for_status.side_effect = requests.HTTPError(response=response)
+    return response
+
+
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='')
 def test_eda_status_reports_not_configured(get, admin_user):
@@ -174,6 +183,41 @@ def test_eda_activation_start_creates_starts_polls_and_reads_events(post, admin_
     assert request_mock.call_args_list[1].kwargs['json']['rulebook_name'] == 'Restart web on alert'
     assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/activations/42/enable/'
     assert request_mock.call_args_list[5].args[1] == 'https://eda.example.test/api/eda/v1/activation-instances/84/logs/'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_VERIFY_SSL=False)
+def test_eda_activation_start_retries_with_upstream_required_ids(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 0, 'results': []}),
+            eda_error_response(mocker, 400, 'Rulebook is required'),
+            eda_response(mocker, {'count': 1, 'results': [{'id': 11, 'name': 'codex-smoke.yml'}]}),
+            eda_response(mocker, {'count': 1, 'results': [{'id': 12, 'name': 'Codex smoke decision environment'}]}),
+            eda_response(mocker, {'count': 1, 'results': [{'id': 13, 'name': 'Default'}]}),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'pending', 'rulebook': {'name': 'codex-smoke.yml'}}),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'running', 'rulebook': {'name': 'codex-smoke.yml'}}),
+        ],
+    )
+
+    response = post(
+        reverse('api:eda_activation_start'),
+        {'rulebook_name': 'codex-smoke.yml', 'poll': False, 'include_events': False},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['activation']['id'] == 42
+    assert response.data['actions'] == ['created', 'started']
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'GET', 'GET', 'GET', 'POST', 'POST']
+    assert request_mock.call_args_list[5].kwargs['json'] == {
+        'name': 'codex-smoke.yml',
+        'is_enabled': False,
+        'rulebook_id': 11,
+        'decision_environment_id': 12,
+        'organization_id': 13,
+    }
 
 
 @pytest.mark.django_db
