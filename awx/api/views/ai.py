@@ -1374,6 +1374,21 @@ def _visible_resource_specs():
             'order_by': ('organization__name', 'provider_id', 'name', 'id'),
             'fields': (('id', 'id'), ('name', 'name'), ('provider', 'provider_id'), ('organization', 'organization')),
         },
+        {
+            'key': 'cloud_provider_states',
+            'singular': 'cloud provider state',
+            'plural': 'cloud provider states',
+            'patterns': (r'\bcloud (?:provider )?states?\b', r'\bprovider states?\b', r'\bpulled cloud data\b'),
+            'model': models.CloudProviderState,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'provider_id', 'id'),
+            'fields': (
+                ('id', 'id'),
+                ('provider', 'provider_id'),
+                ('organization', 'organization'),
+                ('pulled_at', 'pulled_at'),
+            ),
+        },
     ]
 
 
@@ -1474,6 +1489,7 @@ def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, l
         'catalog_items': 'organization_id',
         'catalog_deployments': 'catalog_item__organization_id',
         'cloud_provider_connections': 'organization_id',
+        'cloud_provider_states': 'organization_id',
     }
     organization_filter = organization_filter_by_key.get(spec_key)
     if organization_filter:
@@ -1680,6 +1696,7 @@ def _resource_spec_match_score(message: str, spec: dict) -> int:
         'catalog_items': r'\bcatalog items?\b|\bmarketplace items?\b',
         'catalog_deployments': r'\bcatalog deployments?\b|\bdeployments?\b',
         'cloud_provider_connections': r'\bcloud (?:provider )?connections?\b',
+        'cloud_provider_states': r'\bcloud (?:provider )?states?\b|\bprovider states?\b|\bpulled cloud data\b',
     }
     primary_pattern = primary_patterns.get(spec.get('key'))
     if primary_pattern:
@@ -2267,6 +2284,10 @@ def _ai_authoring_context(user) -> dict:
         ),
         'schedules': _limited_queryset_values(user, models.Schedule, ('id', 'name', 'enabled', 'unified_job_template_id'), limit=20),
         'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
+        'cloud_provider_connections': _limited_queryset_values(
+            user, models.CloudProviderConnection, ('id', 'name', 'provider_id', 'status', 'organization_id'), limit=20
+        ),
+        'cloud_provider_states': _limited_queryset_values(user, models.CloudProviderState, ('id', 'provider_id', 'organization_id', 'pulled_at'), limit=20),
     }
 
 

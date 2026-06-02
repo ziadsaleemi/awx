@@ -9,6 +9,7 @@ from awx.api.versioning import reverse
 from awx.conf.models import Setting
 from awx.main.models import (
     ActivityStream,
+    CloudProviderState,
     Credential,
     CredentialType,
     Group,
@@ -18,6 +19,7 @@ from awx.main.models import (
     JobTemplate,
     Notification,
     NotificationTemplate,
+    Organization,
     Project,
     ProjectUpdate,
     Schedule,
@@ -220,6 +222,40 @@ def test_ai_chat_counts_visible_hosts_scoped_to_inventory_without_provider(post,
         )
 
     assert response.data['message']['content'] == 'There are 2 hosts visible to you in AWX matching inventory "source-inv".'
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_cloud_provider_states_scoped_to_org_without_provider(post, org_admin, organization):
+    other_org = Organization.objects.create(name='AI Other Cloud Org')
+    own_state = CloudProviderState.objects.create(
+        provider_id='proxmox',
+        organization=organization,
+        provider_data={'nodes': [{'node': 'own-pve'}]},
+    )
+    foreign_state = CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        provider_data={'regions': [{'slug': 'fra1'}]},
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': f'List cloud provider states in organization {organization.name}'}]},
+            user=org_admin,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith(f'There are 1 cloud provider state visible to you in AWX matching organization "{organization.name}":')
+    assert f'id: {own_state.pk}' in content
+    assert 'provider: proxmox' in content
+    assert f'id: {foreign_state.pk}' not in content
+    assert 'digitalocean' not in content
+    assert 'own-pve' not in content
     assert response.data['provider'] == 'awx'
     requests_post.assert_not_called()
 
