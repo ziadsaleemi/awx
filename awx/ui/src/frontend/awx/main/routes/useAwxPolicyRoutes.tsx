@@ -23,6 +23,12 @@ export function useAwxPolicyRoutes() {
           element: <PolicyAsCode view="overview" />,
         },
         {
+          id: AwxRoute.PolicyAsCodeGatekeeper,
+          label: t('Gatekeeper'),
+          path: 'gatekeeper',
+          element: <PolicyAsCode view="gatekeeper" />,
+        },
+        {
           id: AwxRoute.PolicyAsCodeModules,
           label: t('Policy Modules'),
           path: 'modules',

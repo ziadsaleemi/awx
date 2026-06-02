@@ -11,6 +11,14 @@ from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Job,
 from awx.main.tasks.policy import OPA_AUTH_TYPES
 
 
+def _json_response(data, status_code=200):
+    response = mock.Mock()
+    response.status_code = status_code
+    response.json.return_value = data
+    response.raise_for_status.return_value = None
+    return response
+
+
 @pytest.mark.django_db
 @override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=True, OPA_POLICY_BUNDLE='package awx\nallow := true')
 def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
@@ -211,6 +219,180 @@ def test_opa_policy_modules_require_system_admin(get, post, delete, rando):
     get(reverse('api:opa_policy_modules'), user=rando, expect=403)
     post(reverse('api:opa_policy_modules'), data={'policy_id': 'awx/managed', 'policy_text': 'package awx'}, user=rando, expect=403)
     delete(reverse('api:opa_policy_module_detail', kwargs={'policy_id': 'awx/managed'}), user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='')
+def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user):
+    response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
+
+    assert response.data['configured'] is False
+    assert response.data['counts'] == {
+        'constraint_templates': 0,
+        'constraints': 0,
+        'violations': 0,
+        'configs': 0,
+    }
+    assert response.data['constraint_templates'] == []
+    assert response.data['message'] == 'Configure the Gatekeeper Kubernetes API connection in Settings.'
+
+
+@pytest.mark.django_db
+def test_gatekeeper_policy_manager_requires_system_admin(get, rando):
+    get(reverse('api:opa_gatekeeper'), user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_AUTH_TOKEN='secret-token',
+    GATEKEEPER_K8S_CONTEXT='prod',
+    GATEKEEPER_K8S_VERIFY_SSL=False,
+    GATEKEEPER_K8S_REQUEST_TIMEOUT=7,
+)
+def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_violations(get, admin_user):
+    responses = [
+        _json_response(
+            {
+                'items': [
+                    {
+                        'apiVersion': 'templates.gatekeeper.sh/v1',
+                        'metadata': {'name': 'k8srequiredlabels'},
+                        'spec': {
+                            'crd': {
+                                'spec': {
+                                    'names': {'kind': 'K8sRequiredLabels'},
+                                    'validation': {'openAPIV3Schema': {'type': 'object'}},
+                                }
+                            },
+                            'targets': [
+                                {
+                                    'target': 'admission.k8s.gatekeeper.sh',
+                                    'rego': 'package k8srequiredlabels\nviolation[{}] { true }',
+                                    'libs': ['package lib.labels'],
+                                }
+                            ],
+                        },
+                        'status': {'created': True, 'observedGeneration': 3, 'byPod': [{'id': 'gatekeeper-a', 'observedGeneration': 3}]},
+                    }
+                ]
+            }
+        ),
+        _json_response(
+            {
+                'preferredVersion': {'version': 'v1beta1'},
+                'versions': [{'version': 'v1beta1'}],
+            }
+        ),
+        _json_response(
+            {
+                'resources': [
+                    {'name': 'k8srequiredlabels', 'kind': 'K8sRequiredLabels', 'verbs': ['get', 'list']},
+                    {'name': 'constraintpodstatuses', 'kind': 'ConstraintPodStatus', 'verbs': ['get', 'list']},
+                    {'name': 'k8srequiredlabels/status', 'kind': 'K8sRequiredLabels', 'verbs': ['get']},
+                ]
+            }
+        ),
+        _json_response(
+            {
+                'items': [
+                    {
+                        'apiVersion': 'constraints.gatekeeper.sh/v1beta1',
+                        'kind': 'K8sRequiredLabels',
+                        'metadata': {'name': 'require-team'},
+                        'spec': {
+                            'enforcementAction': 'dryrun',
+                            'match': {'kinds': [{'apiGroups': [''], 'kinds': ['Pod']}]},
+                            'parameters': {'labels': ['team']},
+                        },
+                        'status': {
+                            'totalViolations': 1,
+                            'auditTimestamp': '2026-06-02T00:00:00Z',
+                            'violations': [
+                                {
+                                    'message': 'missing team label',
+                                    'kind': 'Pod',
+                                    'namespace': 'default',
+                                    'name': 'nginx',
+                                    'group': '',
+                                    'version': 'v1',
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        _json_response(
+            {
+                'items': [
+                    {
+                        'apiVersion': 'config.gatekeeper.sh/v1alpha1',
+                        'metadata': {'name': 'config'},
+                        'spec': {
+                            'sync': {'syncOnly': [{'group': '', 'version': 'v1', 'kind': 'Pod'}]},
+                            'match': [{'excludedNamespaces': ['kube-system'], 'processes': ['audit']}],
+                            'readiness': {'statsEnabled': True},
+                        },
+                    }
+                ]
+            }
+        ),
+    ]
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=responses) as requests_get:
+        response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
+
+    assert response.data['configured'] is True
+    assert response.data['cluster'] == {
+        'server_url': 'https://kube.example.test',
+        'context': 'prod',
+        'verify_ssl': False,
+    }
+    assert response.data['api_versions']['constraint_templates'] == 'v1'
+    assert response.data['counts'] == {
+        'constraint_templates': 1,
+        'constraints': 1,
+        'violations': 1,
+        'configs': 1,
+    }
+    template = response.data['constraint_templates'][0]
+    assert template['name'] == 'k8srequiredlabels'
+    assert template['kind'] == 'K8sRequiredLabels'
+    assert template['created'] is True
+    assert template['constraint_count'] == 1
+    assert template['targets'][0]['rego'].startswith('package k8srequiredlabels')
+    constraint = response.data['constraints'][0]
+    assert constraint['name'] == 'require-team'
+    assert constraint['enforcement_action'] == 'dryrun'
+    assert constraint['total_violations'] == 1
+    assert response.data['violations'][0]['message'] == 'missing team label'
+    assert response.data['configs'][0]['sync_only_count'] == 1
+    assert response.data['errors'] == []
+    requests_get.assert_any_call(
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer secret-token'},
+        verify=False,
+        timeout=7.0,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_policy_manager_surfaces_kubernetes_auth_error(get, admin_user):
+    response = mock.Mock()
+    response.status_code = 403
+    response.json.return_value = {'message': 'forbidden'}
+    error = requests.HTTPError('forbidden')
+    error.response = response
+    response.raise_for_status.side_effect = error
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=response):
+        response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=403)
+
+    assert response.data['detail'] == 'Gatekeeper Kubernetes API request failed.'
+    assert response.data['error']['status_code'] == 403
+    assert response.data['error']['detail'] == {'message': 'forbidden'}
 
 
 @pytest.mark.django_db

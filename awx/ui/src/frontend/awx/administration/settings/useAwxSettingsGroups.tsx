@@ -88,8 +88,10 @@ export function useAwxSettingsGroupsBase() {
       },
       {
         id: 'policyascode',
-        name: t('OPA Connection Settings'),
-        description: t('OPA server connection, authentication, and request settings.'),
+        name: t('Policy Connection Settings'),
+        description: t(
+          'OPA and Gatekeeper server connection, authentication, and request settings.'
+        ),
         defaultSlugs: ['policyascode'],
         categories: [],
       },

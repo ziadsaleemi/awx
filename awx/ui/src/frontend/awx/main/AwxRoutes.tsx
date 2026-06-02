@@ -199,6 +199,7 @@ export enum AwxRoute {
   // Policy as Code
   PolicyAsCode = 'awx-policy-as-code',
   PolicyAsCodeOverview = 'awx-policy-as-code-overview',
+  PolicyAsCodeGatekeeper = 'awx-policy-as-code-gatekeeper',
   PolicyAsCodeModules = 'awx-policy-as-code-modules',
   PolicyAsCodeTester = 'awx-policy-as-code-tester',
   PolicyAsCodeSmoke = 'awx-policy-as-code-smoke',

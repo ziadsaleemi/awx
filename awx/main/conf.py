@@ -1348,6 +1348,63 @@ register(
 )
 
 register(
+    'GATEKEEPER_K8S_API_URL',
+    field_class=fields.URLField,
+    default='',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('Gatekeeper Kubernetes API URL'),
+    help_text=_('Kubernetes API server URL used to read Gatekeeper ConstraintTemplates, Constraints, Configs, and violations.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_AUTH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Gatekeeper Kubernetes API token'),
+    help_text=_('Bearer token used to read Gatekeeper resources from the configured Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_CONTEXT',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('Gatekeeper Kubernetes context label'),
+    help_text=_('Optional context label shown in the Policy as Code Gatekeeper view.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify Gatekeeper Kubernetes API SSL'),
+    help_text=_('Verify TLS certificates when AWX reads Gatekeeper resources from the Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=5,
+    min_value=1,
+    label=_('Gatekeeper Kubernetes API timeout'),
+    help_text=_('Maximum seconds to wait when AWX reads Gatekeeper resources from the Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
     'OPA_POLICY_BUNDLE',
     field_class=fields.CharField,
     label=_('OPA policy bundle'),

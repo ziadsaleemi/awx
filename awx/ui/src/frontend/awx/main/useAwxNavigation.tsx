@@ -333,7 +333,7 @@ export function useAwxNavigation() {
         },
         {
           id: AwxRoute.SettingsPolicyAsCode,
-          label: t('OPA Connection'),
+          label: t('Policy Connections'),
           path: 'policy-as-code',
           children: [
             {
