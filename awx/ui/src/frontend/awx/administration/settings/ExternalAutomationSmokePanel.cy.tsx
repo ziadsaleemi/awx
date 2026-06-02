@@ -30,7 +30,7 @@ describe('ExternalAutomationSmokePanel', () => {
         opa_deny_smoke: true,
         start_eda_activation: false,
         include_gatekeeper: true,
-        gatekeeper_context: '',
+        gatekeeper_context: 'prod',
       });
       req.reply({
         ok: true,
@@ -67,6 +67,7 @@ describe('ExternalAutomationSmokePanel', () => {
       </SeedNavigation>
     );
 
+    cy.getByDataCy('external-automation-gatekeeper-context').type('prod');
     cy.getByDataCy('external-automation-smoke-run-button').click();
     cy.wait('@runSmoke');
     cy.contains('Policy smoke passed.').should('be.visible');

@@ -11,11 +11,13 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  FormGroup,
   Label,
   PageSection,
   Spinner,
   Stack,
   StackItem,
+  TextInput,
 } from '@patternfly/react-core';
 import { CheckCircleIcon, SyncAltIcon, TimesCircleIcon } from '@patternfly/react-icons';
 import { useState } from 'react';
@@ -108,6 +110,7 @@ export function ExternalAutomationSmokePanel(props?: {
   const includeGatekeeper = props?.includeGatekeeper ?? false;
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gatekeeperContext, setGatekeeperContext] = useState('');
   const [loading, setLoading] = useState(false);
 
   const title = includeEda
@@ -147,7 +150,7 @@ export function ExternalAutomationSmokePanel(props?: {
         opa_deny_smoke: includeOpa,
         start_eda_activation: false,
         include_gatekeeper: includeGatekeeper,
-        gatekeeper_context: '',
+        gatekeeper_context: gatekeeperContext.trim(),
       });
       setResult(response);
     } catch {
@@ -165,6 +168,23 @@ export function ExternalAutomationSmokePanel(props?: {
         </CardHeader>
         <CardBody>
           <Stack hasGutter>
+            {includeGatekeeper ? (
+              <StackItem>
+                <FormGroup
+                  label={t('Gatekeeper context')}
+                  fieldId="external-automation-gatekeeper-context"
+                >
+                  <TextInput
+                    id="external-automation-gatekeeper-context"
+                    value={gatekeeperContext}
+                    onChange={(_event, value) => setGatekeeperContext(value)}
+                    placeholder={t('Default context')}
+                    isDisabled={loading}
+                    data-cy="external-automation-gatekeeper-context"
+                  />
+                </FormGroup>
+              </StackItem>
+            ) : null}
             <StackItem>
               <Button
                 variant="secondary"
