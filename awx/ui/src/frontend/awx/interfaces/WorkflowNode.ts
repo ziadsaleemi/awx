@@ -28,6 +28,7 @@ export interface WorkflowNode {
     unified_job_template?: string;
     workflow_job_template: string;
     workflow_job?: string;
+    approval?: string;
     apply_ai_plan?: string;
   };
   summary_fields: {

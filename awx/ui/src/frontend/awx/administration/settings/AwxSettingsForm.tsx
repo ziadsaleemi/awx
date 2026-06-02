@@ -7,6 +7,7 @@ import {
   PageFormCheckbox,
   PageFormDataEditor,
   PageFormSelect,
+  PageFormTextArea,
   PageFormTextInput,
 } from '../../../../framework';
 import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSection';
@@ -283,6 +284,24 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
     return (
       <PageFormSection singleColumn>
         <AwxBgImageUpload name={props.name} label={option.label} helpText={option.help_text} />
+      </PageFormSection>
+    );
+  }
+
+  if (props.name === 'OPA_POLICY_BUNDLE') {
+    return (
+      <PageFormSection singleColumn>
+        <PageFormTextArea
+          label={option.label}
+          name={props.name}
+          labelHelpTitle={option.label}
+          labelHelp={option.help_text}
+          isRequired={option.required}
+          defaultValue={option.default}
+          enableUndo
+          enableReset
+          disableAutoResize
+        />
       </PageFormSection>
     );
   }

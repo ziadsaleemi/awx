@@ -3313,8 +3313,15 @@ class WorkflowJobNodeApplyAIPlan(RetrieveAPIView):
         if not (request.user.is_superuser or (workflow_template and request.user in workflow_template.approval_role)):
             raise PermissionDenied(_('You do not have permission to approve this AI resource action plan.'))
 
+        approval = obj.job if isinstance(obj.job, models.WorkflowApproval) and obj.job.status == 'pending' else None
         try:
-            resource_action = obj.approve_ai_resource_action_plan(request.user)
+            if approval:
+                approval.approve(request)
+                obj.refresh_from_db()
+                approval.refresh_from_db()
+                resource_action = obj.ai_task_result.get('resource_action', {})
+            else:
+                resource_action = obj.approve_ai_resource_action_plan(request.user)
         except AIWorkflowTaskError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 

@@ -17,6 +17,13 @@ def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
     assert response.data['enabled'] is True
     assert response.data['server_url'] == 'https://opa.example.com:8181'
     assert {policy['id'] for policy in response.data['policies']} >= {'job_launch', 'ai_action'}
+    job_launch_policy = next(policy for policy in response.data['policies'] if policy['id'] == 'job_launch')
+    ai_action_policy = next(policy for policy in response.data['policies'] if policy['id'] == 'ai_action')
+    assert job_launch_policy['input_example']['source'] == 'api'
+    assert job_launch_policy['input_example']['launch']['extra_var_keys'] == ['env']
+    assert ai_action_policy['input_example']['source'] == 'workflow_ai_task'
+    assert ai_action_policy['input_example']['destructive'] is True
+    assert ai_action_policy['input_example']['human_approved'] is True
     assert response.data['policy_bundle']['configured'] is True
     assert response.data['policy_bundle']['size'] == len('package awx\nallow := true')
 

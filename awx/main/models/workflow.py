@@ -601,7 +601,28 @@ class WorkflowJobNode(WorkflowNodeBase):
         self.ancestor_artifacts = artifacts
         self.bypassed_job_status = workflow_status
         self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        if ai_status == 'awaiting_approval':
+            self.ensure_ai_task_approval()
         return self
+
+    def ensure_ai_task_approval(self):
+        if self.job and isinstance(self.job, WorkflowApproval):
+            return self.job
+
+        prompt_label = (self.ai_task_prompt or self.identifier or str(self.pk)).splitlines()[0][:80]
+        approval = WorkflowApproval.objects.create(
+            name=_('AI plan approval: %(name)s') % {'name': prompt_label},
+            description=self.ai_task_prompt,
+            status='pending',
+            started=now(),
+            created_by=self.workflow_job.created_by,
+            modified_by=self.workflow_job.created_by,
+        )
+        self.job = approval
+        self.save(update_fields=['job'])
+        approval.send_approval_notification('running')
+        approval.websocket_emit_status(approval.status)
+        return approval
 
     def preview_ai_resource_action_plan(self, plan, provider_result):
         from awx.api.views.ai import (
@@ -720,6 +741,35 @@ class WorkflowJobNode(WorkflowNodeBase):
         self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
         ScheduleWorkflowManager().schedule()
         return resource_action
+
+    def deny_ai_resource_action_plan(self, user=None):
+        error = str(_('AI resource action plan was denied.'))
+        result = copy(self.ai_task_result or {})
+        approval = copy(result.get('approval') or {})
+        approval.update({'denied_by': getattr(user, 'pk', None)})
+        result.update(
+            {
+                'status': 'failed',
+                'error': error,
+                'approval': approval,
+            }
+        )
+        artifacts = copy(self.ancestor_artifacts or {})
+        awx_ai = copy(artifacts.get('awx_ai') or {})
+        awx_ai.update(
+            {
+                'status': 'failed',
+                'error': error,
+                'approval': approval,
+            }
+        )
+        artifacts['awx_ai'] = awx_ai
+        self.ai_task_status = 'failed'
+        self.ai_task_result = result
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = 'failed'
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        ScheduleWorkflowManager().schedule()
 
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
@@ -1470,18 +1520,36 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
                     update_fields.append('expires')
         super(WorkflowApproval, self).save(*args, **kwargs)
 
+    @property
+    def ai_task_node(self):
+        try:
+            node = self.unified_job_node
+        except ObjectDoesNotExist:
+            return None
+        return node if node.is_ai_task_node else None
+
     def approve(self, request=None):
-        self.status = 'successful'
-        self.approved_or_denied_by = get_current_user()
+        user = getattr(request, 'user', None) or get_current_user()
+        ai_node = self.ai_task_node
+        if ai_node and ai_node.ai_task_status == 'awaiting_approval':
+            resource_action = ai_node.approve_ai_resource_action_plan(user)
+            self.status = 'successful' if resource_action.get('can_apply') else 'failed'
+        else:
+            self.status = 'successful'
+        self.approved_or_denied_by = user
         self.save()
-        self.send_approval_notification('approved')
+        self.send_approval_notification('approved' if self.status == 'successful' else 'denied')
         self.websocket_emit_status(self.status)
         ScheduleWorkflowManager().schedule()
         return reverse('api:workflow_approval_approve', kwargs={'pk': self.pk}, request=request)
 
     def deny(self, request=None):
+        user = getattr(request, 'user', None) or get_current_user()
+        ai_node = self.ai_task_node
+        if ai_node and ai_node.ai_task_status == 'awaiting_approval':
+            ai_node.deny_ai_resource_action_plan(user)
         self.status = 'failed'
-        self.approved_or_denied_by = get_current_user()
+        self.approved_or_denied_by = user
         self.save()
         self.send_approval_notification('denied')
         self.websocket_emit_status(self.status)
@@ -1573,7 +1641,7 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
         workflow_url = urljoin(settings.TOWER_URL_BASE, WORKFLOW_BASE_URL.format(settings.OPTIONAL_UI_URL_PREFIX, self.workflow_job.id))
         return {
             'approval_status': approval_status,
-            'approval_node_name': self.workflow_approval_template.name,
+            'approval_node_name': self.workflow_approval_template.name if self.workflow_approval_template_id else self.name,
             'workflow_url': workflow_url,
             'job_metadata': json.dumps(self.notification_data(), indent=4),
         }

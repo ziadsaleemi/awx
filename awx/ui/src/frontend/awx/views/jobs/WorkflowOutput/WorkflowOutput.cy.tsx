@@ -58,7 +58,7 @@ describe('Workflow Output', () => {
     });
   });
 
-  it('should show and apply waiting AI workflow plans', () => {
+  it('should render waiting AI workflow plans without inline approval actions', () => {
     const aiNode = {
       ...workflowNodes.results[0],
       id: 9002,
@@ -77,7 +77,7 @@ describe('Workflow Output', () => {
       },
       related: {
         ...workflowNodes.results[0].related,
-        apply_ai_plan: '/api/v2/workflow_job_nodes/9002/apply_ai_plan/',
+        approval: '/api/v2/workflow_approvals/9010/',
       },
       summary_fields: {
         ...workflowNodes.results[0].summary_fields,
@@ -109,21 +109,6 @@ describe('Workflow Output', () => {
         },
       }
     ).as('getAiWorkflowNodes');
-    cy.intercept('POST', '/api/v2/workflow_job_nodes/9002/apply_ai_plan/', {
-      body: {
-        ...aiNode,
-        ai_task_status: 'applied',
-        related: {
-          ...aiNode.related,
-          apply_ai_plan: undefined,
-        },
-        ai_resource_action: {
-          mode: 'apply',
-          can_apply: true,
-        },
-      },
-    }).as('applyAiPlan');
-
     cy.mount(
       <WorkflowOutput
         job={job as unknown as Job}
@@ -132,11 +117,8 @@ describe('Workflow Output', () => {
       />
     );
     cy.wait('@getAiWorkflowNodes');
-    cy.get('[data-cy="workflow-ai-plan-approval"]').should(
-      'contain.text',
-      'Create approved inventory'
-    );
-    cy.get('[data-cy="workflow-ai-plan-apply"]').click();
-    cy.wait('@applyAiPlan');
+    cy.get('[data-cy="workflow-ai-plan-approval"]').should('not.exist');
+    cy.get('[data-cy="workflow-ai-plan-apply"]').should('not.exist');
+    cy.get('g[data-type="warning-node"]').should('exist');
   });
 });
