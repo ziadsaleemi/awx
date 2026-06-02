@@ -1,3 +1,4 @@
+import hashlib
 from unittest import mock
 
 import pytest
@@ -26,6 +27,9 @@ def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
     assert ai_action_policy['input_example']['human_approved'] is True
     assert response.data['policy_bundle']['configured'] is True
     assert response.data['policy_bundle']['size'] == len('package awx\nallow := true')
+    assert response.data['policy_bundle']['line_count'] == 2
+    assert response.data['policy_bundle']['sha256'] == hashlib.sha256(b'package awx\nallow := true').hexdigest()
+    assert response.data['policy_bundle']['sync_endpoint'] == '/api/v2/opa/policies/sync/'
 
 
 @pytest.mark.django_db
@@ -50,6 +54,78 @@ def test_opa_evaluate_requires_system_admin(post, rando):
         user=rando,
         expect=403,
     )
+
+
+@pytest.mark.django_db
+def test_opa_policy_sync_requires_system_admin(post, rando):
+    post(reverse('api:opa_policies_sync'), data={}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(
+    OPA_HOST='opa.example.com',
+    OPA_PORT=8181,
+    OPA_SSL=True,
+    OPA_AUTH_TYPE=OPA_AUTH_TYPES.TOKEN,
+    OPA_AUTH_TOKEN='secret-token',
+    OPA_AUTH_CUSTOM_HEADERS={'X-Custom': 'Header'},
+    OPA_REQUEST_TIMEOUT=2.5,
+    OPA_POLICY_BUNDLE='package awx\nallow := true',
+)
+def test_opa_policy_sync_puts_managed_rego_to_real_opa_policy_api(post, admin_user):
+    opa_response = mock.Mock()
+    opa_response.status_code = 200
+    opa_response.content = b'{"result":{}}'
+    opa_response.json.return_value = {'result': {}}
+    opa_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.put', return_value=opa_response) as requests_put:
+        response = post(
+            reverse('api:opa_policies_sync'),
+            data={'policy_id': 'awx/managed'},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['policy_id'] == 'awx/managed'
+    assert response.data['size'] == len('package awx\nallow := true')
+    assert response.data['line_count'] == 2
+    assert response.data['sha256'] == hashlib.sha256(b'package awx\nallow := true').hexdigest()
+    assert response.data['opa_response'] == {'result': {}}
+    requests_put.assert_called_once_with(
+        'https://opa.example.com:8181/v1/policies/awx/managed',
+        data='package awx\nallow := true',
+        timeout=2.5,
+        headers={
+            'Content-Type': 'text/plain',
+            'X-Custom': 'Header',
+            'Authorization': 'Bearer secret-token',
+        },
+        cert=None,
+        verify=True,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_POLICY_BUNDLE='')
+def test_opa_policy_sync_requires_managed_bundle_text(post, admin_user):
+    response = post(reverse('api:opa_policies_sync'), data={}, user=admin_user, expect=400)
+
+    assert response.data['detail'] == 'OPA_POLICY_BUNDLE is empty. Save Rego policy text before syncing.'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_POLICY_BUNDLE='package awx\nallow := true')
+def test_opa_policy_sync_rejects_invalid_policy_id(post, admin_user):
+    response = post(
+        reverse('api:opa_policies_sync'),
+        data={'policy_id': '../bad'},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['detail'] == 'policy_id contains invalid characters.'
 
 
 @pytest.mark.django_db

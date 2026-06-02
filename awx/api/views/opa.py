@@ -22,9 +22,11 @@ OPA input schema for job launch checks:
   }
 """
 
+import hashlib
 import logging
 import json
 import re
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -103,7 +105,7 @@ DEFAULT_POLICIES = [
 
 
 class OPAPolicyEngine:
-    """Thin client for the OPA REST API (v1 data API)."""
+    """Thin client for the OPA REST API."""
 
     def __init__(self):
         self.host = getattr(settings, 'OPA_HOST', '')
@@ -121,8 +123,8 @@ class OPAPolicyEngine:
         protocol = 'https' if self.ssl else 'http'
         return f'{protocol}://{self.host}:{self.port}'
 
-    def _headers(self) -> dict:
-        headers = {'Content-Type': 'application/json'}
+    def _headers(self, content_type='application/json') -> dict:
+        headers = {'Content-Type': content_type}
         headers.update(getattr(settings, 'OPA_AUTH_CUSTOM_HEADERS', {}) or {})
         if getattr(settings, 'OPA_AUTH_TYPE', OPA_AUTH_TYPES.NONE) == OPA_AUTH_TYPES.TOKEN:
             headers['Authorization'] = f"Bearer {getattr(settings, 'OPA_AUTH_TOKEN', '')}"
@@ -168,6 +170,37 @@ class OPAPolicyEngine:
         except requests.RequestException as exc:
             logger.error('OPA server unreachable (%s): %s — defaulting to allow', policy_path, exc)
             return {'result': True}
+
+    def put_policy(self, policy_id: str, policy_text: str) -> dict:
+        """
+        PUT Rego module text to /v1/policies/<policy_id>.
+
+        This uses OPA's real Policy API; AWX only stores/syncs the admin-managed
+        Rego source and does not evaluate policy locally.
+        """
+        self.validate_configuration()
+        if not self.is_available():
+            raise ValueError(_('OPA is not enabled or configured.'))
+
+        quoted_policy_id = quote(policy_id.strip('/'), safe='/')
+        url = f'{self.base_url}/v1/policies/{quoted_policy_id}'
+        with opa_cert_file() as cert_files:
+            cert, verify = cert_files
+            resp = requests.put(
+                url,
+                data=policy_text,
+                timeout=self.timeout,
+                headers=self._headers(content_type='text/plain'),
+                cert=cert,
+                verify=verify,
+            )
+        resp.raise_for_status()
+        if getattr(resp, 'content', b''):
+            try:
+                return resp.json()
+            except ValueError:
+                return {'status_code': resp.status_code}
+        return {'status_code': resp.status_code}
 
 
 def check_opa_policy(policy_path: str, input_data: dict) -> bool:
@@ -308,14 +341,18 @@ class OPAPolicyListView(APIView):
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
         policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
+        policy_bundle_configured = bool(policy_bundle.strip())
         return Response(
             {
                 'enabled': engine.is_available(),
                 'server_url': engine.base_url,
                 'policies': DEFAULT_POLICIES,
                 'policy_bundle': {
-                    'configured': bool(policy_bundle.strip()),
+                    'configured': policy_bundle_configured,
                     'size': len(policy_bundle),
+                    'line_count': policy_bundle.count('\n') + 1 if policy_bundle_configured else 0,
+                    'sha256': hashlib.sha256(policy_bundle.encode()).hexdigest() if policy_bundle_configured else '',
+                    'sync_endpoint': '/api/v2/opa/policies/sync/',
                 },
             }
         )
@@ -394,5 +431,53 @@ class OPAPolicyEvaluateView(APIView):
                 'result': opa_resp.get('result'),
                 'allowed': allowed,
                 'opa_response': opa_resp,
+            }
+        )
+
+
+class OPAPolicySyncView(APIView):
+    """
+    POST /api/v2/opa/policies/sync/
+
+    Sync the configured AWX-managed Rego source to the configured OPA server
+    through OPA's Policy API.
+    """
+
+    permission_classes = [IsSuperUser]
+
+    def post(self, request, *args, **kwargs):
+        policy_id = request.data.get('policy_id', 'awx/managed')
+        policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
+
+        if not isinstance(policy_id, str) or not policy_id.strip():
+            return Response({'detail': _('policy_id must be a non-empty string.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        policy_id = policy_id.strip().strip('/')
+        if not re.match(r'^[a-zA-Z0-9_/-]+$', policy_id):
+            return Response({'detail': _('policy_id contains invalid characters.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not policy_bundle.strip():
+            return Response({'detail': _('OPA_POLICY_BUNDLE is empty. Save Rego policy text before syncing.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        engine = OPAPolicyEngine()
+        if not engine.is_available():
+            return Response({'detail': _('OPA is not enabled or configured.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = engine.put_policy(policy_id, policy_bundle)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            logger.error('OPA policy bundle sync failed: %s', exc)
+            return Response({'detail': _('OPA policy sync failed. Check OPA settings and server connectivity.')}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(
+            {
+                'changed': True,
+                'policy_id': policy_id,
+                'size': len(policy_bundle),
+                'line_count': policy_bundle.count('\n') + 1,
+                'sha256': hashlib.sha256(policy_bundle.encode()).hexdigest(),
+                'opa_response': result,
             }
         )

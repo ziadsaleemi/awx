@@ -287,7 +287,7 @@ Features present in Red Hat Ansible Automation Platform (AAP) that are not yet i
 
 | # | Task | Priority | Status |
 |---|------|----------|--------|
-| G6a | **OPA policy engine integration** — backend middleware that evaluates OPA policies before any job launch; policies expressed in Rego; policy bundles stored in AWX settings or fetched from a remote OPA bundle server | High | 🔄 |
+| G6a | **OPA policy engine integration** — backend middleware evaluates OPA policies before job, workflow, Terraform, system, catalog, MCP, and AI resource launches; policies are expressed in Rego, stored in `OPA_POLICY_BUNDLE`, synced to the real OPA Policy API from Settings → Policy as Code, and evaluated through OPA's Data API | High | ✅ |
 | G6b | **Policy management UI** — Settings → Policy as Code now shows OPA enforcement status, server URL, managed bundle size, registered decision paths, sample inputs for each OPA decision, and an inline tester that posts JSON to the real OPA Data API adapter; `OPA_POLICY_BUNDLE` is editable as multi-line Rego text in the settings form | Medium | ✅ |
 | G6c | **AI-action guardrails** — OPA policy checks now cover API, MCP, and workflow AI resource actions with source, mode, destructive-operation classification, privileged-resource classification, human-approval flags, and workflow approval metadata so real OPA policies can block destructive AI actions unless a human approval path was used | High | ✅ |
 
