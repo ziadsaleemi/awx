@@ -214,6 +214,93 @@ def test_ai_chat_counts_visible_hosts_scoped_to_inventory_without_provider(post,
 
 @pytest.mark.django_db
 @override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_job_templates_scoped_to_project_without_provider(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Scope Inventory', organization=organization)
+    scoped_project = Project.objects.create(name='AI Scoped Project', organization=organization)
+    other_project = Project.objects.create(name='AI Other Project', organization=organization)
+    JobTemplate.objects.create(name='AI Scoped Template', project=scoped_project, playbook='scoped.yml', inventory=inventory)
+    JobTemplate.objects.create(name='AI Other Template', project=other_project, playbook='other.yml', inventory=inventory)
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List job templates in project AI Scoped Project'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 job template visible to you in AWX matching project "AI Scoped Project":')
+    assert 'AI Scoped Template' in content
+    assert 'AI Other Template' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_jobs_scoped_to_template_and_status_without_provider(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Jobs Inventory', organization=organization)
+    project = Project.objects.create(name='AI Jobs Project', organization=organization)
+    scoped_template = JobTemplate.objects.create(name='AI Scoped Deploy Template', project=project, playbook='deploy.yml', inventory=inventory)
+    other_template = JobTemplate.objects.create(name='AI Other Deploy Template', project=project, playbook='other.yml', inventory=inventory)
+    failed_job = scoped_template.create_unified_job(_eager_fields={'status': 'failed'})
+    successful_job = scoped_template.create_unified_job(_eager_fields={'status': 'successful'})
+    other_failed_job = other_template.create_unified_job(_eager_fields={'status': 'failed'})
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List failed jobs for AI Scoped Deploy Template'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 job visible to you in AWX matching job template "AI Scoped Deploy Template", status "failed":')
+    assert f'id: {failed_job.pk}' in content
+    assert f'id: {successful_job.pk}' not in content
+    assert f'id: {other_failed_job.pk}' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_lists_visible_schedules_scoped_to_template_without_provider(post, admin_user, organization):
+    inventory = Inventory.objects.create(name='AI Schedule Inventory', organization=organization)
+    project = Project.objects.create(name='AI Schedule Project', organization=organization)
+    scoped_template = JobTemplate.objects.create(name='AI Scoped Schedule Template', project=project, playbook='schedule.yml', inventory=inventory)
+    other_template = JobTemplate.objects.create(name='AI Other Schedule Template', project=project, playbook='other.yml', inventory=inventory)
+    Schedule.objects.create(
+        name='AI Scoped Nightly',
+        unified_job_template=scoped_template,
+        rrule='DTSTART:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1',
+    )
+    Schedule.objects.create(
+        name='AI Other Nightly',
+        unified_job_template=other_template,
+        rrule='DTSTART:20300308T050000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=1',
+    )
+
+    with mock.patch('awx.api.views.ai.requests.post') as requests_post:
+        response = post(
+            reverse('api:ai_chat'),
+            data={'messages': [{'role': 'user', 'content': 'List schedules for AI Scoped Schedule Template'}]},
+            user=admin_user,
+            expect=200,
+        )
+
+    content = response.data['message']['content']
+    assert content.startswith('There are 1 schedule visible to you in AWX matching template "AI Scoped Schedule Template":')
+    assert 'AI Scoped Nightly' in content
+    assert 'AI Other Nightly' not in content
+    assert response.data['provider'] == 'awx'
+    requests_post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
 def test_ai_chat_provider_prompt_includes_visible_awx_resource_rows(post, admin_user, organization):
     inventory = Inventory.objects.create(name='source-inv', organization=organization)
     inventory.hosts.create(name='web01')

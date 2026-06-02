@@ -1267,12 +1267,30 @@ def _message_mentions_name(message: str, name: str) -> bool:
     return name in normalized
 
 
-def _visible_named_rows(user, model, fields=('id', 'name'), limit=500):
+def _visible_named_rows(user, model, fields=('id', 'name'), limit=500, name_field='name'):
     rows = []
-    for row in get_user_queryset(user, model).values(*fields).order_by('name', 'id')[:limit]:
-        if row.get('name'):
+    for row in get_user_queryset(user, model).values(*fields).order_by(name_field, 'id')[:limit]:
+        if row.get(name_field):
             rows.append(row)
-    return sorted(rows, key=lambda item: len(str(item.get('name') or '')), reverse=True)
+    return sorted(rows, key=lambda item: len(str(item.get(name_field) or '')), reverse=True)
+
+
+def _append_named_scope_filter(user, message: str, filters: dict, labels: list[str], scope: dict):
+    filter_key = scope['filter']
+    if filter_key in filters:
+        return
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    hints = scope.get('hints') or ()
+    if hints and not any(re.search(hint, normalized) for hint in hints):
+        return
+    name_field = scope.get('name_field', 'name')
+    fields = scope.get('fields', ('id', name_field))
+    for row in _visible_named_rows(user, scope['model'], fields=fields, name_field=name_field):
+        name = row.get(name_field)
+        if _message_mentions_name(message, name):
+            filters[filter_key] = row['id']
+            labels.append(_('%(scope)s "%(name)s"') % {'scope': scope['label'], 'name': name})
+            break
 
 
 def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, list[str]]:
@@ -1317,6 +1335,21 @@ def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, l
                 filters[organization_filter] = organization['id']
                 labels.append(_('organization "%(name)s"') % {'name': organization['name']})
                 break
+
+    related_scope_by_key = {
+        'credentials': ({'model': models.CredentialType, 'filter': 'credential_type_id', 'label': 'credential type', 'hints': (r'\bcredential types?\b',)},),
+        'inventory_sources': ({'model': models.Project, 'filter': 'source_project_id', 'label': 'source project', 'hints': (r'\bprojects?\b',)},),
+        'job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
+        'terraform_job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
+        'jobs': (
+            {'model': models.JobTemplate, 'filter': 'job_template_id', 'label': 'job template'},
+            {'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},
+        ),
+        'schedules': ({'model': models.UnifiedJobTemplate, 'filter': 'unified_job_template_id', 'label': 'template'},),
+        'catalog_deployments': ({'model': models.CatalogItem, 'filter': 'catalog_item_id', 'label': 'catalog item'},),
+    }
+    for scope in related_scope_by_key.get(spec_key, ()):
+        _append_named_scope_filter(user, message, filters, labels, scope)
 
     if 'status' in field_paths:
         status_terms = (
@@ -1432,6 +1465,45 @@ def _resource_spec_matches_message(message: str, spec: dict) -> bool:
     return any(re.search(pattern, normalized) for pattern in spec.get('patterns') or ())
 
 
+def _resource_spec_match_score(message: str, spec: dict) -> int:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    score = 0
+    for pattern in spec.get('patterns') or ():
+        match = re.search(pattern, normalized)
+        if match:
+            score = max(score, len(match.group(0)))
+
+    primary_patterns = {
+        'hosts': r'\bhosts?\b',
+        'groups': r'\bgroups?\b',
+        'inventories': r'\binventories\b|\binventory\b(?!\s+sources?\b)',
+        'inventory_sources': r'\binventory sources?\b',
+        'projects': r'\bprojects?\b',
+        'job_templates': r'(?<!workflow )(?<!terraform )\bjob templates?\b',
+        'workflow_job_templates': r'\bworkflows?\b|\bworkflow job templates?\b',
+        'terraform_job_templates': r'\bterraform (?:job )?templates?\b',
+        'credentials': r'\bcredentials?\b(?!\s+types?\b)',
+        'credential_types': r'\bcredential types?\b',
+        'organizations': r'\borganizations?\b|\borgs?\b',
+        'teams': r'\bteams?\b',
+        'users': r'\busers?\b',
+        'schedules': r'\bschedules?\b',
+        'execution_environments': r'\bexecution environments?\b',
+        'instance_groups': r'\binstance groups?\b',
+        'instances': r'\binstances?\b|\bnodes?\b',
+        'jobs': r'\bjobs?\b',
+        'catalog_items': r'\bcatalog items?\b|\bmarketplace items?\b',
+        'catalog_deployments': r'\bcatalog deployments?\b|\bdeployments?\b',
+        'cloud_provider_connections': r'\bcloud (?:provider )?connections?\b',
+    }
+    primary_pattern = primary_patterns.get(spec.get('key'))
+    if primary_pattern and re.search(primary_pattern, normalized):
+        score += 100
+        if re.search(rf'\b(?:in|from|for|under|within|on)\s+(?:{primary_pattern})', normalized):
+            score -= 60
+    return score
+
+
 def _format_context_value(value):
     if value is None or value == '':
         return None
@@ -1489,14 +1561,23 @@ def _answer_resource_list(user, spec: dict, message: str) -> str:
 
 def _try_answer_awx_fact_question(user, messages: list) -> str | None:
     latest_message = _latest_user_message(messages)
+    candidates = []
     for spec in _visible_resource_specs():
         if not _resource_spec_matches_message(latest_message, spec):
             continue
+        score = _resource_spec_match_score(latest_message, spec)
         resource_pattern = '|'.join(f'(?:{pattern})' for pattern in spec.get('patterns') or ())
         if _is_count_question(latest_message, resource_pattern):
-            return _answer_resource_count(user, spec, latest_message)
+            candidates.append((score, 'count', spec))
         if _is_list_question(latest_message, resource_pattern):
-            return _answer_resource_list(user, spec, latest_message)
+            candidates.append((score, 'list', spec))
+    if candidates:
+        score, answer_type, spec = max(candidates, key=lambda candidate: candidate[0])
+        if score <= 0:
+            return None
+        if answer_type == 'count':
+            return _answer_resource_count(user, spec, latest_message)
+        return _answer_resource_list(user, spec, latest_message)
     return None
 
 
