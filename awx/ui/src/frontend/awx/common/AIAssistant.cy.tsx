@@ -13,6 +13,21 @@ function SeedNavigation(props: { children: ReactNode }) {
         path: 'activity-stream',
         element: <div />,
       } as PageNavigationItem,
+      {
+        id: AwxRoute.InventoryDetails,
+        path: 'inventories/:inventory_type/:id/details',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.ProjectDetails,
+        path: 'projects/:id/details',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.JobTemplateDetails,
+        path: 'templates/job-template/:id/details',
+        element: <div />,
+      } as PageNavigationItem,
     ]);
   }, [setNavigation]);
   return <>{props.children}</>;
@@ -128,7 +143,25 @@ describe('AIAssistantPanel', () => {
               valid: true,
               errors: {},
               object_id: 42,
-              object: { id: 42, name: 'AI Managed Inventory' },
+              object: { id: 42, name: 'AI Managed Inventory', kind: '' },
+            },
+            {
+              id: 'create-project',
+              operation: 'create',
+              resource_type: 'project',
+              valid: true,
+              errors: {},
+              object_id: 51,
+              object: { id: 51, name: 'AI Content Project' },
+            },
+            {
+              id: 'create-job-template',
+              operation: 'create',
+              resource_type: 'job_template',
+              valid: true,
+              errors: {},
+              object_id: 61,
+              object: { id: 61, name: 'AI Generated Template' },
             },
           ],
           rollback_plan: {
@@ -198,6 +231,15 @@ describe('AIAssistantPanel', () => {
     cy.getByDataCy('ai-resource-audit-link')
       .should('contain.text', 'View Activity Stream #701')
       .and('have.attr', 'href', '/activity-stream?id=701');
+    cy.getByDataCy('ai-resource-object-link-create-inventory')
+      .should('contain.text', 'View AI Managed Inventory')
+      .and('have.attr', 'href', '/inventories/inventory/42/details');
+    cy.getByDataCy('ai-resource-object-link-create-project')
+      .should('contain.text', 'View AI Content Project')
+      .and('have.attr', 'href', '/projects/51/details');
+    cy.getByDataCy('ai-resource-object-link-create-job-template')
+      .should('contain.text', 'View AI Generated Template')
+      .and('have.attr', 'href', '/templates/job-template/61/details');
     cy.getByDataCy('ai-resource-rollback-plan').should('contain.text', 'delete-inventory');
     cy.contains('button', 'Apply rollback').click();
     cy.wait('@applyResourceAction');

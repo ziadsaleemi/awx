@@ -65,6 +65,12 @@ interface AIResourceOperation {
   object?: Record<string, unknown>;
 }
 
+interface AIResourceDetailLink {
+  route: AwxRoute;
+  params: Record<string, string | number | undefined>;
+  label: string;
+}
+
 interface AIResourceActionResponse {
   mode: 'preview' | 'apply';
   generated: boolean;
@@ -163,6 +169,73 @@ function buildRouteContext(context?: Record<string, unknown> | null) {
 
 function formatLabel(value: string) {
   return value.replaceAll('_', ' ');
+}
+
+function valueAsNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function valueAsString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function inventoryKindToPath(kind?: string, resourceType?: string) {
+  if (kind === 'smart' || resourceType === 'smart_inventory') return 'smart_inventory';
+  if (kind === 'constructed' || resourceType === 'constructed_inventory') {
+    return 'constructed_inventory';
+  }
+  return 'inventory';
+}
+
+function getAIResourceDetailLink(operation: AIResourceOperation): AIResourceDetailLink | null {
+  const object = operation.object ?? {};
+  const id = operation.object_id ?? valueAsNumber(object.id);
+  if (!id || operation.operation === 'delete') return null;
+
+  const name = valueAsString(object.name);
+  const label = name ? `View ${name}` : 'View resource';
+
+  if (
+    operation.resource_type === 'inventory' ||
+    operation.resource_type === 'smart_inventory' ||
+    operation.resource_type === 'constructed_inventory'
+  ) {
+    return {
+      route: AwxRoute.InventoryDetails,
+      params: {
+        id,
+        inventory_type: inventoryKindToPath(valueAsString(object.kind), operation.resource_type),
+      },
+      label,
+    };
+  }
+
+  if (operation.resource_type === 'project') {
+    return { route: AwxRoute.ProjectDetails, params: { id }, label };
+  }
+
+  if (operation.resource_type === 'job_template') {
+    return { route: AwxRoute.JobTemplateDetails, params: { id }, label };
+  }
+
+  if (operation.resource_type === 'workflow_job_template') {
+    return { route: AwxRoute.WorkflowJobTemplateDetails, params: { id }, label };
+  }
+
+  if (operation.resource_type === 'host') {
+    return { route: AwxRoute.HostDetails, params: { id }, label };
+  }
+
+  if (operation.resource_type === 'catalog_item') {
+    return { route: AwxRoute.CatalogItemDetails, params: { id }, label };
+  }
+
+  return null;
 }
 
 function errorSummary(errors: Record<string, unknown>) {
@@ -509,84 +582,105 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {resourcePlan.operations.map((operation) => (
-                  <div
-                    key={operation.id}
-                    style={{
-                      border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                      borderRadius: 4,
-                      background: 'var(--pf-v5-global--BackgroundColor--100)',
-                      padding: 10,
-                    }}
-                  >
+                  <div key={operation.id}>
                     <div
+                      key={operation.id}
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        marginBottom: operation.valid ? 6 : 8,
+                        border: '1px solid var(--pf-v5-global--BorderColor--100)',
+                        borderRadius: 4,
+                        background: 'var(--pf-v5-global--BackgroundColor--100)',
+                        padding: 10,
                       }}
                     >
-                      <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
-                        {formatLabel(operation.operation)} {formatLabel(operation.resource_type)}
-                        {operation.object_id ? ` #${operation.object_id}` : ''}
-                      </Text>
-                      <Badge isRead>{operation.valid ? t('Valid') : t('Blocked')}</Badge>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          marginBottom: operation.valid ? 6 : 8,
+                        }}
+                      >
+                        <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
+                          {formatLabel(operation.operation)} {formatLabel(operation.resource_type)}
+                          {operation.object_id ? ` #${operation.object_id}` : ''}
+                        </Text>
+                        <Badge isRead>{operation.valid ? t('Valid') : t('Blocked')}</Badge>
+                      </div>
+                      {operation.valid ? (
+                        <>
+                          {(() => {
+                            const detailLink = getAIResourceDetailLink(operation);
+                            if (!detailLink) return null;
+                            return (
+                              <Text
+                                component={TextVariants.small}
+                                style={{ display: 'block', marginBottom: 6 }}
+                              >
+                                <Link
+                                  to={getPageUrl(detailLink.route, {
+                                    params: detailLink.params,
+                                  })}
+                                  data-cy={`ai-resource-object-link-${operation.id}`}
+                                >
+                                  {detailLink.label}
+                                </Link>
+                              </Text>
+                            );
+                          })()}
+                          <pre
+                            style={{
+                              margin: 0,
+                              maxHeight: 160,
+                              overflow: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              fontSize: 12,
+                              background: 'var(--pf-v5-global--BackgroundColor--300)',
+                              padding: 8,
+                              borderRadius: 4,
+                            }}
+                          >
+                            {JSON.stringify(
+                              operation.object ?? operation.validated_data ?? operation.data,
+                              null,
+                              2
+                            )}
+                          </pre>
+                          {operation.preview ? (
+                            <>
+                              <Text
+                                component={TextVariants.small}
+                                style={{ display: 'block', fontWeight: 600, marginTop: 8 }}
+                              >
+                                {t('Preview details')}
+                              </Text>
+                              <pre
+                                style={{
+                                  margin: '4px 0 0',
+                                  maxHeight: 180,
+                                  overflow: 'auto',
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  fontSize: 12,
+                                  background: 'var(--pf-v5-global--BackgroundColor--300)',
+                                  padding: 8,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                {JSON.stringify(operation.preview, null, 2)}
+                              </pre>
+                            </>
+                          ) : null}
+                        </>
+                      ) : (
+                        <Alert isInline variant="danger" title={t('Operation cannot be applied')}>
+                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                            {errorSummary(operation.errors)}
+                          </pre>
+                        </Alert>
+                      )}
                     </div>
-                    {operation.valid ? (
-                      <>
-                        <pre
-                          style={{
-                            margin: 0,
-                            maxHeight: 160,
-                            overflow: 'auto',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                            fontSize: 12,
-                            background: 'var(--pf-v5-global--BackgroundColor--300)',
-                            padding: 8,
-                            borderRadius: 4,
-                          }}
-                        >
-                          {JSON.stringify(
-                            operation.object ?? operation.validated_data ?? operation.data,
-                            null,
-                            2
-                          )}
-                        </pre>
-                        {operation.preview ? (
-                          <>
-                            <Text
-                              component={TextVariants.small}
-                              style={{ display: 'block', fontWeight: 600, marginTop: 8 }}
-                            >
-                              {t('Preview details')}
-                            </Text>
-                            <pre
-                              style={{
-                                margin: '4px 0 0',
-                                maxHeight: 180,
-                                overflow: 'auto',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                                fontSize: 12,
-                                background: 'var(--pf-v5-global--BackgroundColor--300)',
-                                padding: 8,
-                                borderRadius: 4,
-                              }}
-                            >
-                              {JSON.stringify(operation.preview, null, 2)}
-                            </pre>
-                          </>
-                        ) : null}
-                      </>
-                    ) : (
-                      <Alert isInline variant="danger" title={t('Operation cannot be applied')}>
-                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                          {errorSummary(operation.errors)}
-                        </pre>
-                      </Alert>
-                    )}
                   </div>
                 ))}
               </div>
