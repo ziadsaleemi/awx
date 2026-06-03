@@ -155,6 +155,8 @@ export function ExternalAutomationSmokePanel(props?: {
   const resultIncludeGatekeeper = lastRunChecks?.includeGatekeeper ?? selectedIncludeGatekeeper;
   const showOpaResult = Boolean(result?.checks.opa) || resultIncludeOpa;
   const showGatekeeperResult = Boolean(result?.checks.gatekeeper) || resultIncludeGatekeeper;
+  const gatekeeperNotConfigured =
+    result?.checks.gatekeeper?.ok === false && result.checks.gatekeeper.status === 'not_configured';
 
   const title = includeEda
     ? t('External Automation Smoke')
@@ -304,6 +306,22 @@ export function ExternalAutomationSmokePanel(props?: {
                     title={result.ok ? passedTitle : failedTitle}
                   />
                 </StackItem>
+                {gatekeeperNotConfigured ? (
+                  <StackItem>
+                    <Alert
+                      variant="warning"
+                      isInline
+                      title={t('Gatekeeper Kubernetes API is not configured.')}
+                    >
+                      <Link
+                        to={getPageUrl(AwxRoute.SettingsPolicyAsCode)}
+                        data-cy="external-automation-policy-settings-link"
+                      >
+                        {t('Open Policy Connections settings')}
+                      </Link>
+                    </Alert>
+                  </StackItem>
+                ) : null}
                 <StackItem>
                   <DescriptionList isHorizontal isCompact>
                     {includeEda ? (

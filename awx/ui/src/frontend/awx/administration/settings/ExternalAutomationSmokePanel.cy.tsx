@@ -10,6 +10,11 @@ function SeedNavigation(props: { children: ReactNode }) {
   useEffect(() => {
     setNavigation([
       {
+        id: AwxRoute.SettingsPolicyAsCode,
+        path: 'settings/policy-as-code',
+        element: <div />,
+      } as PageNavigationItem,
+      {
         id: AwxRoute.ActivityStream,
         path: 'activity-stream',
         element: <div />,
@@ -142,6 +147,37 @@ describe('ExternalAutomationSmokePanel', () => {
     cy.contains('Gatekeeper smoke passed.').should('be.visible');
     cy.contains('2 templates, 4 constraints, 0 violations, 1 configs').should('be.visible');
     cy.contains('OPA allow').should('not.exist');
+  });
+
+  it('links failed Gatekeeper smoke to Policy Connections settings', () => {
+    cy.intercept('POST', awxAPI`/external_automation/check/`, {
+      ok: false,
+      checks: {
+        gatekeeper: {
+          ok: false,
+          status: 'not_configured',
+          context: 'default',
+        },
+      },
+      audit: {
+        activity_stream_id: 125,
+        activity_stream_url: '/api/v2/activity_stream/125/',
+      },
+    }).as('runSmoke');
+
+    cy.mount(
+      <SeedNavigation>
+        <ExternalAutomationSmokePanel includeEda={false} includeOpa includeGatekeeper />
+      </SeedNavigation>
+    );
+
+    cy.get('#external-automation-check-opa').uncheck({ force: true });
+    cy.getByDataCy('external-automation-smoke-run-button').click();
+    cy.wait('@runSmoke');
+    cy.contains('Gatekeeper smoke failed.').should('be.visible');
+    cy.getByDataCy('external-automation-policy-settings-link')
+      .should('be.visible')
+      .and('have.attr', 'href', '/settings/policy-as-code');
   });
 
   it('requires at least one policy smoke check', () => {
