@@ -14,9 +14,12 @@ import { RobotIcon, TimesIcon } from '@patternfly/react-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
+import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import styled from 'styled-components';
+import { useGetPageUrl } from '../../../framework';
 import { postRequest, requestGet } from '../../common/crud/Data';
+import { AwxRoute } from '../main/AwxRoutes';
 import { awxAPI } from './api/awx-utils';
 
 interface ChatMessage {
@@ -201,6 +204,7 @@ interface AIAssistantPanelProps {
 
 export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState<AssistantBusyState>(null);
@@ -454,6 +458,21 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                   {resourcePlan.mode === 'apply' ? t('Applied') : t('Preview')}
                 </Badge>
               </div>
+
+              {resourcePlan.audit?.activity_stream_id ? (
+                <div style={{ marginBottom: 10 }}>
+                  <Link
+                    to={getPageUrl(AwxRoute.ActivityStream, {
+                      query: { id: resourcePlan.audit.activity_stream_id },
+                    })}
+                    data-cy="ai-resource-audit-link"
+                  >
+                    {t('View Activity Stream #{{id}}', {
+                      id: resourcePlan.audit.activity_stream_id,
+                    })}
+                  </Link>
+                </div>
+              ) : null}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {resourcePlan.operations.map((operation) => (

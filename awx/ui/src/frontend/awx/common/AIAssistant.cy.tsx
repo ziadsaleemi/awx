@@ -1,4 +1,30 @@
+import { ReactNode, useEffect } from 'react';
+import { PageNavigationItem } from '../../../framework';
+import { usePageNavigationRoutesContext } from '../../../framework/PageNavigation/PageNavigationRoutesProvider';
+import { AwxRoute } from '../main/AwxRoutes';
 import { AIAssistantPanel } from './AIAssistant';
+
+function SeedNavigation(props: { children: ReactNode }) {
+  const [, setNavigation] = usePageNavigationRoutesContext();
+  useEffect(() => {
+    setNavigation([
+      {
+        id: AwxRoute.ActivityStream,
+        path: 'activity-stream',
+        element: <div />,
+      } as PageNavigationItem,
+    ]);
+  }, [setNavigation]);
+  return <>{props.children}</>;
+}
+
+function mountAssistant() {
+  cy.mount(
+    <SeedNavigation>
+      <AIAssistantPanel isOpen onClose={() => undefined} />
+    </SeedNavigation>
+  );
+}
 
 describe('AIAssistantPanel', () => {
   it('renders assistant markdown answers as formatted content', () => {
@@ -11,7 +37,7 @@ describe('AIAssistantPanel', () => {
       provider: 'awx',
     }).as('chat');
 
-    cy.mount(<AIAssistantPanel isOpen onClose={() => undefined} />);
+    mountAssistant();
 
     cy.get('textarea[aria-label="Message"]').type('Can you list all the hosts?');
     cy.contains('button', 'Send').click();
@@ -26,5 +52,105 @@ describe('AIAssistantPanel', () => {
       cy.contains('**AWX host summary**').should('not.exist');
       cy.contains('- web01').should('not.exist');
     });
+  });
+
+  it('links applied resource plans to their Activity Stream audit event', () => {
+    let calls = 0;
+
+    cy.intercept('POST', '/api/v2/ai/resource_actions/', (req) => {
+      calls += 1;
+      const body = req.body as { mode?: string };
+
+      if (calls === 1) {
+        expect(body.mode).to.equal('preview');
+        req.alias = 'previewResourceAction';
+        req.reply({
+          mode: 'preview',
+          generated: true,
+          plan: {
+            name: 'Create AI inventory',
+            description: 'Create inventory from assistant prompt.',
+            operations: [
+              {
+                id: 'create-inventory',
+                operation: 'create',
+                resource_type: 'inventory',
+                data: { name: 'AI Managed Inventory', organization: 1 },
+              },
+            ],
+          },
+          operations: [
+            {
+              id: 'create-inventory',
+              operation: 'create',
+              resource_type: 'inventory',
+              valid: true,
+              errors: {},
+              data: { name: 'AI Managed Inventory', organization: 1 },
+              validated_data: { name: 'AI Managed Inventory', organization: 1 },
+              preview: { type: 'inventory', name: 'AI Managed Inventory' },
+            },
+          ],
+          can_apply: true,
+        });
+        return;
+      }
+
+      expect(body.mode).to.equal('apply');
+      req.alias = 'applyResourceAction';
+      req.reply({
+        mode: 'apply',
+        generated: false,
+        plan: {
+          name: 'Create AI inventory',
+          description: 'Create inventory from assistant prompt.',
+          operations: [
+            {
+              id: 'create-inventory',
+              operation: 'create',
+              resource_type: 'inventory',
+              data: { name: 'AI Managed Inventory', organization: 1 },
+            },
+          ],
+        },
+        operations: [
+          {
+            id: 'create-inventory',
+            operation: 'create',
+            resource_type: 'inventory',
+            valid: true,
+            errors: {},
+            object_id: 42,
+            object: { id: 42, name: 'AI Managed Inventory' },
+          },
+        ],
+        rollback_plan: {
+          name: 'Rollback Create AI inventory',
+          operations: [
+            {
+              id: 'delete-inventory',
+              operation: 'delete',
+              resource_type: 'inventory',
+              object_id: 42,
+            },
+          ],
+        },
+        can_apply: false,
+        audit: { activity_stream_id: 701 },
+      });
+    });
+
+    mountAssistant();
+
+    cy.get('textarea[aria-label="Message"]').type('create an inventory named AI Managed Inventory');
+    cy.getByDataCy('ai-resource-plan-button').click();
+    cy.wait('@previewResourceAction');
+    cy.getByDataCy('ai-resource-plan-apply').click();
+    cy.wait('@applyResourceAction');
+
+    cy.getByDataCy('ai-resource-audit-link')
+      .should('contain.text', 'View Activity Stream #701')
+      .and('have.attr', 'href', '/activity-stream?id=701');
+    cy.getByDataCy('ai-resource-rollback-plan').should('contain.text', 'delete-inventory');
   });
 });
