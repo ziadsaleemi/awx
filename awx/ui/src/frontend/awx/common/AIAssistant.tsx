@@ -85,7 +85,7 @@ interface AIResourceActionResponse {
   };
 }
 
-type AssistantBusyState = 'chat' | 'plan' | 'apply' | null;
+type AssistantBusyState = 'chat' | 'plan' | 'apply' | 'rollback' | null;
 
 const AssistantMarkdown = styled.div`
   p,
@@ -307,6 +307,39 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
       setResourcePlan(resp);
     } catch (err: unknown) {
       setError(messageFromError(err, t('Failed to apply resource changes.')));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, context, resourcePlan, t]);
+
+  const applyRollbackPlan = useCallback(async () => {
+    if (!resourcePlan?.rollback_plan?.operations?.length || busy) {
+      return;
+    }
+
+    setBusy('rollback');
+    setError(null);
+
+    try {
+      const resp = await postRequest<
+        AIResourceActionResponse,
+        {
+          mode: 'apply';
+          plan: NonNullable<AIResourceActionResponse['rollback_plan']>;
+          context: Record<string, unknown>;
+        }
+      >(awxAPI`/ai/resource_actions/`, {
+        mode: 'apply',
+        plan: resourcePlan.rollback_plan,
+        context: buildRouteContext({
+          ...(context ?? {}),
+          source: 'ai_assistant_rollback',
+          rollback_for_activity_stream_id: resourcePlan.audit?.activity_stream_id,
+        }),
+      });
+      setResourcePlan(resp);
+    } catch (err: unknown) {
+      setError(messageFromError(err, t('Failed to apply rollback plan.')));
     } finally {
       setBusy(null);
     }
@@ -608,6 +641,17 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                     data-cy="ai-resource-plan-apply"
                   >
                     {t('Apply changes')}
+                  </Button>
+                ) : null}
+                {resourcePlan.rollback_plan?.operations?.length ? (
+                  <Button
+                    variant="danger"
+                    onClick={() => void applyRollbackPlan()}
+                    isDisabled={busy !== null}
+                    isLoading={busy === 'rollback'}
+                    data-cy="ai-resource-plan-rollback"
+                  >
+                    {t('Apply rollback')}
                   </Button>
                 ) : null}
                 <Button
