@@ -20,7 +20,12 @@ import {
   StackItem,
   TextInput,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, SyncAltIcon, TimesCircleIcon } from '@patternfly/react-icons';
+import {
+  CheckCircleIcon,
+  DownloadIcon,
+  SyncAltIcon,
+  TimesCircleIcon,
+} from '@patternfly/react-icons';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -84,6 +89,25 @@ interface PolicySmokeSelection {
   includeGatekeeper: boolean;
 }
 
+interface ExternalAutomationEvidenceReport {
+  generated_at: string;
+  surface: string;
+  request: ExternalAutomationCheckRequest | null;
+  result: ExternalAutomationCheckResponse;
+}
+
+function downloadEvidenceReport(report: ExternalAutomationEvidenceReport) {
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `external-automation-smoke-${report.generated_at.replace(/[:.]/g, '-')}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 function StatusLabel(props: { check?: ExternalAutomationCheck }) {
   const { t } = useTranslation();
   if (!props.check) {
@@ -119,6 +143,7 @@ export function ExternalAutomationSmokePanel(props?: {
   const [policyCheckGatekeeper, setPolicyCheckGatekeeper] = useState(includeGatekeeper);
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
   const [lastRunChecks, setLastRunChecks] = useState<PolicySmokeSelection | null>(null);
+  const [lastRunRequest, setLastRunRequest] = useState<ExternalAutomationCheckRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gatekeeperContext, setGatekeeperContext] = useState('');
   const [loading, setLoading] = useState(false);
@@ -172,7 +197,19 @@ export function ExternalAutomationSmokePanel(props?: {
       return;
     }
 
+    const requestPayload = {
+      include_eda: includeEda,
+      include_opa: runChecks.includeOpa,
+      sync_opa_policy: runChecks.includeOpa,
+      opa_policy_id: 'awx/managed',
+      opa_deny_smoke: runChecks.includeOpa,
+      start_eda_activation: false,
+      include_gatekeeper: runChecks.includeGatekeeper,
+      gatekeeper_context: runChecks.includeGatekeeper ? gatekeeperContext.trim() : '',
+    };
+
     setLastRunChecks(runChecks);
+    setLastRunRequest(requestPayload);
     setLoading(true);
     setError(null);
     setResult(null);
@@ -180,16 +217,7 @@ export function ExternalAutomationSmokePanel(props?: {
       const response = await postRequest<
         ExternalAutomationCheckResponse,
         ExternalAutomationCheckRequest
-      >(awxAPI`/external_automation/check/`, {
-        include_eda: includeEda,
-        include_opa: runChecks.includeOpa,
-        sync_opa_policy: runChecks.includeOpa,
-        opa_policy_id: 'awx/managed',
-        opa_deny_smoke: runChecks.includeOpa,
-        start_eda_activation: false,
-        include_gatekeeper: runChecks.includeGatekeeper,
-        gatekeeper_context: runChecks.includeGatekeeper ? gatekeeperContext.trim() : '',
-      });
+      >(awxAPI`/external_automation/check/`, requestPayload);
       setResult(response);
     } catch {
       setError(t('External automation smoke check failed. Check service settings and logs.'));
@@ -373,6 +401,23 @@ export function ExternalAutomationSmokePanel(props?: {
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                   </DescriptionList>
+                </StackItem>
+                <StackItem>
+                  <Button
+                    variant="secondary"
+                    icon={<DownloadIcon />}
+                    onClick={() =>
+                      downloadEvidenceReport({
+                        generated_at: new Date().toISOString(),
+                        surface: title,
+                        request: lastRunRequest,
+                        result,
+                      })
+                    }
+                    data-cy="external-automation-evidence-download-button"
+                  >
+                    {t('Download evidence')}
+                  </Button>
                 </StackItem>
                 <StackItem>
                   <CodeBlock>

@@ -21,6 +21,10 @@ function SeedNavigation(props: { children: ReactNode }) {
 
 describe('ExternalAutomationSmokePanel', () => {
   it('runs OPA and Gatekeeper smoke from policy surfaces', () => {
+    cy.window().then((win) => {
+      cy.stub(win.URL, 'createObjectURL').as('createObjectURL').returns('blob:smoke-evidence');
+      cy.stub(win.URL, 'revokeObjectURL').as('revokeObjectURL');
+    });
     cy.intercept('POST', awxAPI`/external_automation/check/`, (req) => {
       expect(req.body).to.deep.equal({
         include_eda: false,
@@ -82,6 +86,9 @@ describe('ExternalAutomationSmokePanel', () => {
     cy.getByDataCy('external-automation-audit-link')
       .should('be.visible')
       .and('have.attr', 'href', '/activity-stream?id=123');
+    cy.getByDataCy('external-automation-evidence-download-button').click();
+    cy.get('@createObjectURL').should('have.been.calledOnce');
+    cy.get('@revokeObjectURL').should('have.been.calledOnce');
   });
 
   it('runs Gatekeeper smoke without OPA when selected', () => {
