@@ -386,6 +386,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           {messages.map((msg, idx) => (
             <div
               key={idx}
+              data-cy={`ai-assistant-message-${msg.role}`}
               style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '85%',
@@ -402,7 +403,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
               }}
             >
               {msg.role === 'assistant' ? (
-                <AssistantMarkdown className="pf-v5-c-content">
+                <AssistantMarkdown className="pf-v5-c-content" data-cy="ai-assistant-markdown">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                 </AssistantMarkdown>
               ) : (
