@@ -2,6 +2,7 @@ from unittest import mock  # noqa
 import pytest
 
 from awx.api.versioning import reverse
+from awx.main.models import Credential
 
 """
     def run_test_ad_hoc_command(self, **kwargs):
@@ -110,6 +111,71 @@ def test_user_post_ad_hoc_command_list_without_inventory(alice, post_adhoc, inve
 def test_admin_post_inventory_ad_hoc_command_list(admin, post_adhoc, inventory):
     post_adhoc(reverse('api:inventory_ad_hoc_commands_list', kwargs={'pk': inventory.id}), {'inventory': None}, admin, expect=201)
     post_adhoc(reverse('api:inventory_ad_hoc_commands_list', kwargs={'pk': inventory.id}), {}, admin, expect=201)
+
+
+@pytest.mark.django_db
+def test_host_ad_hoc_uses_inventory_default_machine_credential(admin, post_adhoc, host, inventory, credentialtype_ssh):
+    inventory_default_credential = Credential.objects.create(
+        credential_type=credentialtype_ssh,
+        name='inventory default machine',
+        inputs={'username': 'inventory', 'password': 'secret'},
+    )
+    inventory.default_machine_credential = inventory_default_credential
+    inventory.save()
+
+    res = post_adhoc(
+        reverse('api:host_ad_hoc_commands_list', kwargs={'pk': host.id}),
+        {'credential': None, 'module_name': 'setup', 'module_args': ''},
+        admin,
+        expect=201,
+    )
+
+    assert res.data['inventory'] == inventory.id
+    assert res.data['limit'] == host.name
+    assert res.data['credential'] == inventory_default_credential.id
+
+
+@pytest.mark.django_db
+def test_host_ad_hoc_force_inventory_machine_credential_overrides_submitted_credential(
+    admin, post_adhoc, host, inventory, machine_credential, credentialtype_ssh
+):
+    inventory_default_credential = Credential.objects.create(
+        credential_type=credentialtype_ssh,
+        name='forced inventory machine',
+        inputs={'username': 'inventory', 'password': 'secret'},
+    )
+    inventory.default_machine_credential = inventory_default_credential
+    inventory.force_inventory_machine_credential = True
+    inventory.save()
+
+    res = post_adhoc(
+        reverse('api:host_ad_hoc_commands_list', kwargs={'pk': host.id}),
+        {'credential': machine_credential.id, 'module_name': 'setup', 'module_args': ''},
+        admin,
+        expect=201,
+    )
+
+    assert res.data['credential'] == inventory_default_credential.id
+
+
+@pytest.mark.django_db
+def test_host_ad_hoc_preserves_submitted_credential_without_inventory_force(admin, post_adhoc, host, inventory, machine_credential, credentialtype_ssh):
+    inventory.default_machine_credential = Credential.objects.create(
+        credential_type=credentialtype_ssh,
+        name='optional inventory machine',
+        inputs={'username': 'inventory', 'password': 'secret'},
+    )
+    inventory.force_inventory_machine_credential = False
+    inventory.save()
+
+    res = post_adhoc(
+        reverse('api:host_ad_hoc_commands_list', kwargs={'pk': host.id}),
+        {'credential': machine_credential.id, 'module_name': 'setup', 'module_args': ''},
+        admin,
+        expect=201,
+    )
+
+    assert res.data['credential'] == machine_credential.id
 
 
 @pytest.mark.django_db

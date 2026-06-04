@@ -4478,17 +4478,42 @@ class AdHocCommandList(ListCreateAPIView):
             data.pop('limit', None)
         return super(AdHocCommandList, self).update_raw_data(data)
 
+    def _get_inventory_for_credential_policy(self, data):
+        if hasattr(self, 'get_parent_object'):
+            parent_obj = self.get_parent_object()
+            if isinstance(parent_obj, models.Inventory):
+                return parent_obj
+            if isinstance(parent_obj, (models.Host, models.Group)):
+                return parent_obj.inventory
+
+        inventory_pk = get_pk_from_dict(data, 'inventory')
+        if inventory_pk:
+            return models.Inventory.objects.filter(pk=inventory_pk).select_related('default_machine_credential').first()
+
+        return None
+
+    def _apply_inventory_machine_credential_policy(self, data):
+        inventory = self._get_inventory_for_credential_policy(data)
+        if not inventory or not inventory.default_machine_credential_id:
+            return
+
+        credential_pk = get_pk_from_dict(data, 'credential')
+        if inventory.force_inventory_machine_credential or credential_pk is None:
+            data['credential'] = inventory.default_machine_credential_id
+
     def create(self, request, *args, **kwargs):
+        data = request.data
+        if getattr(data, '_mutable', None) is False:
+            data._mutable = True
+
         # Inject inventory ID and limit if parent objects is a host/group.
         if hasattr(self, 'get_parent_object') and not getattr(self, 'parent_key', None):
-            data = request.data
-            # HACK: Make request data mutable.
-            if getattr(data, '_mutable', None) is False:
-                data._mutable = True
             parent_obj = self.get_parent_object()
             if isinstance(parent_obj, (models.Host, models.Group)):
                 data['inventory'] = parent_obj.inventory_id
                 data['limit'] = parent_obj.name
+
+        self._apply_inventory_machine_credential_policy(data)
 
         # Check for passwords needed before creating ad hoc command.
         credential_pk = get_pk_from_dict(request.data, 'credential')
