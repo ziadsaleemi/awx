@@ -37,6 +37,7 @@ import { GroupDetails } from '../../resources/groups/GroupDetails';
 import { InventoryHostJobs } from '../../resources/inventories/inventoryHostsPage/InventoryHostJobs';
 import { InventoryHostFacts } from '../../resources/inventories/inventoryHostsPage/InventoryHostFacts';
 import { GroupHosts } from '../../resources/groups/GroupHosts';
+import { HostDashboard } from '../../resources/hosts/HostPage/HostDashboard';
 import { GroupRelatedGroups } from '../../resources/groups/GroupRelatedGroups';
 import { ResourceNotifications } from '../../resources/notifications/ResourceNotifications';
 import { SchedulesList } from '../../views/schedules/SchedulesList';
@@ -241,6 +242,11 @@ export function useAwxInventoryRoutes() {
           path: ':inventory_type/:id/hosts/:host_id',
           element: <InventoryHostPage />,
           children: [
+            {
+              id: AwxRoute.InventoryHostDashboard,
+              path: 'dashboard',
+              element: <HostDashboard page="inventory" />,
+            },
             {
               id: AwxRoute.InventoryHostDetails,
               path: 'details',

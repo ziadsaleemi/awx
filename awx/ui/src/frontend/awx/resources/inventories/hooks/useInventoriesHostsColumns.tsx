@@ -48,7 +48,7 @@ export function useInventoriesHostsColumns(options?: {
   const params = useParams<{ inventory_type: string; id: string }>();
   const nameClick = useCallback(
     (host: AwxHost) =>
-      pageNavigate(AwxRoute.InventoryHostDetails, {
+      pageNavigate(AwxRoute.InventoryHostDashboard, {
         params: {
           inventory_type: params.inventory_type,
           id: params.id,
@@ -107,7 +107,7 @@ export function useInventoriesGroupHostsColumns(options?: {
   const params = useParams<{ inventory_type: string; id: string }>();
   const nameClick = useCallback(
     (host: AwxHost) =>
-      pageNavigate(AwxRoute.InventoryHostDetails, {
+      pageNavigate(AwxRoute.InventoryHostDashboard, {
         params: {
           inventory_type: params.inventory_type,
           id: params.id,

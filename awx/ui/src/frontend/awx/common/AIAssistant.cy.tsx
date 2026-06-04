@@ -127,9 +127,10 @@ describe('AIAssistantPanel', () => {
     };
 
     cy.intercept('POST', '/api/v2/ai/resource_actions/', (req) => {
-      expect(req.body.mode).to.equal('preview');
-      expect(req.body.prompt).to.equal(undefined);
-      expect(req.body.plan).to.deep.equal(plan);
+      const body = req.body as { mode?: string; prompt?: unknown; plan?: typeof plan };
+      expect(body.mode).to.equal('preview');
+      expect(body.prompt).to.equal(undefined);
+      expect(body.plan).to.deep.equal(plan);
       req.alias = 'previewPastedPlan';
       req.reply({
         mode: 'preview',

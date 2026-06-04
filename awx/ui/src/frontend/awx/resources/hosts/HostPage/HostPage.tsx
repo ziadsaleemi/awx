@@ -56,6 +56,7 @@ export function HostPage() {
           persistentFilterKey: 'hosts',
         }}
         tabs={[
+          { label: t('Dashboard'), page: AwxRoute.HostDashboard },
           { label: t('Details'), page: AwxRoute.HostDetails },
           { label: t('Facts'), page: AwxRoute.HostFacts },
           { label: t('Groups'), page: AwxRoute.HostGroups },

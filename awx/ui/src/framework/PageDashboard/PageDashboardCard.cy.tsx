@@ -1,3 +1,4 @@
+/* eslint-disable i18next/no-literal-string */
 import { CardBody } from '@patternfly/react-core';
 import { PageDashboard } from './PageDashboard';
 import { PageDashboardCard } from './PageDashboardCard';
