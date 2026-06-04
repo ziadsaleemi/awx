@@ -99,6 +99,24 @@ from awx.main.utils.workload_identity import retrieve_workload_identity_jwt_with
 logger = logging.getLogger('awx.main.tasks.jobs')
 
 
+AWX_DEFAULT_REMOTE_TMP = '/tmp/ansible'
+
+
+def set_default_remote_tmp(env, remote_tmp=AWX_DEFAULT_REMOTE_TMP):
+    """
+    Keep Ansible module temp files out of remote home directories by default.
+    Respect explicit task/global env overrides; if one legacy env spelling is
+    supplied, mirror it so both supported Ansible spellings agree.
+    """
+    existing_remote_tmp = env.get('ANSIBLE_REMOTE_TEMP') or env.get('ANSIBLE_REMOTE_TMP')
+    if existing_remote_tmp:
+        env.setdefault('ANSIBLE_REMOTE_TEMP', existing_remote_tmp)
+        env.setdefault('ANSIBLE_REMOTE_TMP', existing_remote_tmp)
+        return
+    env['ANSIBLE_REMOTE_TEMP'] = remote_tmp
+    env['ANSIBLE_REMOTE_TMP'] = remote_tmp
+
+
 def populate_claims_for_workload(unified_job) -> dict:
     """
     Extract JWT claims from a Controller workload for the aap_controller_automation_job scope.
@@ -960,9 +978,7 @@ class SourceControlMixin(BaseTask):
             project_path = project.get_project_path(check_if_exists=False)
             if not os.path.isdir(project_path):
                 if project.scm_type and retry_missing_project_copy:
-                    logger.warning(
-                        f'Project source tree missing at copy time for unified job {self.instance.id}; forcing one project sync retry.'
-                    )
+                    logger.warning(f'Project source tree missing at copy time for unified job {self.instance.id}; forcing one project sync retry.')
                     return self.sync_and_copy_without_lock(
                         project,
                         private_data_dir,
@@ -1166,7 +1182,11 @@ class RunJob(SourceControlMixin, BaseTask):
             ('ANSIBLE_CALLBACK_PLUGINS', 'callback_plugins', 'plugins_path', '~/.ansible/plugins:/plugins/callback:/usr/share/ansible/plugins/callback'),
         )
 
-        config_values = read_ansible_config(os.path.join(private_data_dir, 'project'), list(map(lambda x: x[1], path_vars)) + ['callbacks_enabled'])
+        config_values = read_ansible_config(
+            os.path.join(private_data_dir, 'project'), list(map(lambda x: x[1], path_vars)) + ['callbacks_enabled', 'remote_tmp']
+        )
+        if 'remote_tmp' not in config_values:
+            set_default_remote_tmp(env)
 
         for env_key, config_setting, folder, default in path_vars:
             paths = default.split(':')
@@ -2059,6 +2079,7 @@ class RunAdHocCommand(BaseTask):
         env['INVENTORY_HOSTVARS'] = str(True)
         env['ANSIBLE_LOAD_CALLBACK_PLUGINS'] = '1'
         env['ANSIBLE_SFTP_BATCH_MODE'] = 'False'
+        set_default_remote_tmp(env)
 
         return env
 

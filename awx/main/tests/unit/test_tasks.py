@@ -591,6 +591,16 @@ class TestGenericRun:
 
 @pytest.mark.django_db
 class TestAdhocRun(TestJobExecution):
+    def test_adhoc_remote_tmp_defaults_to_tmp_ansible(self, adhoc_job, private_data_dir, execution_environment, mock_me):
+        adhoc_job.execution_environment = execution_environment
+        task = jobs.RunAdHocCommand()
+        task.instance = adhoc_job
+
+        env = task.build_env(adhoc_job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/tmp/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/tmp/ansible'
+
     def test_options_jinja_usage(self, adhoc_job, adhoc_update_model_wrapper, mock_me, mock_create_partition):
         ExecutionEnvironment.objects.create(name='Control Plane EE', managed=True)
         ExecutionEnvironment.objects.create(name='Default Job EE', managed=False)
@@ -948,6 +958,38 @@ class TestJobCredentials(TestJobExecution):
         env = task.build_env(job, private_data_dir)
 
         assert env['FOO'] == 'BAR'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_defaults_to_tmp_ansible(self, private_data_dir, job, mock_me):
+        task = jobs.RunJob()
+        task.instance = job
+
+        env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/tmp/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/tmp/ansible'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_respects_awx_task_env(self, settings, private_data_dir, job, mock_me):
+        settings.AWX_TASK_ENV = {'ANSIBLE_REMOTE_TMP': '/custom/ansible'}
+        task = jobs.RunJob()
+        task.instance = job
+
+        env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/custom/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/custom/ansible'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_respects_project_ansible_config(self, private_data_dir, job, mock_me):
+        task = jobs.RunJob()
+        task.instance = job
+
+        with mock.patch('awx.main.tasks.jobs.read_ansible_config', return_value={'remote_tmp': '/project/tmp'}):
+            env = task.build_env(job, private_data_dir)
+
+        assert 'ANSIBLE_REMOTE_TEMP' not in env
+        assert 'ANSIBLE_REMOTE_TMP' not in env
 
 
 class TestCallbacksEnabled(TestJobExecution):

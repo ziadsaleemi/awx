@@ -29,15 +29,17 @@ import yaml
 
 # Django
 from django.conf import settings
+from django.db import transaction
 
 # Dispatcherd
 from dispatcherd.publish import task
 
 # AWX
 from awx.main.dispatch import get_task_queuename
+from awx.main.models import Group, Host, Inventory
 from awx.main.models.credential import build_safe_env
 from awx.main.models.terraform import TerraformJob
-from awx.main.tasks.jobs import RunProjectUpdate, SourceControlMixin, with_path_cleanup
+from awx.main.tasks.jobs import AWX_DEFAULT_REMOTE_TMP, RunProjectUpdate, SourceControlMixin, with_path_cleanup
 from awx.main.tasks.signals import signal_callback, with_signal_handling
 from awx.main.tasks.terraform_credentials import TerraformProviderInjector
 
@@ -45,9 +47,19 @@ logger = logging.getLogger('awx.main.tasks.terraform')
 
 # Match any Terraform output key that starts with "host_ip"
 _HOST_IP_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
+_ANSIBLE_USER_OUTPUT_KEYS = ('ansible_user', 'vm_ssh_user', 'ssh_user', 'cloud_init_user', 'admin_username')
 _TF_VARIABLE_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 _TF_VARIABLE_BLOCK_RE = re.compile(r'(^|\n)\s*variable\s+"([a-zA-Z_][a-zA-Z0-9_]*)"\s*\{')
 _TF_BACKEND_BLOCK_RE = re.compile(r'(^|\n)\s*backend\s+"([a-zA-Z0-9_\-]+)"\s*\{')
+
+
+def _first_string_output(outputs, keys):
+    for key in keys:
+        value = outputs.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ''
+
 
 # ---------------------------------------------------------------------------
 # Container runtime / default execution environment
@@ -117,9 +129,7 @@ class RunTerraformJob(SourceControlMixin):
                 sync_task.instance = local_project_sync  # skip "waiting" status check
                 sync_task.run(local_project_sync.id)
                 local_project_sync.refresh_from_db()
-                self.instance = self.update_model(
-                    self.instance.pk, scm_revision=local_project_sync.scm_revision
-                )
+                self.instance = self.update_model(self.instance.pk, scm_revision=local_project_sync.scm_revision)
             except Exception:
                 local_project_sync.refresh_from_db()
                 if local_project_sync.status != 'canceled':
@@ -154,9 +164,7 @@ class RunTerraformJob(SourceControlMixin):
         env = dict(os.environ)
         safe_env = build_safe_env(env)
         for credential in self.build_credentials_list(instance):
-            credential.credential_type.inject_credential(
-                credential, env, safe_env, args=[], private_data_dir=private_data_dir
-            )
+            credential.credential_type.inject_credential(credential, env, safe_env, args=[], private_data_dir=private_data_dir)
             # Apply any Python-level injector registered for this credential type
             # (no-op when only template-based injection is needed).
             TerraformProviderInjector.apply_all(credential, env, safe_env, private_data_dir)
@@ -403,7 +411,7 @@ class RunTerraformJob(SourceControlMixin):
         ``--env-file`` so credentials never appear in the process listing.
         """
         if cwd and cwd.startswith(private_data_dir):
-            container_cwd = '/runner' + cwd[len(private_data_dir):]
+            container_cwd = '/runner' + cwd[len(private_data_dir) :]
         else:
             container_cwd = '/runner'
 
@@ -412,11 +420,17 @@ class RunTerraformJob(SourceControlMixin):
         runtime = _container_runtime()
 
         container_cmd = [
-            runtime, 'run', '--rm',
-            '--volume', f'{private_data_dir}:/runner:Z',
-            '--workdir', container_cwd,
-            '--pull', pull,
-            '--env-file', os.path.join(private_data_dir, 'env', 'envvars'),
+            runtime,
+            'run',
+            '--rm',
+            '--volume',
+            f'{private_data_dir}:/runner:Z',
+            '--workdir',
+            container_cwd,
+            '--pull',
+            pull,
+            '--env-file',
+            os.path.join(private_data_dir, 'env', 'envvars'),
             ee.image,
         ] + list(args)
 
@@ -477,8 +491,8 @@ class RunTerraformJob(SourceControlMixin):
         """
         if ee is not None and private_data_dir is not None:
             args = self._wrap_cmd_for_ee(args, cwd, env, private_data_dir, ee)
-            cwd = None   # podman --workdir handles the working directory
-            env = None   # host environment is sufficient for the podman client
+            cwd = None  # podman --workdir handles the working directory
+            env = None  # host environment is sufficient for the podman client
 
         logger.info('%s running: %s', log_prefix, ' '.join(str(a) for a in args))
         proc = subprocess.Popen(
@@ -536,9 +550,7 @@ class RunTerraformJob(SourceControlMixin):
 
         # Plan binary lives in a temp dir on the HOST (or inside the container
         # via the /runner mount when EE is active).
-        plan_tmpdir = tempfile.mkdtemp(
-            prefix='tfplan_', dir=settings.AWX_ISOLATION_BASE_PATH
-        )
+        plan_tmpdir = tempfile.mkdtemp(prefix='tfplan_', dir=settings.AWX_ISOLATION_BASE_PATH)
 
         # When running in an EE the plan file must be reachable inside the
         # container.  Because private_data_dir is mounted at /runner, we store
@@ -549,15 +561,15 @@ class RunTerraformJob(SourceControlMixin):
         else:
             plan_tmpdir_for_cmd = plan_tmpdir
 
-        cmd_kwargs = dict(env=env, timeout=timeout, log_prefix=prefix,
-                          private_data_dir=private_data_dir, ee=ee)
+        cmd_kwargs = dict(env=env, timeout=timeout, log_prefix=prefix, private_data_dir=private_data_dir, ee=ee)
 
         # 1. terraform init
         if hasattr(self, '_event_counter'):
             self._write_event('=== terraform init ===\n')
         rc, text = self._run_cmd(
             ['terraform', 'init', '-no-color', '-input=false'],
-            cwd=working_dir, **cmd_kwargs,
+            cwd=working_dir,
+            **cmd_kwargs,
         )
         output_parts.append('=== terraform init ===\n' + text)
         if rc != 0:
@@ -570,7 +582,8 @@ class RunTerraformJob(SourceControlMixin):
                 self._write_event('=== terraform plan ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'plan', '-no-color', '-input=false'],
-                cwd=working_dir, **cmd_kwargs,
+                cwd=working_dir,
+                **cmd_kwargs,
             )
             output_parts.append('=== terraform plan ===\n' + text)
 
@@ -581,7 +594,8 @@ class RunTerraformJob(SourceControlMixin):
                 self._write_event('=== terraform plan ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'plan', '-no-color', '-input=false', f'-out={plan_file}'],
-                cwd=working_dir, **cmd_kwargs,
+                cwd=working_dir,
+                **cmd_kwargs,
             )
             output_parts.append('=== terraform plan ===\n' + text)
             if rc == 0:
@@ -590,7 +604,8 @@ class RunTerraformJob(SourceControlMixin):
                     self._write_event('=== terraform apply ===\n')
                 rc, text = self._run_cmd(
                     ['terraform', 'apply', '-auto-approve', '-no-color', '-input=false', plan_file],
-                    cwd=working_dir, **cmd_kwargs,
+                    cwd=working_dir,
+                    **cmd_kwargs,
                 )
                 output_parts.append('=== terraform apply ===\n' + text)
 
@@ -599,7 +614,8 @@ class RunTerraformJob(SourceControlMixin):
                 self._write_event('=== terraform destroy ===\n')
             rc, text = self._run_cmd(
                 ['terraform', 'destroy', '-auto-approve', '-no-color', '-input=false'],
-                cwd=working_dir, **cmd_kwargs,
+                cwd=working_dir,
+                **cmd_kwargs,
             )
             output_parts.append('=== terraform destroy ===\n' + text)
 
@@ -752,9 +768,10 @@ class RunTerraformJob(SourceControlMixin):
             )
             return
 
-        from django.db import transaction
-
-        from awx.main.models import Group, Host, Inventory
+        host_connection_vars = {'ansible_remote_tmp': AWX_DEFAULT_REMOTE_TMP}
+        ansible_user = _first_string_output(outputs, _ANSIBLE_USER_OUTPUT_KEYS)
+        if ansible_user:
+            host_connection_vars['ansible_user'] = ansible_user
 
         try:
             inventory = Inventory.objects.get(pk=instance.target_inventory_id)
@@ -784,6 +801,7 @@ class RunTerraformJob(SourceControlMixin):
                             'variables': json.dumps(
                                 {
                                     'ansible_host': ip,
+                                    **host_connection_vars,
                                     'terraform_output_key': key,
                                     'terraform_job_id': instance.pk,
                                 }
@@ -798,6 +816,7 @@ class RunTerraformJob(SourceControlMixin):
                         existing.update(
                             {
                                 'ansible_host': ip,
+                                **host_connection_vars,
                                 'terraform_output_key': key,
                                 'terraform_job_id': instance.pk,
                             }
@@ -933,9 +952,7 @@ class RunTerraformJob(SourceControlMixin):
                 working_dir = os.path.join(working_dir, tf_subdir)
 
             if not os.path.isdir(working_dir):
-                raise RuntimeError(
-                    f'Terraform directory does not exist: {working_dir}'
-                )
+                raise RuntimeError(f'Terraform directory does not exist: {working_dir}')
 
             local_state_warning = self._local_state_warning_message(
                 working_dir,
@@ -959,9 +976,7 @@ class RunTerraformJob(SourceControlMixin):
             )
 
             # 7. Run Terraform
-            rc, combined_output, plan_tmpdir = self._run_terraform(
-                self.instance, working_dir, env, private_data_dir=private_data_dir
-            )
+            rc, combined_output, plan_tmpdir = self._run_terraform(self.instance, working_dir, env, private_data_dir=private_data_dir)
             if plan_tmpdir:
                 self.cleanup_paths.append(plan_tmpdir)
                 plan_tmpdir = None  # ownership transferred to cleanup_paths
@@ -970,13 +985,9 @@ class RunTerraformJob(SourceControlMixin):
 
             # 8. Capture artifacts + inventory population (apply only)
             if status == 'successful' and self.instance.terraform_operation == 'apply':
-                self._capture_artifacts(
-                    self.instance, working_dir, env, private_data_dir=private_data_dir
-                )
+                self._capture_artifacts(self.instance, working_dir, env, private_data_dir=private_data_dir)
                 if self.instance.target_inventory_id:
-                    self._populate_inventory(
-                        self.instance, working_dir, env, private_data_dir=private_data_dir
-                    )
+                    self._populate_inventory(self.instance, working_dir, env, private_data_dir=private_data_dir)
 
         except Exception:
             tb = traceback.format_exc()
@@ -990,9 +1001,7 @@ class RunTerraformJob(SourceControlMixin):
         try:
             self.instance.result_stdout_text = combined_output
         except Exception:
-            logger.warning(
-                '%s Could not persist result_stdout_text', self.instance.log_format
-            )
+            logger.warning('%s Could not persist result_stdout_text', self.instance.log_format)
 
         self.instance = self.update_model(pk, status=status)
 

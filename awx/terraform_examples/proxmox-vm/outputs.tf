@@ -16,6 +16,11 @@ output "host_ip_proxmox_vm" {
   value       = local.resolved_ip
 }
 
+output "cloud_init_user" {
+  description = "SSH user created by cloud-init — consumed by AWX when populating host connection variables."
+  value       = var.cloud_init_user
+}
+
 output "vm_name" {
   description = "Name of the provisioned VM."
   value       = proxmox_virtual_environment_vm.vm.name
