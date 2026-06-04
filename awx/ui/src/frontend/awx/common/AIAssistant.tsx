@@ -71,6 +71,11 @@ interface AIResourceDetailLink {
   label: string;
 }
 
+interface AIResourcePreviewSummary {
+  label: string;
+  value: string;
+}
+
 interface AIResourceActionResponse {
   mode: 'preview' | 'apply';
   generated: boolean;
@@ -184,6 +189,37 @@ function valueAsString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function valueAsStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function previewRows(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> => typeof item === 'object' && item !== null
+      )
+    : [];
+}
+
+function previewCount(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function previewNameSummary(rows: Record<string, unknown>[]) {
+  const names = rows
+    .map((row) => valueAsString(row.name))
+    .filter((name): name is string => Boolean(name))
+    .slice(0, 3);
+  return names.length ? ` (${names.join(', ')})` : '';
+}
+
+function previewCountSummary(preview: Record<string, unknown>, countKey: string, rowsKey: string) {
+  const rows = previewRows(preview[rowsKey]);
+  return `${previewCount(preview[countKey], rows.length)}${previewNameSummary(rows)}`;
+}
+
 function inventoryKindToPath(kind?: string, resourceType?: string) {
   if (kind === 'smart' || resourceType === 'smart_inventory') return 'smart_inventory';
   if (kind === 'constructed' || resourceType === 'constructed_inventory') {
@@ -260,6 +296,52 @@ function getAIResourceLaunchLink(operation: AIResourceOperation): AIResourceDeta
   }
 
   return null;
+}
+
+function getAIResourcePreviewSummary(operation: AIResourceOperation): AIResourcePreviewSummary[] {
+  const preview = operation.preview;
+  if (!preview) return [];
+
+  if (preview.type === 'smart_inventory') {
+    return [
+      {
+        label: 'Matched hosts',
+        value: previewCountSummary(preview, 'matched_hosts_count', 'matched_hosts'),
+      },
+      {
+        label: 'Matched groups',
+        value: previewCountSummary(preview, 'matched_groups_count', 'matched_groups'),
+      },
+    ];
+  }
+
+  if (preview.type === 'constructed_inventory') {
+    const sourceVarsKeys = valueAsStringArray(preview.source_vars_keys);
+    return [
+      {
+        label: 'Input inventories',
+        value: previewCountSummary(preview, 'input_inventories_count', 'input_inventories'),
+      },
+      {
+        label: 'Source hosts',
+        value: previewCountSummary(preview, 'source_hosts_count', 'source_hosts'),
+      },
+      {
+        label: 'Source groups',
+        value: previewCountSummary(preview, 'source_groups_count', 'source_groups'),
+      },
+      ...(sourceVarsKeys.length
+        ? [
+            {
+              label: 'Source vars keys',
+              value: sourceVarsKeys.join(', '),
+            },
+          ]
+        : []),
+    ];
+  }
+
+  return [];
 }
 
 function errorSummary(errors: Record<string, unknown>) {
@@ -698,6 +780,22 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                               >
                                 {t('Preview details')}
                               </Text>
+                              {getAIResourcePreviewSummary(operation).length ? (
+                                <div
+                                  data-cy={`ai-resource-preview-summary-${operation.id}`}
+                                  style={{ margin: '4px 0 0' }}
+                                >
+                                  {getAIResourcePreviewSummary(operation).map((summary) => (
+                                    <Text
+                                      key={summary.label}
+                                      component={TextVariants.small}
+                                      style={{ display: 'block' }}
+                                    >
+                                      {t(summary.label)}: {summary.value}
+                                    </Text>
+                                  ))}
+                                </div>
+                              ) : null}
                               <pre
                                 style={{
                                   margin: '4px 0 0',

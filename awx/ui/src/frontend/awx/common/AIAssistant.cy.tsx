@@ -161,6 +161,44 @@ describe('AIAssistantPanel', () => {
               object: { id: 42, name: 'AI Managed Inventory', kind: '' },
             },
             {
+              id: 'create-smart-inventory',
+              operation: 'create',
+              resource_type: 'smart_inventory',
+              valid: true,
+              errors: {},
+              object_id: 43,
+              object: { id: 43, name: 'AI Smart Web Inventory', kind: 'smart' },
+              preview: {
+                type: 'smart_inventory',
+                matched_hosts_count: 1,
+                matched_hosts: [{ id: 10, name: 'web01' }],
+                matched_groups_count: 1,
+                matched_groups: [{ id: 20, name: 'webservers' }],
+              },
+            },
+            {
+              id: 'create-constructed-inventory',
+              operation: 'create',
+              resource_type: 'constructed_inventory',
+              valid: true,
+              errors: {},
+              object_id: 44,
+              object: { id: 44, name: 'AI Constructed Inventory', kind: 'constructed' },
+              preview: {
+                type: 'constructed_inventory',
+                input_inventories_count: 1,
+                input_inventories: [{ id: 42, name: 'AI Managed Inventory' }],
+                source_hosts_count: 2,
+                source_hosts: [
+                  { id: 10, name: 'web01' },
+                  { id: 11, name: 'db01' },
+                ],
+                source_groups_count: 1,
+                source_groups: [{ id: 20, name: 'webservers' }],
+                source_vars_keys: ['compose', 'groups'],
+              },
+            },
+            {
               id: 'create-project',
               operation: 'create',
               resource_type: 'project',
@@ -258,6 +296,20 @@ describe('AIAssistantPanel', () => {
     cy.getByDataCy('ai-resource-object-link-create-inventory')
       .should('contain.text', 'View AI Managed Inventory')
       .and('have.attr', 'href', '/inventories/inventory/42/details');
+    cy.getByDataCy('ai-resource-object-link-create-smart-inventory')
+      .should('contain.text', 'View AI Smart Web Inventory')
+      .and('have.attr', 'href', '/inventories/smart_inventory/43/details');
+    cy.getByDataCy('ai-resource-preview-summary-create-smart-inventory')
+      .should('contain.text', 'Matched hosts: 1 (web01)')
+      .and('contain.text', 'Matched groups: 1 (webservers)');
+    cy.getByDataCy('ai-resource-object-link-create-constructed-inventory')
+      .should('contain.text', 'View AI Constructed Inventory')
+      .and('have.attr', 'href', '/inventories/constructed_inventory/44/details');
+    cy.getByDataCy('ai-resource-preview-summary-create-constructed-inventory')
+      .should('contain.text', 'Input inventories: 1 (AI Managed Inventory)')
+      .and('contain.text', 'Source hosts: 2 (web01, db01)')
+      .and('contain.text', 'Source groups: 1 (webservers)')
+      .and('contain.text', 'Source vars keys: compose, groups');
     cy.getByDataCy('ai-resource-object-link-create-project')
       .should('contain.text', 'View AI Content Project')
       .and('have.attr', 'href', '/projects/51/details');
