@@ -14,6 +14,8 @@ export type RegularPayload = {
   labels: Array<{ name: string }>;
   variables: string;
   prevent_instance_group_fallback: boolean;
+  default_machine_credential: number | null;
+  force_inventory_machine_credential: boolean;
   organization: number;
 };
 
@@ -34,6 +36,8 @@ describe('Create Edit Inventory Form', () => {
     labels: [{ name: 'test label' }],
     variables: 'hello:world',
     prevent_instance_group_fallback: false,
+    default_machine_credential: null,
+    force_inventory_machine_credential: false,
     organization: 1,
   };
 
@@ -59,6 +63,10 @@ describe('Create Edit Inventory Form', () => {
         { fixture: 'instance_groups.json' }
       );
       cy.intercept({ method: 'GET', url: '/api/v2/labels/*' }, { fixture: 'labels.json' });
+      cy.intercept(
+        { method: 'GET', url: '/api/v2/credentials/*' },
+        { fixture: 'credentials.json' }
+      );
     });
     kinds.forEach((kind) => {
       const path = '/inventories/:inventory_type/create';
@@ -319,6 +327,46 @@ describe('Create Edit Inventory Form', () => {
           });
         });
     });
+
+    it('sets inventory default machine credential policy', () => {
+      cy.intercept(
+        { method: 'OPTIONS', url: '/api/v2/instance_groups/' },
+        { fixture: 'mock_options.json' }
+      );
+      cy.fixture('inventory').then((inventory: Inventory) => {
+        inventory.summary_fields.labels.count = 0;
+        inventory.summary_fields.labels.results = [];
+        cy.intercept('POST', '/api/v2/inventories/', {
+          statusCode: 201,
+          body: inventory,
+        }).as('createInventory');
+      });
+      cy.intercept('POST', '/api/v2/inventories/*/instance_groups/', {
+        statusCode: 204,
+      }).as('submitInstanceGroup');
+
+      cy.mount(<CreateInventory inventoryKind="" />, {
+        path: '/inventories/:inventory_type/create',
+        initialEntries: ['/inventories/inventory/create'],
+      });
+
+      cy.get('[data-cy="name"]').type('policy inventory');
+      cy.get('[data-cy="description"]').type('has default credential');
+      cy.get('[data-cy="variables"]').type('hello: world');
+      cy.fixture('organizations').then((orgResponse: AwxItemsResponse<Organization>) => {
+        cy.selectSingleSelectOption('[data-cy="organization"]', orgResponse.results[0].name);
+      });
+      cy.selectSingleSelectOption('[data-cy="default-machine-credential"]', 'alex');
+      cy.get('[data-cy="force_inventory_machine_credential"]').click();
+      cy.clickButton(/^Create inventory$/);
+
+      cy.wait('@createInventory')
+        .its('request.body')
+        .then((createdInventory) => {
+          expect(createdInventory.default_machine_credential).to.equal(23);
+          expect(createdInventory.force_inventory_machine_credential).to.equal(true);
+        });
+    });
   });
 
   describe('Edit Inventory', () => {
@@ -337,6 +385,10 @@ describe('Create Edit Inventory Form', () => {
       );
 
       cy.intercept({ method: 'GET', url: '/api/v2/labels/*' }, { fixture: 'labels.json' });
+      cy.intercept(
+        { method: 'GET', url: '/api/v2/credentials/*' },
+        { fixture: 'credentials.json' }
+      );
 
       /** Fetch instance groups that are attached to the inventory */
 

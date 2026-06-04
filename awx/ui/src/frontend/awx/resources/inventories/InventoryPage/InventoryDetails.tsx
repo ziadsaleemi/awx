@@ -211,6 +211,18 @@ export function InventoryDetailsInner(props: { inventory: InventoryWithSource })
         )}
       </PageDetail>
       <PageDetail
+        label={t('Default machine credential')}
+        isEmpty={!inventory.default_machine_credential}
+        helpText={inventoryFormDetailLables.default_machine_credential}
+      >
+        <TextCell
+          text={inventory.summary_fields?.default_machine_credential?.name}
+          to={getPageUrl(AwxRoute.CredentialDetails, {
+            params: { id: inventory.default_machine_credential ?? undefined },
+          })}
+        />
+      </PageDetail>
+      <PageDetail
         label={t`Labels`}
         isEmpty={inventory.summary_fields.labels.results.length === 0}
         helpText={inventoryFormDetailLables.labels}
@@ -245,13 +257,21 @@ export function InventoryDetailsInner(props: { inventory: InventoryWithSource })
       />
       <PageDetail
         label={t('Enabled options')}
-        isEmpty={!inventory.prevent_instance_group_fallback}
+        isEmpty={
+          !inventory.prevent_instance_group_fallback &&
+          !inventory.force_inventory_machine_credential
+        }
         helpText={inventoryFormDetailLables.prevent_instance_group_fallback}
       >
         <TextList component={TextListVariants.ul}>
           {inventory.prevent_instance_group_fallback && (
             <TextListItem component={TextListItemVariants.li}>
               {t`Prevent instance group fallback`}
+            </TextListItem>
+          )}
+          {inventory.force_inventory_machine_credential && (
+            <TextListItem component={TextListItemVariants.li}>
+              {t`Force inventory machine credential`}
             </TextListItem>
           )}
         </TextList>

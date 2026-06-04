@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 
 from awx.api.versioning import reverse
 
-from awx.main.models import InventorySource, Inventory, ActivityStream, Organization
+from awx.main.models import Credential, InventorySource, Inventory, ActivityStream, Organization
 from awx.main.utils.inventory_vars import update_group_variables
 
 
@@ -291,6 +291,88 @@ def test_host_filter_unicode(post, admin_user, organization):
     )
     si = Inventory.objects.get(name='smart inventory')
     assert si.host_filter == u'ansible_facts__ansible_distribution=レッドハット'
+
+
+@pytest.mark.django_db
+def test_inventory_accepts_default_machine_credential(post, admin_user, organization, machine_credential):
+    response = post(
+        reverse('api:inventory_list'),
+        data={
+            'name': 'inventory with default credential',
+            'organization': organization.pk,
+            'default_machine_credential': machine_credential.pk,
+            'force_inventory_machine_credential': True,
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert response.data['default_machine_credential'] == machine_credential.pk
+    assert response.data['force_inventory_machine_credential'] is True
+
+
+@pytest.mark.django_db
+def test_inventory_rejects_non_machine_default_credential(patch, admin_user, inventory, vault_credential):
+    response = patch(
+        reverse('api:inventory_detail', kwargs={'pk': inventory.pk}),
+        data={'default_machine_credential': vault_credential.pk},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'Only Machine credentials' in str(response.data['default_machine_credential'])
+
+
+@pytest.mark.django_db
+def test_inventory_rejects_default_credential_from_another_organization(patch, admin_user, inventory, credentialtype_ssh):
+    other_org = Organization.objects.create(name='Other')
+    other_org_credential = Credential.objects.create(
+        credential_type=credentialtype_ssh,
+        name='other org machine',
+        organization=other_org,
+        inputs={'username': 'other', 'password': 'secret'},
+    )
+
+    response = patch(
+        reverse('api:inventory_detail', kwargs={'pk': inventory.pk}),
+        data={'default_machine_credential': other_org_credential.pk},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'same organization' in str(response.data['default_machine_credential'])
+
+
+@pytest.mark.django_db
+def test_inventory_rejects_force_without_default_machine_credential(patch, admin_user, inventory):
+    response = patch(
+        reverse('api:inventory_detail', kwargs={'pk': inventory.pk}),
+        data={'force_inventory_machine_credential': True},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'default machine credential is required' in str(response.data['force_inventory_machine_credential'])
+
+
+@pytest.mark.django_db
+def test_inventory_default_machine_credential_requires_use_access(patch, inventory, machine_credential, alice):
+    inventory.admin_role.members.add(alice)
+
+    patch(
+        reverse('api:inventory_detail', kwargs={'pk': inventory.pk}),
+        data={'default_machine_credential': machine_credential.pk},
+        user=alice,
+        expect=403,
+    )
+
+    machine_credential.use_role.members.add(alice)
+    patch(
+        reverse('api:inventory_detail', kwargs={'pk': inventory.pk}),
+        data={'default_machine_credential': machine_credential.pk},
+        user=alice,
+        expect=200,
+    )
 
 
 @pytest.mark.django_db

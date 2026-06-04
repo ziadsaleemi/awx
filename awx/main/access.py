@@ -836,6 +836,10 @@ class InventoryAccess(BaseAccess):
     """
 
     model = Inventory
+    select_related = (
+        'default_machine_credential',
+        'default_machine_credential__credential_type',
+    )
     prefetch_related = (
         'created_by',
         'modified_by',
@@ -852,7 +856,9 @@ class InventoryAccess(BaseAccess):
         # If no data is specified, just checking for generic add permission?
         if not data:
             return Organization.access_qs(self.user, 'add_inventory').exists()
-        return self.check_related('organization', Organization, data, role_field='inventory_admin_role')
+        return self.check_related('organization', Organization, data, role_field='inventory_admin_role') and self.check_related(
+            'default_machine_credential', Credential, data, role_field='use_role'
+        )
 
     @check_superuser
     def can_change(self, obj, data):
@@ -870,6 +876,7 @@ class InventoryAccess(BaseAccess):
         return (
             self.check_related('organization', Organization, data, obj=obj, role_field='inventory_admin_role', mandatory=org_admin_mandatory)
             and self.user in obj.admin_role
+            and self.check_related('default_machine_credential', Credential, data, obj=obj, role_field='use_role')
         )
 
     @check_superuser

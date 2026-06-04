@@ -191,6 +191,21 @@ export function useAwxInventoryRoutes() {
           element: <CreateGroup />,
         },
         {
+          id: AwxRoute.CreateInventory,
+          path: 'inventory/create',
+          element: <CreateInventory inventoryKind="" />,
+        },
+        {
+          id: AwxRoute.CreateSmartInventory,
+          path: 'smart_inventory/create',
+          element: <CreateInventory inventoryKind="smart" />,
+        },
+        {
+          id: AwxRoute.CreateConstructedInventory,
+          path: 'constructed_inventory/create',
+          element: <CreateInventory inventoryKind="constructed" />,
+        },
+        {
           id: AwxRoute.InventoryPage,
           path: ':inventory_type/:id/',
           element: <InventoryPage />,
@@ -273,21 +288,6 @@ export function useAwxInventoryRoutes() {
           id: AwxRoute.EditInventory,
           path: ':inventory_type/:id/edit',
           element: <EditInventory />,
-        },
-        {
-          id: AwxRoute.CreateInventory,
-          path: 'inventory/create',
-          element: <CreateInventory inventoryKind="" />,
-        },
-        {
-          id: AwxRoute.CreateSmartInventory,
-          path: 'smart-inventory/create',
-          element: <CreateInventory inventoryKind="smart" />,
-        },
-        {
-          id: AwxRoute.CreateConstructedInventory,
-          path: 'constructed-inventory/create',
-          element: <CreateInventory inventoryKind="constructed" />,
         },
         {
           id: AwxRoute.InventoryAddUsers,

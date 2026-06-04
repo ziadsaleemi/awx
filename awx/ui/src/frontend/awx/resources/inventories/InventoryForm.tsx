@@ -17,6 +17,7 @@ import { postRequest, requestGet, requestPatch } from '../../../common/crud/Data
 import { useGet } from '../../../common/crud/useGet';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { PageFormSelectOrganization } from '../../access/organizations/components/PageFormOrganizationSelect';
+import { PageFormCredentialSelect } from '../../access/credentials/components/PageFormCredentialSelect';
 import { PageFormInstanceGroupSelect } from '../../administration/instance-groups/components/PageFormInstanceGroupSelect';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { AwxPageForm } from '../../common/AwxPageForm';
@@ -144,6 +145,8 @@ export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'sm
             update_cache_timeout: 0,
             limit: '',
             source_vars: '',
+            default_machine_credential: null,
+            force_inventory_machine_credential: false,
           }
         : {
             kind: inventoryKind,
@@ -153,6 +156,8 @@ export function CreateInventory(props: { inventoryKind: '' | 'constructed' | 'sm
             labels: [],
             variables: '---\n',
             prevent_instance_group_fallback: false,
+            default_machine_credential: null,
+            force_inventory_machine_credential: false,
             aiGeneratedInventory: routeState?.cloudInventorySuggestion,
           };
 
@@ -351,6 +356,12 @@ export function useInventoryFormDetailLabels() {
     prevent_instance_group_fallback: t(
       `Prevent instance group fallback: If enabled, the inventory will prevent adding any organization instance groups to the list of preferred instances groups to run associated job templates on. Note: If this setting is enabled and you provided an empty list, the global instance groups will be applied.`
     ),
+    default_machine_credential: t(
+      'Optional Machine credential to apply to jobs that use this inventory when the job template and launch prompt do not provide a Machine credential.'
+    ),
+    force_inventory_machine_credential: t(
+      'Force jobs that use this inventory to use the selected inventory Machine credential even when the job template or launch prompt provides another Machine credential.'
+    ),
     input_inventories: t(
       `Input inventories for the constructed inventory plugin. The order of the displayed chips in the field will be the order of execution.`
     ),
@@ -477,16 +488,32 @@ function InventoryInputs(props: { inventoryKind: string }) {
           }}
         />
       </PageFormSection>
-      {inventoryKind === '' && (
-        <PageFormGroup label={t('Options')}>
+      <PageFormGroup label={t('Options')}>
+        <PageFormCredentialSelect<InventoryCreate>
+          name="default_machine_credential"
+          id="default-machine-credential"
+          label={t('Default machine credential')}
+          placeholder={t('None')}
+          labelHelp={inventoryFormDetailLabels.default_machine_credential}
+          queryParams={{
+            credential_type__namespace: 'ssh',
+          }}
+        />
+        {inventoryKind === '' && (
           <PageFormCheckbox<InventoryCreate>
             label={t('Prevent instance group fallback')}
             labelHelpTitle={t('Prevent instance group fallback')}
             labelHelp={inventoryFormDetailLabels.prevent_instance_group_fallback}
             name="prevent_instance_group_fallback"
           />
-        </PageFormGroup>
-      )}
+        )}
+        <PageFormCheckbox<InventoryCreate>
+          label={t('Force inventory machine credential')}
+          labelHelpTitle={t('Force inventory machine credential')}
+          labelHelp={inventoryFormDetailLabels.force_inventory_machine_credential}
+          name="force_inventory_machine_credential"
+        />
+      </PageFormGroup>
     </>
   );
 }

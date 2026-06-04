@@ -101,6 +101,8 @@
   "inventory_sources_with_failures": 0,
   "pending_deletion": false,
   "prevent_instance_group_fallback": false,
+  "default_machine_credential": null,
+  "force_inventory_machine_credential": false,
   "update_cache_timeout": 0,
   "verbosity": 0
 }

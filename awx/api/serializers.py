@@ -174,6 +174,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'source_project': DEFAULT_SUMMARY_FIELDS + ('status', 'scm_type', 'allow_override'),
     'project_update': DEFAULT_SUMMARY_FIELDS + ('status', 'failed'),
     'credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'cloud', 'kubernetes', 'credential_type_id'),
+    'default_machine_credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'credential_type_id'),
     'signature_validation_credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'credential_type_id'),
     'job': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'elapsed', 'type', 'canceled_on'),
     'job_template': DEFAULT_SUMMARY_FIELDS,
@@ -1602,6 +1603,8 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
             'inventory_sources_with_failures',
             'pending_deletion',
             'prevent_instance_group_fallback',
+            'default_machine_credential',
+            'force_inventory_machine_credential',
             'opa_query_path',
         )
 
@@ -1631,6 +1634,8 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
             res['tree'] = self.reverse('api:inventory_tree_view', kwargs={'pk': obj.pk})
         if obj.organization:
             res['organization'] = self.reverse('api:organization_detail', kwargs={'pk': obj.organization.pk})
+        if obj.default_machine_credential:
+            res['default_machine_credential'] = self.reverse('api:credential_detail', kwargs={'pk': obj.default_machine_credential.pk})
         if obj.kind == 'constructed':
             res['input_inventories'] = self.reverse('api:inventory_input_inventories', kwargs={'pk': obj.pk})
             res['constructed_url'] = self.reverse('api:constructed_inventory_detail', kwargs={'pk': obj.pk})
@@ -1672,6 +1677,36 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
 
         if kind == 'smart' and not host_filter:
             raise serializers.ValidationError({'host_filter': _('Smart inventories must specify host_filter')})
+
+        default_machine_credential = attrs.get('default_machine_credential')
+        if default_machine_credential is None and self.instance and 'default_machine_credential' not in attrs:
+            default_machine_credential = self.instance.default_machine_credential
+
+        force_inventory_machine_credential = attrs.get('force_inventory_machine_credential')
+        if force_inventory_machine_credential is None and self.instance and 'force_inventory_machine_credential' not in attrs:
+            force_inventory_machine_credential = self.instance.force_inventory_machine_credential
+
+        organization = attrs.get('organization')
+        if organization is None and self.instance and 'organization' not in attrs:
+            organization = self.instance.organization
+
+        if default_machine_credential and default_machine_credential.credential_type.kind != 'ssh':
+            raise serializers.ValidationError({'default_machine_credential': _('Only Machine credentials can be selected as an inventory default.')})
+
+        if (
+            default_machine_credential
+            and organization
+            and default_machine_credential.organization_id
+            and default_machine_credential.organization_id != organization.id
+        ):
+            raise serializers.ValidationError(
+                {'default_machine_credential': _('Inventory default credentials must belong to the same organization as the inventory.')}
+            )
+
+        if force_inventory_machine_credential and not default_machine_credential:
+            raise serializers.ValidationError(
+                {'force_inventory_machine_credential': _('A default machine credential is required before force can be enabled.')}
+            )
 
         return super(InventorySerializer, self).validate(attrs)
 
@@ -5193,10 +5228,7 @@ class JobLaunchSerializer(BaseSerializer):
 
         # verify that credentials (either provided or existing) don't
         # require launch-time passwords that have not been provided
-        if 'credentials' in accepted:
-            launch_credentials = Credential.unique_dict(list(template_credentials.all()) + list(accepted['credentials'])).values()
-        else:
-            launch_credentials = template_credentials
+        launch_credentials = template.resolve_credentials_for_launch(accepted)
         passwords = attrs.get('credential_passwords', {})  # get from original attrs
         passwords_lacking = []
         for cred in launch_credentials:
