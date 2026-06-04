@@ -560,7 +560,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
         ) : undefined
       }
     >
-      <CardBody>
+      <CardBody style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
         {isLoading ? (
           <Spinner size="lg" />
         ) : hasError ? (
@@ -581,7 +581,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
                     isInline
                     isPlain
                     title={signal.title}
-                    style={{ marginBottom: 6 }}
+                    style={{ marginBottom: 6, overflowWrap: 'anywhere' }}
                   />
                 ))}
               </StackItem>
@@ -638,7 +638,9 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
                     {t('Recommended actions')}
                   </Text>
                 </TextContent>
-                <ul style={{ marginTop: 6, paddingLeft: 18, fontSize: 13 }}>
+                <ul
+                  style={{ marginTop: 6, paddingLeft: 18, fontSize: 13, overflowWrap: 'anywhere' }}
+                >
                   {stats.recommendations.map((recommendation) => (
                     <li key={recommendation}>{recommendation}</li>
                   ))}

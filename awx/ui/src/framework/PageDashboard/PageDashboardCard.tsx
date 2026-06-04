@@ -29,6 +29,21 @@ export type PageDashboardCardHeight = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
 
 const heightUnit = 90;
 
+function getHeightValue(height?: PageDashboardCardHeight) {
+  if (!height) return undefined;
+
+  const span = {
+    xs: 2,
+    sm: 3,
+    md: 4,
+    lg: 6,
+    xl: 8,
+    xxl: 12,
+  }[height];
+
+  return heightUnit * span + 16 * (span - 1);
+}
+
 export function PageDashboardCard(props: {
   id?: string;
   supertitle?: string;
@@ -118,7 +133,7 @@ export function PageDashboardCard(props: {
 
   if (isCollapsed) heightSpan = undefined;
 
-  const height = heightSpan ? heightUnit * heightSpan + 16 * (heightSpan - 1) : undefined;
+  const maxHeight = !isCollapsed ? getHeightValue(props.maxHeight) : undefined;
 
   let rowSpan = {
     xs: 2,
@@ -144,7 +159,8 @@ export function PageDashboardCard(props: {
         gridColumn: `span ${colSpan}`,
         gridRow: rowSpan ? `span ${rowSpan}` : undefined,
         minHeight,
-        maxHeight: height,
+        maxHeight,
+        overflow: maxHeight ? 'auto' : undefined,
         maxWidth: '100%',
         ...props.style,
       }}
