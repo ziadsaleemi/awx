@@ -281,6 +281,18 @@ describe('Activity Stream Tests', () => {
         });
       cy.wait('@executionEnvironmentTypeFilterRequest');
     });
+    it('visit the Activity Stream list page filtered by external automation', () => {
+      cy.mount(<ActivityStreams />);
+      cy.intercept(
+        'api/v2/activity_stream/?or__object1__in=external_automation&or__object2__in=external_automation*'
+      ).as('externalAutomationTypeFilterRequest');
+      cy.get('[data-cy="filter-input"]')
+        .click()
+        .then(() => {
+          cy.get('#external-automation').click();
+        });
+      cy.wait('@externalAutomationTypeFilterRequest');
+    });
     it('visit the Activity Stream list page filtered by settings', () => {
       cy.mount(<ActivityStreams />);
       cy.intercept('api/v2/activity_stream/?or__object1__in=setting&or__object2__in=setting*').as(
@@ -316,6 +328,49 @@ describe('Activity Stream Tests', () => {
       cy.get('thead').find('th').contains('Time').should('exist');
       cy.get('thead').find('th').contains('Initiated by').should('exist');
       cy.get('thead').find('th').contains('Event').should('exist');
+    });
+    it('Renders actorless activity stream rows as system events', () => {
+      cy.intercept(
+        {
+          method: 'GET',
+          url: '/api/v2/activity_stream/*',
+        },
+        {
+          body: {
+            count: 1,
+            next: null,
+            previous: null,
+            results: [
+              {
+                id: 900,
+                type: 'activity_stream',
+                url: '/api/v2/activity_stream/900/',
+                related: {},
+                summary_fields: {
+                  actor: {
+                    id: null,
+                    username: null,
+                    first_name: '',
+                    last_name: '',
+                  },
+                  setting: [{ name: 'OPA_POLICY_BUNDLE', category: 'policyascode' }],
+                },
+                timestamp: '2026-06-02T09:25:06.652675Z',
+                operation: 'create',
+                changes: { value: 'package awx.job_launch allow := true' },
+                object1: 'setting',
+                object2: '',
+                object_association: '',
+                action_node: 'awx-1',
+                object_type: '',
+              },
+            ],
+          },
+        }
+      );
+      cy.mount(<ActivityStreams />);
+      cy.contains('system').should('exist');
+      cy.contains('created setting OPA_POLICY_BUNDLE').should('exist');
     });
     it('Clicking time table header sorts activity stream by timestamp', () => {
       cy.intercept('api/v2/activity_stream/?order_by=-timestamp*').as('timeDescSortRequest');

@@ -14,8 +14,19 @@ module.exports = function (env, argv) {
   // FavIcons
   config.plugins.unshift(
     new FaviconsWebpackPlugin({
-      logo: './frontend/assets/awx-icon.svg',
+      logo: './frontend/assets/awx-logo.svg',
+      mode: 'webapp',
+      devMode: 'webapp',
       inject: true,
+      favicons: {
+        appName: 'AWX',
+        appShortName: 'AWX',
+        appDescription: 'AWX',
+        developerName: 'Red Hat',
+        developerURL: null,
+        background: '#000000',
+        theme_color: '#000000',
+      },
     })
   );
 
@@ -23,6 +34,8 @@ module.exports = function (env, argv) {
     '/api': {
       target: AWX_SERVER,
       secure: false,
+      changeOrigin: true,
+      autoRewrite: true,
       bypass: (req) => {
         req.headers.host = proxyUrl.host;
         req.headers.origin = proxyUrl.origin;
@@ -32,6 +45,8 @@ module.exports = function (env, argv) {
     '/sso': {
       target: AWX_SERVER,
       secure: false,
+      changeOrigin: true,
+      autoRewrite: true,
       bypass: (req, res, options) => {
         req.headers.origin = proxyUrl.origin;
         req.headers.host = getRawHeader(req.rawHeaders, 'Host') || proxyUrl.host;

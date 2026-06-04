@@ -93,7 +93,11 @@ export function useTemplateActions({
         icon: CopyIcon,
         label: t('Copy template'),
         isHidden: (template) => template?.type === 'terraform_job_template',
-        onClick: (template: Template) => copyTemplate(template),
+        onClick: (template: Template) => {
+          if (template.type !== 'terraform_job_template') {
+            copyTemplate(template);
+          }
+        },
         isDisabled: (template: Template) =>
           !template?.summary_fields.user_capabilities.copy
             ? t('You do not have permission to copy this template')

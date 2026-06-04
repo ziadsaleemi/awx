@@ -37,6 +37,7 @@ import { GroupDetails } from '../../resources/groups/GroupDetails';
 import { InventoryHostJobs } from '../../resources/inventories/inventoryHostsPage/InventoryHostJobs';
 import { InventoryHostFacts } from '../../resources/inventories/inventoryHostsPage/InventoryHostFacts';
 import { GroupHosts } from '../../resources/groups/GroupHosts';
+import { HostDashboard } from '../../resources/hosts/HostPage/HostDashboard';
 import { GroupRelatedGroups } from '../../resources/groups/GroupRelatedGroups';
 import { ResourceNotifications } from '../../resources/notifications/ResourceNotifications';
 import { SchedulesList } from '../../views/schedules/SchedulesList';
@@ -190,6 +191,21 @@ export function useAwxInventoryRoutes() {
           element: <CreateGroup />,
         },
         {
+          id: AwxRoute.CreateInventory,
+          path: 'inventory/create',
+          element: <CreateInventory inventoryKind="" />,
+        },
+        {
+          id: AwxRoute.CreateSmartInventory,
+          path: 'smart_inventory/create',
+          element: <CreateInventory inventoryKind="smart" />,
+        },
+        {
+          id: AwxRoute.CreateConstructedInventory,
+          path: 'constructed_inventory/create',
+          element: <CreateInventory inventoryKind="constructed" />,
+        },
+        {
           id: AwxRoute.InventoryPage,
           path: ':inventory_type/:id/',
           element: <InventoryPage />,
@@ -242,6 +258,11 @@ export function useAwxInventoryRoutes() {
           element: <InventoryHostPage />,
           children: [
             {
+              id: AwxRoute.InventoryHostDashboard,
+              path: 'dashboard',
+              element: <HostDashboard page="inventory" />,
+            },
+            {
               id: AwxRoute.InventoryHostDetails,
               path: 'details',
               element: <InventoryHostDetails />,
@@ -267,21 +288,6 @@ export function useAwxInventoryRoutes() {
           id: AwxRoute.EditInventory,
           path: ':inventory_type/:id/edit',
           element: <EditInventory />,
-        },
-        {
-          id: AwxRoute.CreateInventory,
-          path: 'inventory/create',
-          element: <CreateInventory inventoryKind="" />,
-        },
-        {
-          id: AwxRoute.CreateSmartInventory,
-          path: 'smart-inventory/create',
-          element: <CreateInventory inventoryKind="smart" />,
-        },
-        {
-          id: AwxRoute.CreateConstructedInventory,
-          path: 'constructed-inventory/create',
-          element: <CreateInventory inventoryKind="constructed" />,
         },
         {
           id: AwxRoute.InventoryAddUsers,

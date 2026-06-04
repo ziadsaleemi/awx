@@ -23,6 +23,7 @@ export const awxSettingsExcludeKeys: string[] = [
   'BULK_JOB_MAX_LAUNCH',
   'BULK_HOST_MAX_CREATE',
   'BULK_HOST_MAX_DELETE',
+  'OPA_POLICY_BUNDLE',
 ];
 
 export function useAwxSettingsGroupsBase() {
@@ -86,6 +87,29 @@ export function useAwxSettingsGroupsBase() {
         categories: [],
       },
       {
+        id: 'policyascode',
+        name: t('Policy Connection Settings'),
+        description: t(
+          'OPA and Gatekeeper server connection, authentication, and request settings.'
+        ),
+        defaultSlugs: ['policyascode'],
+        categories: [],
+      },
+      {
+        id: 'ai-assistant',
+        name: t('AI Assistant'),
+        description: t('Configure the embedded AI chat assistant and model provider.'),
+        defaultSlugs: ['ai-assistant'],
+        categories: [],
+      },
+      {
+        id: 'eda',
+        name: t('Event-Driven Ansible'),
+        description: t('Configure Event-Driven Ansible controller integration.'),
+        defaultSlugs: ['eda'],
+        categories: [],
+      },
+      {
         id: 'other',
         name: t('Other'),
         categories: [],
@@ -122,6 +146,7 @@ export function useAwxSettingsGroups() {
     >((acc, key) => {
       if (awxSettingsExcludeKeys.includes(key)) return acc;
       const value = awxSettingsDefinedInFile.includes(key) ? actions.GET[key] : actions.PUT[key];
+      if (value.hidden) return acc;
       acc[key] = value;
       return acc;
     }, {});
@@ -147,8 +172,12 @@ export function useAwxSettingsGroups() {
 
       let category = group.categories.find((category) => category.name === categoryName);
       if (!category) {
+        const categoryId =
+          group.defaultSlugs?.length === 1 && group.defaultSlugs[0] === slug
+            ? group.id
+            : categoryName.toLowerCase().replace(/ /g, '-');
         category = {
-          id: categoryName.toLowerCase().replace(/ /g, '-'),
+          id: categoryId,
           name: categoryName,
           slugs: [],
         };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import { AICodeAssistant } from '../../common/AICodeAssistant';
 import {
   LoadingPage,
   PageFormSubmitHandler,
@@ -63,9 +64,7 @@ function defaultValues(template?: TerraformJobTemplate): TerraformTemplateFormVa
     verbosity: template?.verbosity ?? 0,
     terraform_operation: template?.terraform_operation ?? 'apply',
     target_inventory: (template?.summary_fields?.target_inventory as unknown as Inventory) ?? null,
-    target_group: template?.target_group
-      ? { id: -1, name: template.target_group }
-      : null,
+    target_group: template?.target_group ? { id: -1, name: template.target_group } : null,
     timeout: template?.timeout ?? 0,
     ask_variables_on_launch: template?.ask_variables_on_launch ?? false,
     ask_inventory_on_launch: template?.ask_inventory_on_launch ?? false,
@@ -146,9 +145,11 @@ export function EditTerraformTemplate() {
   const params = useParams<{ id: string }>();
   const id = params.id ?? '';
 
-  const { data: template, error, refresh } = useGet<TerraformJobTemplate>(
-    awxAPI`/terraform_job_templates/${id}/`
-  );
+  const {
+    data: template,
+    error,
+    refresh,
+  } = useGet<TerraformJobTemplate>(awxAPI`/terraform_job_templates/${id}/`);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (!template) return <LoadingPage />;
@@ -161,15 +162,8 @@ export function EditTerraformTemplate() {
       target_inventory: values.target_inventory?.id ?? null,
       target_group: values.target_group?.name ?? '',
     };
-    await requestPatch<typeof payload>(
-      awxAPI`/terraform_job_templates/${id}/`,
-      payload
-    );
-    await submitCredentials(
-      template.id,
-      template.summary_fields?.credentials ?? [],
-      credentials
-    );
+    await requestPatch<typeof payload>(awxAPI`/terraform_job_templates/${id}/`, payload);
+    await submitCredentials(template.id, template.summary_fields?.credentials ?? [], credentials);
     pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id } });
   };
 
@@ -187,9 +181,7 @@ export function EditTerraformTemplate() {
         submitText={t('Save Terraform template')}
         onSubmit={onSubmit}
         defaultValue={defaultValues(template)}
-        onCancel={() =>
-          pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id } })
-        }
+        onCancel={() => pageNavigate(AwxRoute.TerraformTemplatePage, { params: { id } })}
       >
         <TerraformTemplateFormInputs />
       </AwxPageForm>
@@ -255,10 +247,7 @@ function TerraformTemplateFormInputs() {
         label={t('Description')}
         placeholder={t('Add a description for this template')}
       />
-      <PageFormProjectSelect<TerraformTemplateFormValues>
-        name="project"
-        isRequired
-      />
+      <PageFormProjectSelect<TerraformTemplateFormValues> name="project" isRequired />
       <PageFormTextInput<TerraformTemplateFormValues>
         name="terraform_dir"
         label={t('Terraform directory')}
@@ -317,11 +306,7 @@ function TerraformTemplateFormInputs() {
         variant="typeahead"
         query={queryInventoryGroups}
         valueToString={(value) => value?.name ?? ''}
-        placeholder={
-          targetInventoryId
-            ? t('Select target group')
-            : t('Select an inventory first')
-        }
+        placeholder={targetInventoryId ? t('Select target group') : t('Select an inventory first')}
         loadingPlaceholder={t('Loading inventory groups...')}
         loadingErrorText={t('Error loading inventory groups')}
         limit={200}
@@ -345,7 +330,14 @@ function TerraformTemplateFormInputs() {
           'Key/value pairs to pass to Terraform as a tfvars file. Accepts JSON or YAML format. Survey variables and launch-time overrides are merged in automatically.'
         )}
         additionalControls={
-          <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+          <>
+            <PageFormCheckbox label={t('Prompt on launch')} name="ask_variables_on_launch" />
+            <AICodeAssistant<TerraformTemplateFormValues>
+              fieldName="extra_vars"
+              format="tfvars"
+              context="Terraform tfvars variables"
+            />
+          </>
         }
       />
     </>

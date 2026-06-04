@@ -33,6 +33,42 @@ fi
 if output=$(ANSIBLE_REVERSE_RESOURCE_SYNC=false awx-manage createsuperuser --noinput --username=admin --email=admin@localhost 2> /dev/null); then
     echo $output
 fi
+ANSIBLE_REVERSE_RESOURCE_SYNC=false awx-manage shell <<'PY'
+import os
+
+from django.contrib.auth import get_user_model
+
+password = os.environ.get('DJANGO_SUPERUSER_PASSWORD')
+if not password:
+    print('DJANGO_SUPERUSER_PASSWORD is not set; admin password not synchronized')
+else:
+    User = get_user_model()
+    user, _created = User.objects.get_or_create(
+        username='admin',
+        defaults={
+            'email': 'admin@localhost',
+            'is_superuser': True,
+            'is_staff': True,
+            'is_active': True,
+        },
+    )
+    changed_fields = []
+    for field, value in {
+        'email': 'admin@localhost',
+        'is_superuser': True,
+        'is_staff': True,
+        'is_active': True,
+    }.items():
+        if getattr(user, field) != value:
+            setattr(user, field, value)
+            changed_fields.append(field)
+    if not user.check_password(password):
+        user.set_password(password)
+        changed_fields.append('password')
+    if changed_fields:
+        user.save(update_fields=changed_fields)
+    print('Admin user synchronized with DJANGO_SUPERUSER_PASSWORD')
+PY
 echo "Admin password: ${DJANGO_SUPERUSER_PASSWORD}"
 
 # Configure awx-tui to connect to the local AWX instance

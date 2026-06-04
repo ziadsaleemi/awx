@@ -6,6 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.encoding import smart_str
 
 from awx.main.scheduler.dag_workflow import WorkflowDAG
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 
 
 class Job:
@@ -14,11 +15,21 @@ class Job:
 
 
 class WorkflowNode(object):
-    def __init__(self, id=None, job=None, do_not_run=False, unified_job_template=None):
+    def __init__(
+        self,
+        id=None,
+        job=None,
+        do_not_run=False,
+        unified_job_template=None,
+        bypassed_job_status='',
+        node_type=WORKFLOW_NODE_TYPE_TEMPLATE,
+    ):
         self.id = id if id is not None else uuid.uuid4()
         self.job = job
         self.do_not_run = do_not_run
         self.unified_job_template = unified_job_template
+        self.bypassed_job_status = bypassed_job_status
+        self.node_type = node_type
         self.all_parents_must_converge = False
 
 
@@ -27,7 +38,8 @@ def wf_node_generator(mocker):
     pytest.count = 0
 
     def fn(**kwargs):
-        wfn = WorkflowNode(id=pytest.count, unified_job_template=object(), **kwargs)
+        kwargs.setdefault('unified_job_template', object())
+        wfn = WorkflowNode(id=pytest.count, **kwargs)
         pytest.count += 1
         return wfn
 
@@ -559,6 +571,67 @@ class TestBFSNodesToRun:
         g.mark_dnr_nodes()
 
         assert set([nodes[1], nodes[2]]) == set(g.bfs_nodes_to_run())
+
+    def test_eda_root_node_runs_as_virtual_success(self, wf_node_generator):
+        g = WorkflowDAG()
+        eda_node = wf_node_generator(unified_job_template=None, node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK)
+        child_node = wf_node_generator()
+        g.add_node(eda_node)
+        g.add_node(child_node)
+        g.add_edge(eda_node, child_node, "success_nodes")
+
+        assert g.is_workflow_done() is False
+        assert g.has_workflow_failed() == (False, None)
+        assert g.bfs_nodes_to_run() == [eda_node]
+
+        eda_node.bypassed_job_status = 'successful'
+        assert g.bfs_nodes_to_run() == [child_node]
+
+    def test_ai_task_root_node_runs_as_virtual_success(self, wf_node_generator):
+        g = WorkflowDAG()
+        ai_node = wf_node_generator(unified_job_template=None, node_type=WORKFLOW_NODE_TYPE_AI_TASK)
+        child_node = wf_node_generator()
+        g.add_node(ai_node)
+        g.add_node(child_node)
+        g.add_edge(ai_node, child_node, "success_nodes")
+
+        assert g.is_workflow_done() is False
+        assert g.has_workflow_failed() == (False, None)
+        assert g.bfs_nodes_to_run() == [ai_node]
+
+        ai_node.bypassed_job_status = 'successful'
+        assert g.bfs_nodes_to_run() == [child_node]
+
+    def test_missing_template_root_still_fails(self, wf_node_generator):
+        g = WorkflowDAG()
+        missing_template_node = wf_node_generator(unified_job_template=None)
+        g.add_node(missing_template_node)
+
+        assert g.is_workflow_done() is True
+        assert g.has_workflow_failed() == (
+            True,
+            smart_str(
+                _(
+                    "No error handling path for workflow job node(s) []. Workflow job node(s) missing" " unified job template and error handling path [{}]."
+                ).format(missing_template_node.id)
+            ),
+        )
+
+    def test_failed_eda_node_without_error_path_fails_workflow(self, wf_node_generator):
+        g = WorkflowDAG()
+        eda_node = wf_node_generator(unified_job_template=None, node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK, bypassed_job_status='failed')
+        g.add_node(eda_node)
+
+        assert g.is_workflow_done() is True
+        assert g.has_workflow_failed() == (
+            True,
+            smart_str(
+                _(
+                    "No error handling path for workflow job node(s) [{node_status}]. Workflow job "
+                    "node(s) missing unified job template and error handling path [{no_ufjt}]."
+                ).format(node_status=f"({eda_node.id},failed)", no_ufjt='')
+            ),
+        )
 
 
 @pytest.mark.xfail(reason="Run manually to re-generate doc images")

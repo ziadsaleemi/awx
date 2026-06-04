@@ -10,9 +10,7 @@ export function useManagedAwxDashboard() {
   const { activeAwxUser } = useAwxActiveUser();
 
   // Use a user-specific key so each user's dashboard card order is stored separately.
-  const storageId = activeAwxUser
-    ? `awx-dashboard-${activeAwxUser.id}`
-    : 'awx-dashboard';
+  const storageId = activeAwxUser ? `awx-dashboard-${activeAwxUser.id}` : 'awx-dashboard';
 
   const columns = useMemo(
     () => [
@@ -30,6 +28,9 @@ export function useManagedAwxDashboard() {
       { id: 'recent_jobs', name: t('Recent jobs') },
       { id: 'recent_projects', name: t('Recent projects') },
       { id: 'recent_inventories', name: t('Recent inventories') },
+      { id: 'automation_roi', name: t('Automation ROI') },
+      { id: 'automation_insights', name: t('Automation Insights') },
+      { id: 'performance_metrics', name: t('Performance Metrics') },
     ],
     [t]
   );

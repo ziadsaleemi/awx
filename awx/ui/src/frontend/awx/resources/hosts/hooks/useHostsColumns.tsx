@@ -39,7 +39,7 @@ function useActivityColumn() {
 export function useHostsColumns(options?: { disableSort?: boolean; disableLinks?: boolean }) {
   const pageNavigate = usePageNavigate();
   const nameClick = useCallback(
-    (host: AwxHost) => pageNavigate(AwxRoute.HostDetails, { params: { id: host.id } }),
+    (host: AwxHost) => pageNavigate(AwxRoute.HostDashboard, { params: { id: host.id } }),
     [pageNavigate]
   );
   const nameColumn = useNameColumn({

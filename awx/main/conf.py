@@ -214,6 +214,141 @@ register(
 )
 
 register(
+    'EDA_SERVER_URL',
+    field_class=fields.URLField,
+    default='',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('EDA Controller URL'),
+    help_text=_('Base URL for an Event-Driven Ansible Controller instance used by AWX overview integration status.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_AUTH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('EDA Controller API token'),
+    help_text=_('Bearer token used to read Event-Driven Ansible Controller activations.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_USERNAME',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('EDA Controller username'),
+    help_text=_('Username used for basic authentication when EDA Controller API token is not set.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_PASSWORD',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('EDA Controller password'),
+    help_text=_('Password used for basic authentication when EDA Controller API token is not set.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify EDA Controller SSL'),
+    help_text=_('Verify TLS certificates when AWX connects to Event-Driven Ansible Controller.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=5,
+    min_value=1,
+    label=_('EDA Controller request timeout'),
+    help_text=_('Maximum seconds to wait when AWX requests Event-Driven Ansible Controller activation data.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATIONS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/',
+    allow_blank=False,
+    label=_('EDA activations API path'),
+    help_text=_('Relative API path used to list Event-Driven Ansible Controller rulebook activations.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_START_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/{activation_id}/enable/',
+    allow_blank=False,
+    label=_('EDA activation start API path'),
+    help_text=_('Relative API path used to enable/start an Event-Driven Ansible Controller rulebook activation. Supports {activation_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_INSTANCE_LOGS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activation-instances/{activation_instance_id}/logs/',
+    allow_blank=False,
+    label=_('EDA activation instance logs API path'),
+    help_text=_('Relative API path used to read Event-Driven Ansible activation instance logs. Supports {activation_instance_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_EVENTS_API_PATH',
+    field_class=fields.CharField,
+    default='/api/eda/v1/activations/{activation_id}/events/',
+    allow_blank=False,
+    label=_('EDA activation events API path'),
+    help_text=_('Relative API path used to read Event-Driven Ansible Controller activation events/logs. Supports {activation_id}.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_POLL_ATTEMPTS',
+    field_class=fields.IntegerField,
+    default=1,
+    min_value=0,
+    label=_('EDA activation poll attempts'),
+    help_text=_('Number of activation status reads after AWX creates or starts an EDA activation.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
+    'EDA_ACTIVATION_POLL_INTERVAL',
+    field_class=fields.IntegerField,
+    default=0,
+    min_value=0,
+    label=_('EDA activation poll interval'),
+    help_text=_('Seconds to wait between EDA activation status reads.'),
+    category=_('Event-Driven Ansible'),
+    category_slug='eda',
+)
+
+register(
     'AWX_ANALYTICS_CANDLEPIN_CA',
     field_class=fields.CharField,
     default='/etc/rhsm/ca/redhat-uep.pem',
@@ -1212,6 +1347,89 @@ register(
     category_slug='policyascode',
 )
 
+register(
+    'GATEKEEPER_K8S_API_URL',
+    field_class=fields.URLField,
+    default='',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('Gatekeeper Kubernetes API URL'),
+    help_text=_('Kubernetes API server URL used to read Gatekeeper ConstraintTemplates, Constraints, Configs, and violations.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_AUTH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Gatekeeper Kubernetes API token'),
+    help_text=_('Bearer token used to read Gatekeeper resources from the configured Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_CONTEXT',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('Gatekeeper Kubernetes context label'),
+    help_text=_('Optional context label shown in the Policy as Code Gatekeeper view.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_CONTEXTS',
+    field_class=fields.DictField,
+    default={},
+    encrypted=True,
+    label=_('Gatekeeper Kubernetes context map'),
+    help_text=_(
+        'Optional named Gatekeeper Kubernetes contexts. JSON object keyed by context name. Each value may include server_url, auth_token, verify_ssl, and request_timeout.'
+    ),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify Gatekeeper Kubernetes API SSL'),
+    help_text=_('Verify TLS certificates when AWX reads Gatekeeper resources from the Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'GATEKEEPER_K8S_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=5,
+    min_value=1,
+    label=_('Gatekeeper Kubernetes API timeout'),
+    help_text=_('Maximum seconds to wait when AWX reads Gatekeeper resources from the Kubernetes API server.'),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+)
+
+register(
+    'OPA_POLICY_BUNDLE',
+    field_class=fields.CharField,
+    label=_('OPA policy bundle'),
+    default='',
+    help_text=_(
+        'Optional Rego policy bundle text stored in AWX. Use this as the editable source of truth for Policy as Code, then sync it to the configured OPA server.'
+    ),
+    category=('PolicyAsCode'),
+    category_slug='policyascode',
+    allow_blank=True,
+)
+
 
 def policy_as_code_validate(serializer, attrs):
     opa_host = attrs.get('OPA_HOST', '')
@@ -1221,3 +1439,245 @@ def policy_as_code_validate(serializer, attrs):
 
 
 register_validate('policyascode', policy_as_code_validate)
+
+
+###############################################################################
+# AI ASSISTANT SETTINGS
+###############################################################################
+
+register(
+    'AI_ENABLED',
+    field_class=fields.BooleanField,
+    default=False,
+    label=_('Enable AI Assistant'),
+    help_text=_(
+        'Enable the embedded AI chat assistant. When enabled, users will see a ' 'chat panel in the navigation bar powered by the configured AI provider.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_PROVIDER',
+    field_class=fields.ChoiceField,
+    choices=[
+        ('openai', _('OpenAI')),
+        ('openai_codex', _('OpenAI Codex device login')),
+        ('azure_openai', _('Azure OpenAI')),
+        ('redhat_ai', _('Red Hat AI')),
+        ('watsonx', _('IBM watsonx')),
+        ('gemini', _('Google Gemini')),
+    ],
+    default='openai',
+    label=_('AI Provider'),
+    help_text=_(
+        'The AI provider to use for the assistant. OpenAI uses an API key; OpenAI Codex device login '
+        'uses the device-code connection below instead of AI_API_KEY. Other providers require their own API key and endpoint URL.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_API_URL',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI API Endpoint URL'),
+    help_text=_(
+        'The base URL for the AI provider API. Leave blank to use the provider default. '
+        'Required for Azure OpenAI (e.g. https://<resource>.openai.azure.com/), '
+        'Red Hat AI, and IBM watsonx deployments.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    placeholder='https://api.openai.com/v1',
+)
+
+register(
+    'AI_API_KEY',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI API Key'),
+    help_text=_('Secret API key for authenticating with the AI provider. This value is encrypted at rest.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_CLIENT_ID',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='app_EMoamEEZ73f0CkXaXp7hrann',
+    label=_('OpenAI Codex Client ID'),
+    help_text=_('OpenAI public client id used for Codex device login. Change only if OpenAI provides a replacement client id.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_OPENAI_CODEX_SCOPE',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='openid profile email offline_access model.request api.responses.write',
+    label=_('OpenAI Codex OAuth Scope'),
+    help_text=_('OAuth scopes requested during OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_OPENAI_CODEX_ACCESS_TOKEN',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Access Token'),
+    help_text=_('Encrypted access token created by OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_REFRESH_TOKEN',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Refresh Token'),
+    help_text=_('Encrypted refresh token created by OpenAI Codex device login.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    encrypted=True,
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_TOKEN_EXPIRES_AT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Token Expiry'),
+    help_text=_('Expiration timestamp for the current OpenAI Codex access token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex ChatGPT Account ID'),
+    help_text=_('ChatGPT account id extracted from the OpenAI Codex device-login token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_PLAN_TYPE',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('OpenAI Codex Plan Type'),
+    help_text=_('ChatGPT plan type extracted from the OpenAI Codex device-login token.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_OPENAI_CODEX_AVAILABLE_MODELS',
+    field_class=fields.StringListField,
+    default=[],
+    label=_('OpenAI Codex Available Models'),
+    help_text=_('Cached model ids available to the OpenAI Codex device-login provider.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    hidden=True,
+)
+
+register(
+    'AI_MODEL_NAME',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('AI Model Name'),
+    help_text=_(
+        'The model to use for completions (e.g. gpt-4o, gpt-4-turbo, gemini-1.5-pro). '
+        'Leave blank to use the provider default. For Azure OpenAI this is the deployment name.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+    placeholder='gpt-4o',
+)
+
+register(
+    'AI_SYSTEM_PROMPT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default=(
+        'You are an AWX automation assistant. Help users understand and manage their '
+        'Ansible Automation Platform resources, including job templates, inventories, '
+        'credentials, workflows, Terraform templates, and catalog items. '
+        'Be concise and provide actionable guidance.'
+    ),
+    label=_('AI System Prompt'),
+    help_text=_('The system prompt sent to the AI model on every conversation. Customize to reflect your organisation context.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_MAX_TOKENS',
+    field_class=fields.IntegerField,
+    min_value=256,
+    max_value=32768,
+    default=2048,
+    label=_('AI Max Tokens'),
+    help_text=_('Maximum number of tokens the AI model may generate in a single response.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'AI_RATE_LIMIT_PER_MINUTE',
+    field_class=fields.IntegerField,
+    min_value=1,
+    max_value=600,
+    default=20,
+    label=_('AI Rate Limit (requests per minute per user)'),
+    help_text=_('Maximum number of AI chat requests a single user may make per minute. Prevents runaway API usage.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'MCP_POLICY_CONTEXT',
+    field_class=fields.CharField,
+    allow_blank=True,
+    default='',
+    label=_('MCP Policy Context'),
+    help_text=_(
+        'Optional organisation policies and best-practice notes exposed to MCP clients. '
+        'Separate documents with blank lines; matching sections are returned with MCP tool responses '
+        'and included in OPA guardrail input for MCP launches.'
+    ),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)
+
+register(
+    'MCP_POLICY_VECTOR_DIMENSIONS',
+    field_class=fields.IntegerField,
+    default=64,
+    min_value=16,
+    label=_('MCP Policy Vector Dimensions'),
+    help_text=_('Number of dimensions used by the local hash-vector policy context index.'),
+    category=_('AI Assistant'),
+    category_slug='ai-assistant',
+)

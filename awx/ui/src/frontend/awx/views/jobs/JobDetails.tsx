@@ -169,7 +169,9 @@ export function JobDetails() {
       />
       <PageDetailCodeEditor
         label={t('Artifacts')}
-        helpText={t('Artifacts produced by this job. Workflow jobs combine artifacts from child jobs that emitted them.')}
+        helpText={t(
+          'Artifacts produced by this job. Workflow jobs combine artifacts from child jobs that emitted them.'
+        )}
         showCopyToClipboard
         value={artifactsValue}
       />

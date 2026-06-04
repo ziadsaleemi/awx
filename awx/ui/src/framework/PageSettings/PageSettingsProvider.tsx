@@ -22,10 +22,16 @@ export interface IPageSettings {
   dataEditorFormat?: 'yaml' | 'json';
 }
 
+type PageSettingsRemoteSave = (settings: IPageSettings) => void | Promise<void>;
+
 type PageSettingsContextValue = [
   IPageSettings,
   (settings: IPageSettings) => void,
-  (userId: string | null) => void,
+  (
+    userId: string | null,
+    serverSettings?: IPageSettings,
+    saveSettings?: PageSettingsRemoteSave
+  ) => void,
 ];
 
 export const PageSettingsContext = createContext<PageSettingsContextValue>([
@@ -47,7 +53,11 @@ export function usePageSettingsSwitchUser() {
 
 const DEFAULT_STORAGE_KEY = 'user-preferences';
 
-function loadSettings(key: string, defaultRefreshInterval: number): IPageSettings {
+function loadSettings(
+  key: string,
+  defaultRefreshInterval: number,
+  serverSettings?: IPageSettings
+): IPageSettings {
   let stored: IPageSettings = {};
   try {
     const raw = localStorage.getItem(key);
@@ -64,6 +74,7 @@ function loadSettings(key: string, defaultRefreshInterval: number): IPageSetting
     dateFormat: 'date-time',
     dataEditorFormat: 'yaml',
     ...stored,
+    ...serverSettings,
   };
 }
 
@@ -72,23 +83,27 @@ export function PageSettingsProvider(props: {
   defaultRefreshInterval: number;
 }) {
   const storageKeyRef = useRef<string>(DEFAULT_STORAGE_KEY);
+  const saveSettingsRef = useRef<PageSettingsRemoteSave | undefined>(undefined);
   const [settings, setSettingsState] = useState<IPageSettings>(() =>
     loadSettings(DEFAULT_STORAGE_KEY, props.defaultRefreshInterval)
   );
 
-  const setSettings = useCallback(
-    (settings: IPageSettings) => {
-      localStorage.setItem(storageKeyRef.current, JSON.stringify(settings));
-      setSettingsState(settings);
-    },
-    []
-  );
+  const setSettings = useCallback((settings: IPageSettings) => {
+    localStorage.setItem(storageKeyRef.current, JSON.stringify(settings));
+    setSettingsState(settings);
+    void Promise.resolve(saveSettingsRef.current?.(settings)).catch(() => undefined);
+  }, []);
 
   const switchUser = useCallback(
-    (userId: string | null) => {
+    (
+      userId: string | null,
+      serverSettings?: IPageSettings,
+      saveSettings?: PageSettingsRemoteSave
+    ) => {
       const key = userId ? `user-preferences-${userId}` : DEFAULT_STORAGE_KEY;
       storageKeyRef.current = key;
-      setSettingsState(loadSettings(key, props.defaultRefreshInterval));
+      saveSettingsRef.current = saveSettings;
+      setSettingsState(loadSettings(key, props.defaultRefreshInterval, serverSettings));
     },
     [props.defaultRefreshInterval]
   );

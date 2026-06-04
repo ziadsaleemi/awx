@@ -6,21 +6,37 @@ import '@patternfly/patternfly/patternfly-charts-theme-dark.css';
 
 import { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { PageFramework, usePageSettingsSwitchUser } from '../../../framework';
+import { IPageSettings, PageFramework, usePageSettingsSwitchUser } from '../../../framework';
+import { requestPatch } from '../../common/crud/Data';
 import '../../common/i18n';
 import { AwxActiveUserProvider } from '../common/useAwxActiveUser';
 import { useAwxActiveUser } from '../common/useAwxActiveUser';
+import { AwxUser } from '../interfaces/User';
 import { AwxApp } from './AwxApp';
 import { AwxLogin } from './AwxLogin';
+import { awxAPI } from '../common/api/awx-utils';
 
 /** Syncs user-specific settings when the logged-in user changes. */
 function AwxUserSettingsSync() {
-  const { activeAwxUser } = useAwxActiveUser();
+  const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
   const switchUser = usePageSettingsSwitchUser();
   useEffect(() => {
     if (activeAwxUser === undefined) return; // still loading
-    switchUser(activeAwxUser ? String(activeAwxUser.id) : null);
-  }, [activeAwxUser, switchUser]);
+    if (!activeAwxUser) {
+      switchUser(null);
+      return;
+    }
+    switchUser(
+      String(activeAwxUser.id),
+      activeAwxUser.ui_preferences,
+      async (settings: IPageSettings) => {
+        await requestPatch<AwxUser, { ui_preferences: IPageSettings }>(awxAPI`/me/`, {
+          ui_preferences: settings,
+        });
+        refreshActiveAwxUser?.();
+      }
+    );
+  }, [activeAwxUser, refreshActiveAwxUser, switchUser]);
   return null;
 }
 

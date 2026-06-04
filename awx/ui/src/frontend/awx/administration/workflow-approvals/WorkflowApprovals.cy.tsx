@@ -1,6 +1,31 @@
+import { AwxRoute } from '../../main/AwxRoutes';
+import {
+  getWorkflowApprovalNotificationUrl,
+  type GetPageUrl,
+} from '../../main/workflowApprovalNotification';
 import { WorkflowApprovals } from './WorkflowApprovals';
 
 describe('Workflow Approvals List', () => {
+  it('Routes notification approval items to the central approvals list', () => {
+    const calls: { id: string; options: Parameters<GetPageUrl>[1] }[] = [];
+    const getPageUrl: GetPageUrl = (id, options) => {
+      calls.push({ id, options });
+      return '/workflow-approvals?id=141&status=pending';
+    };
+
+    const url = getWorkflowApprovalNotificationUrl(getPageUrl, {
+      id: 141,
+    } as Parameters<typeof getWorkflowApprovalNotificationUrl>[1]);
+
+    expect(url).to.equal('/workflow-approvals?id=141&status=pending');
+    expect(calls).to.deep.equal([
+      {
+        id: AwxRoute.WorkflowApprovals,
+        options: { query: { id: '141', status: 'pending' } },
+      },
+    ]);
+  });
+
   describe('Empty list', () => {
     beforeEach(() => {
       cy.intercept(
@@ -40,7 +65,7 @@ describe('Workflow Approvals List', () => {
       cy.get('tbody').find('tr').should('have.length', 6);
     });
 
-    it('Workflow approvals list has filters for Name and ID', () => {
+    it('Workflow approvals list has filters for Name, ID, and Status', () => {
       cy.intercept(
         { method: 'OPTIONS', url: '/api/v2/workflow_approvals/' },
         { fixture: 'mock_options.json' }
@@ -49,6 +74,7 @@ describe('Workflow Approvals List', () => {
       cy.openToolbarFilterTypeSelect().within(() => {
         cy.contains(/^Name$/).should('be.visible');
         cy.contains(/^ID$/).should('be.visible');
+        cy.contains(/^Status$/).should('be.visible');
       });
     });
 

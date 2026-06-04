@@ -15,6 +15,8 @@ export interface CatalogItem {
   provision_workflow: number | null;
   terraform_job_template: number | null;
   deprovision_workflow: number | null;
+  configure_workflow: number | null;
+  validate_workflow: number | null;
   override_workflow_limit: boolean;
   browse_enabled: boolean;
   extra_vars_schema: Record<string, unknown> | null;
@@ -22,6 +24,10 @@ export interface CatalogItem {
   provider_workflows: Record<string, number> | null;
   provider_deprovision_workflows: Record<string, number> | null;
   available_providers: string[] | null;
+  /** Default lease duration in minutes for new deployments (null = no default). */
+  default_lease_minutes?: number | null;
+  /** When true, deployers must supply a TTL; deployments without one are rejected. */
+  require_lease?: boolean;
   provider_field_configs: Record<
     string,
     {
@@ -56,6 +62,8 @@ export interface CatalogItem {
     provision_workflow?: { id: number; name: string };
     terraform_job_template?: { id: number; name: string };
     deprovision_workflow?: { id: number; name: string };
+    configure_workflow?: { id: number; name: string };
+    validate_workflow?: { id: number; name: string };
     user_capabilities: {
       edit: boolean;
       delete: boolean;
@@ -69,6 +77,8 @@ export interface CatalogItem {
     provision_workflow?: string;
     terraform_job_template?: string;
     deprovision_workflow?: string;
+    configure_workflow?: string;
+    validate_workflow?: string;
     provider_workflow_surveys?: Record<string, string>;
   };
 }

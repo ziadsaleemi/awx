@@ -1,7 +1,14 @@
+from datetime import timedelta
+
 import pytest
 
+from ansible_base.rbac.models import RoleDefinition, RoleUserAssignment
+from django.utils.timezone import now
+
 from awx.api.versioning import reverse
-from awx.main.models import CatalogDeployment, CatalogItem, Organization, WorkflowJob, WorkflowJobTemplate
+from awx.main.access import CatalogItemAccess
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, CloudProviderState, Organization, User, WorkflowJob, WorkflowJobTemplate
+from awx.main.models.terraform import TerraformJobTemplate
 
 
 @pytest.mark.django_db
@@ -127,6 +134,270 @@ def test_catalog_item_deploy_survey_requires_use_permission(get, workflow_job_te
 
 
 @pytest.mark.django_db
+def test_catalog_item_direct_use_role_grants_endpoint_access_and_syncs_rbac(get, workflow_job_template, organization, rando, setup_managed_roles):
+    item = CatalogItem.objects.create(
+        name='Direct Use Role VM',
+        organization=organization,
+        provision_workflow=workflow_job_template,
+    )
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=403)
+    assert not CatalogItemAccess(rando).can_use(item)
+
+    item.use_role.members.add(rando)
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk}), rando, expect=200)
+    assert CatalogItemAccess(rando).can_use(item)
+
+    role_definition = RoleDefinition.objects.get(name='CatalogItem Use')
+    assert RoleUserAssignment.objects.filter(
+        user=rando,
+        role_definition=role_definition,
+        object_id=item.pk,
+    ).exists()
+    assert ActivityStream.objects.filter(
+        catalog_item=item,
+        role=item.use_role,
+        user=rando,
+        operation='associate',
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_item_list_is_scoped_to_org_admin(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
+    CatalogItem.objects.create(name='Other Org VM', organization=other_org)
+
+    response = get(reverse('api:catalog_item_list'), org_admin, expect=200)
+
+    item_ids = {item['id'] for item in response.data['results']}
+    assert own_item.pk in item_ids
+    assert not CatalogItem.objects.filter(pk__in=item_ids, organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_default_catalog_user_signal_does_not_cross_org_boundaries(organization):
+    other_org = Organization.objects.create(name='other-org')
+
+    user = User.objects.create(username='new-multi-org-user')
+
+    assert user not in organization.member_role
+    assert user not in other_org.member_role
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_list_is_scoped_to_org_admin(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
+    other_item = CatalogItem.objects.create(name='Other Org VM', organization=other_org)
+    own_deployment = CatalogDeployment.objects.create(
+        name='own-deployment',
+        catalog_item=own_item,
+        owner=org_admin,
+        status='active',
+    )
+    CatalogDeployment.objects.create(
+        name='other-deployment',
+        catalog_item=other_item,
+        owner=org_admin,
+        status='active',
+    )
+
+    response = get(reverse('api:catalog_deployment_list'), org_admin, expect=200)
+
+    deployment_ids = {deployment['id'] for deployment in response.data['results']}
+    assert own_deployment.pk in deployment_ids
+    assert not CatalogDeployment.objects.filter(pk__in=deployment_ids, catalog_item__organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_rejects_cross_org_provider_tft(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_tft = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated DigitalOcean VM',
+        organization=organization,
+        cloud_backends={'digitalocean': foreign_tft.pk},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'target_provider': 'digitalocean'},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'cloud_backends' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_item_deploy_rejects_cross_org_provider_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Workflow', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Workflow VM',
+        organization=organization,
+        provider_workflows={'digitalocean': foreign_workflow.pk},
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'target_provider': 'digitalocean'},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provider_workflows' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_deprovision_rejects_cross_org_provider_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Deprovision', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Deprovision VM',
+        organization=organization,
+        provider_deprovision_workflows={'digitalocean': foreign_workflow.pk},
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='isolated-vm',
+        catalog_item=item,
+        owner=org_admin,
+        status='active',
+        target_provider='digitalocean',
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_deprovision', kwargs={'pk': deployment.pk}),
+        {},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provider_deprovision_workflows' in response.data
+    deployment.refresh_from_db()
+    assert deployment.status == 'active'
+    assert deployment.deprovision_job_id is None
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_retry_rejects_cross_org_tft(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_tft = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Retry VM',
+        organization=organization,
+        terraform_job_template=foreign_tft,
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='retry-vm',
+        catalog_item=item,
+        owner=org_admin,
+        status='failed',
+        extra_vars={},
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_retry', kwargs={'pk': deployment.pk}),
+        {},
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
+    deployment.refresh_from_db()
+    assert deployment.status == 'failed'
+    assert deployment.terraform_provision_job_id is None
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_allows_owner(post, org_auditor, organization):
+    item = CatalogItem.objects.create(name='Cancelable Owner VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='owner-cancel-vm',
+        catalog_item=item,
+        owner=org_auditor,
+        status='provisioning',
+    )
+
+    response = post(
+        reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}),
+        {},
+        org_auditor,
+        expect=200,
+    )
+
+    deployment.refresh_from_db()
+    assert response.data['status'] == 'failed'
+    assert deployment.status == 'failed'
+    assert deployment.provisioning_history[-1]['action'] == 'cancel'
+    assert deployment.provisioning_history[-1]['details']['canceled_by'] == org_auditor.username
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_allows_org_admin(post, org_admin, rando, organization):
+    item = CatalogItem.objects.create(name='Cancelable Admin VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='admin-cancel-vm',
+        catalog_item=item,
+        owner=rando,
+        status='deprovisioning',
+    )
+
+    response = post(reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}), {}, org_admin, expect=200)
+
+    deployment.refresh_from_db()
+    assert response.data['status'] == 'active'
+    assert deployment.status == 'active'
+    assert deployment.provisioning_history[-1]['details']['canceled_by'] == org_admin.username
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_rejects_foreign_org_admin(post, org_admin, rando):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_item = CatalogItem.objects.create(name='Foreign Cancel VM', organization=other_org)
+    deployment = CatalogDeployment.objects.create(
+        name='foreign-cancel-vm',
+        catalog_item=foreign_item,
+        owner=rando,
+        status='provisioning',
+    )
+
+    post(reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}), {}, org_admin, expect=403)
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'provisioning'
+    assert deployment.provisioning_history == []
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_cancel_rejects_forged_catalog_item_permission(post, org_admin, rando, organization):
+    other_org = Organization.objects.create(name='other-forged-org')
+    accessible_item = CatalogItem.objects.create(name='Accessible Cancel VM', organization=organization)
+    inaccessible_item = CatalogItem.objects.create(name='Inaccessible Cancel VM', organization=other_org)
+    deployment = CatalogDeployment.objects.create(
+        name='forged-cancel-vm',
+        catalog_item=inaccessible_item,
+        owner=rando,
+        status='provisioning',
+    )
+
+    post(
+        reverse('api:catalog_deployment_cancel', kwargs={'pk': deployment.pk}),
+        {'catalog_item': accessible_item.pk},
+        org_admin,
+        expect=403,
+    )
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'provisioning'
+    assert deployment.provisioning_history == []
+
+
+@pytest.mark.django_db
 def test_catalog_item_edit_persists_organization(patch, admin_user, organization, workflow_job_template):
     item = CatalogItem.objects.create(
         name='Org VM',
@@ -157,6 +428,297 @@ def test_catalog_item_edit_persists_organization(patch, admin_user, organization
     assert item.dynamic_field_templates == {'vmnam': '{vm_name}-{env}'}
     assert item.deploy_disabled_fields == ['vmnam']
     assert item.deploy_hidden_fields == ['vmnam']
+
+
+@pytest.mark.django_db
+def test_marketplace_templates_use_org_scoped_provider_state(get, org_admin, organization):
+    other_org = Organization.objects.create(name='other-marketplace-org')
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data={
+            'images': [
+                {
+                    'id': 303,
+                    'name': 'Team Ubuntu 24.04 x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3', 'sfo3'],
+                },
+                {
+                    'id': 404,
+                    'name': 'Denied Fedora x64',
+                    'distribution': 'Fedora',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                },
+            ]
+        },
+        admin_settings={'allowedImageIds': [303], 'allowedRegionSlugs': ['nyc3']},
+    )
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=other_org,
+        provider_data={
+            'images': [
+                {
+                    'id': 505,
+                    'name': 'Foreign Ubuntu x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                }
+            ]
+        },
+        admin_settings={'allowedImageIds': [505], 'allowedRegionSlugs': ['nyc3']},
+    )
+
+    response = get(f"{reverse('api:marketplace_template_list')}?organization={organization.pk}", org_admin, expect=200)
+
+    assert response.data['count'] == 1
+    assert len(response.data['providers']) == 1
+    provider = response.data['providers'][0]
+    assert provider['id'] == 'digitalocean'
+    assert provider['source'] == 'cloud_provider_state'
+    template = provider['templates'][0]
+    assert template['id'] == 'digitalocean-image-303'
+    assert template['name'] == 'Team Ubuntu 24.04 x64'
+    assert template['region'] == 'nyc3'
+    assert template['metadata']['id'] == 303
+    assert template['organization'] == organization.pk
+    assert {entry['id'] for entry in provider['templates']} == {'digitalocean-image-303'}
+
+
+@pytest.mark.django_db
+def test_marketplace_templates_reject_foreign_organization(get, org_admin):
+    other_org = Organization.objects.create(name='foreign-marketplace-org')
+
+    response = get(f"{reverse('api:marketplace_template_list')}?organization={other_org.pk}", org_admin, expect=403)
+
+    assert 'organization' in response.data
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_creates_org_scoped_catalog_item(post, org_admin, organization):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'name': 'Team Ubuntu VM',
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.name == 'Team Ubuntu VM'
+    assert item.organization_id == organization.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_accepts_provider_state_template(post, org_admin, organization):
+    CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data={
+            'images': [
+                {
+                    'id': 303,
+                    'name': 'Team Ubuntu 24.04 x64',
+                    'distribution': 'Ubuntu',
+                    'type': 'snapshot',
+                    'min_disk_size': 25,
+                    'regions': ['nyc3'],
+                }
+            ]
+        },
+        admin_settings={'allowedImageIds': [303], 'allowedRegionSlugs': ['nyc3']},
+    )
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'digitalocean-image-303',
+            'organization': organization.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.name == 'Team Ubuntu 24.04 x64'
+    assert item.description == 'Ubuntu droplet image pulled from DigitalOcean.'
+    assert item.organization_id == organization.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_wires_terraform_template(post, org_admin, organization, terraform_job_template):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': terraform_job_template.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.terraform_job_template_id == terraform_job_template.pk
+    assert item.provision_workflow_id is None
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': terraform_job_template.pk}
+    assert item.provider_workflows is None
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_wires_workflow_mappings(post, org_admin, organization):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Provision', organization=organization)
+    deprovision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Deprovision', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Configure', organization=organization)
+    validate_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Validate', organization=organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'provision_workflow': provision_workflow.pk,
+            'deprovision_workflow': deprovision_workflow.pk,
+            'configure_workflow': configure_workflow.pk,
+            'validate_workflow': validate_workflow.pk,
+        },
+        org_admin,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.provision_workflow_id == provision_workflow.pk
+    assert item.deprovision_workflow_id == deprovision_workflow.pk
+    assert item.configure_workflow_id == configure_workflow.pk
+    assert item.validate_workflow_id == validate_workflow.pk
+    assert item.available_providers == ['digitalocean']
+    assert item.cloud_backends == {'digitalocean': None}
+    assert item.provider_workflows == {'digitalocean': provision_workflow.pk}
+    assert item.provider_deprovision_workflows == {'digitalocean': deprovision_workflow.pk}
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_foreign_organization(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': other_org.pk,
+        },
+        org_admin,
+        expect=403,
+    )
+
+    assert 'organization' in response.data
+    assert not CatalogItem.objects.filter(organization=other_org, name='Ubuntu 22.04 LTS (x64)').exists()
+    assert not CatalogItem.objects.filter(organization__isnull=True, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_cross_org_workflow(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Other Org Marketplace Workflow', organization=other_org)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'provision_workflow': foreign_workflow.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'provision_workflow' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_cross_org_terraform_template(post, org_admin, organization):
+    other_org = Organization.objects.create(name='other-org')
+    foreign_template = TerraformJobTemplate.objects.create(name='Other Org Terraform', organization=other_org)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': foreign_template.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_ambiguous_provision_targets(
+    post,
+    org_admin,
+    organization,
+    terraform_job_template,
+):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='DigitalOcean Provision', organization=organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'terraform_job_template': terraform_job_template.pk,
+            'provision_workflow': provision_workflow.pk,
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'terraform_job_template' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_marketplace_ingest_rejects_non_admin(post, rando, organization):
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+        },
+        rando,
+        expect=403,
+    )
+
+    assert 'organization' in response.data
+    assert not CatalogItem.objects.filter(name='Ubuntu 22.04 LTS (x64)').exists()
 
 
 @pytest.mark.django_db
@@ -277,6 +839,169 @@ def test_catalog_deployment_uses_first_dynamic_field_when_template_empty(post, a
 
 
 @pytest.mark.django_db
+def test_catalog_deployment_persists_lease_fields(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Leased VM',
+        organization=organization,
+    )
+    expires_at = (now() + timedelta(hours=2)).isoformat()
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'leased-vm-01', 'expires_at': expires_at, 'auto_deprovision': True},
+        admin_user,
+        expect=201,
+    )
+
+    deployment = CatalogDeployment.objects.get(pk=response.data['id'])
+    assert deployment.expires_at is not None
+    assert deployment.expires_at > now()
+    assert deployment.auto_deprovision is True
+    assert response.data['auto_deprovision'] is True
+    assert response.data['time_remaining_seconds'] > 0
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_requires_lease_when_item_requires_it(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Required Lease VM',
+        organization=organization,
+        require_lease=True,
+    )
+
+    response = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'required-lease-vm-01', 'extra_vars': {}},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'expires_at' in response.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_deployment_rejects_invalid_lease_fields(post, admin_user, organization):
+    item = CatalogItem.objects.create(
+        name='Invalid Lease VM',
+        organization=organization,
+    )
+
+    invalid_expiry = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'invalid-lease-vm-01', 'expires_at': 'not-a-date'},
+        admin_user,
+        expect=400,
+    )
+    missing_expiry = post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': item.pk}),
+        {'name': 'missing-expiry-vm-01', 'auto_deprovision': True},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'expires_at' in invalid_expiry.data
+    assert 'auto_deprovision' in missing_expiry.data
+    assert not CatalogDeployment.objects.filter(catalog_item=item).exists()
+
+
+@pytest.mark.django_db
+def test_expire_catalog_deployments_marks_non_auto_lease_expired(admin_user, organization):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    item = CatalogItem.objects.create(name='Manual Expiry VM', organization=organization)
+    deployment = CatalogDeployment.objects.create(
+        name='manual-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=False,
+    )
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'expired'
+    assert deployment.deprovision_job_id is None
+    assert deployment.provisioning_history[-1]['action'] == 'expire'
+    assert deployment.provisioning_history[-1]['status'] == 'expired'
+
+
+@pytest.mark.django_db
+def test_expire_catalog_deployments_auto_deprovision_uses_saved_vars(mocker, admin_user, organization, workflow_job_template):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    workflow_job_template.organization = organization
+    workflow_job_template.save(update_fields=['organization'])
+    item = CatalogItem.objects.create(
+        name='Auto Expiry VM',
+        organization=organization,
+        deprovision_workflow=workflow_job_template,
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='auto-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        extra_vars={'vm_id': 'vm-123'},
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=True,
+    )
+    launched_job = workflow_job_template.create_unified_job()
+    captured_kwargs = {}
+
+    def fake_create_unified_job(**kwargs):
+        captured_kwargs.update(kwargs)
+        return launched_job
+
+    mocker.patch.object(WorkflowJobTemplate, 'create_unified_job', side_effect=fake_create_unified_job)
+    mocker.patch.object(launched_job, 'signal_start', return_value=None)
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'deprovisioning'
+    assert deployment.deprovision_job_id == launched_job.pk
+    assert captured_kwargs['extra_vars']['vm_id'] == 'vm-123'
+    assert captured_kwargs['extra_vars']['catalog_deployment_id'] == deployment.pk
+    assert deployment.last_deprovision_vars == captured_kwargs['extra_vars']
+    assert deployment.provisioning_history[-1]['action'] == 'auto_expire_deprovision'
+
+
+@pytest.mark.django_db
+def test_expire_catalog_deployments_rejects_cross_org_provider_deprovision_workflow(mocker, admin_user, organization):
+    from awx.main.tasks.system import expire_catalog_deployments
+
+    other_org = Organization.objects.create(name='other-expiry-org')
+    foreign_workflow = WorkflowJobTemplate.objects.create(name='Foreign Expiry Deprovision', organization=other_org)
+    item = CatalogItem.objects.create(
+        name='Isolated Auto Expiry VM',
+        organization=organization,
+        provider_deprovision_workflows={'digitalocean': foreign_workflow.pk},
+    )
+    deployment = CatalogDeployment.objects.create(
+        name='isolated-auto-expiry-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='active',
+        target_provider='digitalocean',
+        expires_at=now() - timedelta(minutes=5),
+        auto_deprovision=True,
+    )
+    create_job = mocker.patch.object(WorkflowJobTemplate, 'create_unified_job')
+
+    expire_catalog_deployments()
+
+    deployment.refresh_from_db()
+    create_job.assert_not_called()
+    assert deployment.status == 'expired'
+    assert deployment.deprovision_job_id is None
+    assert deployment.provisioning_history[-1]['action'] == 'expire'
+    assert deployment.provisioning_history[-1]['details']['reason'] == 'provider_deprovision_workflows'
+
+
+@pytest.mark.django_db
 def test_catalog_deployment_persists_effective_workflow_extra_vars(post, mocker, admin_user, organization, workflow_job_template):
     item = CatalogItem.objects.create(
         name='Persist Effective Vars',
@@ -285,11 +1010,7 @@ def test_catalog_deployment_persists_effective_workflow_extra_vars(post, mocker,
     )
 
     launched_job = workflow_job_template.create_unified_job()
-    launched_job.extra_vars = (
-        '{"vm_name": "awx-apache-vm-01", '
-        '"proxmox_template_name": "ubuntu-24-04-cloud-template-qga", '
-        '"cpu": 2, "ram": 2048}'
-    )
+    launched_job.extra_vars = '{"vm_name": "awx-apache-vm-01", ' '"proxmox_template_name": "ubuntu-24-04-cloud-template-qga", ' '"cpu": 2, "ram": 2048}'
 
     def fake_create_unified_job(**kwargs):
         return launched_job
@@ -405,3 +1126,112 @@ def test_catalog_deprovision_passes_saved_vars(post, mocker, admin_user, organiz
     assert deployment.last_deprovision_vars.get('vm_name') == 'test-vm'
     assert deployment.provisioning_history
     assert deployment.provisioning_history[-1]['action'] == 'deprovision'
+
+
+@pytest.mark.django_db
+def test_catalog_lifecycle_runs_configure_and_validate_after_workflow_success(mocker, admin_user, organization):
+    provision_workflow = WorkflowJobTemplate.objects.create(name='Provision lifecycle VM', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(
+        name='Configure lifecycle VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    validate_workflow = WorkflowJobTemplate.objects.create(
+        name='Validate lifecycle VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    item = CatalogItem.objects.create(
+        name='Lifecycle VM',
+        organization=organization,
+        provision_workflow=provision_workflow,
+        configure_workflow=configure_workflow,
+        validate_workflow=validate_workflow,
+    )
+    provision_job = provision_workflow.create_unified_job()
+    deployment = CatalogDeployment.objects.create(
+        name='lifecycle-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='provisioning',
+        provision_job=provision_job,
+        extra_vars={'vm_name': 'lifecycle-vm-01'},
+    )
+    deployment.append_history_entry('provision', job=provision_job, status='running')
+    deployment.save(update_fields=['provisioning_history'])
+
+    signal_start = mocker.patch.object(WorkflowJob, 'signal_start', return_value=None)
+
+    provision_job.status = 'successful'
+    provision_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'configuring'
+    assert deployment.configure_job_id is not None
+    assert deployment.configure_job.extra_vars_dict['vm_name'] == 'lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'provision'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'configure'
+    assert deployment.provisioning_history[-1]['details']['saved_var_keys'] == ['vm_name']
+    assert signal_start.call_count == 1
+
+    deployment.configure_job.status = 'successful'
+    deployment.configure_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'validating'
+    assert deployment.validate_job_id is not None
+    assert deployment.validate_job.extra_vars_dict['vm_name'] == 'lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'configure'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'validate'
+    assert signal_start.call_count == 2
+
+    deployment.validate_job.status = 'successful'
+    deployment.validate_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'active'
+    assert deployment.provisioning_history[-1]['action'] == 'validate'
+    assert deployment.provisioning_history[-1]['status'] == 'successful'
+
+
+@pytest.mark.django_db
+def test_catalog_lifecycle_runs_configure_after_terraform_success(mocker, admin_user, organization):
+    terraform_template = TerraformJobTemplate.objects.create(name='Terraform lifecycle VM', organization=organization)
+    configure_workflow = WorkflowJobTemplate.objects.create(
+        name='Configure terraform VM',
+        organization=organization,
+        ask_variables_on_launch=True,
+    )
+    item = CatalogItem.objects.create(
+        name='Terraform lifecycle catalog item',
+        organization=organization,
+        terraform_job_template=terraform_template,
+        configure_workflow=configure_workflow,
+    )
+    terraform_job = terraform_template.create_unified_job()
+    deployment = CatalogDeployment.objects.create(
+        name='terraform-lifecycle-vm-01',
+        catalog_item=item,
+        owner=admin_user,
+        status='provisioning',
+        terraform_provision_job=terraform_job,
+        extra_vars={'vm_name': 'terraform-lifecycle-vm-01'},
+    )
+    deployment.append_history_entry('provision', job=terraform_job, status='running')
+    deployment.save(update_fields=['provisioning_history'])
+
+    signal_start = mocker.patch.object(WorkflowJob, 'signal_start', return_value=None)
+
+    terraform_job.status = 'successful'
+    terraform_job.save(update_fields=['status'])
+
+    deployment.refresh_from_db()
+    assert deployment.status == 'configuring'
+    assert deployment.configure_job_id is not None
+    assert deployment.configure_job.extra_vars_dict['vm_name'] == 'terraform-lifecycle-vm-01'
+    assert deployment.provisioning_history[-2]['action'] == 'provision'
+    assert deployment.provisioning_history[-2]['status'] == 'successful'
+    assert deployment.provisioning_history[-1]['action'] == 'configure'
+    assert signal_start.call_count == 1

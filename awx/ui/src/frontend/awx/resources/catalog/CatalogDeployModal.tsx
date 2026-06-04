@@ -64,11 +64,11 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
   const { data: deploymentList } = useGet<CatalogDeploymentListResponse>(item.related.deployments);
 
   const schema = useMemo(
-    () => (surveyData?.schema ?? (item.extra_vars_schema ?? {})) as JsonSchema,
+    () => (surveyData?.schema ?? item.extra_vars_schema ?? {}) as JsonSchema,
     [item.extra_vars_schema, surveyData?.schema]
   );
-  const properties = schema.properties ?? {};
-  const requiredSet = new Set<string>(schema.required ?? []);
+  const properties = useMemo(() => schema.properties ?? {}, [schema.properties]);
+  const requiredSet = useMemo(() => new Set<string>(schema.required ?? []), [schema.required]);
 
   const initialFormValues = useMemo((): Record<string, string> => {
     const vals: Record<string, string> = {};
@@ -107,14 +107,22 @@ export function CatalogDeployModal({ item, onClose }: CatalogDeployModalProps) {
   const generatedName = useMemo(() => {
     const existingNames = deploymentList?.results?.map((deployment) => deployment.name) ?? [];
     const dynamicField = dynamicFieldNames[0];
-    const effectiveTemplate = item.name_template || (dynamicField ? `{${dynamicField}} deployment` : undefined);
+    const effectiveTemplate =
+      item.name_template || (dynamicField ? `{${dynamicField}} deployment` : undefined);
     return generateCatalogName(
       effectiveTemplate,
       { user_org_name: item.summary_fields?.organization?.name, ...formValues },
       existingNames,
       item.name
     );
-  }, [deploymentList?.results, dynamicFieldNames, formValues, item.name, item.name_template, item.summary_fields?.organization?.name]);
+  }, [
+    deploymentList?.results,
+    dynamicFieldNames,
+    formValues,
+    item.name,
+    item.name_template,
+    item.summary_fields?.organization?.name,
+  ]);
 
   useEffect(() => {
     setFormValues(initialFormValues);

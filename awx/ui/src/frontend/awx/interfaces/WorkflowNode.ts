@@ -1,6 +1,18 @@
 import { ExecutionEnvironment } from './ExecutionEnvironment';
 import { SummaryFieldInventory } from './summary-fields/summary-fields';
 
+export type WorkflowNodeType =
+  | 'template'
+  | 'job'
+  | 'workflow_job'
+  | 'project_update'
+  | 'workflow_approval'
+  | 'inventory_update'
+  | 'system_job'
+  | 'terraform_job'
+  | 'eda_rulebook'
+  | 'ai_task';
+
 export interface WorkflowNode {
   id: number;
   type: string;
@@ -13,8 +25,11 @@ export interface WorkflowNode {
     success_nodes: string;
     failure_nodes: string;
     always_nodes: string;
-    unified_job_template: string;
+    unified_job_template?: string;
     workflow_job_template: string;
+    workflow_job?: string;
+    approval?: string;
+    apply_ai_plan?: string;
   };
   summary_fields: {
     job?: {
@@ -46,8 +61,24 @@ export interface WorkflowNode {
         | 'project_update'
         | 'workflow_approval'
         | 'inventory_update'
-        | 'system_job';
+        | 'system_job'
+        | 'terraform_job'
+        | 'eda_rulebook'
+        | 'ai_task';
       timeout?: number;
+    };
+    eda_rulebook?: {
+      name: string;
+      activation_id?: string;
+      event_source?: string;
+      event_source_status?: string;
+      status?: string;
+    };
+    ai_task?: {
+      prompt: string;
+      model?: string;
+      approval_required?: boolean;
+      status?: string;
     };
     inventory: SummaryFieldInventory;
     execution_environment: ExecutionEnvironment;
@@ -71,7 +102,31 @@ export interface WorkflowNode {
   job_slice_count: null;
   timeout: number | null;
   workflow_job_template: number;
-  unified_job_template: number;
+  unified_job_template: number | null;
+  node_type: WorkflowNodeType;
+  eda_rulebook_name: string;
+  eda_activation_id: string;
+  eda_event_source: string;
+  eda_event_source_status: string;
+  ai_task_prompt: string;
+  ai_task_model: string;
+  ai_task_approval_required: boolean;
+  ai_task_status: string;
+  ai_task_result: {
+    status?: string;
+    provider?: string;
+    model?: string;
+    response?: string;
+    plan?: object | null;
+    error?: string;
+    approval_required?: boolean;
+    resource_action?: {
+      mode?: string;
+      can_apply?: boolean;
+      operations?: object[];
+      audit?: { activity_stream_id?: number };
+    };
+  };
   success_nodes: number[];
   failure_nodes: number[];
   always_nodes: number[];

@@ -77,6 +77,7 @@ from awx.main.models import (
     CatalogItem,
     CatalogDeployment,
 )
+from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
 from awx.main.models.mixins import ResourceMixin
 
 __all__ = [
@@ -835,6 +836,10 @@ class InventoryAccess(BaseAccess):
     """
 
     model = Inventory
+    select_related = (
+        'default_machine_credential',
+        'default_machine_credential__credential_type',
+    )
     prefetch_related = (
         'created_by',
         'modified_by',
@@ -851,7 +856,9 @@ class InventoryAccess(BaseAccess):
         # If no data is specified, just checking for generic add permission?
         if not data:
             return Organization.access_qs(self.user, 'add_inventory').exists()
-        return self.check_related('organization', Organization, data, role_field='inventory_admin_role')
+        return self.check_related('organization', Organization, data, role_field='inventory_admin_role') and self.check_related(
+            'default_machine_credential', Credential, data, role_field='use_role'
+        )
 
     @check_superuser
     def can_change(self, obj, data):
@@ -869,6 +876,7 @@ class InventoryAccess(BaseAccess):
         return (
             self.check_related('organization', Organization, data, obj=obj, role_field='inventory_admin_role', mandatory=org_admin_mandatory)
             and self.user in obj.admin_role
+            and self.check_related('default_machine_credential', Credential, data, obj=obj, role_field='use_role')
         )
 
     @check_superuser
@@ -1890,7 +1898,29 @@ class CatalogItemAccess(BaseAccess):
             Q(admin_role__members=self.user)
             | Q(use_role__members=self.user)
             | Q(read_role__members=self.user)
+            | Q(organization__admin_role__members=self.user)
+            | Q(organization__auditor_role__members=self.user)
         ).distinct()
+
+    def _has_direct_item_role(self, obj, role_name):
+        role = getattr(obj, role_name, None)
+        return bool(role and role.members.filter(pk=self.user.pk).exists())
+
+    def _has_org_role(self, obj, role_name):
+        if obj.organization_id is None:
+            return False
+        role = getattr(obj.organization, role_name, None)
+        return bool(role and role.members.filter(pk=self.user.pk).exists())
+
+    def _can_admin_item(self, obj):
+        return self.user.is_superuser or self._has_direct_item_role(obj, 'admin_role') or self._has_org_role(obj, 'admin_role')
+
+    def _can_use_item(self, obj):
+        return (
+            self.user.is_superuser
+            or self._has_direct_item_role(obj, 'use_role')
+            or self._has_org_role(obj, 'admin_role')
+        )
 
     @check_superuser
     def can_add(self, data):
@@ -1899,22 +1929,112 @@ class CatalogItemAccess(BaseAccess):
         return self.check_related('organization', Organization, data, role_field='admin_role')
 
     def can_change(self, obj, data):
-        if self.user not in obj.admin_role and not self.user.is_superuser:
+        if not self._can_admin_item(obj):
             return False
         if data is None:
             return True
         return self.check_related('organization', Organization, data, obj=obj, role_field='admin_role', mandatory=False)
 
     def can_delete(self, obj):
-        return self.user.is_superuser or self.user in obj.admin_role
+        return self._can_admin_item(obj)
 
     def can_use(self, obj):
-        return self.user.is_superuser or self.user in obj.use_role
+        return self._can_use_item(obj)
 
     def get_user_capabilities(self, obj, **kwargs):
         user_capabilities = super().get_user_capabilities(obj, **kwargs)
         user_capabilities['use'] = self.can_use(obj)
         return user_capabilities
+
+
+class CloudProviderConnectionAccess(BaseAccess):
+    """
+    Org admins can create, read, update, and delete cloud provider connections
+    that belong to their organisation.  Superusers can manage all connections.
+    Global connections (organization=None) are visible only to superusers.
+    """
+
+    model = CloudProviderConnection
+    select_related = ('organization', 'credential')
+
+    def filtered_queryset(self):
+        if self.user.is_superuser:
+            return CloudProviderConnection.objects.all()
+        if self.user.is_system_auditor:
+            return CloudProviderConnection.objects.all()
+        admin_orgs = Organization.accessible_objects(self.user, 'admin_role')
+        return CloudProviderConnection.objects.filter(
+            organization__in=admin_orgs
+        ).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'admin_role').exists()
+        org_id = data.get('organization')
+        if not org_id:
+            return False
+        return (
+            Organization.accessible_objects(self.user, 'admin_role').filter(pk=org_id).exists()
+            and self.check_related('credential', Credential, data, role_field='use_role', mandatory=False)
+        )
+
+    def can_change(self, obj, data):
+        if self.user.is_superuser:
+            return True
+        if obj.organization_id is None:
+            return False
+        if not Organization.accessible_objects(self.user, 'admin_role').filter(pk=obj.organization_id).exists():
+            return False
+        if data is None:
+            return True
+        if 'organization' in data:
+            try:
+                org_id = int(data['organization'])
+            except (TypeError, ValueError):
+                return False
+            if org_id != obj.organization_id:
+                return False
+        return self.check_related('credential', Credential, data, obj=obj, role_field='use_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.can_change(obj, None)
+
+
+class CloudProviderStateAccess(BaseAccess):
+    """
+    Provider state is scoped the same way as cloud provider connections.
+    Organization admins can read and update state for orgs they administer.
+    Global provider state rows are system-only.
+    """
+
+    model = CloudProviderState
+    select_related = ('organization',)
+
+    def filtered_queryset(self):
+        if self.user.is_superuser or self.user.is_system_auditor:
+            return CloudProviderState.objects.all()
+        admin_orgs = Organization.accessible_objects(self.user, 'admin_role')
+        return CloudProviderState.objects.filter(organization__in=admin_orgs).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return Organization.accessible_objects(self.user, 'admin_role').exists()
+        org_id = data.get('organization')
+        if not org_id:
+            return False
+        return Organization.accessible_objects(self.user, 'admin_role').filter(pk=org_id).exists()
+
+    def can_change(self, obj, data):
+        if self.user.is_superuser:
+            return True
+        if obj.organization_id is None:
+            return False
+        return Organization.accessible_objects(self.user, 'admin_role').filter(pk=obj.organization_id).exists()
+
+    def can_delete(self, obj):
+        return self.user.is_superuser
 
 
 class CatalogDeploymentAccess(BaseAccess):
@@ -1928,9 +2048,12 @@ class CatalogDeploymentAccess(BaseAccess):
     def filtered_queryset(self):
         if self.user.is_superuser:
             return CatalogDeployment.objects.all()
-        admin_items = CatalogItem.objects.filter(admin_role__members=self.user).values_list('pk', flat=True)
+        admin_items = CatalogItem.objects.filter(
+            Q(admin_role__members=self.user) | Q(organization__admin_role__members=self.user)
+        ).values_list('pk', flat=True)
+        visible_items = CatalogItemAccess(self.user).filtered_queryset().values_list('pk', flat=True)
         return CatalogDeployment.objects.filter(
-            Q(owner=self.user) | Q(catalog_item__in=admin_items)
+            Q(catalog_item__in=admin_items) | Q(owner=self.user, catalog_item__in=visible_items)
         ).distinct()
 
     @check_superuser
@@ -1944,14 +2067,17 @@ class CatalogDeploymentAccess(BaseAccess):
             item = CatalogItem.objects.get(pk=item_id)
         except CatalogItem.DoesNotExist:
             return False
-        return self.user in item.use_role
+        return CatalogItemAccess(self.user).can_use(item)
 
     def can_change(self, obj, data):
         return False
 
     def can_delete(self, obj):
         return self.user.is_superuser or (
-            obj.owner == self.user and obj.status in ('destroyed', 'failed')
+            obj.owner == self.user
+            and obj.status in ('destroyed', 'failed')
+            and obj.catalog_item_id is not None
+            and CatalogItemAccess(self.user).can_read(obj.catalog_item)
         )
 
     def can_retry(self, obj):
@@ -1959,13 +2085,36 @@ class CatalogDeploymentAccess(BaseAccess):
             return False
         if self.user.is_superuser:
             return True
+        if obj.catalog_item_id is None or not CatalogItemAccess(self.user).can_read(obj.catalog_item):
+            return False
         if obj.owner_id == self.user.id:
             return True
-        return self.user in obj.catalog_item.admin_role
+        return CatalogItemAccess(self.user).can_change(obj.catalog_item, None)
+
+    def can_deprovision(self, obj):
+        if obj.catalog_item_id is None:
+            return False
+        if self.user.is_superuser:
+            return True
+        if not CatalogItemAccess(self.user).can_read(obj.catalog_item):
+            return False
+        if obj.owner_id == self.user.id:
+            return True
+        return CatalogItemAccess(self.user).can_change(obj.catalog_item, None)
+
+    def can_cancel(self, obj):
+        if obj.catalog_item_id is None:
+            return False
+        if not CatalogItemAccess(self.user).can_read(obj.catalog_item):
+            return False
+        if obj.owner_id == self.user.id:
+            return True
+        return CatalogItemAccess(self.user).can_change(obj.catalog_item, None)
 
     def get_user_capabilities(self, obj, **kwargs):
         user_capabilities = super().get_user_capabilities(obj, **kwargs)
         user_capabilities['retry'] = self.can_retry(obj)
+        user_capabilities['cancel'] = self.can_cancel(obj)
         return user_capabilities
 
 

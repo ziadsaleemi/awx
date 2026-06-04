@@ -13,11 +13,69 @@ from django.utils.timezone import now
 from ansible_base.lib.logging.runtime import log_excess_runtime
 
 # AWX
+from awx.main.constants import HOST_FACTS_FIELDS
+from awx.main.utils.common import parse_yaml_or_json
 from awx.main.utils.db import bulk_update_sorted_by_id
 from awx.main.models import Host
 
 logger = logging.getLogger('awx.main.tasks.facts')
 system_tracking_logger = logging.getLogger('awx.analytics.system_tracking')
+
+
+def sync_ansible_facts_to_host_variables(host, facts):
+    try:
+        variables = parse_yaml_or_json(host.variables or '{}', silent_failure=False)
+    except Exception as exc:
+        logger.warning(
+            f'Could not sync ansible_facts into host variables for host {smart_str(host.name)}: {exc}',
+            extra=dict(host_id=host.id, host_name=host.name),
+        )
+        return False
+
+    if facts:
+        variables['ansible_facts'] = facts
+    else:
+        variables.pop('ansible_facts', None)
+
+    new_variables = json.dumps(variables, indent=2, sort_keys=True) if variables else ''
+    if host.variables == new_variables:
+        return False
+
+    host.variables = new_variables
+    return True
+
+
+def persist_ad_hoc_setup_facts_from_events(ad_hoc_command):
+    facts_by_host = {}
+    event_qs = ad_hoc_command.ad_hoc_command_events.filter(event='runner_on_ok').only('event_data')
+    for event in event_qs.iterator():
+        event_data = event.event_data or {}
+        facts = (event_data.get('res') or {}).get('ansible_facts')
+        host_name = event_data.get('host') or event_data.get('remote_addr')
+        if isinstance(facts, dict) and host_name:
+            facts_by_host[host_name] = facts
+
+    if not facts_by_host:
+        return
+
+    hosts_to_save = []
+    host_qs = ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS, 'variables').filter(name__in=list(facts_by_host))
+    for host in host_qs.iterator():
+        new_facts = facts_by_host.get(host.name)
+        if new_facts is None:
+            continue
+        changed = False
+        if new_facts != host.ansible_facts:
+            host.ansible_facts = new_facts
+            host.ansible_facts_modified = now()
+            changed = True
+        if sync_ansible_facts_to_host_variables(host, new_facts):
+            changed = True
+        if changed:
+            hosts_to_save.append(host)
+
+    if hosts_to_save:
+        bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
 
 
 @log_excess_runtime(logger, debug_cutoff=0.01, msg='Inventory {inventory_id} host facts prepared for {written_ct} hosts, took {delta:.3f} s', add_log_data=True)
@@ -148,6 +206,7 @@ def finish_fact_cache(host_qs, artifacts_dir, job_id=None, inventory_id=None, jo
     if hosts_with_updates:
         hosts_to_save = []
         total_rows_updated = 0
+        expected_rows_updated = 0
         for host in host_qs.filter(name__in=list(hosts_with_updates)).select_related('inventory').iterator():
             filepath = os.path.join(fact_cache_dir, host.name)
             try:
@@ -159,6 +218,7 @@ def finish_fact_cache(host_qs, artifacts_dir, job_id=None, inventory_id=None, jo
             if new_facts != host.ansible_facts:
                 host.ansible_facts = new_facts
                 host.ansible_facts_modified = now()
+                sync_ansible_facts_to_host_variables(host, new_facts)
                 hosts_to_save.append(host)
                 logger.info(
                     f'New fact for inventory {smart_str(host.inventory.name)} host {smart_str(host.name)}',
@@ -171,20 +231,25 @@ def finish_fact_cache(host_qs, artifacts_dir, job_id=None, inventory_id=None, jo
                     ),
                 )
                 log_data['updated_ct'] += 1
+                expected_rows_updated += 1
+            elif sync_ansible_facts_to_host_variables(host, new_facts):
+                hosts_to_save.append(host)
+                expected_rows_updated += 1
+                log_data['unmodified_ct'] += 1
             else:
                 log_data['unmodified_ct'] += 1
 
             if len(hosts_to_save) >= 100:
-                total_rows_updated += bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified'])
+                total_rows_updated += bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
                 hosts_to_save = []
 
         if hosts_to_save:
-            total_rows_updated += bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified'])
+            total_rows_updated += bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
 
         # Mismatch means a concurrent process changed or deleted hosts between our read and bulk update
-        if total_rows_updated != log_data['updated_ct']:
+        if total_rows_updated != expected_rows_updated:
             logger.warning(
-                f'Fact update for inventory {inventory_id} job {job_id}: expected to update {log_data["updated_ct"]} hosts but {total_rows_updated} rows were changed'
+                f'Fact update for inventory {inventory_id} job {job_id}: expected to update {expected_rows_updated} hosts but {total_rows_updated} rows were changed'
             )
 
     # Phase 3: Clear facts for hosts whose files were removed by Ansible
@@ -204,12 +269,13 @@ def finish_fact_cache(host_qs, artifacts_dir, job_id=None, inventory_id=None, jo
             else:
                 host.ansible_facts = {}
                 host.ansible_facts_modified = now()
+                sync_ansible_facts_to_host_variables(host, {})
                 clear_hosts.append(host)
                 logger.info(f'Facts cleared for inventory {smart_str(host.inventory.name)} host {smart_str(host.name)}')
                 log_data['cleared_ct'] += 1
 
         if clear_hosts:
-            rows = bulk_update_sorted_by_id(Host, clear_hosts, fields=['ansible_facts', 'ansible_facts_modified'])
+            rows = bulk_update_sorted_by_id(Host, clear_hosts, fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
             if rows != len(clear_hosts):
                 logger.warning(f'Fact clear for inventory {inventory_id} job {job_id}: expected to clear {len(clear_hosts)} hosts but {rows} rows were changed')
 

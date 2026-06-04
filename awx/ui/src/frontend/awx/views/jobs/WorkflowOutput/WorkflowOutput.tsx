@@ -124,7 +124,12 @@ export const WorkflowOutput = (props: {
     const nodes = workflowNodes.map((n) => {
       const nodeId = n.id.toString();
       const nodeType = 'node';
-      const nodeName = n.summary_fields?.unified_job_template?.name || '';
+      const nodeName =
+        n.summary_fields?.unified_job_template?.name ||
+        n.summary_fields?.eda_rulebook?.name ||
+        n.summary_fields?.ai_task?.prompt?.split('\n')[0].slice(0, 60) ||
+        n.ai_task_prompt?.split('\n')[0].slice(0, 60) ||
+        '';
       const nodeLabel = getNodeLabel(nodeName, n.identifier) || t('Deleted');
 
       n.success_nodes.forEach((id) => {
@@ -140,7 +145,18 @@ export const WorkflowOutput = (props: {
       if (n?.summary_fields?.job?.elapsed) {
         time = secondsToHHMMSS(n?.summary_fields?.job?.elapsed);
       }
-      const status = (n.summary_fields.job?.status as NodeStatus) || undefined;
+      const aiStatus = n.summary_fields.ai_task?.status;
+      const status =
+        (n.summary_fields.job?.status as NodeStatus) ||
+        (n.summary_fields.eda_rulebook?.status as NodeStatus) ||
+        (aiStatus === 'awaiting_approval'
+          ? NodeStatus.warning
+          : aiStatus === 'applied' || aiStatus === 'successful'
+            ? NodeStatus.success
+            : aiStatus === 'failed'
+              ? NodeStatus.danger
+              : undefined) ||
+        undefined;
       const node = {
         id: nodeId,
         type: status ? `${status}-node` : nodeType,

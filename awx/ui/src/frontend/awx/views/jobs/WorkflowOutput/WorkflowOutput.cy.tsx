@@ -57,4 +57,68 @@ describe('Workflow Output', () => {
       });
     });
   });
+
+  it('should render waiting AI workflow plans without inline approval actions', () => {
+    const aiNode = {
+      ...workflowNodes.results[0],
+      id: 9002,
+      node_type: 'ai_task',
+      unified_job_template: null,
+      ai_task_prompt: 'Create approved inventory',
+      ai_task_model: 'gpt-5.2',
+      ai_task_approval_required: true,
+      ai_task_status: 'awaiting_approval',
+      ai_task_result: {
+        status: 'awaiting_approval',
+        resource_action: {
+          mode: 'preview',
+          can_apply: true,
+        },
+      },
+      related: {
+        ...workflowNodes.results[0].related,
+        approval: '/api/v2/workflow_approvals/9010/',
+      },
+      summary_fields: {
+        ...workflowNodes.results[0].summary_fields,
+        unified_job_template: undefined,
+        job: undefined,
+        ai_task: {
+          prompt: 'Create approved inventory',
+          model: 'gpt-5.2',
+          approval_required: true,
+          status: 'awaiting_approval',
+        },
+      },
+      success_nodes: [],
+      failure_nodes: [],
+      always_nodes: [],
+    };
+    cy.intercept(
+      {
+        method: 'GET',
+        url: `/api/v2/workflow_jobs/*/workflow_nodes/*`,
+        hostname: 'localhost',
+      },
+      {
+        body: {
+          count: 1,
+          next: null,
+          previous: null,
+          results: [aiNode],
+        },
+      }
+    ).as('getAiWorkflowNodes');
+    cy.mount(
+      <WorkflowOutput
+        job={job as unknown as Job}
+        reloadJob={() => null}
+        refreshNodeStatus={() => null}
+      />
+    );
+    cy.wait('@getAiWorkflowNodes');
+    cy.get('[data-cy="workflow-ai-plan-approval"]').should('not.exist');
+    cy.get('[data-cy="workflow-ai-plan-apply"]').should('not.exist');
+    cy.get('g[data-type="warning-node"]').should('exist');
+  });
 });

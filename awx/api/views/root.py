@@ -119,6 +119,8 @@ class ApiVersionRootView(APIView):
         data['workflow_job_template_nodes'] = reverse('api:workflow_job_template_node_list', request=request)
         data['workflow_job_nodes'] = reverse('api:workflow_job_node_list', request=request)
         data['mesh_visualizer'] = reverse('api:mesh_visualizer_view', request=request)
+        data['eda'] = reverse('api:eda_status', request=request)
+        data['external_automation'] = reverse('api:external_automation_check', request=request)
         data['bulk'] = reverse('api:bulk', request=request)
         data['analytics'] = reverse('api:analytics_root_view', request=request)
         data['service_index'] = django_reverse('service-index-root')

@@ -397,6 +397,93 @@ def test_job_launch_with_default_creds(machine_credential, vault_credential, dep
 
 
 @pytest.mark.django_db
+def test_job_launch_uses_inventory_default_machine_credential(machine_credential, deploy_jobtemplate, credential):
+    deploy_jobtemplate.inventory.default_machine_credential = machine_credential
+    deploy_jobtemplate.inventory.save()
+
+    job_obj = deploy_jobtemplate.create_unified_job()
+
+    assert job_obj.machine_credential.pk == machine_credential.pk
+    assert credential.pk in [cred.pk for cred in job_obj.cloud_credentials]
+
+
+@pytest.mark.django_db
+def test_job_launch_keeps_template_machine_credential_without_inventory_force(machine_credential, deploy_jobtemplate):
+    template_machine_credential = Credential.objects.create(
+        credential_type=machine_credential.credential_type,
+        name='template machine',
+        inputs={'username': 'template', 'password': 'secret'},
+    )
+    deploy_jobtemplate.credentials.add(template_machine_credential)
+    deploy_jobtemplate.inventory.default_machine_credential = machine_credential
+    deploy_jobtemplate.inventory.force_inventory_machine_credential = False
+    deploy_jobtemplate.inventory.save()
+
+    job_obj = deploy_jobtemplate.create_unified_job()
+
+    assert job_obj.machine_credential.pk == template_machine_credential.pk
+
+
+@pytest.mark.django_db
+def test_job_launch_force_inventory_machine_credential_replaces_template_machine(machine_credential, deploy_jobtemplate, credential):
+    template_machine_credential = Credential.objects.create(
+        credential_type=machine_credential.credential_type,
+        name='template machine',
+        inputs={'username': 'template', 'password': 'secret'},
+    )
+    deploy_jobtemplate.credentials.add(template_machine_credential)
+    deploy_jobtemplate.inventory.default_machine_credential = machine_credential
+    deploy_jobtemplate.inventory.force_inventory_machine_credential = True
+    deploy_jobtemplate.inventory.save()
+
+    job_obj = deploy_jobtemplate.create_unified_job()
+
+    assert job_obj.machine_credential.pk == machine_credential.pk
+    assert credential.pk in [cred.pk for cred in job_obj.cloud_credentials]
+
+
+@pytest.mark.django_db
+def test_job_launch_prompted_machine_credential_wins_without_inventory_force(machine_credential, deploy_jobtemplate, credential):
+    prompted_machine_credential = Credential.objects.create(
+        credential_type=machine_credential.credential_type,
+        name='prompted machine',
+        inputs={'username': 'prompted', 'password': 'secret'},
+    )
+    deploy_jobtemplate.ask_credential_on_launch = True
+    deploy_jobtemplate.save()
+    deploy_jobtemplate.inventory.default_machine_credential = machine_credential
+    deploy_jobtemplate.inventory.force_inventory_machine_credential = False
+    deploy_jobtemplate.inventory.save()
+
+    serializer = JobLaunchSerializer(
+        data={'credentials': [credential.pk, prompted_machine_credential.pk]},
+        context={'template': deploy_jobtemplate},
+    )
+    assert serializer.is_valid(), serializer.errors
+
+    prompted_fields, ignored_fields, errors = deploy_jobtemplate._accept_or_ignore_job_kwargs(**serializer.validated_data)
+    job_obj = deploy_jobtemplate.create_unified_job(**prompted_fields)
+
+    assert job_obj.machine_credential.pk == prompted_machine_credential.pk
+
+
+@pytest.mark.django_db
+def test_job_launch_inventory_default_machine_credential_requires_password(deploy_jobtemplate, credentialtype_ssh):
+    inventory_machine_credential = Credential.objects.create(
+        credential_type=credentialtype_ssh,
+        name='inventory machine ask',
+        inputs={'username': 'inventory', 'password': 'ASK'},
+    )
+    deploy_jobtemplate.inventory.default_machine_credential = inventory_machine_credential
+    deploy_jobtemplate.inventory.save()
+
+    serializer = JobLaunchSerializer(data={}, context={'template': deploy_jobtemplate})
+
+    assert not serializer.is_valid()
+    assert serializer.errors['passwords_needed_to_start'] == ['ssh_password']
+
+
+@pytest.mark.django_db
 def test_job_launch_JT_enforces_unique_credentials_kinds(machine_credential, credentialtype_aws, deploy_jobtemplate):
     """
     JT launching should require that credentials have distinct CredentialTypes

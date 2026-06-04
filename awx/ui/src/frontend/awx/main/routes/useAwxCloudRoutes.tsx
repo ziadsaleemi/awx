@@ -9,20 +9,22 @@ import {
   fetchCloudConnections,
 } from '../../resources/cloud/cloudConnectionStore';
 import { getCloudProviderLabel } from '../../resources/cloud/cloudProviders';
+import { useCloudOrganization } from '../../resources/cloud/useCloudOrganization';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCloudRoutes() {
   const { t } = useTranslation();
+  const { organizationId } = useCloudOrganization();
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
   const refreshConnectedProviders = useCallback(() => {
-    void fetchCloudConnections().then((entries) => {
+    void fetchCloudConnections(undefined, organizationId).then((entries) => {
       const providers = [
         ...new Set(entries.filter((e) => e.status === 'connected').map((e) => e.providerId)),
       ];
       setConnectedProviders(providers);
     });
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     refreshConnectedProviders();

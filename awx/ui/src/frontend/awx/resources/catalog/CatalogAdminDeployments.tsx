@@ -11,6 +11,7 @@ import {
   PageTable,
   TextCell,
   ToolbarFilterType,
+  useGetPageUrl,
   usePageNavigate,
   usePageAlertToaster,
 } from '../../../../framework';
@@ -20,6 +21,7 @@ import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { StatusCell } from '../../../common/Status';
+import { terraformJobOutputRoute, workflowJobOutputRoute } from './catalogJobRoutes';
 
 export function CatalogAdminDeployments() {
   const { t } = useTranslation();
@@ -106,8 +108,8 @@ export function CatalogAdminDeployments() {
           deployment.status === 'destroyed'
             ? t('Deployment is already destroyed.')
             : deployment.status === 'deprovisioning'
-            ? t('Deprovision already in progress.')
-            : undefined,
+              ? t('Deprovision already in progress.')
+              : undefined,
         onClick: handleDeprovision,
       },
     ],
@@ -160,6 +162,7 @@ function useAdminDeploymentFilters(): IToolbarFilter[] {
 function useAdminDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
   const { t } = useTranslation();
   const pageNavigate = usePageNavigate();
+  const getPageUrl = useGetPageUrl();
   return useMemo(
     () => [
       {
@@ -180,9 +183,7 @@ function useAdminDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
       },
       {
         header: t('Owner'),
-        cell: (deployment) => (
-          <TextCell text={deployment.summary_fields?.owner?.username ?? '-'} />
-        ),
+        cell: (deployment) => <TextCell text={deployment.summary_fields?.owner?.username ?? '-'} />,
       },
       {
         header: t('Catalog item'),
@@ -198,17 +199,23 @@ function useAdminDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
       },
       {
         header: t('Provision details'),
-        cell: (deployment) => (
-          <TextCell
-            text={
-              deployment.terraform_provision_job
-                ? t('Terraform #{{id}}', { id: deployment.terraform_provision_job })
-                : deployment.provision_job
-                ? t('Workflow #{{id}}', { id: deployment.provision_job })
-                : '-'
-            }
-          />
-        ),
+        cell: (deployment) => {
+          const route = deployment.terraform_provision_job
+            ? terraformJobOutputRoute(deployment.terraform_provision_job)
+            : workflowJobOutputRoute(deployment.provision_job);
+          return (
+            <TextCell
+              text={
+                deployment.terraform_provision_job
+                  ? t('Terraform #{{id}}', { id: deployment.terraform_provision_job })
+                  : deployment.provision_job
+                    ? t('Workflow #{{id}}', { id: deployment.provision_job })
+                    : '-'
+              }
+              to={route ? getPageUrl(route.route, { params: route.params }) : undefined}
+            />
+          );
+        },
       },
       {
         header: t('Status'),
@@ -221,6 +228,6 @@ function useAdminDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
         sort: 'created',
       },
     ],
-    [pageNavigate, t]
+    [getPageUrl, pageNavigate, t]
   );
 }

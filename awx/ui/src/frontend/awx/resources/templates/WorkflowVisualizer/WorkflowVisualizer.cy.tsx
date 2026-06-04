@@ -56,6 +56,9 @@ describe('WorkflowVisualizer', () => {
           expect(description).to.contain('Approval Node');
           expect(description).to.contain('Inventory Update');
           expect(description).to.contain('System Job');
+          expect(description).to.contain('Terraform Template');
+          expect(description).to.contain('EDA Rulebook Activation');
+          expect(description).to.contain('AI Task');
         });
         cy.get('[data-cy="legend-node-status-types"]').should((description) => {
           expect(description).to.contain('Node status types');
@@ -117,6 +120,320 @@ describe('WorkflowVisualizer', () => {
     cy.get('svg[data-cy="workflow-visualizer-toolbar-collapse"]').should('not.exist');
   });
 
+  it('Should preview and apply an AI workflow plan to the visualizer', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: {
+        count: 1,
+        next: null,
+        previous: null,
+        results: [
+          {
+            id: 12002,
+            name: 'Deploy App',
+            description: 'Deploys application',
+            type: 'job_template',
+          },
+        ],
+      },
+    }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: false,
+        status: 'not_configured',
+        controller_url: '',
+      },
+    }).as('edaStatus');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'Deploy with approval',
+            summary: 'Deploy app, then require human approval.',
+            nodes: [
+              {
+                id: 'deploy',
+                name: 'Deploy App',
+                type: 'job',
+                template_id: 12002,
+                description: 'Run deployment job.',
+                run: 'root',
+              },
+              {
+                id: 'approval',
+                name: 'Approve production',
+                type: 'workflow_approval',
+                description: 'Human gate before production.',
+                after: 'deploy',
+                run: 'success',
+              },
+            ],
+            edges: [{ source: 'deploy', target: 'approval', status: 'success' }],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('Deploy app then approve production');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Deploy with approval');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.get('[data-id="8-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.get('[data-id="7-ai-unsavedNode-8-ai-unsavedNode"]').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').should('be.visible');
+  });
+
+  it('Should apply EDA workflow plans as persisted metadata nodes', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: { count: 0, next: null, previous: null, results: [] },
+    }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: true,
+        status: 'configured',
+        controller_url: 'https://eda.example.test',
+      },
+    }).as('edaStatus');
+    cy.intercept('GET', '/api/v2/eda/activations/?*', {
+      body: {
+        count: 1,
+        next: null,
+        previous: null,
+        results: [
+          {
+            id: 77,
+            name: 'Restart web on alert',
+            status: 'running',
+            rulebook: 'ops-alerts',
+            event_source: 'webhook',
+          },
+        ],
+      },
+    }).as('edaActivations');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'Event driven restart',
+            summary: 'Use EDA to react to alerts.',
+            nodes: [
+              {
+                id: 'alert',
+                name: 'Restart web on alert',
+                type: 'eda_rulebook',
+                description: 'Rulebook activation listens for alert webhook events.',
+                run: 'root',
+              },
+            ],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+    cy.intercept('POST', '/api/v2/workflow_job_templates/*/workflow_nodes/', (req) => {
+      const body = req.body as {
+        node_type?: string;
+        eda_rulebook_name?: string;
+        eda_event_source_status?: string;
+      };
+      expect(body.node_type).to.equal('eda_rulebook');
+      expect(body.eda_rulebook_name).to.equal('Restart web on alert');
+      expect(body.eda_event_source_status).to.equal('planned');
+      req.reply({
+        id: 9001,
+        type: 'workflow_job_template_node',
+        url: '/api/v2/workflow_job_template_nodes/9001/',
+        related: {
+          labels: '/api/v2/workflow_job_template_nodes/9001/labels/',
+          credentials: '/api/v2/workflow_job_template_nodes/9001/credentials/',
+          instance_groups: '/api/v2/workflow_job_template_nodes/9001/instance_groups/',
+          create_approval_template:
+            '/api/v2/workflow_job_template_nodes/9001/create_approval_template/',
+          success_nodes: '/api/v2/workflow_job_template_nodes/9001/success_nodes/',
+          failure_nodes: '/api/v2/workflow_job_template_nodes/9001/failure_nodes/',
+          always_nodes: '/api/v2/workflow_job_template_nodes/9001/always_nodes/',
+          workflow_job_template: '/api/v2/workflow_job_templates/1/',
+        },
+        summary_fields: {
+          workflow_job_template: { id: 1, name: 'E2E 6GDe', description: '' },
+          eda_rulebook: {
+            name: 'Restart web on alert',
+            activation_id: '',
+            event_source: 'Rulebook activation listens for alert webhook events.',
+            event_source_status: 'planned',
+          },
+        },
+        node_type: 'eda_rulebook',
+        eda_rulebook_name: 'Restart web on alert',
+        eda_activation_id: '',
+        eda_event_source: 'Rulebook activation listens for alert webhook events.',
+        eda_event_source_status: 'planned',
+        workflow_job_template: 1,
+        unified_job_template: null,
+        success_nodes: [],
+        failure_nodes: [],
+        always_nodes: [],
+        all_parents_must_converge: false,
+        identifier: 'Restart web on alert',
+      });
+    }).as('createEdaWorkflowNode');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('React to EDA alert webhook');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
+    cy.wait('@edaActivations');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-eda-status"]').should('contain.text', 'https://eda.example.test');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Event driven restart');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').should('be.enabled');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').click();
+    cy.wait('@createEdaWorkflowNode');
+  });
+
+  it('Should apply AI task workflow plans as persisted metadata nodes', () => {
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      body: {
+        enabled: true,
+        configured: true,
+        provider: 'test',
+        model: 'test',
+      },
+    }).as('aiSettings');
+    cy.intercept('GET', '/api/v2/unified_job_templates/*', {
+      body: { count: 0, next: null, previous: null, results: [] },
+    }).as('unifiedJobTemplates');
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      body: {
+        configured: false,
+        status: 'not_configured',
+        controller_url: '',
+      },
+    }).as('edaStatus');
+    cy.intercept('POST', '/api/v2/ai/chat/', {
+      body: {
+        message: {
+          role: 'assistant',
+          content: JSON.stringify({
+            name: 'AI runtime planning',
+            summary: 'Generate a runtime execution plan from workflow artifacts.',
+            nodes: [
+              {
+                id: 'plan',
+                name: 'Generate remediation plan',
+                type: 'ai_task',
+                description: 'Build execution plan from upstream workflow artifacts.',
+                run: 'root',
+                model: 'gpt-5.2',
+              },
+            ],
+          }),
+        },
+      },
+    }).as('aiWorkflowChat');
+    cy.intercept('POST', '/api/v2/workflow_job_templates/*/workflow_nodes/', (req) => {
+      const body = req.body as {
+        node_type?: string;
+        ai_task_prompt?: string;
+        ai_task_model?: string;
+        ai_task_approval_required?: boolean;
+      };
+      expect(body.node_type).to.equal('ai_task');
+      expect(body.ai_task_prompt).to.equal(
+        'Build execution plan from upstream workflow artifacts.'
+      );
+      expect(body.ai_task_model).to.equal('gpt-5.2');
+      expect(body.ai_task_approval_required).to.equal(true);
+      req.reply({
+        id: 9002,
+        type: 'workflow_job_template_node',
+        url: '/api/v2/workflow_job_template_nodes/9002/',
+        related: {
+          labels: '/api/v2/workflow_job_template_nodes/9002/labels/',
+          credentials: '/api/v2/workflow_job_template_nodes/9002/credentials/',
+          instance_groups: '/api/v2/workflow_job_template_nodes/9002/instance_groups/',
+          create_approval_template:
+            '/api/v2/workflow_job_template_nodes/9002/create_approval_template/',
+          success_nodes: '/api/v2/workflow_job_template_nodes/9002/success_nodes/',
+          failure_nodes: '/api/v2/workflow_job_template_nodes/9002/failure_nodes/',
+          always_nodes: '/api/v2/workflow_job_template_nodes/9002/always_nodes/',
+          workflow_job_template: '/api/v2/workflow_job_templates/1/',
+        },
+        summary_fields: {
+          workflow_job_template: { id: 1, name: 'E2E 6GDe', description: '' },
+          ai_task: {
+            prompt: 'Build execution plan from upstream workflow artifacts.',
+            model: 'gpt-5.2',
+            approval_required: true,
+            status: '',
+          },
+        },
+        node_type: 'ai_task',
+        ai_task_prompt: 'Build execution plan from upstream workflow artifacts.',
+        ai_task_model: 'gpt-5.2',
+        ai_task_approval_required: true,
+        ai_task_status: '',
+        ai_task_result: {},
+        workflow_job_template: 1,
+        unified_job_template: null,
+        success_nodes: [],
+        failure_nodes: [],
+        always_nodes: [],
+        all_parents_must_converge: false,
+        identifier: 'Generate remediation plan',
+      });
+    }).as('createAiTaskWorkflowNode');
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@aiSettings');
+    cy.get('[data-cy="ai-workflow-suggest"]').click();
+    cy.get('[data-cy="ai-workflow-description"]').type('Plan runtime remediation with AI');
+    cy.get('[data-cy="ai-workflow-generate"]').click();
+    cy.wait('@unifiedJobTemplates');
+    cy.wait('@edaStatus');
+    cy.wait('@aiWorkflowChat');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'AI runtime planning');
+    cy.get('[data-cy="ai-workflow-plan-preview"]').should('contain.text', 'Ready');
+    cy.get('[data-cy="ai-workflow-apply"]').should('be.enabled');
+    cy.get('[data-cy="ai-workflow-apply"]').click();
+    cy.contains('.pf-v5-c-button', 'Close').click();
+    cy.get('[data-id="7-ai-unsavedNode"] .pf-topology__node__action-icon').should('be.visible');
+    cy.contains('button:not(:disabled):not(:hidden)', 'Save').click();
+    cy.wait('@createAiTaskWorkflowNode');
+  });
+
   it('Should toggle the expand collapse button in the toolbar', () => {
     cy.mount(<WorkflowVisualizer />);
     cy.get('button[data-cy="workflow-visualizer-toolbar-expand-collapse"]').click();
@@ -142,6 +459,147 @@ describe('WorkflowVisualizer', () => {
       'have.text',
       'Total nodes 6'
     );
+  });
+
+  it('Should show workflow mode counts for deterministic, EDA, and AI nodes', () => {
+    cy.fixture('workflow_nodes.json').then((workflowNodes: AwxItemsResponse<WorkflowNode>) => {
+      workflowNodes.results.push(
+        {
+          id: 9001,
+          type: 'workflow_job_template_node',
+          url: '/api/v2/workflow_job_template_nodes/9001/',
+          related: {
+            labels: '/api/v2/workflow_job_template_nodes/9001/labels/',
+            credentials: '/api/v2/workflow_job_template_nodes/9001/credentials/',
+            instance_groups: '/api/v2/workflow_job_template_nodes/9001/instance_groups/',
+            create_approval_template:
+              '/api/v2/workflow_job_template_nodes/9001/create_approval_template/',
+            success_nodes: '/api/v2/workflow_job_template_nodes/9001/success_nodes/',
+            failure_nodes: '/api/v2/workflow_job_template_nodes/9001/failure_nodes/',
+            always_nodes: '/api/v2/workflow_job_template_nodes/9001/always_nodes/',
+            workflow_job_template: '/api/v2/workflow_job_templates/1/',
+          },
+          summary_fields: {
+            workflow_job: { id: 1, name: 'Workflow', description: '' },
+            workflow_job_template: { id: 1, name: 'Workflow', description: '' },
+            eda_rulebook: {
+              name: 'Restart web on alert',
+              activation_id: '77',
+              event_source: 'webhook',
+              event_source_status: 'planned',
+            },
+            inventory: undefined as never,
+            execution_environment: undefined as never,
+          },
+          created: '',
+          modified: '',
+          extra_data: {},
+          inventory: null,
+          scm_branch: null,
+          job_type: null,
+          job_tags: null,
+          skip_tags: null,
+          limit: null,
+          diff_mode: null,
+          verbosity: null,
+          execution_environment: null,
+          forks: null,
+          job_slice_count: null,
+          timeout: null,
+          workflow_job_template: 1,
+          unified_job_template: null,
+          node_type: 'eda_rulebook',
+          eda_rulebook_name: 'Restart web on alert',
+          eda_activation_id: '77',
+          eda_event_source: 'webhook',
+          eda_event_source_status: 'planned',
+          ai_task_prompt: '',
+          ai_task_model: '',
+          ai_task_approval_required: true,
+          ai_task_status: '',
+          ai_task_result: {},
+          success_nodes: [],
+          failure_nodes: [],
+          always_nodes: [],
+          all_parents_must_converge: false,
+          identifier: 'Restart web on alert',
+        },
+        {
+          id: 9002,
+          type: 'workflow_job_template_node',
+          url: '/api/v2/workflow_job_template_nodes/9002/',
+          related: {
+            labels: '/api/v2/workflow_job_template_nodes/9002/labels/',
+            credentials: '/api/v2/workflow_job_template_nodes/9002/credentials/',
+            instance_groups: '/api/v2/workflow_job_template_nodes/9002/instance_groups/',
+            create_approval_template:
+              '/api/v2/workflow_job_template_nodes/9002/create_approval_template/',
+            success_nodes: '/api/v2/workflow_job_template_nodes/9002/success_nodes/',
+            failure_nodes: '/api/v2/workflow_job_template_nodes/9002/failure_nodes/',
+            always_nodes: '/api/v2/workflow_job_template_nodes/9002/always_nodes/',
+            workflow_job_template: '/api/v2/workflow_job_templates/1/',
+          },
+          summary_fields: {
+            workflow_job: { id: 1, name: 'Workflow', description: '' },
+            workflow_job_template: { id: 1, name: 'Workflow', description: '' },
+            ai_task: {
+              prompt: 'Build execution plan from upstream workflow artifacts.',
+              model: 'gpt-5.2',
+              approval_required: true,
+              status: 'pending',
+            },
+            inventory: undefined as never,
+            execution_environment: undefined as never,
+          },
+          created: '',
+          modified: '',
+          extra_data: {},
+          inventory: null,
+          scm_branch: null,
+          job_type: null,
+          job_tags: null,
+          skip_tags: null,
+          limit: null,
+          diff_mode: null,
+          verbosity: null,
+          execution_environment: null,
+          forks: null,
+          job_slice_count: null,
+          timeout: null,
+          workflow_job_template: 1,
+          unified_job_template: null,
+          node_type: 'ai_task',
+          eda_rulebook_name: '',
+          eda_activation_id: '',
+          eda_event_source: '',
+          eda_event_source_status: '',
+          ai_task_prompt: 'Build execution plan from upstream workflow artifacts.',
+          ai_task_model: 'gpt-5.2',
+          ai_task_approval_required: true,
+          ai_task_status: 'pending',
+          ai_task_result: {},
+          success_nodes: [],
+          failure_nodes: [],
+          always_nodes: [],
+          all_parents_must_converge: false,
+          identifier: 'Generate remediation plan',
+        }
+      );
+      workflowNodes.count = workflowNodes.results.length;
+      cy.intercept(
+        { method: 'GET', url: '/api/v2/workflow_job_templates/*/workflow_nodes/*' },
+        workflowNodes
+      ).as('getMixedWorkflowNodes');
+    });
+
+    cy.mount(<WorkflowVisualizer />);
+    cy.wait('@getMixedWorkflowNodes');
+    cy.get('[data-cy="workflow-mode-filter-all"]').should('contain.text', '8');
+    cy.get('[data-cy="workflow-mode-filter-deterministic"]').should('contain.text', '6');
+    cy.get('[data-cy="workflow-mode-filter-event-driven"]').should('contain.text', '1');
+    cy.get('[data-cy="workflow-mode-filter-ai"]').should('contain.text', '1').click();
+    cy.get('#workflow-mode-filter-ai').should('have.attr', 'aria-pressed', 'true');
+    cy.get('[data-id="9002"] .pf-topology__node__action-icon').should('be.visible');
   });
 
   it('Should show Delete all nodes button', () => {

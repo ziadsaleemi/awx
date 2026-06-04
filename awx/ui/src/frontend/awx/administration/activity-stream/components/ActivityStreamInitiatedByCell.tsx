@@ -19,9 +19,8 @@ export const ActivityStreamInitiatedByCell: React.FC<ActivityStreamInitiatedByCe
   const actorId = item.summary_fields?.actor?.id;
   const actorUsername = item.summary_fields?.actor?.username;
 
-  const pageUrl = getPageUrl(AwxRoute.UserDetails, { params: { id: actorId } });
-
   if (actorId) {
+    const pageUrl = getPageUrl(AwxRoute.UserDetails, { params: { id: actorId } });
     return (
       <TextCell
         text={actorUsername ?? ''}

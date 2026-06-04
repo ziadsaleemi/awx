@@ -15,4 +15,6 @@ export const RESOURCE_TYPE: Record<UnifiedJobType, UnifiedJobType> = {
   inventory_update: 'inventory_update',
   system_job: 'system_job',
   terraform_job: 'terraform_job',
+  eda_rulebook: 'eda_rulebook',
+  ai_task: 'ai_task',
 };

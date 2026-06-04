@@ -105,8 +105,13 @@ export interface ViewExtendedOptions<T extends object> extends ViewOptions {
 }
 
 export function useView(options: ViewOptions): IView {
-  const { defaultValues, defaultPerPage, disableQueryString, ignoreQueryStringKeys, filterQueryStringKeys } =
-    options;
+  const {
+    defaultValues,
+    defaultPerPage,
+    disableQueryString,
+    ignoreQueryStringKeys,
+    filterQueryStringKeys,
+  } = options;
 
   const mountedRef = useIsMountedRef();
 

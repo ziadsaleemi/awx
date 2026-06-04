@@ -10,7 +10,10 @@ import { useSurveyColumns } from './useSurveyColumns';
 import type { Spec } from '../../../interfaces/Survey';
 import { useParams } from 'react-router-dom';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
+
+type SurveyTemplateType = (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)['type'];
 
 const ModalBodyDiv = styled.div`
   display: flex;
@@ -28,7 +31,7 @@ const ConfirmBoxDiv = styled.div`
 
 export function useDeleteSurveyDialog(
   onComplete: (questions: Spec[]) => void,
-  templateType?: (JobTemplate | WorkflowJobTemplate)['type'] | 'terraform_job_template'
+  templateType?: SurveyTemplateType
 ) {
   const { t } = useTranslation();
   const [_, setDialog] = usePageDialog();
@@ -70,7 +73,7 @@ function DeleteSurveyDialog(props: {
   onComplete: (questions: Spec[]) => void;
   onError: (err: unknown) => void;
   id?: string;
-  templateType?: (JobTemplate | WorkflowJobTemplate)['type'] | 'terraform_job_template';
+  templateType?: SurveyTemplateType;
 }) {
   const { questions, onClose, onComplete, onError, id, templateType } = props;
   const { t } = useTranslation();

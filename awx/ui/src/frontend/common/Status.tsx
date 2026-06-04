@@ -68,6 +68,7 @@ function useLabel(status: string | undefined, t: (str: string) => string) {
     deprovisioning: t('Deprovisioning'),
     disabled: t('Disabled'),
     error: t('Error'),
+    expired: t('Expired'),
     failed: t('Failed'),
     healthy: t('Healthy'),
     installed: t('Installed'),
@@ -130,6 +131,7 @@ function getColor(status: string | undefined) {
     case 'canceled':
     case 'changed':
     case 'destroyed':
+    case 'expired':
     case 'unknown':
       return 'orange';
     case 'stopped':
@@ -180,6 +182,7 @@ function getIcon(status: string | undefined) {
     case 'canceled':
     case 'changed':
     case 'destroyed':
+    case 'expired':
     case 'unknown':
       return ExclamationTriangleIcon;
     case 'disabled':

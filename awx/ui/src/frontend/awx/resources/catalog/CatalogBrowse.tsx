@@ -18,10 +18,7 @@ import {
   Title,
 } from '@patternfly/react-core';
 import { CubesIcon } from '@patternfly/react-icons';
-import {
-  PageHeader,
-  PageLayout,
-} from '../../../../framework';
+import { PageHeader, PageLayout } from '../../../../framework';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGet } from '../../../common/crud/useGet';
 import { CatalogItem } from '../../interfaces/CatalogItem';
@@ -44,19 +41,26 @@ const PROVIDER_LOGOS: Record<string, React.ComponentType<React.SVGProps<SVGSVGEl
   gcp: GCPLogo,
 };
 
-const PROVIDER_ICON_CONFIG: Record<string, { bg: string; fg: string; abbr: string; label: string }> = {
+const PROVIDER_ICON_CONFIG: Record<
+  string,
+  { bg: string; fg: string; abbr: string; label: string }
+> = {
   digitalocean: { bg: '#0080FF', fg: '#fff', abbr: 'DO', label: 'DigitalOcean' },
-  azure:        { bg: '#0078D4', fg: '#fff', abbr: 'Az', label: 'Microsoft Azure' },
-  proxmox:      { bg: '#E57000', fg: '#fff', abbr: 'PX', label: 'Proxmox VE' },
-  aws:          { bg: '#FF9900', fg: '#1a1a1a', abbr: 'AWS', label: 'Amazon AWS' },
-  vmware:       { bg: '#607078', fg: '#fff', abbr: 'VM', label: 'VMware vSphere' },
-  gcp:          { bg: '#4285F4', fg: '#fff', abbr: 'GCP', label: 'Google Cloud' },
+  azure: { bg: '#0078D4', fg: '#fff', abbr: 'Az', label: 'Microsoft Azure' },
+  proxmox: { bg: '#E57000', fg: '#fff', abbr: 'PX', label: 'Proxmox VE' },
+  aws: { bg: '#FF9900', fg: '#1a1a1a', abbr: 'AWS', label: 'Amazon AWS' },
+  vmware: { bg: '#607078', fg: '#fff', abbr: 'VM', label: 'VMware vSphere' },
+  gcp: { bg: '#4285F4', fg: '#fff', abbr: 'GCP', label: 'Google Cloud' },
 };
 
 function providerConfig(slug: string) {
   return (
-    PROVIDER_ICON_CONFIG[slug] ??
-    { bg: '#6a9955', fg: '#fff', abbr: slug.slice(0, 2).toUpperCase(), label: slug }
+    PROVIDER_ICON_CONFIG[slug] ?? {
+      bg: '#6a9955',
+      fg: '#fff',
+      abbr: slug.slice(0, 2).toUpperCase(),
+      label: slug,
+    }
   );
 }
 
@@ -95,7 +99,9 @@ const ProviderFallbackBtn = styled.button`
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 600;
-  transition: transform 0.2s ease, background 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
 
   &:hover {
     transform: scale(1.05);

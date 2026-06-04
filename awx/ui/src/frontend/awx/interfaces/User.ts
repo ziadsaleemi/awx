@@ -1,3 +1,4 @@
+import type { IPageSettings } from '../../../framework/PageSettings/PageSettingsProvider';
 import { User as SwaggerUser } from './generated-from-swagger/api';
 import { SummaryFieldsOrganization } from './summary-fields/summary-fields';
 
@@ -60,4 +61,5 @@ export interface AwxUser
   user_roles?: AccessRole[];
   team_roles?: AccessRole[];
   auth: string[];
+  ui_preferences?: IPageSettings;
 }

@@ -27,6 +27,7 @@ export type GraphNodeData = {
   resource: WorkflowNode;
   launch_data: PromptFormValues;
   survey_data: { [key: string]: string | string[] | { name: string }[] };
+  modeDimmed?: boolean;
 };
 export interface CustomNodeProps extends WithSelectionProps {
   element: GraphElement<
@@ -34,6 +35,7 @@ export interface CustomNodeProps extends WithSelectionProps {
     {
       secondaryLabel?: string;
       resource: WorkflowNode;
+      modeDimmed?: boolean;
       badge?: string;
       badgeTextColor?: string;
       badgeColor?: string;
@@ -45,6 +47,7 @@ export interface CustomNodeProps extends WithSelectionProps {
 export type GraphEdgeData = {
   tag: string;
   tagStatus: EdgeStatus;
+  modeDimmed?: boolean;
 };
 export interface CustomEdgeProps {
   element: GraphElement<
@@ -61,6 +64,7 @@ export interface CustomEdgeInnerProps extends Omit<CustomEdgeProps, 'element'> {
     {
       tag: string;
       tagStatus: EdgeStatus;
+      modeDimmed?: boolean;
     }
   >;
   dragging?: boolean;
@@ -115,6 +119,28 @@ export interface NodeResource {
   summary_fields?: { inventory: { kind: string } };
 }
 
+export interface EDARulebookResource {
+  id: number;
+  name: string;
+  description: string;
+  type: 'eda_rulebook';
+  rulebook_name: string;
+  activation_id?: string;
+  event_source?: string;
+  event_source_status?: string;
+}
+
+export interface AITaskResource {
+  id: number;
+  name: string;
+  description: string;
+  type: 'ai_task';
+  prompt: string;
+  model?: string;
+  approval_required?: boolean;
+  status?: string;
+}
+
 export interface PromptFormValues {
   inventory: Partial<Inventory> | SummaryFieldInventory | null;
   credentials:
@@ -165,7 +191,9 @@ export type AllResources =
   | SystemJobTemplate
   | TerraformJobTemplate
   | WorkflowApproval
-  | WorkflowJobTemplate;
+  | WorkflowJobTemplate
+  | EDARulebookResource
+  | AITaskResource;
 
 export interface WizardFormValues {
   approval_description: string;
@@ -174,6 +202,13 @@ export interface WizardFormValues {
   node_alias: string;
   node_convergence: 'any' | 'all';
   node_days_to_keep: number;
+  eda_activation_id: string;
+  eda_event_source: string;
+  eda_event_source_status: string;
+  eda_rulebook_name: string;
+  ai_task_prompt: string;
+  ai_task_model: string;
+  ai_task_approval_required: boolean;
   resource: AllResources | NodeResource | null;
   node_type: UnifiedJobType;
   node_status_type?: EdgeStatus;
@@ -191,4 +226,6 @@ export type UnifiedJobType =
   | 'workflow_approval'
   | 'inventory_update'
   | 'system_job'
-  | 'terraform_job';
+  | 'terraform_job'
+  | 'eda_rulebook'
+  | 'ai_task';

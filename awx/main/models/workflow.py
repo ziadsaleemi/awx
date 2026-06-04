@@ -5,6 +5,7 @@
 import json
 import logging
 import re
+from types import SimpleNamespace
 from uuid import uuid4
 from copy import copy
 from urllib.parse import urljoin
@@ -45,6 +46,7 @@ from awx.main.models.jobs import LaunchTimeConfigBase, LaunchTimeConfig, JobTemp
 from awx.main.models.credential import Credential
 from awx.main.redact import REPLACE_STR
 from awx.main.utils import ScheduleWorkflowManager, NullablePromptPseudoField
+from awx.main.utils.eda import EDAControllerClient, EDAControllerError, workflow_status_from_activation_status
 
 __all__ = [
     'WorkflowJobTemplate',
@@ -61,6 +63,114 @@ logger = logging.getLogger('awx.main.models.workflow')
 
 WORKFLOW_BASE_URL = "{}/jobs/workflow/{}"
 _HOST_IP_ARTIFACT_KEY_RE = re.compile(r'^host_ip', re.IGNORECASE)
+WORKFLOW_NODE_TYPE_TEMPLATE = 'template'
+WORKFLOW_NODE_TYPE_EDA_RULEBOOK = 'eda_rulebook'
+WORKFLOW_NODE_TYPE_AI_TASK = 'ai_task'
+WORKFLOW_NODE_TYPES = (
+    (WORKFLOW_NODE_TYPE_TEMPLATE, _('Template')),
+    (WORKFLOW_NODE_TYPE_EDA_RULEBOOK, _('EDA rulebook activation')),
+    (WORKFLOW_NODE_TYPE_AI_TASK, _('AI task')),
+)
+
+
+class AIWorkflowTaskError(Exception):
+    pass
+
+
+class AIWorkflowTaskRequest(SimpleNamespace):
+    path_info = '/api/v2/workflow_job_nodes/'
+    path = '/api/v2/workflow_job_nodes/'
+    method = 'POST'
+    GET = {}
+    query_params = {}
+
+    def get_full_path(self):
+        return self.path_info
+
+    def build_absolute_uri(self, location=None):
+        return location or self.path_info
+
+
+def _extract_ai_plan(value):
+    source = str(value or '').strip()
+    if not source:
+        return None
+    start = source.find('{')
+    end = source.rfind('}')
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(source[start : end + 1])
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def run_ai_workflow_task(prompt, parent_artifacts=None, model_name=''):
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIWorkflowTaskError(_('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'))
+
+    from awx.api.views.ai import _PROVIDER_DEFAULTS, _call_ai_provider, _openai_codex_effective_default_model, AIProviderError
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIWorkflowTaskError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'))
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = model_name or (
+        _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    )
+    artifacts_json = json.dumps(parent_artifacts or {}, default=str, sort_keys=True)[:12000]
+    system_prompt = (
+        'You are an AWX runtime workflow planner. Generate an execution plan for the requested automation. '
+        'Do not mutate AWX resources or claim that actions were executed. Return concise JSON when possible. '
+        'When the task should create or update AWX resources, return a resource-action plan shaped as '
+        '{"name": "...", "operations": [{"id": "op-1", "operation": "create|update", '
+        '"resource_type": "inventory|smart_inventory|constructed_inventory|project|job_template|workflow_job_template|schedule|catalog_item", '
+        '"object_id": 123, "data": {}}]}. AWX will validate and require approval before applying by default.'
+    )
+    messages = [
+        {
+            'role': 'user',
+            'content': '\n\n'.join(
+                [
+                    f'Runtime AI task:\n{prompt}',
+                    f'Parent workflow artifacts JSON:\n{artifacts_json or "{}"}',
+                ]
+            ),
+        }
+    ]
+    try:
+        response = _call_ai_provider(
+            provider, model, messages, getattr(settings, 'AI_MAX_TOKENS', 2048), system_prompt, api_key, getattr(settings, 'AI_API_URL', '')
+        )
+    except AIProviderError as exc:
+        raise AIWorkflowTaskError(str(exc.detail)) from exc
+
+    return {
+        'provider': provider,
+        'model': model,
+        'response': response,
+        'plan': _extract_ai_plan(response),
+    }
+
+
+def _ai_resource_action_plan(value):
+    if not isinstance(value, dict) or not isinstance(value.get('operations'), list):
+        return None
+    from awx.api.views.ai import _normalize_ai_plan
+
+    try:
+        return _normalize_ai_plan(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _ai_resource_action_request(user):
+    if not user:
+        raise AIWorkflowTaskError(_('AI resource action plans require a workflow launch user.'))
+    return AIWorkflowTaskRequest(user=user)
 
 
 class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
@@ -97,6 +207,24 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         default=None,
         on_delete=models.SET_NULL,
     )
+    node_type = models.CharField(max_length=32, choices=WORKFLOW_NODE_TYPES, default=WORKFLOW_NODE_TYPE_TEMPLATE)
+    eda_rulebook_name = models.CharField(max_length=512, blank=True, default='')
+    eda_activation_id = models.CharField(max_length=128, blank=True, default='')
+    eda_event_source = models.CharField(max_length=512, blank=True, default='')
+    eda_event_source_status = models.CharField(max_length=64, blank=True, default='')
+    ai_task_prompt = models.TextField(blank=True, default='')
+    ai_task_model = models.CharField(max_length=128, blank=True, default='')
+    ai_task_approval_required = models.BooleanField(default=True)
+    ai_task_status = models.CharField(max_length=64, blank=True, default='')
+    ai_task_result = JSONBlob(default=dict, blank=True)
+
+    @property
+    def is_eda_rulebook_node(self):
+        return self.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK
+
+    @property
+    def is_ai_task_node(self):
+        return self.node_type == WORKFLOW_NODE_TYPE_AI_TASK
 
     def get_parent_nodes(self):
         '''Returns queryset containing all parents of this node'''
@@ -113,6 +241,16 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
         return [
             'workflow_job',
             'unified_job_template',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
             'extra_data',
             'survey_passwords',
             'inventory',
@@ -160,6 +298,16 @@ class WorkflowNodeBase(CreatedModifiedModel, LaunchTimeConfig):
 class WorkflowJobTemplateNode(WorkflowNodeBase):
     FIELDS_TO_PRESERVE_AT_COPY = [
         'unified_job_template',
+        'node_type',
+        'eda_rulebook_name',
+        'eda_activation_id',
+        'eda_event_source',
+        'eda_event_source_status',
+        'ai_task_prompt',
+        'ai_task_model',
+        'ai_task_approval_required',
+        'ai_task_status',
+        'ai_task_result',
         'workflow_job_template',
         'success_nodes',
         'failure_nodes',
@@ -322,6 +470,314 @@ class WorkflowJobNode(WorkflowNodeBase):
     def event_processing_finished(self):
         return True
 
+    def _build_parent_artifacts(self):
+        artifacts = {k: v for k, v in self.ancestor_artifacts.items() if k != 'job_slice'} if self.ancestor_artifacts else {}
+        for parent_node in self.get_parent_nodes():
+            artifacts.update(parent_node.ancestor_artifacts)
+            if parent_node.job:
+                artifacts.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
+        return artifacts
+
+    def sync_eda_rulebook_activation(self):
+        artifacts = self._build_parent_artifacts()
+        activation = None
+        controller_status = 'not_configured'
+        controller_error = ''
+        activation_status = self.eda_event_source_status or 'planned'
+        source = 'virtual'
+
+        client = EDAControllerClient()
+        if client.is_configured:
+            source = 'eda_controller'
+            try:
+                result = client.ensure_activation_started(
+                    self.eda_rulebook_name,
+                    activation_id=self.eda_activation_id,
+                    event_source=self.eda_event_source,
+                )
+                activation = result['activation']
+                if activation:
+                    controller_status = 'ok'
+                    if activation.get('id'):
+                        self.eda_activation_id = activation['id']
+                    activation_status = activation.get('status') or activation_status
+                else:
+                    controller_status = 'not_found'
+                    activation_status = 'not_found'
+            except EDAControllerError as exc:
+                controller_status = exc.status
+                controller_error = str(exc)
+                activation_status = exc.status
+
+        workflow_status = workflow_status_from_activation_status(activation_status)
+        artifacts['awx_eda'] = {
+            'rulebook_name': self.eda_rulebook_name,
+            'activation_id': self.eda_activation_id,
+            'event_source': self.eda_event_source,
+            'event_source_status': activation_status,
+            'controller_status': controller_status,
+            'controller_error': controller_error,
+            'source': source,
+        }
+        if activation:
+            artifacts['awx_eda']['activation'] = activation
+            artifacts['awx_eda']['actions'] = result.get('actions', [])
+            artifacts['awx_eda']['events'] = result.get('events', [])
+        self.ancestor_artifacts = artifacts
+        self.eda_event_source_status = activation_status
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'eda_activation_id', 'eda_event_source_status', 'bypassed_job_status'])
+        return self
+
+    def mark_eda_rulebook_successful(self):
+        return self.sync_eda_rulebook_activation()
+
+    def sync_ai_task(self):
+        if self.ai_task_status == 'awaiting_approval':
+            return self
+
+        artifacts = self._build_parent_artifacts()
+        ai_status = 'planned'
+        workflow_status = 'failed'
+        error = ''
+        resource_action = None
+        result = {
+            'provider': '',
+            'model': self.ai_task_model,
+            'response': '',
+            'plan': None,
+        }
+
+        try:
+            if not self.ai_task_prompt:
+                raise AIWorkflowTaskError(_('AI task prompt is required.'))
+            result = run_ai_workflow_task(self.ai_task_prompt, copy(artifacts), self.ai_task_model)
+            ai_status = 'successful'
+            workflow_status = 'successful'
+            resource_action_plan = _ai_resource_action_plan(result.get('plan'))
+            if resource_action_plan:
+                resource_action = self.preview_ai_resource_action_plan(resource_action_plan, result)
+                if not resource_action['can_apply']:
+                    ai_status = 'failed'
+                    workflow_status = 'failed'
+                    error = _('AI resource action plan failed validation.')
+                elif self.ai_task_approval_required:
+                    ai_status = 'awaiting_approval'
+                    workflow_status = ''
+                else:
+                    resource_action = self.apply_ai_resource_action_plan(resource_action_plan, result, user=self.workflow_job.created_by)
+                    ai_status = 'applied' if resource_action['can_apply'] else 'failed'
+                    workflow_status = 'successful' if resource_action['can_apply'] else 'failed'
+                    error = '' if resource_action['can_apply'] else _('AI resource action plan failed to apply.')
+        except AIWorkflowTaskError as exc:
+            ai_status = 'failed'
+            workflow_status = 'failed'
+            error = str(exc)
+
+        self.ai_task_status = ai_status
+        self.ai_task_result = {
+            'status': ai_status,
+            'provider': result.get('provider', ''),
+            'model': result.get('model') or self.ai_task_model,
+            'response': result.get('response', ''),
+            'plan': result.get('plan'),
+            'error': error,
+            'approval_required': self.ai_task_approval_required,
+        }
+        if resource_action:
+            self.ai_task_result['resource_action'] = resource_action
+        artifacts['awx_ai'] = {
+            'prompt': self.ai_task_prompt,
+            'status': ai_status,
+            'provider': self.ai_task_result['provider'],
+            'model': self.ai_task_result['model'],
+            'response': self.ai_task_result['response'],
+            'plan': self.ai_task_result['plan'],
+            'error': error,
+            'approval_required': self.ai_task_approval_required,
+            'resource_action': resource_action,
+            'source': 'ai_provider',
+        }
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        if ai_status == 'awaiting_approval':
+            self.ensure_ai_task_approval()
+        return self
+
+    def ensure_ai_task_approval(self):
+        if self.job and isinstance(self.job, WorkflowApproval):
+            return self.job
+
+        prompt_label = (self.ai_task_prompt or self.identifier or str(self.pk)).splitlines()[0][:80]
+        approval = WorkflowApproval.objects.create(
+            name=_('AI plan approval: %(name)s') % {'name': prompt_label},
+            description=self.ai_task_prompt,
+            status='pending',
+            started=now(),
+            created_by=self.workflow_job.created_by,
+            modified_by=self.workflow_job.created_by,
+        )
+        self.job = approval
+        self.save(update_fields=['job'])
+        approval.send_approval_notification('running')
+        approval.websocket_emit_status(approval.status)
+        return approval
+
+    def preview_ai_resource_action_plan(self, plan, provider_result):
+        from awx.api.views.ai import (
+            _ai_plan_uses_operation_references,
+            _audit_ai_resource_action,
+            _public_ai_operation_result,
+            _redact_sensitive,
+            _simulate_ai_operations_for_preview,
+            _validate_ai_operations_for_preview,
+            _json_safe,
+        )
+
+        request = _ai_resource_action_request(self.workflow_job.created_by)
+        policy_context = {
+            'source': 'workflow_ai_task',
+            'approval_required': self.ai_task_approval_required,
+            'human_approved': False,
+            'approval': {
+                'workflow_job_node': self.pk,
+                'workflow_job': self.workflow_job_id,
+                'workflow_job_template': getattr(self.workflow_job, 'workflow_job_template_id', None),
+            },
+        }
+        operations = (
+            _simulate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
+            if _ai_plan_uses_operation_references(plan['operations'])
+            else _validate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
+        )
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        audit_entry = _audit_ai_resource_action(
+            request,
+            'preview',
+            plan,
+            public_operations,
+            provider=provider_result.get('provider', ''),
+            model=provider_result.get('model', ''),
+        )
+        return {
+            'mode': 'preview',
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': all(operation.get('valid') for operation in public_operations),
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+
+    def apply_ai_resource_action_plan(self, plan=None, provider_result=None, user=None, human_approved=False):
+        from awx.api.views.ai import (
+            _apply_ai_operations_sequentially,
+            _audit_ai_resource_action,
+            _build_ai_rollback_plan,
+            _public_ai_operation_result,
+            _redact_sensitive,
+            _json_safe,
+        )
+
+        plan = _ai_resource_action_plan(plan or self.ai_task_result.get('plan'))
+        if not plan:
+            raise AIWorkflowTaskError(_('AI task result does not contain an applicable resource action plan.'))
+        request = _ai_resource_action_request(user)
+        policy_context = {
+            'source': 'workflow_ai_task',
+            'approval_required': self.ai_task_approval_required,
+            'human_approved': human_approved,
+            'approval': {
+                'workflow_job_node': self.pk,
+                'workflow_job': self.workflow_job_id,
+                'workflow_job_template': getattr(self.workflow_job, 'workflow_job_template_id', None),
+                'approved_by': getattr(user, 'pk', None) if human_approved else None,
+            },
+        }
+        operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        provider_result = provider_result or self.ai_task_result
+        rollback_plan = _build_ai_rollback_plan(plan, public_operations) if can_apply else None
+        audit_entry = _audit_ai_resource_action(
+            request,
+            'apply',
+            plan,
+            public_operations,
+            provider=provider_result.get('provider', ''),
+            model=provider_result.get('model', ''),
+            prompt_summary=provider_result.get('prompt', ''),
+            rollback_plan=rollback_plan,
+        )
+        result = {
+            'mode': 'apply',
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': can_apply,
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+        if rollback_plan:
+            result['rollback_plan'] = rollback_plan
+        return result
+
+    def approve_ai_resource_action_plan(self, user):
+        resource_action = self.apply_ai_resource_action_plan(user=user, human_approved=True)
+        ai_status = 'applied' if resource_action['can_apply'] else 'failed'
+        workflow_status = 'successful' if resource_action['can_apply'] else 'failed'
+        error = '' if resource_action['can_apply'] else _('AI resource action plan failed to apply.')
+        result = copy(self.ai_task_result or {})
+        result.update(
+            {
+                'status': ai_status,
+                'error': error,
+                'resource_action': resource_action,
+            }
+        )
+        artifacts = copy(self.ancestor_artifacts or {})
+        awx_ai = copy(artifacts.get('awx_ai') or {})
+        awx_ai.update(
+            {
+                'status': ai_status,
+                'error': error,
+                'resource_action': resource_action,
+            }
+        )
+        artifacts['awx_ai'] = awx_ai
+        self.ai_task_status = ai_status
+        self.ai_task_result = result
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = workflow_status
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        ScheduleWorkflowManager().schedule()
+        return resource_action
+
+    def deny_ai_resource_action_plan(self, user=None):
+        error = str(_('AI resource action plan was denied.'))
+        result = copy(self.ai_task_result or {})
+        approval = copy(result.get('approval') or {})
+        approval.update({'denied_by': getattr(user, 'pk', None)})
+        result.update(
+            {
+                'status': 'failed',
+                'error': error,
+                'approval': approval,
+            }
+        )
+        artifacts = copy(self.ancestor_artifacts or {})
+        awx_ai = copy(artifacts.get('awx_ai') or {})
+        awx_ai.update(
+            {
+                'status': 'failed',
+                'error': error,
+                'approval': approval,
+            }
+        )
+        artifacts['awx_ai'] = awx_ai
+        self.ai_task_status = 'failed'
+        self.ai_task_result = result
+        self.ancestor_artifacts = artifacts
+        self.bypassed_job_status = 'failed'
+        self.save(update_fields=['ancestor_artifacts', 'ai_task_status', 'ai_task_result', 'bypassed_job_status'])
+        ScheduleWorkflowManager().schedule()
+
     def get_absolute_url(self, request=None):
         return reverse('api:workflow_job_node_detail', kwargs={'pk': self.pk}, request=request)
 
@@ -378,13 +834,10 @@ class WorkflowJobNode(WorkflowNodeBase):
         # child workflows via seed_root_ancestor_artifacts to carry artifacts
         # from the parent workflow); exclude job_slice which is internal
         # metadata handled separately below
-        aa_dict = {k: v for k, v in self.ancestor_artifacts.items() if k != 'job_slice'} if self.ancestor_artifacts else {}
+        aa_dict = self._build_parent_artifacts()
         is_root_node = True
         for parent_node in self.get_parent_nodes():
             is_root_node = False
-            aa_dict.update(parent_node.ancestor_artifacts)
-            if parent_node.job:
-                aa_dict.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
         if aa_dict and not is_root_node:
             self.ancestor_artifacts = aa_dict
             self.save(update_fields=['ancestor_artifacts'])
@@ -734,7 +1187,12 @@ class WorkflowJobTemplate(UnifiedJobTemplate, WorkflowJobOptions, SurveyJobTempl
         return not bool(self.variables_needed_to_start)
 
     def node_templates_missing(self):
-        return [node.pk for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True).all()]
+        return [
+            node.pk
+            for node in self.workflow_job_template_nodes.filter(unified_job_template__isnull=True)
+            .exclude(node_type__in=(WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_AI_TASK))
+            .all()
+        ]
 
     def node_prompts_rejected(self):
         node_list = []
@@ -828,6 +1286,36 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
 
     def get_ui_url(self):
         return urljoin(settings.TOWER_URL_BASE, WORKFLOW_BASE_URL.format(settings.OPTIONAL_UI_URL_PREFIX, self.pk))
+
+    def cancel(self, job_explanation=None, is_chain=False):
+        has_already_canceled = bool(self.status == 'canceled')
+        result = super().cancel(job_explanation=job_explanation, is_chain=is_chain)
+        if has_already_canceled or self.status == 'canceled':
+            return result
+
+        self.workflow_nodes.filter(do_not_run=False, job__isnull=True).update(do_not_run=True)
+        has_active_children = False
+        for node in self.workflow_nodes.select_related('job'):
+            job = node.job
+            if job is None:
+                continue
+            if job.can_cancel:
+                job.cancel(job_explanation=self._build_job_explanation(), is_chain=True)
+                job.refresh_from_db()
+            if job.status not in ('successful', 'failed', 'error', 'canceled'):
+                has_active_children = True
+
+        if not has_active_children:
+            update_fields = ['status', 'start_args']
+            self.status = 'canceled'
+            self.start_args = ''
+            if job_explanation is not None and self.job_explanation != job_explanation:
+                self.job_explanation = job_explanation
+                update_fields.append('job_explanation')
+            self.save(update_fields=update_fields)
+            self.websocket_emit_status('canceled')
+
+        return result
 
     def notification_data(self):
         result = super(WorkflowJob, self).notification_data()
@@ -1069,18 +1557,36 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
                     update_fields.append('expires')
         super(WorkflowApproval, self).save(*args, **kwargs)
 
+    @property
+    def ai_task_node(self):
+        try:
+            node = self.unified_job_node
+        except ObjectDoesNotExist:
+            return None
+        return node if node.is_ai_task_node else None
+
     def approve(self, request=None):
-        self.status = 'successful'
-        self.approved_or_denied_by = get_current_user()
+        user = getattr(request, 'user', None) or get_current_user()
+        ai_node = self.ai_task_node
+        if ai_node and ai_node.ai_task_status == 'awaiting_approval':
+            resource_action = ai_node.approve_ai_resource_action_plan(user)
+            self.status = 'successful' if resource_action.get('can_apply') else 'failed'
+        else:
+            self.status = 'successful'
+        self.approved_or_denied_by = user
         self.save()
-        self.send_approval_notification('approved')
+        self.send_approval_notification('approved' if self.status == 'successful' else 'denied')
         self.websocket_emit_status(self.status)
         ScheduleWorkflowManager().schedule()
         return reverse('api:workflow_approval_approve', kwargs={'pk': self.pk}, request=request)
 
     def deny(self, request=None):
+        user = getattr(request, 'user', None) or get_current_user()
+        ai_node = self.ai_task_node
+        if ai_node and ai_node.ai_task_status == 'awaiting_approval':
+            ai_node.deny_ai_resource_action_plan(user)
         self.status = 'failed'
-        self.approved_or_denied_by = get_current_user()
+        self.approved_or_denied_by = user
         self.save()
         self.send_approval_notification('denied')
         self.websocket_emit_status(self.status)
@@ -1172,7 +1678,7 @@ class WorkflowApproval(UnifiedJob, JobNotificationMixin):
         workflow_url = urljoin(settings.TOWER_URL_BASE, WORKFLOW_BASE_URL.format(settings.OPTIONAL_UI_URL_PREFIX, self.workflow_job.id))
         return {
             'approval_status': approval_status,
-            'approval_node_name': self.workflow_approval_template.name,
+            'approval_node_name': self.workflow_approval_template.name if self.workflow_approval_template_id else self.name,
             'workflow_url': workflow_url,
             'job_metadata': json.dumps(self.notification_data(), indent=4),
         }

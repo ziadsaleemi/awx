@@ -346,6 +346,32 @@ class JobTemplate(
         else:
             return actual_slice_count
 
+    def _resolve_inventory_machine_credential_policy(self, launch_kwargs=None):
+        launch_kwargs = launch_kwargs or {}
+        actual_inventory = launch_kwargs.get('inventory') if launch_kwargs.get('inventory') is not None else self.inventory
+        template_credentials = list(self.credentials.all())
+        prompted_credentials = list(launch_kwargs.get('credentials') or [])
+        Credential = self.credentials.model
+        effective_credentials = Credential.unique_dict(template_credentials)
+        effective_credentials.update(Credential.unique_dict(prompted_credentials))
+
+        if not actual_inventory or not getattr(actual_inventory, 'default_machine_credential_id', None):
+            return [credential for credential in effective_credentials.values()], prompted_credentials, False
+
+        default_credential = actual_inventory.default_machine_credential
+        has_machine_credential = any(credential.credential_type.kind == 'ssh' for credential in effective_credentials.values())
+        if actual_inventory.force_inventory_machine_credential or not has_machine_credential:
+            effective_credentials[default_credential.unique_hash()] = default_credential
+            prompted_credentials = [credential for credential in prompted_credentials if credential.credential_type.kind != 'ssh']
+            prompted_credentials.append(default_credential)
+            return [credential for credential in effective_credentials.values()], prompted_credentials, True
+
+        return [credential for credential in effective_credentials.values()], prompted_credentials, False
+
+    def resolve_credentials_for_launch(self, launch_kwargs=None):
+        effective_credentials, _prompted_credentials, _policy_applied = self._resolve_inventory_machine_credential_policy(launch_kwargs)
+        return effective_credentials
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get('update_fields', [])
         # if project is deleted for some reason, then keep the old organization
@@ -360,6 +386,9 @@ class JobTemplate(
         prevent_slicing = kwargs.pop('_prevent_slicing', False)
         slice_ct = self.get_effective_slice_ct(kwargs)
         slice_event = bool(slice_ct > 1 and (not prevent_slicing))
+        _effective_credentials, prompted_credentials, policy_applied = self._resolve_inventory_machine_credential_policy(kwargs)
+        if policy_applied:
+            kwargs['credentials'] = prompted_credentials
         if slice_event:
             # A Slice Job Template will generate a WorkflowJob rather than a Job
             from awx.main.models.workflow import WorkflowJobTemplate, WorkflowJobNode

@@ -25,7 +25,7 @@ export function TerraformJobTemplateDetails({
   const templateExtraVars = template.extra_vars || '';
 
   const { data: project } = useGet<{ id: number; name: string }>(
-    template.project ? awxAPI`/projects/${template.project.toString()}/` : null
+    template.project ? awxAPI`/projects/${template.project.toString()}/` : undefined
   );
 
   return (
@@ -71,7 +71,11 @@ export function TerraformJobTemplateDetails({
         />
       </PageDetail>
 
-      <NodeCodeEditorDetail label={t('Variables')} nodeExtraVars={nodeExtraVars} templateExtraVars={templateExtraVars} />
+      <NodeCodeEditorDetail
+        label={t('Variables')}
+        nodeExtraVars={nodeExtraVars}
+        templateExtraVars={templateExtraVars}
+      />
     </>
   );
 }

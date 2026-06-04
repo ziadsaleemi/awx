@@ -43,17 +43,19 @@ const CustomEdgeInner: FC<
   const isSourceRootNode = edgeElement.getSource().getId() === START_NODE_ID;
   const data = edgeElement.getData();
   if (!data) return null;
-  const { tag, tagStatus } = data;
+  const { modeDimmed, tag, tagStatus } = data;
   const edgeStyles = css(
     `pf-topology__edge ${StatusModifier[tagStatus]}`,
     (hover || tagHover) && 'pf-m-hover'
   );
+  const opacity = modeDimmed ? 0.35 : 1;
   return (
     <Layer id={dragging ? TOP_LAYER : undefined} {...rest}>
       <g
         data-test-id="workflow-visualizer-edge"
         className={edgeStyles}
         fillOpacity={0}
+        opacity={opacity}
         ref={hoverRef as LegacyRef<SVGTextElement>}
         onClick={onSelect}
       >
@@ -68,16 +70,18 @@ const CustomEdgeInner: FC<
         />
       </g>
       {centerPoint ? (
-        <CustomLabel
-          hoverRef={tagHoverRef}
-          xPoint={centerPoint.x}
-          yPoint={centerPoint.y}
-          status={tagStatus}
-          isSourceRootNode={isSourceRootNode}
-          {...props}
-        >
-          {tag}
-        </CustomLabel>
+        <g opacity={opacity}>
+          <CustomLabel
+            hoverRef={tagHoverRef}
+            xPoint={centerPoint.x}
+            yPoint={centerPoint.y}
+            status={tagStatus}
+            isSourceRootNode={isSourceRootNode}
+            {...props}
+          >
+            {tag}
+          </CustomLabel>
+        </g>
       ) : null}
       <EdgeTerminal
         target={edgeElement.getTarget().getPosition()}

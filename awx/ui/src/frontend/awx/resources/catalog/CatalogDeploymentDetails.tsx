@@ -4,8 +4,8 @@ import {
   LoadingPage,
   PageDetail,
   PageDetails,
+  TextCell,
   useGetPageUrl,
-  usePageNavigate,
 } from '../../../../framework';
 import { useGetItem } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
@@ -14,13 +14,17 @@ import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
 import { StatusCell } from '../../../common/Status';
 import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
+import {
+  terraformJobOutputRoute,
+  type CatalogJobRoute,
+  workflowJobOutputRoute,
+} from './catalogJobRoutes';
 
 export function CatalogDeploymentDetails() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const id = params.id ?? '';
   const getPageUrl = useGetPageUrl();
-  const pageNavigate = usePageNavigate();
 
   const {
     data: deployment,
@@ -59,37 +63,26 @@ export function CatalogDeploymentDetails() {
       </PageDetail>
       {deployment.provision_job && (
         <PageDetail label={t('Provision job')}>
-          <a
-            href={getPageUrl(AwxRoute.Jobs)}
-            onClick={(e) => {
-              e.preventDefault();
-              /* navigate to workflow job detail when we have the route */
-            }}
-          >
-            {t('Job #{{id}}', { id: deployment.provision_job })}
-          </a>
+          <CatalogJobLink
+            text={t('Workflow Job #{{id}}', { id: deployment.provision_job })}
+            route={workflowJobOutputRoute(deployment.provision_job)}
+          />
         </PageDetail>
       )}
       {deployment.terraform_provision_job && (
         <PageDetail label={t('Terraform provision job')}>
-          <a
-            href={getPageUrl(AwxRoute.TerraformJobPage, {
-              params: { job_id: String(deployment.terraform_provision_job) },
-            })}
-            onClick={(e) => {
-              e.preventDefault();
-              pageNavigate(AwxRoute.TerraformJobPage, {
-                params: { job_id: String(deployment.terraform_provision_job) },
-              });
-            }}
-          >
-            {t('Terraform Job #{{id}}', { id: deployment.terraform_provision_job })}
-          </a>
+          <CatalogJobLink
+            text={t('Terraform Job #{{id}}', { id: deployment.terraform_provision_job })}
+            route={terraformJobOutputRoute(deployment.terraform_provision_job)}
+          />
         </PageDetail>
       )}
       {deployment.deprovision_job && (
         <PageDetail label={t('Deprovision job')}>
-          {t('Job #{{id}}', { id: deployment.deprovision_job })}
+          <CatalogJobLink
+            text={t('Workflow Job #{{id}}', { id: deployment.deprovision_job })}
+            route={workflowJobOutputRoute(deployment.deprovision_job)}
+          />
         </PageDetail>
       )}
       <PageDetailCodeEditor
@@ -119,3 +112,13 @@ export function CatalogDeploymentDetails() {
   );
 }
 
+function CatalogJobLink(props: { text: string; route: CatalogJobRoute | undefined }) {
+  const getPageUrl = useGetPageUrl();
+  const { text, route } = props;
+  return (
+    <TextCell
+      text={text}
+      to={route ? getPageUrl(route.route, { params: route.params }) : undefined}
+    />
+  );
+}

@@ -18,6 +18,9 @@ UI_SRC="$REPO_ROOT/awx/ui/src"
 BUILD_SRC="$UI_SRC/build/awx"
 BUILD_DEST="$REPO_ROOT/awx/ui/build/awx"
 CONTAINER="tools_awx_1"
+HEALTH_URL="${AWX_UI_DEPLOY_HEALTH_URL:-https://localhost:8043/}"
+HEALTH_TIMEOUT="${AWX_UI_DEPLOY_HEALTH_TIMEOUT:-60}"
+HEALTH_INTERVAL="${AWX_UI_DEPLOY_HEALTH_INTERVAL:-3}"
 
 NO_BUILD=0
 for arg in "$@"; do
@@ -63,6 +66,27 @@ retry() {
   done
   echo "    [retry] all $max attempts failed for: $desc" >&2
   return $ret
+}
+
+wait_for_http_200() {
+  local url=$1 timeout=$2 delay=$3
+  local elapsed=0 code
+  while true; do
+    code=$(curl -sk "$url" -o /dev/null -w "%{http_code}" || true)
+    if [[ "$code" == "200" ]]; then
+      HTTP_CODE="$code"
+      echo "    [health] HTTP $code after ${elapsed}s"
+      return 0
+    fi
+    if (( elapsed >= timeout )); then
+      HTTP_CODE="$code"
+      echo "    [health] HTTP $code after ${elapsed}s; giving up" >&2
+      return 1
+    fi
+    echo "    [health] HTTP $code; waiting ${delay}s..." >&2
+    sleep "$delay"
+    elapsed=$(( elapsed + delay ))
+  done
 }
 
 echo "=== AWX UI Deploy  (started $(date '+%H:%M:%S')) ==="
@@ -145,20 +169,21 @@ step_start
 echo "[4/4] Restarting uwsgi in container..."
 docker exec "$CONTAINER" supervisorctl restart tower-processes:awx-uwsgi
 echo "  Waiting for uwsgi to come up..."
-sleep 8
+HTTP_CODE="000"
+if ! wait_for_http_200 "$HEALTH_URL" "$HEALTH_TIMEOUT" "$HEALTH_INTERVAL"; then
+  true
+fi
 step_end "deploy"
 echo "  uwsgi restarted. (${STEP_TIME_DEPLOY}s)"
 
 # ── Step 5: Verify ─────────────────────────────────────────────────────────────
-HTTP_CODE=$(curl -sk https://localhost:8043/ -o /dev/null -w "%{http_code}")
-set +o pipefail
-JS_SRC=$(curl -sk https://localhost:8043/ | grep -o 'src="/static/awx/[^"]*\.js"' | head -1)
-set -o pipefail
-
 TOTAL=$(( SECONDS - DEPLOY_START ))
 [[ $NO_BUILD -eq 0 ]] && BUILD_DISPLAY="${STEP_TIME_BUILD}s" || BUILD_DISPLAY="skipped"
 
 if [[ "$HTTP_CODE" == "200" ]]; then
+  set +o pipefail
+  JS_SRC=$(curl -sk "$HEALTH_URL" | grep -o 'src="/static/awx/[^"]*\.js"' | head -1)
+  set -o pipefail
   echo ""
   echo "=== Deploy successful  (finished $(date '+%H:%M:%S')) ==="
   echo ""

@@ -99,6 +99,24 @@ from awx.main.utils.workload_identity import retrieve_workload_identity_jwt_with
 logger = logging.getLogger('awx.main.tasks.jobs')
 
 
+AWX_DEFAULT_REMOTE_TMP = '/tmp/ansible'
+
+
+def set_default_remote_tmp(env, remote_tmp=AWX_DEFAULT_REMOTE_TMP):
+    """
+    Keep Ansible module temp files out of remote home directories by default.
+    Respect explicit task/global env overrides; if one legacy env spelling is
+    supplied, mirror it so both supported Ansible spellings agree.
+    """
+    existing_remote_tmp = env.get('ANSIBLE_REMOTE_TEMP') or env.get('ANSIBLE_REMOTE_TMP')
+    if existing_remote_tmp:
+        env.setdefault('ANSIBLE_REMOTE_TEMP', existing_remote_tmp)
+        env.setdefault('ANSIBLE_REMOTE_TMP', existing_remote_tmp)
+        return
+    env['ANSIBLE_REMOTE_TEMP'] = remote_tmp
+    env['ANSIBLE_REMOTE_TMP'] = remote_tmp
+
+
 def populate_claims_for_workload(unified_job) -> dict:
     """
     Extract JWT claims from a Controller workload for the aap_controller_automation_job scope.
@@ -960,9 +978,7 @@ class SourceControlMixin(BaseTask):
             project_path = project.get_project_path(check_if_exists=False)
             if not os.path.isdir(project_path):
                 if project.scm_type and retry_missing_project_copy:
-                    logger.warning(
-                        f'Project source tree missing at copy time for unified job {self.instance.id}; forcing one project sync retry.'
-                    )
+                    logger.warning(f'Project source tree missing at copy time for unified job {self.instance.id}; forcing one project sync retry.')
                     return self.sync_and_copy_without_lock(
                         project,
                         private_data_dir,
@@ -1166,7 +1182,11 @@ class RunJob(SourceControlMixin, BaseTask):
             ('ANSIBLE_CALLBACK_PLUGINS', 'callback_plugins', 'plugins_path', '~/.ansible/plugins:/plugins/callback:/usr/share/ansible/plugins/callback'),
         )
 
-        config_values = read_ansible_config(os.path.join(private_data_dir, 'project'), list(map(lambda x: x[1], path_vars)) + ['callbacks_enabled'])
+        config_values = read_ansible_config(
+            os.path.join(private_data_dir, 'project'), list(map(lambda x: x[1], path_vars)) + ['callbacks_enabled', 'remote_tmp']
+        )
+        if 'remote_tmp' not in config_values:
+            set_default_remote_tmp(env)
 
         for env_key, config_setting, folder, default in path_vars:
             paths = default.split(':')
@@ -2059,8 +2079,41 @@ class RunAdHocCommand(BaseTask):
         env['INVENTORY_HOSTVARS'] = str(True)
         env['ANSIBLE_LOAD_CALLBACK_PLUGINS'] = '1'
         env['ANSIBLE_SFTP_BATCH_MODE'] = 'False'
+        set_default_remote_tmp(env)
 
         return env
+
+    def should_update_host_facts(self, ad_hoc_command):
+        return ad_hoc_command.module_name == 'setup'
+
+    def should_use_fact_cache(self):
+        return bool(self.instance and self.should_update_host_facts(self.instance))
+
+    def pre_run_hook(self, ad_hoc_command, private_data_dir):
+        super(RunAdHocCommand, self).pre_run_hook(ad_hoc_command, private_data_dir)
+        if self.should_update_host_facts(ad_hoc_command):
+            ad_hoc_command.log_lifecycle("start_ad_hoc_fact_cache")
+            self.hosts_with_facts_cached = start_fact_cache(
+                ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS),
+                artifacts_dir=os.path.join(private_data_dir, 'artifacts', str(ad_hoc_command.id)),
+                inventory_id=ad_hoc_command.inventory_id,
+            )
+
+    def post_run_hook(self, ad_hoc_command, status):
+        super(RunAdHocCommand, self).post_run_hook(ad_hoc_command, status)
+        ad_hoc_command.refresh_from_db(fields=['job_env'])
+        private_data_dir = ad_hoc_command.job_env.get('AWX_PRIVATE_DATA_DIR')
+        if not private_data_dir:
+            return
+        if self.should_update_host_facts(ad_hoc_command) and self.runner_callback.artifacts_processed:
+            ad_hoc_command.log_lifecycle("finish_ad_hoc_fact_cache")
+            finish_fact_cache(
+                ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS),
+                artifacts_dir=os.path.join(private_data_dir, 'artifacts', str(ad_hoc_command.id)),
+                job_id=ad_hoc_command.id,
+                inventory_id=ad_hoc_command.inventory_id,
+                job_created=ad_hoc_command.created,
+            )
 
     def build_args(self, ad_hoc_command, private_data_dir, passwords):
         """

@@ -46,4 +46,40 @@ describe('WorkflowOutputNavigation', () => {
     cy.clickButton('Successful');
     cy.getByDataCy('workflow-nodes').contains('Fail');
   });
+
+  it('WorkflowOutputNavigation should show virtual EDA nodes without job links', () => {
+    const workflowNodes = [
+      ...jobWorkflowNodesData.results,
+      {
+        ...jobWorkflowNodesData.results[0],
+        id: 9001,
+        job: null,
+        unified_job_template: null,
+        identifier: 'Restart web on alert',
+        node_type: 'eda_rulebook',
+        summary_fields: {
+          ...jobWorkflowNodesData.results[0].summary_fields,
+          job: undefined,
+          unified_job_template: undefined,
+          eda_rulebook: {
+            name: 'Restart web on alert',
+            event_source_status: 'running',
+            status: 'successful',
+          },
+        },
+      },
+    ];
+
+    cy.mount(
+      <WorkflowOutputNavigation workflowNodes={workflowNodes as unknown as WorkflowJobNode[]} />
+    );
+    cy.contains('Workflow Job 1/7').click();
+    cy.getByDataCy('workflow-nodes').contains('Restart web on alert');
+    cy.getByDataCy('workflow-nodes')
+      .contains('Restart web on alert')
+      .should('not.have.attr', 'href');
+
+    cy.clickButton('Successful');
+    cy.getByDataCy('workflow-nodes').contains('Restart web on alert');
+  });
 });

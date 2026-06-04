@@ -97,6 +97,7 @@ from awx.main.models import (
     CloudProviderState,
     UnifiedJob,
     UnifiedJobTemplate,
+    UserUISettings,
     WorkflowApproval,
     WorkflowApprovalTemplate,
     WorkflowJob,
@@ -107,6 +108,7 @@ from awx.main.models import (
 )
 from awx.main.models.base import VERBOSITY_CHOICES, NEW_JOB_TYPE_CHOICES
 from awx.main.models.rbac import role_summary_fields_generator, give_creator_permissions, get_role_codenames, to_permissions, get_role_from_object_role
+from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 from awx.main.fields import ImplicitRoleField
 from awx.main.utils import (
     get_model_for_type,
@@ -172,6 +174,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'source_project': DEFAULT_SUMMARY_FIELDS + ('status', 'scm_type', 'allow_override'),
     'project_update': DEFAULT_SUMMARY_FIELDS + ('status', 'failed'),
     'credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'cloud', 'kubernetes', 'credential_type_id'),
+    'default_machine_credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'credential_type_id'),
     'signature_validation_credential': DEFAULT_SUMMARY_FIELDS + ('kind', 'credential_type_id'),
     'job': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'elapsed', 'type', 'canceled_on'),
     'job_template': DEFAULT_SUMMARY_FIELDS,
@@ -196,6 +199,7 @@ SUMMARIZABLE_FK_FIELDS = {
     'approved_or_denied_by': ('id', 'username', 'first_name', 'last_name'),
     'credential_type': DEFAULT_SUMMARY_FIELDS,
     'resource': ('ansible_id', 'resource_type'),
+    'catalog_item': DEFAULT_SUMMARY_FIELDS + ('organization_id',),
     'cloud_provider_connection': ('id', 'name', 'provider_id', 'status'),
     'cloud_provider_state': ('id', 'provider_id', 'pulled_at'),
 }
@@ -1019,7 +1023,7 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
             elif isinstance(obj, WorkflowApproval):
                 serializer_class = WorkflowApprovalListSerializer
             elif isinstance(obj, TerraformJob):
-                serializer_class = TerraformJobSerializer
+                serializer_class = TerraformJobListSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -1195,6 +1199,17 @@ class UserSerializer(BaseSerializer):
             )
         )
         return res
+
+
+class UserMeSerializer(UserSerializer):
+    ui_preferences = serializers.SerializerMethodField()
+
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + ('ui_preferences',)
+
+    def get_ui_preferences(self, obj):
+        settings_obj, _created = UserUISettings.objects.get_or_create(user=obj)
+        return settings_obj.ui_preferences or {}
 
 
 class UserActivityStreamSerializer(UserSerializer):
@@ -1588,6 +1603,8 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
             'inventory_sources_with_failures',
             'pending_deletion',
             'prevent_instance_group_fallback',
+            'default_machine_credential',
+            'force_inventory_machine_credential',
             'opa_query_path',
         )
 
@@ -1617,6 +1634,8 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
             res['tree'] = self.reverse('api:inventory_tree_view', kwargs={'pk': obj.pk})
         if obj.organization:
             res['organization'] = self.reverse('api:organization_detail', kwargs={'pk': obj.organization.pk})
+        if obj.default_machine_credential:
+            res['default_machine_credential'] = self.reverse('api:credential_detail', kwargs={'pk': obj.default_machine_credential.pk})
         if obj.kind == 'constructed':
             res['input_inventories'] = self.reverse('api:inventory_input_inventories', kwargs={'pk': obj.pk})
             res['constructed_url'] = self.reverse('api:constructed_inventory_detail', kwargs={'pk': obj.pk})
@@ -1658,6 +1677,36 @@ class InventorySerializer(LabelsListMixin, BaseSerializerWithVariables, OpaQuery
 
         if kind == 'smart' and not host_filter:
             raise serializers.ValidationError({'host_filter': _('Smart inventories must specify host_filter')})
+
+        default_machine_credential = attrs.get('default_machine_credential')
+        if default_machine_credential is None and self.instance and 'default_machine_credential' not in attrs:
+            default_machine_credential = self.instance.default_machine_credential
+
+        force_inventory_machine_credential = attrs.get('force_inventory_machine_credential')
+        if force_inventory_machine_credential is None and self.instance and 'force_inventory_machine_credential' not in attrs:
+            force_inventory_machine_credential = self.instance.force_inventory_machine_credential
+
+        organization = attrs.get('organization')
+        if organization is None and self.instance and 'organization' not in attrs:
+            organization = self.instance.organization
+
+        if default_machine_credential and default_machine_credential.credential_type.kind != 'ssh':
+            raise serializers.ValidationError({'default_machine_credential': _('Only Machine credentials can be selected as an inventory default.')})
+
+        if (
+            default_machine_credential
+            and organization
+            and default_machine_credential.organization_id
+            and default_machine_credential.organization_id != organization.id
+        ):
+            raise serializers.ValidationError(
+                {'default_machine_credential': _('Inventory default credentials must belong to the same organization as the inventory.')}
+            )
+
+        if force_inventory_machine_credential and not default_machine_credential:
+            raise serializers.ValidationError(
+                {'force_inventory_machine_credential': _('A default machine credential is required before force can be enabled.')}
+            )
 
         return super(InventorySerializer, self).validate(attrs)
 
@@ -3895,9 +3944,7 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
         if obj.target_inventory_id:
             res['target_inventory'] = self.reverse('api:inventory_detail', kwargs={'pk': obj.target_inventory_id})
         if obj.execution_environment_id:
-            res['execution_environment'] = self.reverse(
-                'api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id}
-            )
+            res['execution_environment'] = self.reverse('api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id})
         return res
 
 
@@ -3933,9 +3980,7 @@ class TerraformJobSerializer(UnifiedJobSerializer):
     def get_related(self, obj):
         res = super().get_related(obj)
         if obj.terraform_job_template_id:
-            res['terraform_job_template'] = self.reverse(
-                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
-            )
+            res['terraform_job_template'] = self.reverse('api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id})
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
         res['cancel'] = self.reverse('api:terraform_job_cancel', kwargs={'pk': obj.pk})
@@ -3945,10 +3990,13 @@ class TerraformJobSerializer(UnifiedJobSerializer):
         try:
             return obj.result_stdout
         except StdoutMaxBytesExceeded as e:
-            return _(
-                "Standard Output too large to display ({text_size} bytes), "
-                "only download supported for sizes over {supported_size} bytes."
-            ).format(text_size=e.total, supported_size=e.supported)
+            return _("Standard Output too large to display ({text_size} bytes), " "only download supported for sizes over {supported_size} bytes.").format(
+                text_size=e.total, supported_size=e.supported
+            )
+
+
+class TerraformJobListSerializer(TerraformJobSerializer, UnifiedJobListSerializer):
+    pass
 
 
 class TerraformJobCancelSerializer(TerraformJobSerializer):
@@ -3984,6 +4032,10 @@ class CatalogItemSerializer(BaseSerializer):
             'provider_deprovision_workflows',
             'available_providers',
             'provider_field_configs',
+            'configure_workflow',
+            'validate_workflow',
+            'default_lease_minutes',
+            'require_lease',
         )
 
     def get_related(self, obj):
@@ -3992,24 +4044,19 @@ class CatalogItemSerializer(BaseSerializer):
         res['deploy'] = self.reverse('api:catalog_item_deploy', kwargs={'pk': obj.pk})
         res['deploy_survey'] = self.reverse('api:catalog_item_deploy_survey', kwargs={'pk': obj.pk})
         if obj.provision_workflow_id:
-            res['provision_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id}
-            )
+            res['provision_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.provision_workflow_id})
         if obj.terraform_job_template_id:
-            res['terraform_job_template'] = self.reverse(
-                'api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id}
-            )
+            res['terraform_job_template'] = self.reverse('api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id})
         if obj.deprovision_workflow_id:
-            res['deprovision_workflow'] = self.reverse(
-                'api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id}
-            )
+            res['deprovision_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.deprovision_workflow_id})
+        if obj.configure_workflow_id:
+            res['configure_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.configure_workflow_id})
+        if obj.validate_workflow_id:
+            res['validate_workflow'] = self.reverse('api:workflow_job_template_detail', kwargs={'pk': obj.validate_workflow_id})
         # Per-provider WJT survey links
         if obj.provider_workflows and isinstance(obj.provider_workflows, dict):
             res['provider_workflow_surveys'] = {
-                provider: self.reverse(
-                    'api:workflow_job_template_survey_spec', kwargs={'pk': wjt_pk}
-                )
-                for provider, wjt_pk in obj.provider_workflows.items()
+                provider: self.reverse('api:workflow_job_template_survey_spec', kwargs={'pk': wjt_pk}) for provider, wjt_pk in obj.provider_workflows.items()
             }
         return res
 
@@ -4032,11 +4079,22 @@ class CatalogItemSerializer(BaseSerializer):
                 'id': obj.deprovision_workflow_id,
                 'name': obj.deprovision_workflow.name,
             }
+        if obj.configure_workflow_id:
+            d['configure_workflow'] = {
+                'id': obj.configure_workflow_id,
+                'name': obj.configure_workflow.name,
+            }
+        if obj.validate_workflow_id:
+            d['validate_workflow'] = {
+                'id': obj.validate_workflow_id,
+                'name': obj.validate_workflow.name,
+            }
         return d
 
 
 class CatalogDeploymentSerializer(BaseSerializer):
     show_capabilities = ['delete', 'retry']
+    time_remaining_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = CatalogDeployment
@@ -4052,6 +4110,9 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'extra_vars',
             'last_deprovision_vars',
             'provisioning_history',
+            'expires_at',
+            'auto_deprovision',
+            'time_remaining_seconds',
         )
         read_only_fields = (
             'status',
@@ -4062,7 +4123,16 @@ class CatalogDeploymentSerializer(BaseSerializer):
             'owner',
             'last_deprovision_vars',
             'provisioning_history',
+            'time_remaining_seconds',
         )
+
+    def get_time_remaining_seconds(self, obj):
+        if obj.expires_at is None:
+            return None
+        from django.utils.timezone import now as utcnow
+
+        delta = obj.expires_at - utcnow()
+        return max(0, int(delta.total_seconds()))
 
     def get_related(self, obj):
         res = super().get_related(obj)
@@ -4094,14 +4164,14 @@ class CatalogDeploymentSerializer(BaseSerializer):
 class CloudProviderConnectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProviderConnection
-        fields = ('id', 'provider_id', 'name', 'status', 'credential', 'credential_name', 'error', 'updated_at')
+        fields = ('id', 'provider_id', 'name', 'status', 'credential', 'credential_name', 'error', 'organization', 'updated_at')
         read_only_fields = ('updated_at',)
 
 
 class CloudProviderStateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProviderState
-        fields = ('id', 'provider_id', 'pulled_at', 'provider_data', 'admin_settings', 'provider_settings')
+        fields = ('id', 'provider_id', 'organization', 'pulled_at', 'provider_data', 'admin_settings', 'provider_settings')
 
 
 class WorkflowJobTemplateSerializer(LabelsListMixin, UnifiedJobTemplateSerializer):
@@ -4516,6 +4586,13 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
     failure_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     always_nodes = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     exclude_errors = ('required',)  # required variables may be provided by WFJT or on launch
+    eda_fields = ('eda_rulebook_name', 'eda_activation_id', 'eda_event_source', 'eda_event_source_status')
+    ai_fields = ('ai_task_prompt', 'ai_task_model', 'ai_task_approval_required', 'ai_task_status', 'ai_task_result')
+    virtual_node_fields = ('node_type',) + eda_fields + ai_fields
+
+    def _submitted_metadata_value(self, field_name):
+        initial_data = getattr(self, 'initial_data', {}) or {}
+        return field_name in initial_data and initial_data[field_name] not in ('', None, {}, [])
 
     class Meta:
         model = WorkflowJobTemplateNode
@@ -4533,6 +4610,16 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
             'always_nodes',
             'all_parents_must_converge',
             'identifier',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
         )
 
     def get_related(self, obj):
@@ -4561,7 +4648,69 @@ class WorkflowJobTemplateNodeSerializer(LaunchConfigurationBaseSerializer):
         summary_fields = super(WorkflowJobTemplateNodeSerializer, self).get_summary_fields(obj)
         if isinstance(obj.unified_job_template, WorkflowApprovalTemplate):
             summary_fields['unified_job_template']['timeout'] = obj.unified_job_template.timeout
+        if obj.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            summary_fields['eda_rulebook'] = {
+                'name': obj.eda_rulebook_name,
+                'activation_id': obj.eda_activation_id,
+                'event_source': obj.eda_event_source,
+                'event_source_status': obj.eda_event_source_status,
+            }
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            summary_fields['ai_task'] = {
+                'prompt': obj.ai_task_prompt,
+                'model': obj.ai_task_model,
+                'approval_required': obj.ai_task_approval_required,
+                'status': obj.ai_task_status or 'pending',
+            }
         return summary_fields
+
+    def validate(self, attrs):
+        virtual_values = {
+            field_name: attrs[field_name]
+            for field_name in self.virtual_node_fields
+            if field_name in attrs and field_name in (getattr(self, 'initial_data', {}) or {})
+        }
+        unified_job_template_submitted = 'unified_job_template' in attrs
+        submitted_unified_job_template = attrs.get('unified_job_template')
+        attrs = super(WorkflowJobTemplateNodeSerializer, self).validate(attrs)
+        for field_name in self.eda_fields + self.ai_fields:
+            if field_name not in virtual_values:
+                attrs.pop(field_name, None)
+        attrs.update(virtual_values)
+        if unified_job_template_submitted:
+            attrs['unified_job_template'] = submitted_unified_job_template
+
+        node_type = attrs.get('node_type')
+        if node_type is None and self.instance:
+            node_type = self.instance.node_type
+        node_type = node_type or WORKFLOW_NODE_TYPE_TEMPLATE
+
+        unified_job_template = attrs.get('unified_job_template')
+        if unified_job_template is None and self.instance and not unified_job_template_submitted:
+            unified_job_template = self.instance.unified_job_template
+
+        if node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            if unified_job_template is not None:
+                raise serializers.ValidationError({'unified_job_template': _('EDA rulebook nodes cannot also reference a unified job template.')})
+            rulebook_name = attrs.get('eda_rulebook_name') or getattr(self.instance, 'eda_rulebook_name', '')
+            if not rulebook_name:
+                raise serializers.ValidationError({'eda_rulebook_name': _('This field is required for EDA rulebook nodes.')})
+            return attrs
+
+        if node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            if unified_job_template is not None:
+                raise serializers.ValidationError({'unified_job_template': _('AI task nodes cannot also reference a unified job template.')})
+            prompt = attrs.get('ai_task_prompt') or getattr(self.instance, 'ai_task_prompt', '')
+            if not prompt:
+                raise serializers.ValidationError({'ai_task_prompt': _('This field is required for AI task nodes.')})
+            return attrs
+
+        if any(self._submitted_metadata_value(field_name) for field_name in self.eda_fields):
+            raise serializers.ValidationError({'node_type': _('EDA metadata is only valid when node_type is eda_rulebook.')})
+        if any(self._submitted_metadata_value(field_name) for field_name in self.ai_fields):
+            raise serializers.ValidationError({'node_type': _('AI task metadata is only valid when node_type is ai_task.')})
+
+        return attrs
 
 
 class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
@@ -4588,6 +4737,16 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             'do_not_run',
             'bypassed_job_status',
             'identifier',
+            'node_type',
+            'eda_rulebook_name',
+            'eda_activation_id',
+            'eda_event_source',
+            'eda_event_source_status',
+            'ai_task_prompt',
+            'ai_task_model',
+            'ai_task_approval_required',
+            'ai_task_status',
+            'ai_task_result',
         )
 
     def get_related(self, obj):
@@ -4601,12 +4760,29 @@ class WorkflowJobNodeSerializer(LaunchConfigurationBaseSerializer):
             res['job'] = obj.job.get_absolute_url(self.context.get('request'))
         if obj.workflow_job:
             res['workflow_job'] = self.reverse('api:workflow_job_detail', kwargs={'pk': obj.workflow_job.pk})
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK and isinstance(obj.job, WorkflowApproval):
+            res['approval'] = self.reverse('api:workflow_approval_detail', kwargs={'pk': obj.job.pk})
         return res
 
     def get_summary_fields(self, obj):
         summary_fields = super(WorkflowJobNodeSerializer, self).get_summary_fields(obj)
         if isinstance(obj.job, WorkflowApproval):
             summary_fields['job']['timed_out'] = obj.job.timed_out
+        if obj.node_type == WORKFLOW_NODE_TYPE_EDA_RULEBOOK:
+            summary_fields['eda_rulebook'] = {
+                'name': obj.eda_rulebook_name,
+                'activation_id': obj.eda_activation_id,
+                'event_source': obj.eda_event_source,
+                'event_source_status': obj.eda_event_source_status,
+                'status': obj.bypassed_job_status or 'pending',
+            }
+        if obj.node_type == WORKFLOW_NODE_TYPE_AI_TASK:
+            summary_fields['ai_task'] = {
+                'prompt': obj.ai_task_prompt,
+                'model': obj.ai_task_model,
+                'approval_required': obj.ai_task_approval_required,
+                'status': obj.ai_task_status or obj.bypassed_job_status or 'pending',
+            }
         return summary_fields
 
 
@@ -5052,10 +5228,7 @@ class JobLaunchSerializer(BaseSerializer):
 
         # verify that credentials (either provided or existing) don't
         # require launch-time passwords that have not been provided
-        if 'credentials' in accepted:
-            launch_credentials = Credential.unique_dict(list(template_credentials.all()) + list(accepted['credentials'])).values()
-        else:
-            launch_credentials = template_credentials
+        launch_credentials = template.resolve_credentials_for_launch(accepted)
         passwords = attrs.get('credential_passwords', {})  # get from original attrs
         passwords_lacking = []
         for cred in launch_credentials:
@@ -6458,6 +6631,7 @@ class ActivityStreamSerializer(BaseSerializer):
             ('ad_hoc_command', ('id', 'name', 'status', 'limit')),
             ('workflow_approval', ('id', 'name', 'unified_job_id')),
             ('instance', ('id', 'hostname')),
+            ('catalog_item', ('id', 'name', 'description', 'organization_id')),
             ('cloud_provider_connection', ('id', 'name', 'provider_id', 'status')),
             ('cloud_provider_state', ('id', 'provider_id', 'pulled_at')),
         ]

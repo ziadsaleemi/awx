@@ -1,11 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import {
-  LoadingPage,
-  PageHeader,
-  PageLayout,
-  useGetPageUrl,
-} from '../../../../framework';
+import { LoadingPage, PageHeader, PageLayout, useGetPageUrl } from '../../../../framework';
 import { PageRoutedTabs } from '../../../common/PageRoutedTabs';
 import { useGetItem } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
@@ -17,10 +12,12 @@ export function CatalogItemPage() {
   const params = useParams<{ id: string }>();
   const getPageUrl = useGetPageUrl();
 
-  const { data: item, error, isLoading, refresh } = useGetItem<CatalogItem>(
-    awxAPI`/catalog_items`,
-    params.id
-  );
+  const {
+    data: item,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<CatalogItem>(awxAPI`/catalog_items`, params.id);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !item) return <LoadingPage breadcrumbs tabs />;

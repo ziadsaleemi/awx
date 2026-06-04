@@ -20,14 +20,27 @@ export interface TerraformJob {
   target_group: string;
   timeout: number;
 
-  status: 'new' | 'pending' | 'waiting' | 'running' | 'successful' | 'failed' | 'error' | 'canceled';
+  status:
+    | 'new'
+    | 'pending'
+    | 'waiting'
+    | 'running'
+    | 'successful'
+    | 'failed'
+    | 'error'
+    | 'canceled';
   failed: boolean;
   result_stdout: string;
   execution_node: string;
   artifacts?: Record<string, unknown>;
 
   summary_fields: {
-    unified_job_template?: { id: number; name: string; description: string; unified_job_type: string };
+    unified_job_template?: {
+      id: number;
+      name: string;
+      description: string;
+      unified_job_type: string;
+    };
     terraform_job_template?: { id: number; name: string; description: string };
     project?: { id: number; name: string; scm_type: string };
     target_inventory?: { id: number; name: string; kind: string };

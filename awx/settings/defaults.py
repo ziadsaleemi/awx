@@ -199,6 +199,20 @@ MAX_UI_JOB_EVENTS = 4000
 # to update job data in response to status changes websocket events
 UI_LIVE_UPDATES_ENABLED = True
 
+# Optional Event-Driven Ansible controller integration.
+EDA_SERVER_URL = ''
+EDA_AUTH_TOKEN = ''
+EDA_USERNAME = ''
+EDA_PASSWORD = ''
+EDA_VERIFY_SSL = True
+EDA_REQUEST_TIMEOUT = 5
+EDA_ACTIVATIONS_API_PATH = '/api/eda/v1/activations/'
+EDA_ACTIVATION_START_API_PATH = '/api/eda/v1/activations/{activation_id}/enable/'
+EDA_ACTIVATION_INSTANCE_LOGS_API_PATH = '/api/eda/v1/activation-instances/{activation_instance_id}/logs/'
+EDA_ACTIVATION_EVENTS_API_PATH = '/api/eda/v1/activations/{activation_id}/events/'
+EDA_ACTIVATION_POLL_ATTEMPTS = 1
+EDA_ACTIVATION_POLL_INTERVAL = 0
+
 # The maximum size of the ansible callback event's res data structure
 # beyond this limit and the value will be removed
 MAX_EVENT_RES_DATA = 700000
@@ -544,6 +558,11 @@ DISPATCHER_SCHEDULE = {
     'awx.main.tasks.host_indirect.cleanup_and_save_indirect_host_entries_fallback': {
         'task': 'awx.main.tasks.host_indirect.cleanup_and_save_indirect_host_entries_fallback',
         'schedule': 3600,
+    },
+    'awx.main.tasks.system.expire_catalog_deployments': {
+        'task': 'awx.main.tasks.system.expire_catalog_deployments',
+        'schedule': 300,
+        'options': {'expires': 290},
     },
 }
 
@@ -1239,6 +1258,37 @@ OPA_AUTH_CA_CERT = ''  # The content of the CA certificate for mTLS authenticati
 OPA_AUTH_CUSTOM_HEADERS = {}  # Optional custom headers included in requests to the OPA server. Defaults to empty dictionary ({}).
 OPA_REQUEST_TIMEOUT = 1.5  # The number of seconds after which the connection to the OPA server will time out. Defaults to 1.5 seconds.
 OPA_REQUEST_RETRIES = 2  # The number of retry attempts for connecting to the OPA server. Default is 2.
+OPA_POLICY_BUNDLE = ''  # Optional Rego policy bundle text stored in AWX settings for admin-managed policy-as-code workflows.
+
+# AI Assistant settings
+AI_ENABLED = False
+AI_PROVIDER = 'openai'
+AI_API_URL = ''
+AI_API_KEY = ''
+AI_MODEL_NAME = ''
+AI_OPENAI_CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+AI_OPENAI_CODEX_ACCESS_TOKEN = ''
+AI_OPENAI_CODEX_REFRESH_TOKEN = ''
+AI_OPENAI_CODEX_TOKEN_EXPIRES_AT = ''
+AI_OPENAI_CODEX_SCOPE = 'openid profile email offline_access model.request api.responses.write'
+AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID = ''
+AI_OPENAI_CODEX_PLAN_TYPE = ''
+AI_OPENAI_CODEX_AVAILABLE_MODELS = []
+AI_SYSTEM_PROMPT = (
+    'You are an AWX automation assistant. Help users understand and manage their '
+    'Ansible Automation Platform resources, including job templates, inventories, '
+    'credentials, workflows, Terraform templates, and catalog items. '
+    'Be concise and provide actionable guidance.'
+)
+AI_MAX_TOKENS = 2048
+AI_RATE_LIMIT_PER_MINUTE = 20
+MCP_POLICY_CONTEXT = ''
+MCP_POLICY_VECTOR_DIMENSIONS = 64
+
+# OPA (Open Policy Agent) guardrails
+OPA_ENABLED = False
+OPA_SERVER_URL = ''
+OPA_TIMEOUT = 5  # seconds
 
 # feature flags
 FEATURE_INDIRECT_NODE_COUNTING_ENABLED = False

@@ -1,5 +1,6 @@
 import { requestGet, postRequest, requestPatch, requestDelete } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
+import type { GeneratedInventoryPlan } from '../inventories/GeneratedInventory';
 
 /**
  * Dispatch this custom event after any connection change so that other
@@ -18,6 +19,7 @@ export interface CloudConnectionEntry {
   credentialId: number | null;
   credentialName: string;
   error: string;
+  organizationId: number | null;
   updatedAt: string;
 }
 
@@ -213,8 +215,8 @@ export interface VmwareHost {
   id: string;
   name: string;
   cluster_id?: string;
-  power_state: 'POWERED_ON' | 'POWERED_OFF' | 'STANDBY' | string;
-  connection_state: 'CONNECTED' | 'DISCONNECTED' | 'NOT_RESPONDING' | string;
+  power_state: string;
+  connection_state: string;
   cpu_count?: number;
   memory_size_mib?: number;
 }
@@ -222,7 +224,7 @@ export interface VmwareHost {
 export interface VmwareVM {
   id: string;
   name: string;
-  power_state: 'POWERED_ON' | 'POWERED_OFF' | 'SUSPENDED' | string;
+  power_state: string;
   host_id?: string;
   memory_size_mib: number;
   cpu_count: number;
@@ -231,13 +233,13 @@ export interface VmwareVM {
 export interface VmwareNetwork {
   id: string;
   name: string;
-  type: 'STANDARD_PORTGROUP' | 'DISTRIBUTED_PORTGROUP' | 'OPAQUE_NETWORK' | string;
+  type: string;
 }
 
 export interface VmwareDatastore {
   id: string;
   name: string;
-  type: 'VMFS' | 'NFS' | 'NFS41' | 'VSAN' | 'VVOL' | string;
+  type: string;
   capacity_mb: number;
   free_space_mb: number;
   accessible: boolean;
@@ -277,7 +279,7 @@ export interface AzureVM {
   location: string;
   resource_group: string;
   vm_size: string;
-  os_type: 'Windows' | 'Linux' | string;
+  os_type: string;
   power_state?: string;
   provisioning_state: string;
   tags?: Record<string, string>;
@@ -316,17 +318,17 @@ export interface AzureVMImage {
   offer: string;
   sku: string;
   version: string;
-  os_type: string;       // "Linux" | "Windows" | ""
-  image_type: string;    // "marketplace" | "custom" | "gallery"
+  os_type: string; // "Linux" | "Windows" | ""
+  image_type: string; // "marketplace" | "custom" | "gallery"
   location: string;
-  urn: string;           // publisher:offer:sku:version (Terraform reference)
+  urn: string; // publisher:offer:sku:version (Terraform reference)
   description?: string;
 }
 
 export interface AzureVMSize {
-  name: string;           // e.g. "Standard_D4s_v5"
-  tier: string;           // "Standard" | "Basic"
-  family: string;         // e.g. "standardDSv5Family"
+  name: string; // e.g. "Standard_D4s_v5"
+  tier: string; // "Standard" | "Basic"
+  family: string; // e.g. "standardDSv5Family"
   vcpus: number;
   memory_gb: number;
   gpus: number;
@@ -337,7 +339,7 @@ export interface AzureVMSize {
   accelerated_networking: boolean;
   zones: string[];
   location: string;
-  price_per_hour: number | null;  // Linux pay-as-you-go USD/hr (null if not available)
+  price_per_hour: number | null; // Linux pay-as-you-go USD/hr (null if not available)
 }
 
 export interface AzureProviderData {
@@ -363,6 +365,7 @@ interface ApiCloudConnection {
   credential: number | null;
   credential_name: string;
   error: string;
+  organization: number | null;
   updated_at: string;
 }
 
@@ -374,10 +377,30 @@ interface ApiConnectionListResponse {
 export interface ApiCloudProviderState {
   id: number;
   provider_id: string;
+  organization: number | null;
   pulled_at: string | null;
   provider_data: unknown;
-  admin_settings: DigitalOceanAdminSettings | ProxmoxAdminSettings | VmwareAdminSettings | AzureAdminSettings | null;
+  admin_settings:
+    | DigitalOceanAdminSettings
+    | ProxmoxAdminSettings
+    | VmwareAdminSettings
+    | AzureAdminSettings
+    | null;
   provider_settings: CloudProviderSettingsState | null;
+}
+
+export interface CloudInventorySuggestionResponse {
+  provider: string;
+  organization: number | null;
+  connection_id: number | null;
+  pulled_at: string | null;
+  resource_counts: Record<string, number>;
+  resource_count: number;
+  ai_used: boolean;
+  ai_status: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  suggestion: GeneratedInventoryPlan;
 }
 
 function apiConnectionToEntry(conn: ApiCloudConnection): CloudConnectionEntry {
@@ -389,6 +412,7 @@ function apiConnectionToEntry(conn: ApiCloudConnection): CloudConnectionEntry {
     credentialId: conn.credential,
     credentialName: conn.credential_name,
     error: conn.error,
+    organizationId: conn.organization ?? null,
     updatedAt: conn.updated_at,
   };
 }
@@ -396,9 +420,18 @@ function apiConnectionToEntry(conn: ApiCloudConnection): CloudConnectionEntry {
 // ── Connection CRUD ───────────────────────────────────────────────────────────
 
 /** Fetches all connections, optionally filtered to a single provider. */
-export async function fetchCloudConnections(providerId?: string): Promise<CloudConnectionEntry[]> {
-  const url = providerId
-    ? awxAPI`/catalog_cloud/connections/?provider_id=${providerId}`
+export async function fetchCloudConnections(
+  providerId?: string,
+  organizationId?: number | null
+): Promise<CloudConnectionEntry[]> {
+  const params = new URLSearchParams();
+  if (providerId) params.set('provider_id', providerId);
+  if (organizationId !== undefined && organizationId !== null) {
+    params.set('organization', String(organizationId));
+  }
+  const query = params.toString();
+  const url = query
+    ? `${awxAPI`/catalog_cloud/connections/`}?${query}`
     : awxAPI`/catalog_cloud/connections/`;
   const data = await requestGet<ApiConnectionListResponse>(url);
   return (data.results ?? []).map(apiConnectionToEntry);
@@ -407,9 +440,12 @@ export async function fetchCloudConnections(providerId?: string): Promise<CloudC
 /** Creates a new connection for the given provider and returns the saved entry. */
 export async function createCloudConnection(
   providerId: string,
-  entry: Pick<CloudConnectionEntry, 'name' | 'status' | 'credentialId' | 'credentialName' | 'error'>
+  entry: Pick<
+    CloudConnectionEntry,
+    'name' | 'status' | 'credentialId' | 'credentialName' | 'error'
+  > & { organizationId?: number | null }
 ): Promise<CloudConnectionEntry> {
-  const payload = {
+  const payload: Record<string, unknown> = {
     provider_id: providerId,
     name: entry.name,
     status: entry.status,
@@ -417,6 +453,9 @@ export async function createCloudConnection(
     credential_name: entry.credentialName,
     error: entry.error,
   };
+  if (entry.organizationId !== undefined) {
+    payload.organization = entry.organizationId;
+  }
   const conn = await postRequest<ApiCloudConnection, typeof payload>(
     awxAPI`/catalog_cloud/connections/`,
     payload
@@ -430,7 +469,9 @@ export async function createCloudConnection(
  */
 export async function updateCloudConnectionApi(
   id: string,
-  partial: Partial<Pick<CloudConnectionEntry, 'name' | 'status' | 'credentialId' | 'credentialName' | 'error'>>
+  partial: Partial<
+    Pick<CloudConnectionEntry, 'name' | 'status' | 'credentialId' | 'credentialName' | 'error'>
+  >
 ): Promise<CloudConnectionEntry> {
   const payload: Record<string, unknown> = {};
   if (partial.name !== undefined) payload.name = partial.name;
@@ -460,11 +501,20 @@ export async function removeCloudConnectionApi(id: string): Promise<void> {
  * settings) for the given provider id.  Returns null on any error so callers
  * can treat it as "not yet saved".
  */
-export async function fetchProviderState(providerId: string): Promise<ApiCloudProviderState | null> {
+export function getProviderStateUrl(providerId: string, organizationId?: number | null): string {
+  const url = awxAPI`/catalog_cloud/provider_state/${providerId}/`;
+  if (organizationId !== undefined && organizationId !== null) {
+    return `${url}?organization=${organizationId}`;
+  }
+  return url;
+}
+
+export async function fetchProviderState(
+  providerId: string,
+  organizationId?: number | null
+): Promise<ApiCloudProviderState | null> {
   try {
-    return await requestGet<ApiCloudProviderState>(
-      awxAPI`/catalog_cloud/provider_state/${providerId}/`
-    );
+    return await requestGet<ApiCloudProviderState>(getProviderStateUrl(providerId, organizationId));
   } catch {
     return null;
   }
@@ -476,16 +526,60 @@ export async function fetchProviderState(providerId: string): Promise<ApiCloudPr
  */
 export async function patchProviderState(
   providerId: string,
-  partial: Partial<Pick<ApiCloudProviderState, 'provider_data' | 'admin_settings' | 'provider_settings' | 'pulled_at'>>
+  partial: Partial<
+    Pick<
+      ApiCloudProviderState,
+      'provider_data' | 'admin_settings' | 'provider_settings' | 'pulled_at'
+    >
+  >,
+  organizationId?: number | null
 ): Promise<ApiCloudProviderState | null> {
   try {
+    const payload = { ...partial } as typeof partial & { organization?: number };
+    if (organizationId !== undefined && organizationId !== null) {
+      payload.organization = organizationId;
+    }
     return await requestPatch<ApiCloudProviderState>(
-      awxAPI`/catalog_cloud/provider_state/${providerId}/`,
-      partial
+      getProviderStateUrl(providerId, organizationId),
+      payload
     );
   } catch {
     return null;
   }
+}
+
+export function getProviderInventorySuggestionsUrl(
+  providerId: string,
+  organizationId?: number | null
+): string {
+  const url = awxAPI`/catalog_cloud/provider_state/${providerId}/inventory_suggestions/`;
+  if (organizationId !== undefined && organizationId !== null) {
+    return `${url}?organization=${organizationId}`;
+  }
+  return url;
+}
+
+export async function suggestCloudInventory(
+  providerId: string,
+  options: {
+    organizationId?: number | null;
+    connectionId?: string | number | null;
+    sampleLimit?: number;
+  } = {}
+): Promise<CloudInventorySuggestionResponse> {
+  const payload: Record<string, unknown> = {
+    sample_limit: options.sampleLimit ?? 75,
+  };
+  if (options.organizationId !== undefined && options.organizationId !== null) {
+    payload.organization = options.organizationId;
+  }
+  if (options.connectionId !== undefined && options.connectionId !== null) {
+    payload.connection_id = options.connectionId;
+  }
+  return postRequest<CloudInventorySuggestionResponse, typeof payload>(
+    getProviderInventorySuggestionsUrl(providerId, options.organizationId),
+    payload
+  );
 }
 
 // ── DigitalOcean admin allow-list settings ────────────────────────────────────
@@ -502,5 +596,3 @@ export interface DigitalOceanAdminSettings {
   allowedImageIds: number[] | null;
   allowedRegionSlugs: string[] | null;
 }
-
-

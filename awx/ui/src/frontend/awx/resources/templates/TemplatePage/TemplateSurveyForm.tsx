@@ -92,8 +92,8 @@ export function TemplateSurveyForm(props: IProps) {
       resourceType === 'job_templates'
         ? AwxRoute.JobTemplateSurvey
         : resourceType === 'terraform_job_templates'
-        ? AwxRoute.TerraformTemplateSurvey
-        : AwxRoute.WorkflowJobTemplateSurvey,
+          ? AwxRoute.TerraformTemplateSurvey
+          : AwxRoute.WorkflowJobTemplateSurvey,
       { params: { id } }
     );
 

@@ -49,6 +49,11 @@ export function useActivityStreamFilter() {
           value: 'execution_environment',
           group: 'Infrastructure',
         },
+        {
+          label: 'External Automation',
+          value: 'external_automation',
+          group: 'Administration',
+        },
         { label: 'Settings', value: 'setting', group: 'Administration' },
       ],
       placeholder: 'Filter by type',

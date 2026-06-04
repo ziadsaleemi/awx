@@ -2,22 +2,14 @@ import {
   Chart,
   ChartArea,
   ChartAxis,
-  ChartCursorContainerProps,
-  ChartLegendTooltip,
   ChartLine,
   ChartScatter,
   ChartStack,
-  ChartVoronoiContainerProps,
-  createContainer,
 } from '@patternfly/react-charts';
 import { useMemo } from 'react';
 import { PageChartContainer } from './PageChartContainer';
 import { PageChartLegend } from './PageChartLegend';
 import './PageDashboardChart.css';
-
-const CursorVoronoiContainer = createContainer('voronoi', 'cursor') as React.FunctionComponent<
-  ChartVoronoiContainerProps & ChartCursorContainerProps
->;
 
 export function PageDashboardChart(props: {
   id?: string;
@@ -67,16 +59,6 @@ export function PageDashboardChart(props: {
         }
         return false;
       });
-  const legendData = groups
-    .filter((group) => !!group.label)
-    .map((group, index) => {
-      return {
-        childName: `${index}`, // Sync tooltip legend with the series associated with given chart name
-        name: group.label,
-        symbol: { fill: group.color, type: 'square' },
-      };
-    });
-
   const legend = groups
     .filter((group) => !!group.label)
     .map((group) => ({
@@ -85,6 +67,29 @@ export function PageDashboardChart(props: {
       color: group.color,
       link: group.link,
     }));
+  const pointClickEvents = useMemo(
+    () =>
+      onPointClick
+        ? [
+            {
+              target: 'data' as const,
+              eventHandlers: {
+                onClick: (
+                  _event: React.SyntheticEvent,
+                  point?: { datum?: { x?: string | number } }
+                ) => {
+                  const label = point?.datum?.x;
+                  if (label !== undefined) {
+                    onPointClick(label.toString());
+                  }
+                  return [];
+                },
+              },
+            },
+          ]
+        : undefined,
+    [onPointClick]
+  );
 
   const maxDomainY = useMemo(() => {
     const maxValues: Record<string, number> = {};
@@ -102,7 +107,6 @@ export function PageDashboardChart(props: {
     left: (props.padding?.left ?? 12) + Math.round(maxDomainY).toString().length * 9.5 + 16,
     right: (props.padding?.right ?? 0) + 16,
   };
-
   return (
     <div
       style={{
@@ -133,22 +137,6 @@ export function PageDashboardChart(props: {
                 width={size.width}
                 minDomain={minDomain}
                 maxDomain={{ y: maxDomainY }}
-                containerComponent={
-                  <CursorVoronoiContainer
-                    cursorDimension="x"
-                    labels={(point: { datum: { y: string | number } }) => point.datum.y.toString()}
-                    labelComponent={
-                      <ChartLegendTooltip
-                        // title={(datum: { x: number | string }) => datum.x}
-                        legendData={legendData}
-                        cornerRadius={8}
-                      />
-                    }
-                    mouseFollowTooltips
-                    voronoiDimension="x"
-                    voronoiPadding={50}
-                  />
-                }
               >
                 <ChartAxis fixLabelOverlap />
                 <ChartAxis
@@ -177,8 +165,10 @@ export function PageDashboardChart(props: {
                       name={'scatter-' + index}
                       data={group.values.map((value) => ({ x: value.label, y: value.value }))}
                       size={({ active }) => (active ? 6 : 3)}
-                      style={{ data: { fill: group.color, cursor: onPointClick ? 'pointer' : undefined } }}
-                      events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
+                      style={{
+                        data: { fill: group.color, cursor: onPointClick ? 'pointer' : undefined },
+                      }}
+                      events={pointClickEvents}
                     />
                   ))}
                 {(!props.variant || props.variant === 'stackedAreaChart') && (
@@ -206,7 +196,7 @@ export function PageDashboardChart(props: {
                         }))}
                         size={({ active }) => (active ? 6 : 3)}
                         style={{ data: { cursor: onPointClick ? 'pointer' : undefined } }}
-                        events={onPointClick ? [{ target: 'data', eventHandlers: { onClick: (_e: React.MouseEvent, p: { datum: { x: string } }) => { onPointClick(p.datum.x); return []; } } }] : undefined}
+                        events={pointClickEvents}
                       />
                     ))}
                   </ChartStack>

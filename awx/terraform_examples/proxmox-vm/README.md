@@ -39,8 +39,10 @@ through the **Proxmox VE** credential type as environment variables:
 
 After a successful `terraform apply`, AWX reads the `host_ip_proxmox_vm` output
 and creates a host record in the configured target inventory. The host is added
-to the `proxmox_vms` group. The `ansible_host` variable is set to the IP address
-so the subsequent Ansible job template can connect to the newly provisioned VM.
+to the `proxmox_vms` group. The `ansible_host` variable is set to the IP address,
+`ansible_user` is set from `cloud_init_user`, and `ansible_remote_tmp` is set to
+`/tmp/ansible` so the subsequent Ansible job template can connect to the newly
+provisioned VM without using the remote home directory for module temp files.
 
 ## Usage outside AWX
 

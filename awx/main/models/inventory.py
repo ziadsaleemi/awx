@@ -73,7 +73,14 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin, OpaQu
     an inventory source contains lists and hosts.
     """
 
-    FIELDS_TO_PRESERVE_AT_COPY = ['hosts', 'groups', 'instance_groups', 'prevent_instance_group_fallback']
+    FIELDS_TO_PRESERVE_AT_COPY = [
+        'hosts',
+        'groups',
+        'instance_groups',
+        'prevent_instance_group_fallback',
+        'default_machine_credential',
+        'force_inventory_machine_credential',
+    ]
     KIND_CHOICES = [
         ('', _('Hosts have a direct link to this inventory.')),
         ('smart', _('Hosts for inventory generated using the host_filter property.')),
@@ -208,6 +215,21 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin, OpaQu
             "If this setting is enabled and you provided an empty list, the global instance "
             "groups will be applied."
         ),
+    )
+    default_machine_credential = models.ForeignKey(
+        'Credential',
+        related_name='default_for_inventories',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_(
+            'Machine credential to use for jobs launched with this inventory when no machine credential is supplied by the job template or launch prompt.'
+        ),
+    )
+    force_inventory_machine_credential = models.BooleanField(
+        default=False,
+        help_text=_('If enabled, jobs launched with this inventory use the inventory machine credential even when the job template has one.'),
     )
 
     def get_absolute_url(self, request=None):

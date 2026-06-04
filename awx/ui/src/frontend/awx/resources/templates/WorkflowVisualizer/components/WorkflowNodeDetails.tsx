@@ -7,6 +7,7 @@ import {
   ClockIcon,
   CogIcon,
   InfrastructureIcon,
+  MagicIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -72,11 +73,16 @@ export function WorkflowNodeDetails({ node }: { node: GraphNode }) {
   const { t } = useTranslation();
   const nodeData = node.getData();
   const unifiedJobTemplate = nodeData?.resource?.summary_fields?.unified_job_template;
+  const isEdaNode = nodeData?.resource?.node_type === 'eda_rulebook';
+  const isAiNode = nodeData?.resource?.node_type === 'ai_task';
   const { data } = useGet<RelatedTemplate>(
     getRelatedResourceUrl(nodeData?.resource?.summary_fields.unified_job_template)
   );
   const timeoutString = useGetTimeoutString(unifiedJobTemplate?.timeout || 0);
-  const nodeTypeDetail = useGetNodeTypeDetail(unifiedJobTemplate?.unified_job_type);
+  const nodeTypeDetail = useGetNodeTypeDetail(
+    unifiedJobTemplate?.unified_job_type ||
+      (isEdaNode ? 'eda_rulebook' : isAiNode ? 'ai_task' : undefined)
+  );
   const controller = useVisualizationController();
   const { RBAC } = controller.getState<ControllerState>();
 
@@ -119,6 +125,42 @@ export function WorkflowNodeDetails({ node }: { node: GraphNode }) {
           <PageDetail isEmpty={!unifiedJobTemplate?.description} label={t('Description')}>
             {unifiedJobTemplate?.description}
           </PageDetail>
+          {isEdaNode && (
+            <>
+              <PageDetail
+                label={t('Activation id')}
+                isEmpty={!nodeData?.resource?.eda_activation_id}
+              >
+                {nodeData?.resource?.eda_activation_id}
+              </PageDetail>
+              <PageDetail label={t('Event source')} isEmpty={!nodeData?.resource?.eda_event_source}>
+                {nodeData?.resource?.eda_event_source}
+              </PageDetail>
+              <PageDetail
+                label={t('Event source status')}
+                isEmpty={!nodeData?.resource?.eda_event_source_status}
+              >
+                {nodeData?.resource?.eda_event_source_status}
+              </PageDetail>
+            </>
+          )}
+          {isAiNode && (
+            <>
+              <PageDetail label={t('Model')} isEmpty={!nodeData?.resource?.ai_task_model}>
+                {nodeData?.resource?.ai_task_model}
+              </PageDetail>
+              <PageDetail label={t('Approval required')}>
+                {nodeData?.resource?.ai_task_approval_required ? t('Yes') : t('No')}
+              </PageDetail>
+              <PageDetail label={t('Status')} isEmpty={!nodeData?.resource?.ai_task_status}>
+                {nodeData?.resource?.ai_task_status}
+              </PageDetail>
+              <PageDetailCodeEditor
+                label={t('Prompt')}
+                value={nodeData?.resource?.ai_task_prompt || ''}
+              />
+            </>
+          )}
           <PageDetail label={t('Convergence')}>
             {nodeData?.resource?.all_parents_must_converge ? t('All') : t('Any')}
           </PageDetail>
@@ -154,10 +196,14 @@ function WorkflowNodeDetailsHeader({ node }: { node: GraphNode }) {
     terraform_job: InfrastructureIcon,
     workflow_approval: ClockIcon,
     workflow_job: ShareAltIcon,
+    eda_rulebook: ProcessAutomationIcon,
+    ai_task: MagicIcon,
   };
 
   const nodeData = node.getData();
-  const jobType = nodeData?.resource?.summary_fields.unified_job_template?.unified_job_type;
+  const jobType =
+    nodeData?.resource?.summary_fields.unified_job_template?.unified_job_type ||
+    nodeData?.resource?.node_type;
   const Icon = jobType ? NodeIcon[jobType] : null;
 
   return (

@@ -2,7 +2,10 @@ import { Page } from '@patternfly/react-core';
 import { ReactNode, useEffect, useMemo } from 'react';
 import { Outlet, Route, RouteObject, Routes } from 'react-router-dom';
 import { PageNotFound } from '../PageEmptyStates/PageNotFound';
-import { PageNotificationsDrawer } from '../PageNotifications/PageNotificationsProvider';
+import {
+  PageNotificationsContent,
+  usePageNotifications,
+} from '../PageNotifications/PageNotificationsProvider';
 import { PageNavigation } from './PageNavigation';
 import { PageNavigationItem } from './PageNavigationItem';
 import { usePageNavigationRoutesContext } from './PageNavigationRoutesProvider';
@@ -27,6 +30,7 @@ export function PageApp(props: {
   banner?: ReactNode;
 }) {
   const { navigation, masthead } = props;
+  const { notificationsDrawerOpen, setNotificationsDrawerOpen } = usePageNotifications();
   const navigationItems = useMemo(
     () => [
       {
@@ -35,30 +39,38 @@ export function PageApp(props: {
           <Page
             header={masthead}
             sidebar={<PageNavigation navigation={navigation} basename={props.basename} />}
+            notificationDrawer={<PageNotificationsContent />}
+            isNotificationDrawerExpanded={notificationsDrawerOpen}
+            onNotificationDrawerExpand={() => setNotificationsDrawerOpen(true)}
           >
-            <PageNotificationsDrawer>
-              <div
-                style={{
-                  maxHeight: '100%',
-                  overflow: 'hidden',
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                {props.banner}
-                <div style={{ flexGrow: 1, overflow: 'hidden' }}>
-                  <Outlet />
-                </div>
+            <div
+              style={{
+                maxHeight: '100%',
+                overflow: 'hidden',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {props.banner}
+              <div style={{ flexGrow: 1, overflow: 'hidden' }}>
+                <Outlet />
               </div>
-            </PageNotificationsDrawer>
+            </div>
           </Page>
         ),
         children: navigation.filter(({ href }) => !href),
       },
       { path: '*', element: <PageNotFound /> },
     ],
-    [masthead, navigation, props.banner, props.basename]
+    [
+      masthead,
+      navigation,
+      notificationsDrawerOpen,
+      props.banner,
+      props.basename,
+      setNotificationsDrawerOpen,
+    ]
   );
   const [_, setNavigation] = usePageNavigationRoutesContext();
   useEffect(() => setNavigation(navigationItems), [navigationItems, setNavigation]);

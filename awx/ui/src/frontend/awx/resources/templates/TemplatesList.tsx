@@ -107,7 +107,9 @@ export function TemplatesList(props: {
   usePersistentFilters('templates');
   const deleteTemplates = useDeleteTemplates(view.unselectItemsAndRefresh);
 
-  const toolbarActions = useMemo<IPageAction<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]>(
+  const toolbarActions = useMemo<
+    IPageAction<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]
+  >(
     () => [
       {
         type: PageActionType.Dropdown,
@@ -161,7 +163,14 @@ export function TemplatesList(props: {
         isDanger: true,
       },
     ],
-    [canCreateJobTemplate, canCreateWFJobTemplate, canCreateTerraformTemplate, deleteTemplates, getPageUrl, t]
+    [
+      canCreateJobTemplate,
+      canCreateWFJobTemplate,
+      canCreateTerraformTemplate,
+      deleteTemplates,
+      getPageUrl,
+      t,
+    ]
   );
 
   const rowActions = useTemplateActions({

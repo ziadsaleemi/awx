@@ -1,6 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ITableColumn, IToolbarFilter, ToolbarFilterType, usePageDialog } from '../../../../../framework';
+import {
+  ITableColumn,
+  IToolbarFilter,
+  ToolbarFilterType,
+  usePageDialog,
+} from '../../../../../framework';
 import { SingleSelectDialog } from '../../../../../framework/PageDialogs/SingleSelectDialog';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxView } from '../../../common/useAwxView';
@@ -67,10 +72,7 @@ export function useSelectTerraformJobTemplate() {
   const openSelectDialog = useCallback(
     (onSelect: (template: TerraformJobTemplate) => void) => {
       setDialog(
-        <SelectTerraformJobTemplate
-          title={t('Select Terraform template')}
-          onSelect={onSelect}
-        />
+        <SelectTerraformJobTemplate title={t('Select Terraform template')} onSelect={onSelect} />
       );
     },
     [setDialog, t]

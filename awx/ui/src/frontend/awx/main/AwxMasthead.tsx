@@ -1,8 +1,21 @@
-import { Brand, Button } from '@patternfly/react-core';
+import { Brand, Button, ButtonVariant } from '@patternfly/react-core';
 import { Icon, ToolbarGroup, ToolbarItem } from '@patternfly/react-core';
 import { DropdownItem } from '@patternfly/react-core/deprecated';
-import { ExternalLinkAltIcon, HistoryIcon, QuestionCircleIcon, UserCircleIcon } from '@patternfly/react-icons';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  ExternalLinkAltIcon,
+  HistoryIcon,
+  QuestionCircleIcon,
+  UserCircleIcon,
+} from '@patternfly/react-icons';
+import {
+  AI_ASSISTANT_CONTEXT_EVENT,
+  AIAssistantButton,
+  AIAssistantPanel,
+  openAIAssistantWithContext,
+  useAIAssistantEnabled,
+} from '../common/AIAssistant';
+import { ContextualAIAssistantButton } from '../common/ContextualAIAssistantButton';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PageMasthead, useGetPageUrl, usePageNavigate } from '../../../framework';
 import { PageMastheadDropdown } from '../../../framework/PageMasthead/PageMastheadDropdown';
@@ -13,6 +26,7 @@ import AwxBrand from '../../assets/awx-logo.svg';
 import { useAnsibleAboutModal } from '../../common/AboutModal';
 import { PageRefreshIcon } from '../../common/PageRefreshIcon';
 import { useGet } from '../../common/crud/useGet';
+import { usePostRequest } from '../../common/crud/usePostRequest';
 import { AwxItemsResponse } from '../common/AwxItemsResponse';
 import { awxAPI } from '../common/api/awx-utils';
 import { useAwxActiveUser } from '../common/useAwxActiveUser';
@@ -23,6 +37,7 @@ import { WorkflowApproval } from '../interfaces/WorkflowApproval';
 import { AwxRoute } from './AwxRoutes';
 import { AwxGlobalSearch } from './AwxGlobalSearch';
 import { AwxSystemUsageBar } from './AwxSystemUsageBar';
+import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotification';
 
 const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
 
@@ -33,6 +48,8 @@ export function AwxMasthead() {
   const pageNavigate = usePageNavigate();
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
   useAwxNotifications();
+  const { enabled: aiEnabled } = useAIAssistantEnabled();
+  const [aiOpen, setAiOpen] = useState(false);
 
   const [logoHeight] = useState<number>(() => {
     const stored = localStorage.getItem(LOGO_SIZE_KEY);
@@ -42,6 +59,12 @@ export function AwxMasthead() {
     await fetch('/api/logout/');
     refreshActiveAwxUser?.();
   }, [refreshActiveAwxUser]);
+
+  useEffect(() => {
+    const openAssistant = () => setAiOpen(true);
+    window.addEventListener(AI_ASSISTANT_CONTEXT_EVENT, openAssistant);
+    return () => window.removeEventListener(AI_ASSISTANT_CONTEXT_EVENT, openAssistant);
+  }, []);
 
   const customLogoSrc =
     config?.custom_logo && config.custom_logo.startsWith('data:image/')
@@ -55,92 +78,122 @@ export function AwxMasthead() {
   );
 
   return (
-    <PageMasthead brand={brandElement}>
-      <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
-        <ToolbarItem style={{ marginLeft: 'auto' }}>
-          <PageRefreshIcon />
-        </ToolbarItem>
-        <ToolbarItem>
-          <AwxGlobalSearch />
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageThemeSwitcher />
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageNotificationsIcon />
-        </ToolbarItem>
-        <ToolbarItem>
-          <Button
-            variant="plain"
-            aria-label={t('Activity Stream')}
-            title={t('Activity Stream')}
-            onClick={() => pageNavigate(AwxRoute.ActivityStream)}
-            data-cy="masthead-activity-stream"
-          >
-            <HistoryIcon />
-          </Button>
-        </ToolbarItem>
-        <ToolbarItem>
-          <AwxSystemUsageBar />
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageMastheadDropdown id="help-menu" icon={<QuestionCircleIcon />}>
-            <DropdownItem
-              id="documentation"
-              icon={<ExternalLinkAltIcon />}
-              component="a"
-              href={useGetDocsUrl(config, 'index')}
-              target="_blank"
-              data-cy="masthead-documentation"
+    <>
+      {aiEnabled && (
+        <>
+          <AIAssistantPanel isOpen={aiOpen} onClose={() => setAiOpen(false)} />
+          <ContextualAIAssistantButton isEnabled={aiEnabled} />
+        </>
+      )}
+      <PageMasthead brand={brandElement}>
+        <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
+          <ToolbarItem style={{ marginLeft: 'auto' }}>
+            <PageRefreshIcon />
+          </ToolbarItem>
+          <ToolbarItem>
+            <AwxGlobalSearch />
+          </ToolbarItem>
+          {aiEnabled && (
+            <ToolbarItem>
+              <AIAssistantButton
+                onClick={() => {
+                  if (aiOpen) {
+                    setAiOpen(false);
+                  } else {
+                    openAIAssistantWithContext({ source: 'masthead' });
+                  }
+                }}
+                isActive={aiOpen}
+              />
+            </ToolbarItem>
+          )}
+          <ToolbarItem>
+            <PageThemeSwitcher />
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageNotificationsIcon />
+          </ToolbarItem>
+          <ToolbarItem>
+            <Button
+              variant="plain"
+              aria-label={t('Activity Stream')}
+              title={t('Activity Stream')}
+              onClick={() => pageNavigate(AwxRoute.ActivityStream)}
+              data-cy="masthead-activity-stream"
             >
-              {t('Documentation')}
-            </DropdownItem>
-            <DropdownItem
-              id="about"
-              onClick={() => openAnsibleAboutModal({ brandImageSrc: '/assets/awx-logo.svg' })}
-              data-cy="masthead-about"
-            >
-              {t('About')}
-            </DropdownItem>
-          </PageMastheadDropdown>
-        </ToolbarItem>
-        <ToolbarItem>
-          <PageMastheadDropdown
-            id="account-menu"
-            icon={
-              <Icon size="lg">
-                <UserCircleIcon />
-              </Icon>
-            }
-            label={activeAwxUser?.username}
-          >
-            <DropdownItem
-              id="user-details"
-              label={t('User details')}
-              onClick={() =>
-                pageNavigate(AwxRoute.UserDetails, { params: { id: activeAwxUser?.id } })
+              <HistoryIcon />
+            </Button>
+          </ToolbarItem>
+          <ToolbarItem>
+            <AwxSystemUsageBar />
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageMastheadDropdown id="help-menu" icon={<QuestionCircleIcon />}>
+              <DropdownItem
+                id="documentation"
+                icon={<ExternalLinkAltIcon />}
+                component="a"
+                href={useGetDocsUrl(config, 'index')}
+                target="_blank"
+                data-cy="masthead-documentation"
+              >
+                {t('Documentation')}
+              </DropdownItem>
+              <DropdownItem
+                id="about"
+                onClick={() => openAnsibleAboutModal({ brandImageSrc: '/assets/awx-logo.svg' })}
+                data-cy="masthead-about"
+              >
+                {t('About')}
+              </DropdownItem>
+            </PageMastheadDropdown>
+          </ToolbarItem>
+          <ToolbarItem>
+            <PageMastheadDropdown
+              id="account-menu"
+              icon={
+                <Icon size="lg">
+                  <UserCircleIcon />
+                </Icon>
               }
+              label={activeAwxUser?.username}
             >
-              {t('User details')}
-            </DropdownItem>
-            <DropdownItem id="logout" label={t('Logout')} onClick={() => void logout()}>
-              {t('Logout')}
-            </DropdownItem>
-          </PageMastheadDropdown>
-        </ToolbarItem>
-      </ToolbarGroup>
-    </PageMasthead>
+              <DropdownItem
+                id="user-details"
+                label={t('User details')}
+                onClick={() =>
+                  pageNavigate(AwxRoute.UserDetails, { params: { id: activeAwxUser?.id } })
+                }
+              >
+                {t('User details')}
+              </DropdownItem>
+              <DropdownItem id="logout" label={t('Logout')} onClick={() => void logout()}>
+                {t('Logout')}
+              </DropdownItem>
+            </PageMastheadDropdown>
+          </ToolbarItem>
+        </ToolbarGroup>
+      </PageMasthead>
+    </>
   );
 }
 
 export function useAwxNotifications() {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
+  const postRequest = usePostRequest();
+  const postRequestRef = useRef(postRequest);
 
   const { data, refresh } = useGet<AwxItemsResponse<WorkflowApproval>>(
     awxAPI`/workflow_approvals/`,
     { page_size: 200, status: 'pending' }
   );
+  const refreshRef = useRef(refresh);
+
+  useEffect(() => {
+    postRequestRef.current = postRequest;
+    refreshRef.current = refresh;
+  }, [postRequest, refresh]);
 
   const handleWebSocketMessage = useCallback(
     (message?: { group_name?: string; type?: string }) => {
@@ -167,16 +220,47 @@ export function useAwxNotifications() {
     setNotificationGroups((groups) => {
       groups['workflow-approvals'] = {
         title: t('Workflow Approvals'),
+        count: data?.count ?? 0,
         notifications:
-          data?.results.map((workflow_approval) => ({
-            title: workflow_approval.name,
-            description: workflow_approval.summary_fields.workflow_job?.name,
-            timestamp: workflow_approval.created,
-            variant: 'info',
-            to: getPageUrl(AwxRoute.WorkflowApprovalDetails, {
-              params: { id: workflow_approval.id },
-            }),
-          })) ?? [],
+          data?.results.map((workflow_approval) => {
+            const canApproveOrDeny =
+              String(workflow_approval.can_approve_or_deny) === 'true' &&
+              !workflow_approval.timed_out;
+            return {
+              title: workflow_approval.name,
+              description: workflow_approval.summary_fields.workflow_job?.name,
+              timestamp: workflow_approval.created,
+              variant: 'info',
+              to: getWorkflowApprovalNotificationUrl(getPageUrl, workflow_approval),
+              actions: [
+                {
+                  label: t('Approve'),
+                  variant: ButtonVariant.primary,
+                  isDisabled: !canApproveOrDeny,
+                  onClick: async () => {
+                    await postRequestRef.current(
+                      awxAPI`/workflow_approvals/${workflow_approval.id.toString()}/approve/`,
+                      {}
+                    );
+                    void refreshRef.current();
+                  },
+                },
+                {
+                  label: t('Deny'),
+                  variant: ButtonVariant.secondary,
+                  isDanger: true,
+                  isDisabled: !canApproveOrDeny,
+                  onClick: async () => {
+                    await postRequestRef.current(
+                      awxAPI`/workflow_approvals/${workflow_approval.id.toString()}/deny/`,
+                      {}
+                    );
+                    void refreshRef.current();
+                  },
+                },
+              ],
+            };
+          }) ?? [],
       };
       return { ...groups };
     });

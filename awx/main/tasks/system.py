@@ -8,7 +8,7 @@ import os
 import shutil
 import time
 from collections import namedtuple
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from packaging.version import Version
 from io import StringIO
 
@@ -60,6 +60,7 @@ from awx.main.models import (
     Instance,
     InstanceGroup,
     Inventory,
+    AdHocCommand,
     Job,
     Notification,
     Schedule,
@@ -68,6 +69,7 @@ from awx.main.models import (
     UnifiedJob,
     convert_jsonfields,
 )
+from awx.main.tasks.facts import persist_ad_hoc_setup_facts_from_events
 from awx.main.tasks.helpers import is_run_threshold_reached
 from awx.main.tasks.host_indirect import save_indirect_host_entries
 from awx.main.tasks.receptor import administrative_workunit_reaper, get_receptor_ctl, worker_cleanup, worker_info, write_receptor_config
@@ -407,6 +409,8 @@ def events_processed_hook(unified_job):
     """This method is intended to be called for every unified job
     after the playbook_on_stats/EOF event is processed and final status is saved
     Either one of these events could happen before the other, or there may be no events"""
+    if isinstance(unified_job, AdHocCommand) and unified_job.module_name == 'setup':
+        persist_ad_hoc_setup_facts_from_events(unified_job)
     unified_job.send_notification_templates('succeeded' if unified_job.status == 'successful' else 'failed')
     if isinstance(unified_job, Job) and flag_enabled("FEATURE_INDIRECT_NODE_COUNTING_ENABLED"):
         if unified_job.event_queries_processed is True:
@@ -1116,6 +1120,108 @@ def deep_copy_model_obj(model_module, model_name, obj_pk, new_obj_pk, user_pk, p
             permission_check_func(creater, copy_mapping.values())
     if isinstance(new_obj, Inventory):
         update_inventory_computed_fields.delay(new_obj.id)
+
+
+@task(queue=get_task_queuename, timeout=600, on_duplicate='discard')
+def expire_catalog_deployments():
+    """
+    Scan for active CatalogDeployments whose lease has expired. Deployments
+    without auto-deprovision are marked expired; deployments with
+    auto-deprovision try to launch their deprovision workflow first. Runs every
+    5 minutes via DISPATCHER_SCHEDULE.
+    """
+    from awx.main.models.catalog import CatalogDeployment
+    from awx.main.utils.catalog import catalog_related_object_matches_item_org, collect_catalog_deployment_saved_vars
+
+    expired = CatalogDeployment.objects.filter(
+        status='active',
+        expires_at__lte=now(),
+    ).select_related('catalog_item', 'owner')
+
+    if not expired.exists():
+        return
+
+    logger.info('expire_catalog_deployments: found %d expired deployment(s)', expired.count())
+
+    def mark_expired(deployment, reason=None):
+        details = {'reason': reason} if reason else None
+        deployment.status = 'expired'
+        deployment.append_history_entry('expire', status='expired', details=details)
+        deployment.save(update_fields=['status', 'provisioning_history', 'modified'])
+
+    for deployment in expired:
+        item = deployment.catalog_item
+        if item is None:
+            mark_expired(deployment, reason='catalog_item_missing')
+            continue
+
+        if not deployment.auto_deprovision:
+            mark_expired(deployment)
+            continue
+
+        # Resolve the deprovision workflow for the active provider
+        wjt = None
+        target_provider = deployment.target_provider or ''
+        mismatch_field = None
+        if target_provider and item.provider_deprovision_workflows:
+            wf_pk = item.provider_deprovision_workflows.get(target_provider)
+            if wf_pk:
+                try:
+                    from awx.main.models import WorkflowJobTemplate
+
+                    wjt = WorkflowJobTemplate.objects.get(pk=wf_pk)
+                except WorkflowJobTemplate.DoesNotExist:
+                    pass
+                else:
+                    if not catalog_related_object_matches_item_org(item, wjt):
+                        wjt = None
+                        mismatch_field = 'provider_deprovision_workflows'
+        if wjt is None and item.deprovision_workflow_id:
+            try:
+                from awx.main.models import WorkflowJobTemplate
+
+                wjt = WorkflowJobTemplate.objects.get(pk=item.deprovision_workflow_id)
+            except WorkflowJobTemplate.DoesNotExist:
+                pass
+            else:
+                if not catalog_related_object_matches_item_org(item, wjt):
+                    wjt = None
+                    mismatch_field = 'deprovision_workflow'
+
+        if wjt is None:
+            logger.warning(
+                'expire_catalog_deployments: deployment %s has no valid deprovision workflow; marking expired',
+                deployment.pk,
+            )
+            mark_expired(deployment, reason=mismatch_field or 'deprovision_workflow_missing')
+            continue
+
+        try:
+            extra_vars = collect_catalog_deployment_saved_vars(deployment)
+            extra_vars['catalog_deployment_id'] = deployment.pk
+            impersonation = impersonate(deployment.owner) if deployment.owner_id else nullcontext()
+            with impersonation:
+                wj = wjt.create_unified_job(extra_vars=extra_vars)
+            wj.signal_start()
+            deployment.status = 'deprovisioning'
+            deployment.deprovision_job = wj
+            deployment.last_deprovision_vars = extra_vars
+            deployment.save(update_fields=['status', 'deprovision_job', 'modified'])
+            deployment.append_history_entry('auto_expire_deprovision', job=wj, status='pending')
+            deployment.save(update_fields=['last_deprovision_vars', 'provisioning_history'])
+            logger.info(
+                'expire_catalog_deployments: launched deprovision job %s for deployment %s',
+                wj.pk,
+                deployment.pk,
+            )
+        except Exception as exc:
+            logger.exception(
+                'expire_catalog_deployments: failed to launch deprovision for deployment %s: %s',
+                deployment.pk,
+                exc,
+            )
+            deployment.status = 'failed'
+            deployment.save(update_fields=['status', 'modified'])
 
 
 @task(queue=get_task_queuename, timeout=3600, on_duplicate='discard')

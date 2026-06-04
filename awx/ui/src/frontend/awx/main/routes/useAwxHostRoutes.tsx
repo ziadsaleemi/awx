@@ -5,6 +5,7 @@ import { HostPage } from '../../resources/hosts/HostPage/HostPage';
 import { Hosts } from '../../resources/hosts/Hosts';
 import { AwxRoute } from '../AwxRoutes';
 import { HostJobs } from '../../resources/hosts/HostPage/HostJobs';
+import { HostDashboard } from '../../resources/hosts/HostPage/HostDashboard';
 import {
   CreateHost,
   EditHost,
@@ -26,6 +27,11 @@ export function useAwxHostRoutes() {
           path: ':id',
           element: <HostPage />,
           children: [
+            {
+              id: AwxRoute.HostDashboard,
+              path: 'dashboard',
+              element: <HostDashboard page="host" />,
+            },
             {
               id: AwxRoute.HostDetails,
               path: 'details',

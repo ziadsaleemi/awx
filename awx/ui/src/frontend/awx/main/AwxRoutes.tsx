@@ -116,6 +116,7 @@ export enum AwxRoute {
   InventoryHosts = 'awx-inventory-hosts',
   InventoryHostAdd = 'awx-inventory-host-add',
   InventoryHostEdit = 'awx-inventory-host-edit',
+  InventoryHostDashboard = 'awx-inventory-host-dashboard',
   InventoryHostDetails = 'awx-inventory-host-details',
   InventoryHostGroups = 'awx-inventory-host-groups',
   InventoryHostJobs = 'awx-inventory-host-jobs',
@@ -143,6 +144,7 @@ export enum AwxRoute {
   CreateHost = 'awx-create-host',
   EditHost = 'awx-edit-host',
   HostPage = 'awx-host-page',
+  HostDashboard = 'awx-host-dashboard',
   HostDetails = 'awx-host-details',
   HostFacts = 'awx-host-facts',
   HostGroups = 'awx-host-groups',
@@ -189,11 +191,25 @@ export enum AwxRoute {
   CatalogAdminItems = 'awx-catalog-admin-items',
   CatalogAdminVmSizes = 'awx-catalog-admin-vm-sizes',
   CatalogAdminDeployments = 'awx-catalog-admin-deployments',
+  CatalogMarketplace = 'awx-catalog-marketplace',
 
   // Cloud
   Cloud = 'awx-cloud',
   CloudConnections = 'awx-cloud-connections',
   CloudProviderSettings = 'awx-cloud-provider-settings',
+
+  // Policy as Code
+  PolicyAsCode = 'awx-policy-as-code',
+  PolicyAsCodeOverview = 'awx-policy-as-code-overview',
+  PolicyAsCodeGatekeeper = 'awx-policy-as-code-gatekeeper',
+  PolicyAsCodeModules = 'awx-policy-as-code-modules',
+  PolicyAsCodeTester = 'awx-policy-as-code-tester',
+  PolicyAsCodeSmoke = 'awx-policy-as-code-smoke',
+
+  // Event-Driven Ansible
+  EventDriven = 'awx-event-driven',
+  EdaActivations = 'awx-eda-activations',
+  EdaActivationPage = 'awx-eda-activation-page',
 
   // Access
   Access = 'awx-access',
@@ -330,6 +346,9 @@ export enum AwxRoute {
   SettingsLogging = 'awx-settings-logging',
   SettingsCustomizeLogin = 'awx-settings-customize-login',
   SettingsTroubleshooting = 'awx-settings-troubleshooting',
+  SettingsPolicyAsCode = 'awx-settings-policy-as-code',
+  SettingsAiAssistant = 'awx-settings-ai-assistant',
+  SettingsEda = 'awx-settings-eda',
   SettingsOther = 'awx-settings-other',
   SettingsAuthentication = 'awx-settings-authentication',
   SettingsCategory = 'awx-settings-category',

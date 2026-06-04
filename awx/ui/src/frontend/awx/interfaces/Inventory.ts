@@ -35,6 +35,13 @@ export interface CommonInventory
       count: number;
       results: Label[];
     };
+    default_machine_credential?: {
+      id: number;
+      name: string;
+      description?: string;
+      kind?: string;
+      credential_type_id?: number;
+    };
   };
   organization: number;
   has_inventory_sources: boolean;
@@ -42,6 +49,8 @@ export interface CommonInventory
   pending_deletion: boolean;
   total_inventory_sources: number;
   variables: string;
+  default_machine_credential: number | null;
+  force_inventory_machine_credential: boolean;
 }
 
 export interface ConstructedInventory extends CommonInventory {

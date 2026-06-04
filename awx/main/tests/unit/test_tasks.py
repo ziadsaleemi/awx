@@ -20,6 +20,7 @@ from awx.main.models import (
     Inventory,
     InventorySource,
     InventoryUpdate,
+    AdHocCommandEvent,
     Job,
     JobTemplate,
     Notification,
@@ -591,6 +592,90 @@ class TestGenericRun:
 
 @pytest.mark.django_db
 class TestAdhocRun(TestJobExecution):
+    def _create_adhoc_fact_job(self, module_name='setup'):
+        org = Organization.objects.create(name=f'Facts org {module_name}')
+        inventory = Inventory.objects.create(name=f'Facts inventory {module_name}', organization=org)
+        inventory.hosts.create(name=f'facts-host-{module_name}')
+        return AdHocCommand.objects.create(inventory=inventory, module_name=module_name)
+
+    def test_adhoc_remote_tmp_defaults_to_tmp_ansible(self, adhoc_job, private_data_dir, execution_environment, mock_me):
+        adhoc_job.execution_environment = execution_environment
+        task = jobs.RunAdHocCommand()
+        task.instance = adhoc_job
+
+        env = task.build_env(adhoc_job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/tmp/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/tmp/ansible'
+
+    @mock.patch('awx.main.tasks.jobs.start_fact_cache')
+    def test_adhoc_setup_starts_fact_cache(self, mock_start_fact_cache, private_data_dir, mock_create_partition):
+        adhoc_job = self._create_adhoc_fact_job(module_name='setup')
+        task = jobs.RunAdHocCommand()
+        task.instance = adhoc_job
+
+        task.pre_run_hook(adhoc_job, private_data_dir)
+
+        mock_start_fact_cache.assert_called_once()
+        hosts_qs = mock_start_fact_cache.call_args.args[0]
+        assert list(hosts_qs.values_list('name', flat=True)) == ['facts-host-setup']
+        assert mock_start_fact_cache.call_args.kwargs['artifacts_dir'] == os.path.join(private_data_dir, 'artifacts', str(adhoc_job.id))
+        assert mock_start_fact_cache.call_args.kwargs['inventory_id'] == adhoc_job.inventory_id
+
+    @mock.patch('awx.main.tasks.jobs.start_fact_cache')
+    def test_adhoc_non_setup_skips_fact_cache(self, mock_start_fact_cache, private_data_dir, mock_create_partition):
+        adhoc_job = self._create_adhoc_fact_job(module_name='command')
+        task = jobs.RunAdHocCommand()
+        task.instance = adhoc_job
+
+        task.pre_run_hook(adhoc_job, private_data_dir)
+
+        mock_start_fact_cache.assert_not_called()
+
+    def test_adhoc_setup_enables_ansible_fact_cache(self):
+        task = jobs.RunAdHocCommand()
+        task.instance = AdHocCommand(module_name='setup')
+        assert task.should_use_fact_cache() is True
+
+        task.instance = AdHocCommand(module_name='command')
+        assert task.should_use_fact_cache() is False
+
+    def test_adhoc_setup_persists_event_facts(self):
+        adhoc_job = self._create_adhoc_fact_job(module_name='setup')
+        facts = {'ansible_hostname': 'facts-host-setup', 'ansible_distribution': 'RedHat'}
+        AdHocCommandEvent.objects.create(
+            ad_hoc_command=adhoc_job,
+            event='runner_on_ok',
+            host_name='facts-host-setup',
+            event_data={'host': 'facts-host-setup', 'res': {'ansible_facts': facts}},
+        )
+
+        adhoc_job.send_notification_templates = mock.Mock()
+        system.events_processed_hook(adhoc_job)
+
+        host = adhoc_job.inventory.hosts.get(name='facts-host-setup')
+        assert host.ansible_facts == facts
+        assert host.variables_dict['ansible_facts'] == facts
+
+    @mock.patch('awx.main.tasks.jobs.finish_fact_cache')
+    def test_adhoc_setup_finishes_fact_cache(self, mock_finish_fact_cache, private_data_dir):
+        adhoc_job = self._create_adhoc_fact_job(module_name='setup')
+        adhoc_job.job_env = {'AWX_PRIVATE_DATA_DIR': private_data_dir}
+        adhoc_job.save(update_fields=['job_env'])
+        task = jobs.RunAdHocCommand()
+        task.instance = adhoc_job
+        task.runner_callback.artifacts_processed = True
+
+        task.post_run_hook(adhoc_job, 'successful')
+
+        mock_finish_fact_cache.assert_called_once()
+        hosts_qs = mock_finish_fact_cache.call_args.args[0]
+        assert list(hosts_qs.values_list('name', flat=True)) == ['facts-host-setup']
+        assert mock_finish_fact_cache.call_args.kwargs['artifacts_dir'] == os.path.join(private_data_dir, 'artifacts', str(adhoc_job.id))
+        assert mock_finish_fact_cache.call_args.kwargs['job_id'] == adhoc_job.id
+        assert mock_finish_fact_cache.call_args.kwargs['inventory_id'] == adhoc_job.inventory_id
+        assert mock_finish_fact_cache.call_args.kwargs['job_created'] == adhoc_job.created
+
     def test_options_jinja_usage(self, adhoc_job, adhoc_update_model_wrapper, mock_me, mock_create_partition):
         ExecutionEnvironment.objects.create(name='Control Plane EE', managed=True)
         ExecutionEnvironment.objects.create(name='Default Job EE', managed=False)
@@ -948,6 +1033,38 @@ class TestJobCredentials(TestJobExecution):
         env = task.build_env(job, private_data_dir)
 
         assert env['FOO'] == 'BAR'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_defaults_to_tmp_ansible(self, private_data_dir, job, mock_me):
+        task = jobs.RunJob()
+        task.instance = job
+
+        env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/tmp/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/tmp/ansible'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_respects_awx_task_env(self, settings, private_data_dir, job, mock_me):
+        settings.AWX_TASK_ENV = {'ANSIBLE_REMOTE_TMP': '/custom/ansible'}
+        task = jobs.RunJob()
+        task.instance = job
+
+        env = task.build_env(job, private_data_dir)
+
+        assert env['ANSIBLE_REMOTE_TEMP'] == '/custom/ansible'
+        assert env['ANSIBLE_REMOTE_TMP'] == '/custom/ansible'
+
+    @pytest.mark.django_db
+    def test_job_remote_tmp_respects_project_ansible_config(self, private_data_dir, job, mock_me):
+        task = jobs.RunJob()
+        task.instance = job
+
+        with mock.patch('awx.main.tasks.jobs.read_ansible_config', return_value={'remote_tmp': '/project/tmp'}):
+            env = task.build_env(job, private_data_dir)
+
+        assert 'ANSIBLE_REMOTE_TEMP' not in env
+        assert 'ANSIBLE_REMOTE_TMP' not in env
 
 
 class TestCallbacksEnabled(TestJobExecution):

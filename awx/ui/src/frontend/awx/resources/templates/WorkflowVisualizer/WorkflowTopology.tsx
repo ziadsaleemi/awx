@@ -159,7 +159,13 @@ export const WorkflowTopology = ({ data: { workflowNodes = [], template } }: Top
     const nodes = workflowNodes.map((n) => {
       const nodeId = n.id.toString();
       const nodeType = 'node';
-      const nodeName = n.summary_fields?.unified_job_template?.name || '';
+      const nodeName =
+        n.summary_fields?.unified_job_template?.name ||
+        n.summary_fields?.eda_rulebook?.name ||
+        n.summary_fields?.ai_task?.prompt?.split('\n')[0].slice(0, 60) ||
+        n.ai_task_prompt?.split('\n')[0].slice(0, 60) ||
+        n.eda_rulebook_name ||
+        '';
       const nodeLabel = getNodeLabel(nodeName, n.identifier) || t('Deleted');
 
       n.success_nodes.forEach((id) => {

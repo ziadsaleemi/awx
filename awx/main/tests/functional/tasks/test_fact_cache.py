@@ -42,6 +42,8 @@ class TestFinishFactCacheScoping:
 
         host1 = inv1.hosts.create(name='shared')
         host2 = inv2.hosts.create(name='shared')
+        host1.variables = 'custom: keep'
+        host1.save(update_fields=['variables'])
 
         # Give both hosts initial facts
         for h in (host1, host2):
@@ -66,7 +68,30 @@ class TestFinishFactCacheScoping:
         host2.refresh_from_db()
 
         assert host1.ansible_facts == {'updated': True}
+        assert host1.variables_dict == {'custom': 'keep', 'ansible_facts': {'updated': True}}
         assert host2.ansible_facts == {'original': True}, 'Host in a different inventory was modified despite not being in the queryset'
+        assert 'ansible_facts' not in host2.variables_dict
+
+    def test_unchanged_facts_are_still_synced_to_variables(self, organization, artifacts_dir):
+        inv = Inventory.objects.create(organization=organization, name='unchanged-sync-inv')
+        host = inv.hosts.create(name='unchanged', variables='custom: keep')
+        host.ansible_facts = {'same': True}
+        host.ansible_facts_modified = now()
+        host.save(update_fields=['ansible_facts', 'ansible_facts_modified'])
+
+        start_fact_cache(inv.hosts.all(), artifacts_dir=artifacts_dir, timeout=0, inventory_id=inv.id)
+
+        fact_file = os.path.join(artifacts_dir, 'fact_cache', host.name)
+        future = time.time() + 60
+        with open(fact_file, 'w') as f:
+            json.dump({'same': True}, f)
+        os.utime(fact_file, (future, future))
+
+        finish_fact_cache(inv.hosts, artifacts_dir=artifacts_dir, inventory_id=inv.id)
+
+        host.refresh_from_db()
+        assert host.ansible_facts == {'same': True}
+        assert host.variables_dict == {'custom': 'keep', 'ansible_facts': {'same': True}}
 
 
 @pytest.mark.django_db
@@ -150,11 +175,12 @@ class TestFinishFactCacheConcurrentProtection:
         """
         inv = Inventory.objects.create(organization=organization, name='clear-inv')
         host = inv.hosts.create(name='stale')
+        host.variables = json.dumps({'custom': 'keep', 'ansible_facts': {'stale': True}})
 
         old_time = now() - timedelta(hours=1)
         host.ansible_facts = {'stale': True}
         host.ansible_facts_modified = old_time
-        host.save(update_fields=['ansible_facts', 'ansible_facts_modified'])
+        host.save(update_fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
 
         job_created = now() - timedelta(minutes=5)
 
@@ -172,6 +198,28 @@ class TestFinishFactCacheConcurrentProtection:
 
         host.refresh_from_db()
         assert host.ansible_facts == {}, 'Stale facts should have been cleared when the fact file is missing ' 'and ansible_facts_modified predates job_created'
+        assert host.variables_dict == {'custom': 'keep'}
+
+    def test_invalid_host_variables_do_not_block_fact_update(self, organization, artifacts_dir):
+        inv = Inventory.objects.create(organization=organization, name='invalid-vars-inv')
+        host = inv.hosts.create(name='invalid-vars-host', variables='not: [valid')
+        host.ansible_facts = {'original': True}
+        host.ansible_facts_modified = now()
+        host.save(update_fields=['ansible_facts', 'ansible_facts_modified'])
+
+        start_fact_cache(inv.hosts.all(), artifacts_dir=artifacts_dir, timeout=0, inventory_id=inv.id)
+
+        fact_file = os.path.join(artifacts_dir, 'fact_cache', host.name)
+        future = time.time() + 60
+        with open(fact_file, 'w') as f:
+            json.dump({'updated': True}, f)
+        os.utime(fact_file, (future, future))
+
+        finish_fact_cache(inv.hosts, artifacts_dir=artifacts_dir, inventory_id=inv.id)
+
+        host.refresh_from_db()
+        assert host.ansible_facts == {'updated': True}
+        assert host.variables == 'not: [valid'
 
 
 @pytest.mark.django_db

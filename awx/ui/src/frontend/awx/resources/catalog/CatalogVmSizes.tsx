@@ -25,12 +25,13 @@ import {
   usePageAlertToaster,
 } from '../../../../framework';
 import { useGet } from '../../../common/crud/useGet';
-import { awxAPI } from '../../common/api/awx-utils';
 import {
   ApiCloudProviderState,
   CloudProviderSettingsState,
+  getProviderStateUrl,
   patchProviderState,
 } from '../../resources/cloud/cloudConnectionStore';
+import { useCloudOrganization } from '../../resources/cloud/useCloudOrganization';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -55,16 +56,20 @@ function readVmSizes(state: ApiCloudProviderState | undefined): VmSize[] {
 
 async function persistVmSizes(
   globalState: ApiCloudProviderState | undefined,
-  sizes: VmSize[]
+  sizes: VmSize[],
+  organizationId?: number | null
 ): Promise<ApiCloudProviderState | null> {
-  const existing =
-    (globalState?.provider_settings as unknown as Record<string, unknown>) ?? {};
-  return patchProviderState(GLOBAL_PROVIDER_ID, {
-    provider_settings: {
-      ...existing,
-      vm_sizes: sizes,
-    } as unknown as CloudProviderSettingsState,
-  });
+  const existing = (globalState?.provider_settings as unknown as Record<string, unknown>) ?? {};
+  return patchProviderState(
+    GLOBAL_PROVIDER_ID,
+    {
+      provider_settings: {
+        ...existing,
+        vm_sizes: sizes,
+      } as unknown as CloudProviderSettingsState,
+    },
+    organizationId
+  );
 }
 
 // ── AddVmSizeModal ────────────────────────────────────────────────────────────
@@ -81,9 +86,7 @@ function AddVmSizeModal({ existingNames, onAdd, onClose }: AddVmSizeModalProps) 
   const [cpu, setCpu] = useState('');
   const [ram, setRam] = useState('');
 
-  const isDuplicate = existingNames
-    .map((n) => n.toLowerCase())
-    .includes(name.trim().toLowerCase());
+  const isDuplicate = existingNames.map((n) => n.toLowerCase()).includes(name.trim().toLowerCase());
   const isValid = name.trim() !== '' && cpu.trim() !== '' && ram.trim() !== '' && !isDuplicate;
 
   return (
@@ -224,6 +227,7 @@ function EditVmSizeModal({ size, existingNames, onSave, onClose }: EditVmSizeMod
 export function CatalogVmSizes() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
+  const { organizationId } = useCloudOrganization();
 
   const [sizes, setSizes] = useState<VmSize[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
@@ -231,7 +235,7 @@ export function CatalogVmSizes() {
   const [editSize, setEditSize] = useState<VmSize | null>(null);
 
   const { data: globalState, isLoading } = useGet<ApiCloudProviderState>(
-    awxAPI`/catalog_cloud/provider_state/${GLOBAL_PROVIDER_ID}/`
+    getProviderStateUrl(GLOBAL_PROVIDER_ID, organizationId)
   );
 
   useEffect(() => {
@@ -244,7 +248,7 @@ export function CatalogVmSizes() {
     async (newSizes: VmSize[]) => {
       setIsSaving(true);
       try {
-        const result = await persistVmSizes(globalState, newSizes);
+        const result = await persistVmSizes(globalState, newSizes, organizationId);
         if (!result) throw new Error(t('Server returned no data'));
       } catch (error) {
         alertToaster.addAlert({
@@ -257,7 +261,7 @@ export function CatalogVmSizes() {
         setIsSaving(false);
       }
     },
-    [alertToaster, globalState, t]
+    [alertToaster, globalState, organizationId, t]
   );
 
   const onAdd = useCallback(
@@ -291,9 +295,7 @@ export function CatalogVmSizes() {
 
   const onToggleEnabled = useCallback(
     (size: VmSize, enabled: boolean) => {
-      const newSizes = (sizes ?? []).map((s) =>
-        s.name === size.name ? { ...s, enabled } : s
-      );
+      const newSizes = (sizes ?? []).map((s) => (s.name === size.name ? { ...s, enabled } : s));
       setSizes(newSizes);
       void doSave(newSizes);
     },
@@ -448,9 +450,7 @@ export function CatalogVmSizes() {
     <PageLayout>
       <PageHeader
         title={t('VM Sizes')}
-        description={t(
-          'Manage reusable VM size presets. These apply to all hypervisor providers.'
-        )}
+        description={t('Manage reusable VM size presets. These apply to all hypervisor providers.')}
       />
       <PageTable<VmSize>
         id="catalog-vm-sizes-table"

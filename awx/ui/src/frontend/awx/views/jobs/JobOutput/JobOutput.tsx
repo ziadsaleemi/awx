@@ -64,6 +64,7 @@ export function JobOutputInner(props: { job: Job; reloadJob: () => void }) {
         <>
           <HostStatusBar counts={job.host_status_counts || {}} />
           <JobOutputToolbar
+            job={job}
             toolbarFilters={toolbarFilters}
             filterState={filterState}
             setFilterState={setFilterState}

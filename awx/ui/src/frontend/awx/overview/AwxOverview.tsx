@@ -13,6 +13,9 @@ import { AwxJobActivityCard } from './cards/AwxJobActivityCard';
 import { AwxRecentInventoriesCard } from './cards/AwxRecentInventoriesCard';
 import { AwxRecentJobsCard } from './cards/AwxRecentJobsCard';
 import { AwxRecentProjectsCard } from './cards/AwxRecentProjectsCard';
+import { AwxROICard } from './cards/AwxROICard';
+import { AwxInsightsCard } from './cards/AwxInsightsCard';
+import { AwxPerformanceCard } from './cards/AwxPerformanceCard';
 import { useManagedAwxDashboard } from './hooks/useManagedAwxDashboard';
 
 type Resource = { id: string; name: string };
@@ -43,9 +46,12 @@ export function AwxOverview() {
 
 function AwxOverviewInternal(props: { managedResources: Resource[] }) {
   const { managedResources } = props;
-  const { data, isLoading, mutate: refreshDashboard } = useSWR<IAwxDashboardData>(
-    awxAPI`/dashboard/`,
-    (url: string) => fetch(url).then((r) => r.json())
+  const {
+    data,
+    isLoading,
+    mutate: refreshDashboard,
+  } = useSWR<IAwxDashboardData>(awxAPI`/dashboard/`, (url: string) =>
+    fetch(url).then((r) => r.json())
   );
 
   // Refresh dashboard data whenever a job changes state (real-time via WebSocket)
@@ -78,6 +84,12 @@ function AwxOverviewInternal(props: { managedResources: Resource[] }) {
             return <AwxRecentProjectsCard key={resource.id} />;
           case 'recent_inventories':
             return <AwxRecentInventoriesCard key={resource.id} />;
+          case 'automation_roi':
+            return <AwxROICard key={resource.id} />;
+          case 'automation_insights':
+            return <AwxInsightsCard key={resource.id} />;
+          case 'performance_metrics':
+            return <AwxPerformanceCard key={resource.id} />;
           default:
             return <></>;
         }

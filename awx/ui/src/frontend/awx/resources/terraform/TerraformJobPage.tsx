@@ -1,21 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import {
-  LoadingPage,
-  PageActions,
-  PageHeader,
-  PageLayout,
-  useGetPageUrl,
-  usePageNavigate,
-} from '../../../../framework';
+import { LoadingPage, PageHeader, PageLayout, useGetPageUrl } from '../../../../framework';
 import { PageRoutedTabs } from '../../../common/PageRoutedTabs';
 import { useGetItem } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { TerraformJob } from '../../interfaces/TerraformJob';
-import { DropdownPosition } from '@patternfly/react-core/deprecated';
-import { StatusCell } from '../../../common/Status';
 
 export function TerraformJobPage() {
   const { t } = useTranslation();
@@ -23,10 +14,12 @@ export function TerraformJobPage() {
   const getPageUrl = useGetPageUrl();
   const jobId = params.job_id ?? '';
 
-  const { data: job, error, isLoading, refresh } = useGetItem<TerraformJob>(
-    awxAPI`/terraform_jobs`,
-    jobId
-  );
+  const {
+    data: job,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<TerraformJob>(awxAPI`/terraform_jobs`, jobId);
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
   if (isLoading || !job) return <LoadingPage breadcrumbs tabs />;

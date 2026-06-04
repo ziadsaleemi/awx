@@ -9,7 +9,7 @@ export function useResumeWorkflowJob() {
   const alertToaster = usePageAlertToaster();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const postRequest = usePostRequest();
+  const postRequest = usePostRequest<object, UnifiedJob>();
   const getJobOutputUrl = useGetJobOutputUrl();
 
   return async (job: UnifiedJob) => {
@@ -17,7 +17,7 @@ export function useResumeWorkflowJob() {
       return;
     }
     try {
-      const resumedJob = await postRequest<UnifiedJob>(job.related.resume, {});
+      const resumedJob = await postRequest(job.related.resume, {});
       navigate(getJobOutputUrl(resumedJob));
     } catch (error) {
       alertToaster.addAlert({

@@ -119,6 +119,7 @@ def test_organization_admin_has_audit(setup_managed_roles):
 def test_organization_level_permissions(organization, inventory, setup_managed_roles):
     u1 = User.objects.create(username='alice')
     u2 = User.objects.create(username='bob')
+    organization.member_role.members.remove(u1, u2)
 
     organization.inventory_admin_role.members.add(u1)
     organization.workflow_admin_role.members.add(u2)
@@ -203,6 +204,8 @@ def test_mapping_from_role_definitions_to_roles(organization, team, rando, role_
     """
     resource = organization if resource_name == 'Organization' else team
     old_role_name = f"{role_name.lower()}_role"
+    if resource_name == 'Organization':
+        resource.member_role.members.remove(rando)
     getattr(resource, old_role_name).members.add(rando)
     assignment = RoleUserAssignment.objects.get(user=rando)
     assert assignment.role_definition.name == f'{resource_name} {role_name}'

@@ -1,11 +1,16 @@
 import pytest
 import json
 
-from awx.api.versioning import reverse
+from django.test import override_settings
 
+from awx.api.versioning import reverse
 from awx.main.models.activity_stream import ActivityStream
+from awx.main.models.inventory import Inventory
 from awx.main.models.jobs import JobTemplate
 from awx.main.models.workflow import (
+    AIWorkflowTaskError,
+    WORKFLOW_NODE_TYPE_AI_TASK,
+    WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
     WorkflowApproval,
     WorkflowApprovalTemplate,
     WorkflowJob,
@@ -34,6 +39,15 @@ def node(workflow_job_template, admin_user, job_template):
 @pytest.fixture
 def approval_node(workflow_job_template, admin_user):
     return WorkflowJobTemplateNode.objects.create(workflow_job_template=workflow_job_template)
+
+
+def eda_response(mocker, payload):
+    response = mocker.Mock()
+    response.status_code = 200
+    response.content = b'{}'
+    response.raise_for_status.return_value = None
+    response.json.return_value = payload
+    return response
 
 
 @pytest.mark.django_db
@@ -89,6 +103,514 @@ def test_create_node_with_field(field_name, field_value, workflow_job_template, 
     url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
     res = post(url, {field_name: field_value}, user=admin_user, expect=201)
     assert res.data[field_name] == field_value
+
+
+@pytest.mark.django_db
+def test_create_eda_rulebook_node(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {
+            'node_type': 'eda_rulebook',
+            'eda_rulebook_name': 'ops-alerts',
+            'eda_activation_id': 'activation-1',
+            'eda_event_source': 'webhook',
+            'eda_event_source_status': 'running',
+            'identifier': 'ops-alerts',
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert res.data['node_type'] == 'eda_rulebook'
+    assert res.data['unified_job_template'] is None
+    assert res.data['eda_rulebook_name'] == 'ops-alerts'
+    assert res.data['summary_fields']['eda_rulebook']['event_source'] == 'webhook'
+
+
+@pytest.mark.django_db
+def test_create_ai_task_node(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {
+            'node_type': 'ai_task',
+            'ai_task_prompt': 'Create a rollout plan from parent artifacts',
+            'ai_task_model': 'gpt-5.2',
+            'ai_task_approval_required': True,
+            'identifier': 'ai-plan',
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert res.data['node_type'] == 'ai_task'
+    assert res.data['unified_job_template'] is None
+    assert res.data['ai_task_prompt'] == 'Create a rollout plan from parent artifacts'
+    assert res.data['summary_fields']['ai_task']['model'] == 'gpt-5.2'
+    assert res.data['summary_fields']['ai_task']['approval_required'] is True
+
+
+@pytest.mark.django_db
+def test_launch_eda_rulebook_node_completes_as_virtual_success(post, admin_user, controlplane_instance_group):
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='ops-alerts',
+        eda_activation_id='activation-1',
+        eda_event_source='webhook',
+        eda_event_source_status='running',
+        identifier='ops-alerts',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ops-alerts')
+    assert node.bypassed_job_status == 'successful'
+    assert node.ancestor_artifacts['awx_eda']['rulebook_name'] == 'ops-alerts'
+
+    WorkflowManager().schedule()
+    workflow_job.refresh_from_db()
+    assert workflow_job.status == 'successful'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_launch_eda_rulebook_node_syncs_controller_status(post, admin_user, controlplane_instance_group, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(
+            mocker,
+            {
+                'id': 'activation-1',
+                'name': 'ops-alerts',
+                'status': 'running',
+                'rulebook_name': 'ops-alerts.yml',
+                'event_source': 'webhook',
+            },
+        ),
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow controller sync')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='ops-alerts',
+        eda_activation_id='activation-1',
+        eda_event_source='webhook',
+        eda_event_source_status='planned',
+        identifier='ops-alerts',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ops-alerts')
+
+    assert node.bypassed_job_status == 'successful'
+    assert node.eda_event_source_status == 'running'
+    assert node.ancestor_artifacts['awx_eda']['source'] == 'eda_controller'
+    assert node.ancestor_artifacts['awx_eda']['controller_status'] == 'ok'
+    assert node.ancestor_artifacts['awx_eda']['activation']['rulebook'] == 'ops-alerts.yml'
+    assert node.ancestor_artifacts['awx_eda']['actions'] == ['found', 'polled']
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_VERIFY_SSL=False)
+def test_launch_eda_rulebook_node_creates_starts_and_polls_activation(post, admin_user, controlplane_instance_group, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 0, 'results': []}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'created', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'rulebook_name': 'ops-alerts.yml'}),
+            eda_response(mocker, {'id': 'created-1', 'name': 'ops-alerts', 'status': 'running', 'current_job_id': 'instance-1'}),
+            eda_response(mocker, {'results': [{'id': 'event-1', 'log': 'activation started'}]}),
+        ],
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='eda workflow controller start')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='ops-alerts',
+        eda_event_source='webhook',
+        eda_event_source_status='planned',
+        identifier='ops-alerts',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ops-alerts')
+
+    assert node.bypassed_job_status == 'successful'
+    assert node.eda_activation_id == 'created-1'
+    assert node.eda_event_source_status == 'running'
+    assert node.ancestor_artifacts['awx_eda']['actions'] == ['created', 'started', 'polled', 'events']
+    assert node.ancestor_artifacts['awx_eda']['events'][0]['message'] == 'activation started'
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'GET', 'GET', 'GET']
+    assert request_mock.call_args_list[1].kwargs['json']['event_source'] == 'webhook'
+    assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/activations/created-1/enable/'
+    assert request_mock.call_args_list[5].args[1] == 'https://eda.example.test/api/eda/v1/activation-instances/instance-1/logs/'
+
+
+@pytest.mark.django_db
+def test_launch_ai_task_node_generates_runtime_plan(post, admin_user, controlplane_instance_group, mocker):
+    run_mock = mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"steps":[{"name":"verify"}]}',
+            'plan': {'steps': [{'name': 'verify'}]},
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Build execution plan',
+        ai_task_model='gpt-5.2',
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+
+    assert node.bypassed_job_status == 'successful'
+    assert node.ai_task_status == 'successful'
+    assert node.ai_task_result['plan']['steps'][0]['name'] == 'verify'
+    assert node.ancestor_artifacts['awx_ai']['provider'] == 'openai_codex'
+    assert node.ancestor_artifacts['awx_ai']['approval_required'] is True
+    run_mock.assert_called_once_with('Build execution plan', {}, 'gpt-5.2')
+
+
+@pytest.mark.django_db
+def test_launch_ai_task_node_waits_for_resource_action_approval(get, post, admin_user, rando, organization, controlplane_instance_group, mocker):
+    mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"name":"Create inventory","operations":[{"id":"inv","operation":"create","resource_type":"inventory","data":{"name":"AI Approved Inventory","organization":%s}}]}'
+            % organization.pk,
+            'plan': {
+                'name': 'Create inventory',
+                'operations': [
+                    {
+                        'id': 'inv',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Approved Inventory', 'organization': organization.pk},
+                    }
+                ],
+            },
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow approval')
+    workflow_job_template.read_role.members.add(rando)
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Create approved inventory',
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+
+    assert node.bypassed_job_status == ''
+    assert node.ai_task_status == 'awaiting_approval'
+    assert node.ai_task_result['resource_action']['mode'] == 'preview'
+    assert node.ai_task_result['resource_action']['can_apply'] is True
+    assert not Inventory.objects.filter(name='AI Approved Inventory', organization=organization).exists()
+    approval = WorkflowApproval.objects.get(unified_job_node=node)
+    assert approval.status == 'pending'
+    assert approval.workflow_approval_template is None
+
+    node_detail = get(reverse('api:workflow_job_node_detail', kwargs={'pk': node.pk}), user=admin_user, expect=200)
+    assert node_detail.data['related']['approval'].endswith(f'/api/v2/workflow_approvals/{approval.pk}/')
+
+    approve_url = reverse('api:workflow_approval_approve', kwargs={'pk': approval.pk})
+    post(approve_url, user=rando, expect=403)
+    post(approve_url, user=admin_user, expect=204)
+    node.refresh_from_db()
+    approval.refresh_from_db()
+
+    assert approval.status == 'successful'
+    assert node.bypassed_job_status == 'successful'
+    assert node.ai_task_status == 'applied'
+    assert node.ai_task_result['resource_action']['mode'] == 'apply'
+    assert node.ai_task_result['resource_action']['can_apply'] is True
+    assert Inventory.objects.filter(name='AI Approved Inventory', organization=organization).exists()
+
+
+@pytest.mark.django_db
+def test_approved_ai_task_resource_action_sends_human_approval_to_opa(post, admin_user, organization, controlplane_instance_group, mocker):
+    inventory = Inventory.objects.create(name='AI OPA Workflow Source', organization=organization)
+    policy_inputs = []
+
+    def deny_apply_without_human_approval(policy_path, input_data):
+        policy_inputs.append(input_data)
+        assert policy_path == 'awx/ai_action/allow'
+        if input_data['mode'] == 'apply' and input_data['destructive']:
+            return input_data['human_approved']
+        return True
+
+    mocker.patch('awx.api.views.ai.check_opa_policy', side_effect=deny_apply_without_human_approval)
+    mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"name":"Rename inventory","operations":[{"id":"inv","operation":"update","resource_type":"inventory","object_id":%s,"data":{"name":"AI OPA Workflow Renamed"}}]}'
+            % inventory.pk,
+            'plan': {
+                'name': 'Rename inventory',
+                'operations': [
+                    {
+                        'id': 'inv',
+                        'operation': 'update',
+                        'resource_type': 'inventory',
+                        'object_id': inventory.pk,
+                        'data': {'name': 'AI OPA Workflow Renamed'},
+                    }
+                ],
+            },
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow opa approval')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Rename inventory',
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+    assert node.ai_task_status == 'awaiting_approval'
+    approval = WorkflowApproval.objects.get(unified_job_node=node)
+
+    post(reverse('api:workflow_approval_approve', kwargs={'pk': approval.pk}), user=admin_user, expect=204)
+
+    inventory.refresh_from_db()
+    apply_input = next(input_data for input_data in policy_inputs if input_data['mode'] == 'apply')
+    assert inventory.name == 'AI OPA Workflow Renamed'
+    assert apply_input['source'] == 'workflow_ai_task'
+    assert apply_input['destructive'] is True
+    assert apply_input['human_approved'] is True
+    assert apply_input['approval']['workflow_job_node'] == node.pk
+    assert apply_input['approval']['approved_by'] == admin_user.pk
+
+
+@pytest.mark.django_db
+def test_denied_ai_task_resource_action_fails_from_workflow_approval(post, admin_user, organization, controlplane_instance_group, mocker):
+    mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"name":"Create inventory","operations":[{"id":"inv","operation":"create","resource_type":"inventory","data":{"name":"AI Denied Inventory","organization":%s}}]}'
+            % organization.pk,
+            'plan': {
+                'name': 'Create inventory',
+                'operations': [
+                    {
+                        'id': 'inv',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Denied Inventory', 'organization': organization.pk},
+                    }
+                ],
+            },
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow deny approval')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Create denied inventory',
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+    approval = WorkflowApproval.objects.get(unified_job_node=node)
+
+    post(reverse('api:workflow_approval_deny', kwargs={'pk': approval.pk}), user=admin_user, expect=204)
+    node.refresh_from_db()
+    approval.refresh_from_db()
+
+    assert approval.status == 'failed'
+    assert node.bypassed_job_status == 'failed'
+    assert node.ai_task_status == 'failed'
+    assert node.ai_task_result['approval']['denied_by'] == admin_user.pk
+    assert not Inventory.objects.filter(name='AI Denied Inventory', organization=organization).exists()
+
+
+@pytest.mark.django_db
+def test_launch_ai_task_node_auto_applies_resource_action_when_approval_disabled(post, admin_user, organization, controlplane_instance_group, mocker):
+    mocker.patch(
+        'awx.main.models.workflow.run_ai_workflow_task',
+        return_value={
+            'provider': 'openai_codex',
+            'model': 'gpt-5.2',
+            'response': '{"name":"Create inventory","operations":[{"id":"inv","operation":"create","resource_type":"inventory","data":{"name":"AI Auto Inventory","organization":%s}}]}'
+            % organization.pk,
+            'plan': {
+                'name': 'Create inventory',
+                'operations': [
+                    {
+                        'id': 'inv',
+                        'operation': 'create',
+                        'resource_type': 'inventory',
+                        'data': {'name': 'AI Auto Inventory', 'organization': organization.pk},
+                    }
+                ],
+            },
+        },
+    )
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow auto apply')
+    WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Create inventory',
+        ai_task_approval_required=False,
+        identifier='ai-plan',
+    )
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+    workflow_job.created_by = admin_user
+    workflow_job.save(update_fields=['created_by'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+
+    assert node.bypassed_job_status == 'successful'
+    assert node.ai_task_status == 'applied'
+    assert node.ai_task_result['resource_action']['mode'] == 'apply'
+    assert Inventory.objects.filter(name='AI Auto Inventory', organization=organization).exists()
+
+
+@pytest.mark.django_db
+def test_launch_ai_task_node_routes_provider_error_to_failure_path(post, admin_user, controlplane_instance_group, mocker):
+    mocker.patch('awx.main.models.workflow.run_ai_workflow_task', side_effect=AIWorkflowTaskError('provider offline'))
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow failure')
+    ai_node = WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_AI_TASK,
+        ai_task_prompt='Build execution plan',
+        identifier='ai-plan',
+    )
+    failure_node = WorkflowJobTemplateNode.objects.create(
+        workflow_job_template=workflow_job_template,
+        node_type=WORKFLOW_NODE_TYPE_EDA_RULEBOOK,
+        eda_rulebook_name='failure-handler',
+        identifier='failure-handler',
+    )
+    ai_node.failure_nodes.add(failure_node)
+
+    res = post(reverse('api:workflow_job_template_launch', kwargs={'pk': workflow_job_template.pk}), user=admin_user, expect=201)
+    workflow_job = WorkflowJob.objects.get(pk=res.data['workflow_job'])
+
+    DependencyManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    TaskManager().schedule()
+    WorkflowManager().schedule()
+    ai_job_node = workflow_job.workflow_job_nodes.get(identifier='ai-plan')
+    failure_job_node = workflow_job.workflow_job_nodes.get(identifier='failure-handler')
+
+    assert ai_job_node.bypassed_job_status == 'failed'
+    assert ai_job_node.ai_task_status == 'failed'
+    assert ai_job_node.ancestor_artifacts['awx_ai']['error'] == 'provider offline'
+    assert failure_job_node.bypassed_job_status == 'successful'
+
+
+@pytest.mark.django_db
+def test_eda_rulebook_node_requires_rulebook_name(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(url, {'node_type': 'eda_rulebook'}, user=admin_user, expect=400)
+
+    assert 'eda_rulebook_name' in res.data
+
+
+@pytest.mark.django_db
+def test_eda_rulebook_node_rejects_unified_job_template(workflow_job_template, post, admin_user, job_template):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {'node_type': 'eda_rulebook', 'eda_rulebook_name': 'ops-alerts', 'unified_job_template': job_template.pk},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'unified_job_template' in res.data
+
+
+@pytest.mark.django_db
+def test_ai_task_node_requires_prompt(workflow_job_template, post, admin_user):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(url, {'node_type': 'ai_task'}, user=admin_user, expect=400)
+
+    assert 'ai_task_prompt' in res.data
+
+
+@pytest.mark.django_db
+def test_ai_task_node_rejects_unified_job_template(workflow_job_template, post, admin_user, job_template):
+    url = reverse('api:workflow_job_template_workflow_nodes_list', kwargs={'pk': workflow_job_template.pk})
+    res = post(
+        url,
+        {'node_type': 'ai_task', 'ai_task_prompt': 'Build plan', 'unified_job_template': job_template.pk},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert 'unified_job_template' in res.data
 
 
 @pytest.mark.django_db

@@ -44,6 +44,7 @@ export function JobsList(props: {
       emptyStateTitle={t('No jobs yet')}
       emptyStateDescription={t('Please run a job to populate this list.')}
       emptyStateIcon={CubesIcon}
+      virtualizeRows
       {...view}
     />
   );

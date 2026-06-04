@@ -51,7 +51,9 @@ function useActivityColumn() {
   return column;
 }
 
-export const missingResources = (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate) =>
+export const missingResources = (
+  template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate
+) =>
   template.type === 'job_template' &&
   (!template?.summary_fields.project ||
     (!template?.summary_fields.inventory && !template?.ask_inventory_on_launch));
@@ -59,9 +61,9 @@ export const missingResources = (template: JobTemplate | WorkflowJobTemplate | T
 export function useTemplateColumns(options?: { disableSort?: boolean; disableLinks?: boolean }) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
-  const makeReadable: (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate) => string = (
-    template
-  ) => {
+  const makeReadable: (
+    template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate
+  ) => string = (template) => {
     if (template.type === 'workflow_job_template') {
       return t('Workflow job template');
     }
@@ -87,7 +89,9 @@ export function useTemplateColumns(options?: { disableSort?: boolean; disableLin
     makeReadable,
   });
 
-  const tableColumns = useMemo<ITableColumn<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]>(
+  const tableColumns = useMemo<
+    ITableColumn<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]
+  >(
     () => [
       {
         header: t('Name'),

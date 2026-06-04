@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Button,
+  Checkbox,
   Form,
   FormGroup,
   FormSelect,
@@ -26,6 +27,7 @@ import {
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGetItem } from '../../../common/crud/useGet';
 import { useGet } from '../../../common/crud/useGet';
+import { requestGet } from '../../../common/crud/Data';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { AwxError } from '../../common/AwxError';
 import { AwxRoute } from '../../main/AwxRoutes';
@@ -41,14 +43,25 @@ interface VmSizePreset {
   enabled?: boolean;
 }
 
+type SurveyQuestionType =
+  | 'text'
+  | 'textarea'
+  | 'password'
+  | 'integer'
+  | 'float'
+  | 'multiplechoice'
+  | 'multiselect';
+
 interface SchemaProperty {
-  type?: 'string' | 'integer' | 'number' | 'boolean';
+  type?: 'string' | 'integer' | 'number' | 'boolean' | 'array';
   title?: string;
   description?: string;
   default?: unknown;
   minimum?: number;
   maximum?: number;
   enum?: string[];
+  items?: { type: 'string'; enum?: string[] };
+  surveyType?: SurveyQuestionType;
 }
 
 interface JsonSchema {
@@ -67,9 +80,9 @@ interface WjtSurveyQuestion {
   question_name: string;
   question_description?: string;
   required: boolean;
-  type: 'text' | 'textarea' | 'password' | 'integer' | 'float' | 'multiplechoice' | 'multiselect';
+  type: SurveyQuestionType;
   default?: unknown;
-  choices?: string; // newline-separated choices for multiplechoice/multiselect
+  choices?: string | string[]; // newline-separated or list choices for multiplechoice/multiselect
   min?: number;
   max?: number;
 }
@@ -78,6 +91,27 @@ interface WjtSurveySpec {
   name: string;
   description?: string;
   spec: WjtSurveyQuestion[];
+}
+
+function normalizeSurveyChoices(choices: unknown): string[] {
+  const rawChoices = Array.isArray(choices)
+    ? choices
+    : typeof choices === 'string'
+      ? choices.split('\n')
+      : [];
+  return rawChoices.map((choice) => String(choice).trim()).filter((choice) => choice.length > 0);
+}
+
+function defaultToFormValue(prop: SchemaProperty): string {
+  if (prop.default === undefined || prop.default === null || prop.default === '') return '';
+  if (prop.type === 'array' || Array.isArray(prop.default)) {
+    return normalizeSurveyChoices(prop.default).join('\n');
+  }
+  return String(prop.default);
+}
+
+function formValueToArray(value: string | undefined): string[] {
+  return normalizeSurveyChoices(value ?? '');
 }
 
 /** Convert an AWX WJT survey spec into the JsonSchema format used by the form renderer. */
@@ -89,12 +123,15 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     const prop: SchemaProperty = {
       title: q.question_name,
       description: q.question_description || undefined,
+      surveyType: q.type,
     };
 
     if (q.type === 'integer') {
       prop.type = 'integer';
     } else if (q.type === 'float') {
       prop.type = 'number';
+    } else if (q.type === 'multiselect') {
+      prop.type = 'array';
     } else {
       prop.type = 'string';
     }
@@ -106,9 +143,12 @@ function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
     if (q.min !== undefined) prop.minimum = q.min;
     if (q.max !== undefined) prop.maximum = q.max;
 
-    if (q.type === 'multiplechoice' && q.choices) {
-      const choicesArr = Array.isArray(q.choices) ? q.choices : String(q.choices).split('\n');
-      prop.enum = choicesArr.map((c) => c.trim()).filter(Boolean);
+    if ((q.type === 'multiplechoice' || q.type === 'multiselect') && q.choices) {
+      const choices = normalizeSurveyChoices(q.choices);
+      prop.enum = choices;
+      if (q.type === 'multiselect') {
+        prop.items = { type: 'string', enum: choices };
+      }
     }
 
     properties[q.variable] = prop;
@@ -242,6 +282,24 @@ export function CatalogDeployContent({
 
   const postRequest = usePostRequest<Record<string, unknown>, CatalogDeployment>();
 
+  // TTL / lease state
+  const defaultLeaseMinutes = item.default_lease_minutes ?? null;
+  const requireLease = item.require_lease ?? false;
+  const [leaseDurationMinutes, setLeaseDurationMinutes] = useState<number | null>(
+    defaultLeaseMinutes
+  );
+  const [autoDeprovision, setAutoDeprovision] = useState<boolean>(Boolean(defaultLeaseMinutes));
+
+  const TTL_PRESETS = useMemo(
+    () => [
+      { label: t('2 h'), minutes: 120 },
+      { label: t('8 h'), minutes: 480 },
+      { label: t('24 h'), minutes: 1440 },
+      { label: t('7 d'), minutes: 10080 },
+    ],
+    [t]
+  );
+
   // Multi-cloud state — pre-select from initialProvider prop
   const allProviders = useMemo(() => {
     const set = new Set<string>();
@@ -265,13 +323,29 @@ export function CatalogDeployContent({
     return allProviders[0] ?? '';
   });
 
+  useEffect(() => {
+    if (
+      initialProvider &&
+      (allProviders.includes(initialProvider) || initialProvider === 'default')
+    ) {
+      setSelectedProvider(initialProvider);
+      return;
+    }
+    if (selectedProvider && allProviders.includes(selectedProvider)) {
+      return;
+    }
+    setSelectedProvider(allProviders[0] ?? '');
+  }, [allProviders, initialProvider, selectedProvider]);
+
   // When the modal is opened from a specific provider icon, lock to that provider
   // and skip rendering tabs for other providers.
   const lockedProvider = initialProvider ?? null;
   const isProviderConfigured = (p: string) =>
     Boolean(
       (item.provider_workflows && item.provider_workflows[p]) ||
-        (item.cloud_backends && item.cloud_backends[p])
+        (item.cloud_backends && item.cloud_backends[p]) ||
+        item.terraform_job_template ||
+        item.provision_workflow
     );
 
   const PROVIDER_LABELS: Record<string, string> = {
@@ -287,7 +361,24 @@ export function CatalogDeployContent({
     selectedProvider && item.related?.provider_workflow_surveys
       ? item.related.provider_workflow_surveys[selectedProvider]
       : undefined;
-  const { data: providerSurveyData } = useGet<WjtSurveySpec>(providerSurveyUrl);
+  const [providerSurveyData, setProviderSurveyData] = useState<WjtSurveySpec | undefined>();
+  const [providerSurveyError, setProviderSurveyError] = useState<Error | undefined>();
+
+  useEffect(() => {
+    setProviderSurveyData(undefined);
+    setProviderSurveyError(undefined);
+    if (!providerSurveyUrl) return;
+
+    const abortController = new AbortController();
+    void requestGet<WjtSurveySpec>(providerSurveyUrl, abortController.signal)
+      .then((data) => setProviderSurveyData(data))
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setProviderSurveyError(err instanceof Error ? err : new Error(String(err)));
+      });
+
+    return () => abortController.abort();
+  }, [providerSurveyUrl]);
 
   // The active schema: provider survey > catalog deploy_survey > extra_vars_schema
   const schema = useMemo((): JsonSchema => {
@@ -296,7 +387,7 @@ export function CatalogDeployContent({
     }
     return (deploySurvey?.schema ?? item.extra_vars_schema ?? {}) as JsonSchema;
   }, [providerSurveyData, deploySurvey?.schema, item.extra_vars_schema]);
-  const properties = schema.properties ?? {};
+  const properties = useMemo(() => schema.properties ?? {}, [schema.properties]);
   const requiredSet = new Set<string>(schema.required ?? []);
 
   const existingDynamicFieldValues = useMemo(() => {
@@ -323,7 +414,7 @@ export function CatalogDeployContent({
   const initialFormValues = useMemo((): Record<string, string> => {
     const values: Record<string, string> = {};
     for (const [key, prop] of Object.entries(properties)) {
-      values[key] = prop.default !== undefined ? String(prop.default) : '';
+      values[key] = defaultToFormValue(prop);
     }
     Object.assign(values, prefilledValues);
 
@@ -340,6 +431,7 @@ export function CatalogDeployContent({
 
   const [formValues, setFormValues] = useState<Record<string, string>>(initialFormValues);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [leaseError, setLeaseError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Generic provider state for dynamic field source resolution
@@ -359,7 +451,7 @@ export function CatalogDeployContent({
       setProviderAdminSettings(null);
       return;
     }
-    void fetchProviderState(selectedProvider).then((state) => {
+    void fetchProviderState(selectedProvider, item.organization).then((state) => {
       const rawData = state?.provider_data as Record<string, unknown> | null | undefined;
       if (rawData && typeof rawData === 'object') {
         if (selectedProvider === 'digitalocean') {
@@ -383,10 +475,11 @@ export function CatalogDeployContent({
             if (connData && typeof connData === 'object') {
               for (const [key, val] of Object.entries(connData as Record<string, unknown>)) {
                 if (Array.isArray(val)) {
+                  const values = val as unknown[];
                   if (aggregated[key]) {
-                    aggregated[key].push(...val);
+                    aggregated[key].push(...values);
                   } else {
-                    aggregated[key] = [...val];
+                    aggregated[key] = [...values];
                   }
                 }
               }
@@ -399,16 +492,16 @@ export function CatalogDeployContent({
       }
       setProviderAdminSettings(state?.admin_settings ?? null);
     });
-  }, [selectedProvider]);
+  }, [item.organization, selectedProvider]);
 
   // Fetch global VM size presets once on mount
   useEffect(() => {
-    void fetchProviderState('global').then((state) => {
+    void fetchProviderState('global', item.organization).then((state) => {
       const settings = state?.provider_settings as { vm_sizes?: VmSizePreset[] } | null | undefined;
       const sizes = settings?.vm_sizes ?? [];
       setGlobalVmSizes(sizes.filter((s) => s.enabled !== false));
     });
-  }, []);
+  }, [item.organization]);
 
   // When provider changes, reset form values so stale fields from a previous survey don't persist
   useEffect(() => {
@@ -446,21 +539,24 @@ export function CatalogDeployContent({
   const vmSizeSettings = providerFieldCfg?.vm_size_settings;
   const showVmSizePicker = vmSizeSettings?.enabled !== false && globalVmSizes.length > 0;
 
-  const onVmSizeSelect = useCallback((sizeName: string) => {
-    setSelectedVmSize(sizeName);
-    if (!sizeName) return;
-    const size = globalVmSizes.find((s) => s.name === sizeName);
-    if (size) {
-      if (vmSizeSettings?.cpu_variable) {
-        setFormValues((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: size.cpu }));
-        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: '' }));
+  const onVmSizeSelect = useCallback(
+    (sizeName: string) => {
+      setSelectedVmSize(sizeName);
+      if (!sizeName) return;
+      const size = globalVmSizes.find((s) => s.name === sizeName);
+      if (size) {
+        if (vmSizeSettings?.cpu_variable) {
+          setFormValues((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: size.cpu }));
+          setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.cpu_variable]: '' }));
+        }
+        if (vmSizeSettings?.ram_variable) {
+          setFormValues((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: size.ram }));
+          setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: '' }));
+        }
       }
-      if (vmSizeSettings?.ram_variable) {
-        setFormValues((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: size.ram }));
-        setFieldErrors((prev) => ({ ...prev, [vmSizeSettings.ram_variable]: '' }));
-      }
-    }
-  }, [globalVmSizes, vmSizeSettings]);
+    },
+    [globalVmSizes, vmSizeSettings]
+  );
 
   // Determine whether the current CPU / RAM values exceed the configured limits
   const isLimitExceeded = useMemo(() => {
@@ -510,6 +606,25 @@ export function CatalogDeployContent({
     setFieldErrors((prev) => ({ ...prev, [key]: '' }));
   }, []);
 
+  const setMultiSelectValue = useCallback(
+    (key: string, option: string, checked: boolean, options: string[]) => {
+      setFormValues((prev) => {
+        const selected = new Set(formValueToArray(prev[key]));
+        if (checked) {
+          selected.add(option);
+        } else {
+          selected.delete(option);
+        }
+        return {
+          ...prev,
+          [key]: options.filter((candidate) => selected.has(candidate)).join('\n'),
+        };
+      });
+      setFieldErrors((prev) => ({ ...prev, [key]: '' }));
+    },
+    []
+  );
+
   const validate = (): boolean => {
     let valid = true;
 
@@ -523,6 +638,12 @@ export function CatalogDeployContent({
     }
 
     setFieldErrors(errors);
+    if (requireLease && (leaseDurationMinutes === null || leaseDurationMinutes <= 0)) {
+      setLeaseError(t('This catalog item requires a lease duration.'));
+      valid = false;
+    } else {
+      setLeaseError('');
+    }
     return valid;
   };
 
@@ -547,7 +668,9 @@ export function CatalogDeployContent({
       for (const [key, prop] of Object.entries(properties)) {
         const raw = resolvedValues[key];
         if (raw === '' || raw === undefined) continue;
-        if (prop.type === 'integer' || prop.type === 'number') {
+        if (prop.type === 'array' || prop.surveyType === 'multiselect') {
+          extraVars[key] = formValueToArray(raw);
+        } else if (prop.type === 'integer' || prop.type === 'number') {
           const parsed = Number(raw);
           if (!Number.isNaN(parsed)) extraVars[key] = parsed;
         } else if (prop.type === 'boolean') {
@@ -566,6 +689,11 @@ export function CatalogDeployContent({
       }
       if (isLimitExceeded && vmSizeSettings?.require_approval) {
         body['requires_approval'] = true;
+      }
+      if (leaseDurationMinutes !== null && leaseDurationMinutes > 0) {
+        const expiresAt = new Date(Date.now() + leaseDurationMinutes * 60 * 1000);
+        body['expires_at'] = expiresAt.toISOString();
+        body['auto_deprovision'] = autoDeprovision;
       }
 
       await postRequest(awxAPI`/catalog_items/${id}/deploy/`, body);
@@ -597,6 +725,16 @@ export function CatalogDeployContent({
 
   return (
     <Form>
+      {providerSurveyError && (
+        <Alert
+          variant="danger"
+          isInline
+          title={t('Failed to load provider survey')}
+          style={{ marginBottom: '1rem' }}
+        >
+          {providerSurveyError.message}
+        </Alert>
+      )}
       {/* Provider tabs — one per cloud/hypervisor backend.
               When opened from a specific cloud icon (lockedProvider), restrict to that provider only. */}
       {lockedProvider && !isProviderConfigured(lockedProvider) ? (
@@ -649,7 +787,9 @@ export function CatalogDeployContent({
                         <HelperText>
                           <HelperTextItem>
                             {vmSizeSettings?.allow_manual
-                              ? t('Selecting a preset pre-fills CPU and RAM. You can still edit them.')
+                              ? t(
+                                  'Selecting a preset pre-fills CPU and RAM. You can still edit them.'
+                                )
                               : t('Selecting a preset fills in CPU and RAM automatically.')}
                           </HelperTextItem>
                         </HelperText>
@@ -668,7 +808,8 @@ export function CatalogDeployContent({
                         showVmSizePicker &&
                         !vmSizeSettings?.allow_manual &&
                         selectedVmSize !== '' &&
-                        (key === vmSizeSettings?.cpu_variable || key === vmSizeSettings?.ram_variable);
+                        (key === vmSizeSettings?.cpu_variable ||
+                          key === vmSizeSettings?.ram_variable);
                       const isEffectivelyDisabled = isAdminDisabledField || isVmSizeLocked;
 
                       // Check for a dynamic source configured for this field
@@ -828,6 +969,43 @@ export function CatalogDeployContent({
                         );
                       }
 
+                      if (prop.surveyType === 'multiselect' && prop.enum && prop.enum.length > 0) {
+                        const selectedValues = formValueToArray(formValues[key]);
+                        return (
+                          <FormGroup
+                            key={key}
+                            label={fieldLabel}
+                            isRequired={isReq}
+                            fieldId={fieldId}
+                          >
+                            {prop.description && (
+                              <HelperText style={{ marginBottom: '0.25rem' }}>
+                                <HelperTextItem>{prop.description}</HelperTextItem>
+                              </HelperText>
+                            )}
+                            <div style={{ display: 'grid', gap: '0.5rem' }}>
+                              {prop.enum.map((opt, index) => (
+                                <Checkbox
+                                  key={opt}
+                                  id={`${fieldId}-${index}`}
+                                  label={opt}
+                                  isChecked={selectedValues.includes(opt)}
+                                  onChange={(_event, checked) =>
+                                    setMultiSelectValue(key, opt, checked, prop.enum ?? [])
+                                  }
+                                  isDisabled={isEffectivelyDisabled || isSubmitting}
+                                />
+                              ))}
+                            </div>
+                            {fieldError && (
+                              <HelperText>
+                                <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                              </HelperText>
+                            )}
+                          </FormGroup>
+                        );
+                      }
+
                       if (prop.enum && prop.enum.length > 0) {
                         return (
                           <FormGroup
@@ -909,6 +1087,37 @@ export function CatalogDeployContent({
             const fieldLabel = prop.title ?? key;
             const fieldId = `deploy-field-${key}`;
             const isAdminDisabledField = disabledFieldSet.has(key);
+            if (prop.surveyType === 'multiselect' && prop.enum && prop.enum.length > 0) {
+              const selectedValues = formValueToArray(formValues[key]);
+              return (
+                <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
+                  {prop.description && (
+                    <HelperText style={{ marginBottom: '0.25rem' }}>
+                      <HelperTextItem>{prop.description}</HelperTextItem>
+                    </HelperText>
+                  )}
+                  <div style={{ display: 'grid', gap: '0.5rem' }}>
+                    {prop.enum.map((opt, index) => (
+                      <Checkbox
+                        key={opt}
+                        id={`${fieldId}-${index}`}
+                        label={opt}
+                        isChecked={selectedValues.includes(opt)}
+                        onChange={(_event, checked) =>
+                          setMultiSelectValue(key, opt, checked, prop.enum ?? [])
+                        }
+                        isDisabled={isAdminDisabledField || isSubmitting}
+                      />
+                    ))}
+                  </div>
+                  {fieldError && (
+                    <HelperText>
+                      <HelperTextItem variant="error">{fieldError}</HelperTextItem>
+                    </HelperText>
+                  )}
+                </FormGroup>
+              );
+            }
             if (prop.enum && prop.enum.length > 0) {
               return (
                 <FormGroup key={key} label={fieldLabel} isRequired={isReq} fieldId={fieldId}>
@@ -1009,6 +1218,71 @@ export function CatalogDeployContent({
             {t('Auto-generated from your template and deploy form values.')}
           </HelperTextItem>
         </HelperText>
+      </FormGroup>
+
+      {/* ---- TTL / Lease section ---- */}
+      <FormGroup
+        label={requireLease ? t('Lease duration (required)') : t('Lease duration (optional)')}
+        fieldId="deploy-ttl"
+      >
+        <HelperText>
+          <HelperTextItem>
+            {t(
+              'Set a time limit on this deployment. After the lease expires the deployment will be marked expired.'
+            )}
+          </HelperTextItem>
+        </HelperText>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {TTL_PRESETS.map((preset) => (
+            <Button
+              key={preset.minutes}
+              variant={leaseDurationMinutes === preset.minutes ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => {
+                setLeaseDurationMinutes(preset.minutes);
+                setLeaseError('');
+              }}
+            >
+              {preset.label}
+            </Button>
+          ))}
+          <Button
+            variant={leaseDurationMinutes === null ? 'secondary' : 'plain'}
+            size="sm"
+            isDisabled={requireLease}
+            onClick={() => {
+              setLeaseDurationMinutes(null);
+              setAutoDeprovision(false);
+              setLeaseError('');
+            }}
+          >
+            {t('No limit')}
+          </Button>
+        </div>
+        {leaseError && (
+          <HelperText>
+            <HelperTextItem variant="error">{leaseError}</HelperTextItem>
+          </HelperText>
+        )}
+        {leaseDurationMinutes !== null && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <Checkbox
+              id="deploy-auto-deprovision"
+              label={t('Auto-deprovision when lease expires')}
+              isChecked={autoDeprovision}
+              onChange={(_evt, checked) => setAutoDeprovision(checked)}
+            />
+            <HelperText>
+              <HelperTextItem>
+                {autoDeprovision
+                  ? t('The deprovision workflow will run automatically when the lease expires.')
+                  : t(
+                      'The deployment will be flagged as expired but resources will not be removed automatically.'
+                    )}
+              </HelperTextItem>
+            </HelperText>
+          </div>
+        )}
       </FormGroup>
 
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>

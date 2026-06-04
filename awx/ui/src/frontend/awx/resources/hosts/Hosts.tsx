@@ -74,6 +74,7 @@ export function Hosts() {
         emptyStateButtonIcon={<PlusCircleIcon />}
         emptyStateButtonText={canCreateHost ? t('Create host') : undefined}
         emptyStateButtonClick={canCreateHost ? () => pageNavigate(AwxRoute.CreateHost) : undefined}
+        virtualizeRows
         {...view}
         defaultSubtitle={t('Host')}
       />

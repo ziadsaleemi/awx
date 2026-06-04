@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,6 +25,8 @@ import {
   Modal,
   Title,
   ToolbarItem,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core';
 import { observer, useVisualizationController } from '@patternfly/react-topology';
 import { usePageNavigate, usePageAlertToaster } from '../../../../../../framework';
@@ -34,10 +36,16 @@ import { useGetDocsUrl } from '../../../../common/util/useGetDocsUrl';
 import { useAwxConfig } from '../../../../common/useAwxConfig';
 import { useViewOptions } from '../ViewOptionsProvider';
 import { AddNodeButton } from './AddNodeButton';
+import { AIWorkflowSuggester } from './AIWorkflowSuggester';
 import { useRemoveGraphElements, useSaveVisualizer } from '../hooks';
-import type { ControllerState, GraphNode } from '../types';
+import type { ControllerState, GraphEdgeData, GraphNode, GraphNodeData } from '../types';
 import { START_NODE_ID } from '../constants';
 import { useLaunchTemplate } from '../../hooks/useLaunchTemplate';
+import {
+  createEmptyWorkflowModeCounts,
+  getWorkflowNodeMode,
+  type WorkflowCanvasMode,
+} from '../workflowNodeMode';
 
 export const ToolbarHeader = observer(() => {
   const { t } = useTranslation();
@@ -169,7 +177,7 @@ export const WorkflowVisualizerToolbar = observer(() => {
   const [isKebabOpen, setIsKebabOpen] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const { isFullScreen, toggleFullScreen } = useViewOptions();
+  const { isFullScreen, toggleFullScreen, workflowMode, setWorkflowMode } = useViewOptions();
   const { removeNodes } = useRemoveGraphElements();
   const handleSave = useSaveVisualizer(templateId || '');
   const launch = useLaunchTemplate();
@@ -178,6 +186,65 @@ export const WorkflowVisualizerToolbar = observer(() => {
     .getGraph()
     .getNodes()
     .filter((n) => n.isVisible() && n.getId() !== START_NODE_ID) as GraphNode[];
+
+  const modeCounts = useMemo(() => {
+    const counts = createEmptyWorkflowModeCounts();
+    nodes.forEach((node) => {
+      const mode = getWorkflowNodeMode(node.getData()?.resource);
+      counts.all += 1;
+      counts[mode] += 1;
+    });
+    return counts;
+  }, [nodes]);
+
+  useEffect(() => {
+    nodes.forEach((node) => {
+      const nodeData = node.getData();
+      if (!nodeData) return;
+      const isDimmed =
+        workflowMode !== 'all' && getWorkflowNodeMode(nodeData?.resource) !== workflowMode;
+
+      if (nodeData?.modeDimmed !== isDimmed) {
+        node.setData({ ...nodeData, modeDimmed: isDimmed });
+      }
+    });
+
+    controller
+      .getGraph()
+      .getEdges()
+      .forEach((edge) => {
+        const edgeData = edge.getData() as GraphEdgeData | undefined;
+        const sourceData = edge.getSource().getData() as GraphNodeData | undefined;
+        const targetData = edge.getTarget().getData() as GraphNodeData | undefined;
+        const isDimmed = Boolean(sourceData?.modeDimmed || targetData?.modeDimmed);
+
+        if (edgeData?.modeDimmed !== isDimmed) {
+          edge.setData({ ...(edgeData || {}), modeDimmed: isDimmed });
+        }
+      });
+  }, [controller, nodes, workflowMode]);
+
+  const modeOptions: {
+    label: string;
+    value: WorkflowCanvasMode;
+    count: number;
+    dataCy: string;
+  }[] = [
+    { label: t('All'), value: 'all', count: modeCounts.all, dataCy: 'workflow-mode-filter-all' },
+    {
+      label: t('Deterministic'),
+      value: 'deterministic',
+      count: modeCounts.deterministic,
+      dataCy: 'workflow-mode-filter-deterministic',
+    },
+    {
+      label: t('EDA'),
+      value: 'event_driven',
+      count: modeCounts.event_driven,
+      dataCy: 'workflow-mode-filter-event-driven',
+    },
+    { label: t('AI'), value: 'ai', count: modeCounts.ai, dataCy: 'workflow-mode-filter-ai' },
+  ];
 
   const handleLaunchWorkflow = useCallback(async () => {
     await launch(workflowTemplate);
@@ -228,6 +295,9 @@ export const WorkflowVisualizerToolbar = observer(() => {
           </ToolbarItem>
           <ToolbarItem>
             <AddNodeButton />
+          </ToolbarItem>
+          <ToolbarItem>
+            <AIWorkflowSuggester />
           </ToolbarItem>
         </>
       )}
@@ -296,6 +366,24 @@ export const WorkflowVisualizerToolbar = observer(() => {
             )}
           </DropdownList>
         </Dropdown>
+      </ToolbarItem>
+      <ToolbarItem data-cy="workflow-mode-filter" style={{ alignSelf: 'center' }}>
+        <ToggleGroup aria-label={t('Workflow node mode')} isCompact>
+          {modeOptions.map((option) => (
+            <ToggleGroupItem
+              key={option.value}
+              data-cy={option.dataCy}
+              text={
+                <>
+                  {option.label} <Badge isRead>{option.count}</Badge>
+                </>
+              }
+              buttonId={option.dataCy}
+              isSelected={workflowMode === option.value}
+              onChange={() => setWorkflowMode(option.value)}
+            />
+          ))}
+        </ToggleGroup>
       </ToolbarItem>
       <ToolbarItem style={{ alignSelf: 'center' }}>
         <div data-cy="workflow-visualizer-toolbar-total-nodes">

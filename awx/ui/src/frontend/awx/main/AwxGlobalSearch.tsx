@@ -1,14 +1,4 @@
-import {
-  Button,
-  Divider,
-  Flex,
-  FlexItem,
-  Spinner,
-  Text,
-  TextContent,
-  TextInput,
-  TextVariants,
-} from '@patternfly/react-core';
+import { Button, Divider, Spinner, TextInput } from '@patternfly/react-core';
 import {
   ArchiveIcon,
   BriefcaseIcon,
@@ -27,7 +17,13 @@ import { AwxRoute } from './AwxRoutes';
 interface SearchResultItem {
   id: number;
   name: string;
-  type: 'job' | 'template' | 'workflow_template' | 'inventory' | 'terraform_template' | 'catalog_item';
+  type:
+    | 'job'
+    | 'template'
+    | 'workflow_template'
+    | 'inventory'
+    | 'terraform_template'
+    | 'catalog_item';
   subtitle?: string;
 }
 
@@ -110,87 +106,91 @@ export function AwxGlobalSearch() {
       return;
     }
     setIsLoading(true);
-    const timer = setTimeout(async () => {
-      const q = encodeURIComponent(query.trim());
-      try {
-        const [jobs, templates, wfTemplates, inventories, terraformTemplates, catalogItems] = await Promise.all([
-          requestGet<AwxItemsResponse<{ id: number; name: string; type: string; status?: string }>>(
-            awxAPI`/unified_jobs/?name__icontains=${query.trim()}&not__launch_type=sync&order_by=-finished&page_size=5`
-          ).catch(() => ({ results: [] })),
-          requestGet<AwxItemsResponse<{ id: number; name: string }>>(
-            awxAPI`/job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
-          ).catch(() => ({ results: [] })),
-          requestGet<AwxItemsResponse<{ id: number; name: string }>>(
-            awxAPI`/workflow_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
-          ).catch(() => ({ results: [] })),
-          requestGet<AwxItemsResponse<{ id: number; name: string }>>(
-            awxAPI`/inventories/?name__icontains=${query.trim()}&order_by=name&page_size=5`
-          ).catch(() => ({ results: [] })),
-          requestGet<AwxItemsResponse<{ id: number; name: string }>>(
-            awxAPI`/terraform_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
-          ).catch(() => ({ results: [] })),
-          requestGet<AwxItemsResponse<{ id: number; name: string; description?: string }>>(
-            awxAPI`/catalog_items/?name__icontains=${query.trim()}&order_by=name&page_size=5`
-          ).catch(() => ({ results: [] })),
-        ]);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const [jobs, templates, wfTemplates, inventories, terraformTemplates, catalogItems] =
+            await Promise.all([
+              requestGet<
+                AwxItemsResponse<{ id: number; name: string; type: string; status?: string }>
+              >(
+                awxAPI`/unified_jobs/?name__icontains=${query.trim()}&not__launch_type=sync&order_by=-finished&page_size=5`
+              ).catch(() => ({ results: [] })),
+              requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+                awxAPI`/job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+              ).catch(() => ({ results: [] })),
+              requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+                awxAPI`/workflow_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+              ).catch(() => ({ results: [] })),
+              requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+                awxAPI`/inventories/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+              ).catch(() => ({ results: [] })),
+              requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+                awxAPI`/terraform_job_templates/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+              ).catch(() => ({ results: [] })),
+              requestGet<AwxItemsResponse<{ id: number; name: string; description?: string }>>(
+                awxAPI`/catalog_items/?name__icontains=${query.trim()}&order_by=name&page_size=5`
+              ).catch(() => ({ results: [] })),
+            ]);
 
-        const combined: QuickResult[] = [
-          ...(jobs.results ?? []).map((j) => ({
-            id: j.id,
-            name: j.name,
-            type: 'job' as const,
-            subtitle: j.status,
-            route: AwxRoute.JobOutput,
-            routeParams: { id: j.id },
-            icon: categoryIcon('job'),
-          })),
-          ...(templates.results ?? []).map((t) => ({
-            id: t.id,
-            name: t.name,
-            type: 'template' as const,
-            route: AwxRoute.JobTemplateDetails,
-            routeParams: { id: t.id },
-            icon: categoryIcon('template'),
-          })),
-          ...(wfTemplates.results ?? []).map((t) => ({
-            id: t.id,
-            name: t.name,
-            type: 'workflow_template' as const,
-            route: AwxRoute.WorkflowJobTemplateDetails,
-            routeParams: { id: t.id },
-            icon: categoryIcon('workflow_template'),
-          })),
-          ...(inventories.results ?? []).map((inv) => ({
-            id: inv.id,
-            name: inv.name,
-            type: 'inventory' as const,
-            route: AwxRoute.InventoryDetails,
-            routeParams: { id: inv.id },
-            icon: categoryIcon('inventory'),
-          })),
-          ...(terraformTemplates.results ?? []).map((tf) => ({
-            id: tf.id,
-            name: tf.name,
-            type: 'terraform_template' as const,
-            route: AwxRoute.TerraformTemplateDetails,
-            routeParams: { id: tf.id },
-            icon: categoryIcon('terraform_template'),
-          })),
-          ...(catalogItems.results ?? []).map((ci) => ({
-            id: ci.id,
-            name: ci.name,
-            type: 'catalog_item' as const,
-            subtitle: ci.description,
-            route: AwxRoute.CatalogItemDetails,
-            routeParams: { id: ci.id },
-            icon: categoryIcon('catalog_item'),
-          })),
-        ];
-        setResults(combined);
-        setSelectedIndex(0);
-      } finally {
-        setIsLoading(false);
-      }
+          const combined: QuickResult[] = [
+            ...(jobs.results ?? []).map((j) => ({
+              id: j.id,
+              name: j.name,
+              type: 'job' as const,
+              subtitle: j.status,
+              route: AwxRoute.JobOutput,
+              routeParams: { id: j.id },
+              icon: categoryIcon('job'),
+            })),
+            ...(templates.results ?? []).map((t) => ({
+              id: t.id,
+              name: t.name,
+              type: 'template' as const,
+              route: AwxRoute.JobTemplateDetails,
+              routeParams: { id: t.id },
+              icon: categoryIcon('template'),
+            })),
+            ...(wfTemplates.results ?? []).map((t) => ({
+              id: t.id,
+              name: t.name,
+              type: 'workflow_template' as const,
+              route: AwxRoute.WorkflowJobTemplateDetails,
+              routeParams: { id: t.id },
+              icon: categoryIcon('workflow_template'),
+            })),
+            ...(inventories.results ?? []).map((inv) => ({
+              id: inv.id,
+              name: inv.name,
+              type: 'inventory' as const,
+              route: AwxRoute.InventoryDetails,
+              routeParams: { id: inv.id },
+              icon: categoryIcon('inventory'),
+            })),
+            ...(terraformTemplates.results ?? []).map((tf) => ({
+              id: tf.id,
+              name: tf.name,
+              type: 'terraform_template' as const,
+              route: AwxRoute.TerraformTemplateDetails,
+              routeParams: { id: tf.id },
+              icon: categoryIcon('terraform_template'),
+            })),
+            ...(catalogItems.results ?? []).map((ci) => ({
+              id: ci.id,
+              name: ci.name,
+              type: 'catalog_item' as const,
+              subtitle: ci.description,
+              route: AwxRoute.CatalogItemDetails,
+              routeParams: { id: ci.id },
+              icon: categoryIcon('catalog_item'),
+            })),
+          ];
+          setResults(combined);
+          setSelectedIndex(0);
+        } finally {
+          setIsLoading(false);
+        }
+      })();
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
@@ -221,7 +221,14 @@ export function AwxGlobalSearch() {
     return acc;
   }, {});
 
-  const typeOrder: SearchResultItem['type'][] = ['job', 'template', 'workflow_template', 'inventory', 'terraform_template', 'catalog_item'];
+  const typeOrder: SearchResultItem['type'][] = [
+    'job',
+    'template',
+    'workflow_template',
+    'inventory',
+    'terraform_template',
+    'catalog_item',
+  ];
 
   return (
     <>
@@ -237,6 +244,9 @@ export function AwxGlobalSearch() {
 
       {isOpen && (
         <div
+          aria-label={t('Global search')}
+          aria-modal="true"
+          role="dialog"
           style={{
             position: 'fixed',
             inset: 0,
@@ -247,11 +257,9 @@ export function AwxGlobalSearch() {
             justifyContent: 'center',
             paddingTop: '10vh',
           }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsOpen(false);
-          }}
         >
           <div
+            tabIndex={-1}
             style={{
               background: 'var(--pf-v5-global--BackgroundColor--100)',
               borderRadius: 8,
@@ -263,7 +271,6 @@ export function AwxGlobalSearch() {
               boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
               overflow: 'hidden',
             }}
-            onKeyDown={handleKeyDown}
           >
             {/* Search input */}
             <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8 }}>
@@ -272,6 +279,7 @@ export function AwxGlobalSearch() {
                 ref={inputRef}
                 value={query}
                 onChange={(_e, v) => setQuery(v)}
+                onKeyDown={handleKeyDown}
                 placeholder={t('Search jobs, templates, inventories…')}
                 aria-label={t('Global search')}
                 style={{
@@ -290,7 +298,7 @@ export function AwxGlobalSearch() {
                 onClick={() => setIsOpen(false)}
                 style={{ fontSize: 12, color: 'var(--pf-v5-global--Color--200)' }}
               >
-                Esc
+                {t('Esc')}
               </Button>
             </div>
 
@@ -319,8 +327,9 @@ export function AwxGlobalSearch() {
                           const idx = results.indexOf(result);
                           const isSelected = idx === selectedIndex;
                           return (
-                            <div
+                            <Button
                               key={`${result.type}-${result.id}`}
+                              variant="plain"
                               onClick={() => navigate(result)}
                               onMouseEnter={() => setSelectedIndex(idx)}
                               style={{
@@ -334,18 +343,28 @@ export function AwxGlobalSearch() {
                                   : undefined,
                                 borderRadius: 4,
                                 margin: '1px 4px',
+                                width: 'calc(100% - 8px)',
                               }}
                             >
                               <span style={{ flexShrink: 0 }}>{result.icon}</span>
-                              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <span
+                                style={{
+                                  flex: 1,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
                                 {result.name}
                               </span>
                               {result.subtitle && (
-                                <span style={{ fontSize: 12, color: 'var(--pf-v5-global--Color--200)' }}>
+                                <span
+                                  style={{ fontSize: 12, color: 'var(--pf-v5-global--Color--200)' }}
+                                >
                                   {result.subtitle}
                                 </span>
                               )}
-                            </div>
+                            </Button>
                           );
                         })}
                       </div>
@@ -358,7 +377,13 @@ export function AwxGlobalSearch() {
             {!isLoading && query.trim() && results.length === 0 && (
               <>
                 <Divider />
-                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--pf-v5-global--Color--200)' }}>
+                <div
+                  style={{
+                    padding: '24px 16px',
+                    textAlign: 'center',
+                    color: 'var(--pf-v5-global--Color--200)',
+                  }}
+                >
                   {t('No results found for')} &ldquo;{query}&rdquo;
                 </div>
               </>
@@ -375,9 +400,9 @@ export function AwxGlobalSearch() {
                 color: 'var(--pf-v5-global--Color--200)',
               }}
             >
-              <span>↑↓ {t('navigate')}</span>
-              <span>↵ {t('select')}</span>
-              <span>Esc {t('close')}</span>
+              <span>{t('Arrow keys navigate')}</span>
+              <span>{t('Enter selects')}</span>
+              <span>{t('Esc closes')}</span>
             </div>
           </div>
         </div>

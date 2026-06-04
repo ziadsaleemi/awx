@@ -12,6 +12,7 @@ import {
 import { useRemoveGraphElements } from './hooks';
 import { ControllerState, GraphEdgeData, GraphNodeData } from './types';
 import { GRAPH_ID, START_NODE_ID } from './constants';
+import type { WorkflowCanvasMode } from './workflowNodeMode';
 
 const FullPage = styled.div`
   position: fixed;
@@ -42,8 +43,10 @@ export interface IViewOptions {
   toggleLegend: () => void;
   isEmpty: boolean;
   isLoading: boolean;
+  workflowMode: WorkflowCanvasMode;
   sidebarMode: 'add' | 'edit' | 'view' | undefined;
   selectedIds: string[];
+  setWorkflowMode: (value: WorkflowCanvasMode) => void;
   setSidebarMode: (value: 'add' | 'edit' | 'view' | undefined) => void;
   removeNodes: (item: Node<NodeModel, GraphNodeData>[]) => void;
   removeLink: (item: Edge<EdgeModel, GraphEdgeData>) => void;
@@ -56,7 +59,9 @@ export const ViewOptionsContext = createContext<IViewOptions>({
   toggleLegend: () => {},
   isEmpty: false,
   isLoading: true,
+  workflowMode: 'all',
   sidebarMode: undefined,
+  setWorkflowMode: () => null,
   setSidebarMode: () => null,
   removeNodes: () => null,
   removeLink: () => null,
@@ -78,6 +83,7 @@ export const ViewOptionsProvider = observer((props: { children: ReactElement }) 
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(isGraphReady ? false : true);
+  const [workflowMode, setWorkflowMode] = useState<WorkflowCanvasMode>('all');
   const [sidebarMode, setSidebarMode] = useState<'add' | 'edit' | 'view' | undefined>(undefined);
 
   useEffect(() => {
@@ -126,9 +132,11 @@ export const ViewOptionsProvider = observer((props: { children: ReactElement }) 
     isLegendOpen,
     toggleLegend,
     isLoading,
+    workflowMode,
     isEmpty,
     sidebarMode,
     selectedIds,
+    setWorkflowMode,
     setSidebarMode,
     removeNodes,
     removeLink,

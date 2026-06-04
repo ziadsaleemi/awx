@@ -18,7 +18,7 @@ from ansible_base.lib.utils.models import user_summary_fields
 # AWX
 from awx.main.models.base import BaseModel, PrimordialModel, accepts_json, VERBOSITY_CHOICES  # noqa
 from awx.main.models.unified_jobs import UnifiedJob, UnifiedJobTemplate, StdoutMaxBytesExceeded  # noqa
-from awx.main.models.organization import Organization, Team, UserSessionMembership  # noqa
+from awx.main.models.organization import Organization, Team, UserUISettings, UserSessionMembership  # noqa
 from awx.main.models.credential import Credential, CredentialType, CredentialInputSource, ManagedCredentialType, build_safe_env  # noqa
 from awx.main.models.projects import Project, ProjectUpdate  # noqa
 from awx.main.models.receptor_address import ReceptorAddress  # noqa
@@ -256,11 +256,24 @@ activity_stream_registrar.connect(WorkflowJobTemplateNode)
 activity_stream_registrar.connect(WorkflowJob)
 activity_stream_registrar.connect(WorkflowApproval)
 activity_stream_registrar.connect(WorkflowApprovalTemplate)
+activity_stream_registrar.connect(CatalogItem)
 activity_stream_registrar.connect(CloudProviderConnection)
 activity_stream_registrar.connect(CloudProviderState)
 
 # Register models
-permission_registry.register(Project, Team, WorkflowJobTemplate, JobTemplate, TerraformJobTemplate, Inventory, Organization, Credential, NotificationTemplate, ExecutionEnvironment)
+permission_registry.register(
+    Project,
+    Team,
+    WorkflowJobTemplate,
+    JobTemplate,
+    TerraformJobTemplate,
+    CatalogItem,
+    Inventory,
+    Organization,
+    Credential,
+    NotificationTemplate,
+    ExecutionEnvironment,
+)
 permission_registry.register(InstanceGroup, parent_field_name=None)  # Not part of an organization
 
 # prevent API filtering on certain Django-supplied sensitive fields

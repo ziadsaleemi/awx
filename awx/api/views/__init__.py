@@ -27,8 +27,9 @@ from django.db import IntegrityError, ProgrammingError, transaction, connection
 from django.db.models.fields.related import ManyToManyField, ForeignKey
 from django.db.models.functions import Trunc
 from django.shortcuts import get_object_or_404
+from django.utils.dateparse import parse_datetime
 from django.utils.safestring import mark_safe
-from django.utils.timezone import now
+from django.utils.timezone import is_naive, make_aware, now
 from django.views.decorators.csrf import csrf_exempt
 from django.template.loader import render_to_string
 from django.http import HttpResponse, HttpResponseRedirect
@@ -90,6 +91,7 @@ from awx.api.generics import (
     SubListCreateAttachDetachAPIView,
     SubListDestroyAPIView,
 )
+from awx.api.views.opa import enforce_opa_launch_policy
 from awx.api.views.labels import LabelSubListCreateAttachDetachView
 from awx.api.versioning import reverse
 from awx.main import models
@@ -101,6 +103,12 @@ from awx.main.utils import (
     get_pk_from_dict,
     ScheduleWorkflowManager,
     ignore_inventory_computed_fields,
+)
+from awx.main.utils.catalog import catalog_related_object_matches_item_org, collect_catalog_deployment_saved_vars
+from awx.main.utils.cloud_inventory import (
+    build_cloud_inventory_suggestion,
+    count_inventory_plan_hosts,
+    parse_inventory_source,
 )
 from awx.main.utils.encryption import encrypt_value
 from awx.main.utils.filters import SmartFilter
@@ -116,6 +124,7 @@ from awx.api.permissions import (
     VariableDataPermission,
     WorkflowApprovalPermission,
     IsSystemAdminOrAuditor,
+    ModelAccessPermission,
 )
 from awx.api import renderers
 from awx.api import serializers
@@ -1238,13 +1247,44 @@ class UserList(ListCreateAPIView):
 
 class UserMeList(ListAPIView):
     model = models.User
-    serializer_class = serializers.UserSerializer
+    serializer_class = serializers.UserMeSerializer
     name = _('Me')
     ordering = ('username',)
     resource_purpose = 'current authenticated user'
 
     def get_queryset(self):
         return self.model.objects.filter(pk=self.request.user.pk)
+
+    def patch(self, request, *args, **kwargs):
+        allowed_values = {
+            'refreshInterval': {0, 5, 10, 30, 60, 300},
+            'theme': {'system', 'light', 'dark'},
+            'tableLayout': {'compact', 'comfortable'},
+            'formColumns': {'single', 'multiple'},
+            'formLayout': {'vertical', 'horizontal'},
+            'dateFormat': {'since', 'date-time'},
+            'dataEditorFormat': {'yaml', 'json'},
+        }
+        preferences = request.data.get('ui_preferences')
+        if preferences is None:
+            preferences = request.data
+        if not isinstance(preferences, dict):
+            raise ParseError(_('ui_preferences must be an object.'))
+
+        settings_obj, _created = models.UserUISettings.objects.get_or_create(user=request.user)
+        current = settings_obj.ui_preferences or {}
+        updated = {}
+        for key, value in preferences.items():
+            allowed = allowed_values.get(key)
+            if key == 'refreshInterval' and type(value) is int and value in allowed:
+                updated[key] = value
+            elif isinstance(value, str) and allowed and value in allowed:
+                updated[key] = value
+        current.update(updated)
+        settings_obj.ui_preferences = current
+        settings_obj.save(update_fields=['ui_preferences'])
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
 
 
 class UserTeamsList(SubListAPIView):
@@ -2760,6 +2800,7 @@ class JobTemplateLaunch(RetrieveAPIView):
             raise PermissionDenied()
 
         passwords = serializer.validated_data.pop('credential_passwords', {})
+        enforce_opa_launch_policy(request, obj, serializer.validated_data, source='api', action='launch')
         new_job = obj.create_unified_job(**serializer.validated_data)
         result = new_job.signal_start(**passwords)
 
@@ -3284,6 +3325,42 @@ class WorkflowJobNodeDetail(RetrieveAPIView):
     resource_purpose = 'workflow job node detail'
 
 
+class WorkflowJobNodeApplyAIPlan(RetrieveAPIView):
+    model = models.WorkflowJobNode
+    serializer_class = serializers.WorkflowJobNodeDetailSerializer
+    resource_purpose = 'apply an approved AI resource action plan for a workflow job node'
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Apply an approved AI resource action plan for a workflow job node"})
+    def post(self, request, *args, **kwargs):
+        from awx.main.models.workflow import AIWorkflowTaskError
+
+        obj = self.get_object()
+        if not obj.is_ai_task_node:
+            return Response({'detail': _('Only AI task workflow nodes can apply AI plans.')}, status=status.HTTP_400_BAD_REQUEST)
+        if obj.ai_task_status != 'awaiting_approval':
+            return Response({'detail': _('AI task node is not awaiting approval.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        workflow_template = obj.workflow_job.workflow_job_template
+        if not (request.user.is_superuser or (workflow_template and request.user in workflow_template.approval_role)):
+            raise PermissionDenied(_('You do not have permission to approve this AI resource action plan.'))
+
+        approval = obj.job if isinstance(obj.job, models.WorkflowApproval) and obj.job.status == 'pending' else None
+        try:
+            if approval:
+                approval.approve(request)
+                obj.refresh_from_db()
+                approval.refresh_from_db()
+                resource_action = obj.ai_task_result.get('resource_action', {})
+            else:
+                resource_action = obj.approve_ai_resource_action_plan(request.user)
+        except AIWorkflowTaskError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializers.WorkflowJobNodeDetailSerializer(obj, context=self.get_serializer_context()).data
+        data['ai_resource_action'] = resource_action
+        return Response(data, status=status.HTTP_201_CREATED if resource_action.get('can_apply') else status.HTTP_400_BAD_REQUEST)
+
+
 class WorkflowJobNodeCredentialsList(SubListAPIView):
     model = models.Credential
     serializer_class = serializers.CredentialSerializer
@@ -3592,6 +3669,7 @@ class WorkflowJobTemplateLaunch(RetrieveAPIView):
         if not request.user.can_access(models.JobLaunchConfig, 'add', serializer.validated_data, template=obj):
             raise PermissionDenied()
 
+        enforce_opa_launch_policy(request, obj, serializer.validated_data, source='api', action='launch')
         new_job = obj.create_unified_job(**serializer.validated_data)
         new_job.signal_start()
 
@@ -3862,7 +3940,9 @@ class SystemJobTemplateLaunch(GenericAPIView):
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
 
-        new_job = obj.create_unified_job(extra_vars=request.data.get('extra_vars', {}))
+        launch_kwargs = {'extra_vars': request.data.get('extra_vars', {})}
+        enforce_opa_launch_policy(request, obj, launch_kwargs, source='api', action='launch')
+        new_job = obj.create_unified_job(**launch_kwargs)
         new_job.signal_start()
         data = OrderedDict()
         data['system_job'] = new_job.id
@@ -4398,17 +4478,42 @@ class AdHocCommandList(ListCreateAPIView):
             data.pop('limit', None)
         return super(AdHocCommandList, self).update_raw_data(data)
 
+    def _get_inventory_for_credential_policy(self, data):
+        if hasattr(self, 'get_parent_object'):
+            parent_obj = self.get_parent_object()
+            if isinstance(parent_obj, models.Inventory):
+                return parent_obj
+            if isinstance(parent_obj, (models.Host, models.Group)):
+                return parent_obj.inventory
+
+        inventory_pk = get_pk_from_dict(data, 'inventory')
+        if inventory_pk:
+            return models.Inventory.objects.filter(pk=inventory_pk).select_related('default_machine_credential').first()
+
+        return None
+
+    def _apply_inventory_machine_credential_policy(self, data):
+        inventory = self._get_inventory_for_credential_policy(data)
+        if not inventory or not inventory.default_machine_credential_id:
+            return
+
+        credential_pk = get_pk_from_dict(data, 'credential')
+        if inventory.force_inventory_machine_credential or credential_pk is None:
+            data['credential'] = inventory.default_machine_credential_id
+
     def create(self, request, *args, **kwargs):
+        data = request.data
+        if getattr(data, '_mutable', None) is False:
+            data._mutable = True
+
         # Inject inventory ID and limit if parent objects is a host/group.
         if hasattr(self, 'get_parent_object') and not getattr(self, 'parent_key', None):
-            data = request.data
-            # HACK: Make request data mutable.
-            if getattr(data, '_mutable', None) is False:
-                data._mutable = True
             parent_obj = self.get_parent_object()
             if isinstance(parent_obj, (models.Host, models.Group)):
                 data['inventory'] = parent_obj.inventory_id
                 data['limit'] = parent_obj.name
+
+        self._apply_inventory_machine_credential_policy(data)
 
         # Check for passwords needed before creating ad hoc command.
         credential_pk = get_pk_from_dict(request.data, 'credential')
@@ -5074,6 +5179,7 @@ class WorkflowApprovalDeny(RetrieveAPIView):
 # Terraform Job Template + Terraform Job views
 # ---------------------------------------------------------------------------
 
+
 class TerraformJobTemplateList(ListCreateAPIView):
     model = models.TerraformJobTemplate
     serializer_class = serializers.TerraformJobTemplateSerializer
@@ -5143,6 +5249,7 @@ class TerraformJobTemplateLaunch(GenericAPIView):
         if obj.ask_terraform_operation_on_launch and 'terraform_operation' in request.data:
             launch_kwargs['terraform_operation'] = request.data['terraform_operation']
 
+        enforce_opa_launch_policy(request, obj, launch_kwargs, source='api', action='launch')
         new_job = obj.create_unified_job(**launch_kwargs)
         new_job.signal_start()
         data = OrderedDict()
@@ -5171,7 +5278,7 @@ class TerraformJobTemplateCredentialsList(SubListCreateAttachDetachAPIView):
 
 class TerraformJobTemplateJobsList(SubListAPIView):
     model = models.TerraformJob
-    serializer_class = serializers.TerraformJobSerializer
+    serializer_class = serializers.TerraformJobListSerializer
     parent_model = models.TerraformJobTemplate
     relationship = 'jobs'
     parent_key = 'terraform_job_template'
@@ -5231,7 +5338,7 @@ class TerraformJobTemplateObjectRolesList(SubListAPIView):
 
 class TerraformJobList(ListAPIView):
     model = models.TerraformJob
-    serializer_class = serializers.TerraformJobSerializer
+    serializer_class = serializers.TerraformJobListSerializer
     resource_purpose = 'terraform jobs'
 
 
@@ -5327,9 +5434,7 @@ def _build_catalog_item_live_schema(item):
                 required_fields.add(variable)
 
     dynamic_fields = _parse_catalog_dynamic_name_fields(item.dynamic_name_field)
-    dynamic_field_templates = _parse_catalog_dynamic_field_templates(
-        item.dynamic_field_templates, dynamic_fields
-    )
+    dynamic_field_templates = _parse_catalog_dynamic_field_templates(item.dynamic_field_templates, dynamic_fields)
 
     for dynamic_field in dynamic_fields:
         prop = schema['properties'].setdefault(
@@ -5364,22 +5469,7 @@ def _build_catalog_item_live_schema(item):
 
 
 def _collect_deployment_saved_vars(deployment):
-    saved_vars = {}
-    if isinstance(deployment.extra_vars, dict):
-        saved_vars.update(deployment.extra_vars)
-
-    if deployment.provision_job_id and deployment.provision_job:
-        try:
-            saved_vars.update(deployment.provision_job.get_real_instance().get_effective_artifacts(parents_set=set()))
-        except Exception:
-            logger.exception('Failed to collect workflow artifacts for CatalogDeployment %s', deployment.pk)
-
-    if deployment.terraform_provision_job_id and deployment.terraform_provision_job:
-        artifacts = deployment.terraform_provision_job.artifacts
-        if isinstance(artifacts, dict):
-            saved_vars.update(artifacts)
-
-    return saved_vars
+    return collect_catalog_deployment_saved_vars(deployment)
 
 
 def _parse_catalog_launch_extra_vars(raw_extra_vars):
@@ -5481,6 +5571,52 @@ def _parse_catalog_dynamic_field_templates(raw_value, dynamic_fields):
     return templates
 
 
+def _parse_catalog_deployment_bool(raw_value):
+    if raw_value in (None, ''):
+        return False, None
+    if isinstance(raw_value, bool):
+        return raw_value, None
+    if isinstance(raw_value, str):
+        value = raw_value.strip().lower()
+        if value in ('true', '1', 'yes', 'on'):
+            return True, None
+        if value in ('false', '0', 'no', 'off'):
+            return False, None
+    return None, _('Must be a boolean value.')
+
+
+def _parse_catalog_deployment_expires_at(raw_value):
+    if raw_value in (None, ''):
+        return None, None
+    if not isinstance(raw_value, str):
+        return None, _('Enter a valid ISO-8601 datetime.')
+    parsed = parse_datetime(raw_value)
+    if parsed is None:
+        return None, _('Enter a valid ISO-8601 datetime.')
+    if is_naive(parsed):
+        parsed = make_aware(parsed, dt_timezone.utc)
+    if parsed <= now():
+        return None, _('Lease expiry must be in the future.')
+    return parsed, None
+
+
+def _catalog_related_object_matches_item_org(item, obj):
+    return catalog_related_object_matches_item_org(item, obj)
+
+
+def _catalog_related_org_mismatch_response(field_name):
+    return Response(
+        {field_name: [_('Configured template must belong to the same organization as the catalog item.')]},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _catalog_validate_related_object_org(item, obj, field_name):
+    if _catalog_related_object_matches_item_org(item, obj):
+        return None
+    return _catalog_related_org_mismatch_response(field_name)
+
+
 class CatalogItemDeploySurvey(GenericAPIView):
     model = models.CatalogItem
     serializer_class = serializers.EmptySerializer
@@ -5489,6 +5625,10 @@ class CatalogItemDeploySurvey(GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         item = self.get_object()
+        if item.provision_workflow_id:
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
         schema = _build_catalog_item_live_schema(item)
         return Response({'schema': schema})
 
@@ -5517,6 +5657,23 @@ class CatalogItemDeploy(GenericAPIView):
             launch_extra_vars = extra_vars.copy()
         else:
             return Response({'extra_vars': ['This field must be a dictionary.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        expires_at, expires_at_error = _parse_catalog_deployment_expires_at(request.data.get('expires_at'))
+        if expires_at_error:
+            return Response({'expires_at': [expires_at_error]}, status=status.HTTP_400_BAD_REQUEST)
+        auto_deprovision, auto_deprovision_error = _parse_catalog_deployment_bool(request.data.get('auto_deprovision'))
+        if auto_deprovision_error:
+            return Response({'auto_deprovision': [auto_deprovision_error]}, status=status.HTTP_400_BAD_REQUEST)
+        if item.require_lease and expires_at is None:
+            return Response(
+                {'expires_at': [_('This catalog item requires a lease duration.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if auto_deprovision and expires_at is None:
+            return Response(
+                {'auto_deprovision': [_('Auto-deprovision requires a lease expiry.')]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         name = request.data.get('name', '')
         if isinstance(name, str) and name.strip():
@@ -5560,15 +5717,21 @@ class CatalogItemDeploy(GenericAPIView):
             wf_id = item.provider_workflows[target_provider]
             try:
                 from awx.main.models import WorkflowJobTemplate
+
                 resolved_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
             except WorkflowJobTemplate.DoesNotExist:
                 pass
+            else:
+                mismatch = _catalog_validate_related_object_org(item, resolved_workflow, 'provider_workflows')
+                if mismatch is not None:
+                    return mismatch
 
         # Only look up a TFT when no per-provider workflow is configured
         if resolved_workflow is None:
-            if target_provider and item.cloud_backends and target_provider in item.cloud_backends:
+            if target_provider and item.cloud_backends and item.cloud_backends.get(target_provider):
                 tft_id = item.cloud_backends[target_provider]
                 from awx.main.models.terraform import TerraformJobTemplate
+
                 try:
                     resolved_tft = TerraformJobTemplate.objects.get(pk=tft_id)
                 except TerraformJobTemplate.DoesNotExist:
@@ -5576,29 +5739,47 @@ class CatalogItemDeploy(GenericAPIView):
                         {'target_provider': ['Configured Terraform job template not found.']},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-            elif not target_provider:
-                # Only use global terraform_job_template when no specific provider was requested
+                mismatch = _catalog_validate_related_object_org(item, resolved_tft, 'cloud_backends')
+                if mismatch is not None:
+                    return mismatch
+            else:
+                # Unknown or omitted providers fall back to the global Terraform template.
                 resolved_tft = item.terraform_job_template
+                mismatch = _catalog_validate_related_object_org(item, resolved_tft, 'terraform_job_template')
+                if mismatch is not None:
+                    return mismatch
 
         workflow_job = None
         terraform_job = None
+        catalog_opa_metadata = {
+            'catalog_item': item.pk,
+            'catalog_item_name': item.name,
+            'target_provider': target_provider or '',
+            'deployment_name': name,
+        }
         if resolved_workflow:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
+            enforce_opa_launch_policy(request, resolved_workflow, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             workflow_job = resolved_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
         elif resolved_tft:
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = json.dumps(launch_extra_vars)
+            enforce_opa_launch_policy(request, resolved_tft, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             terraform_job = resolved_tft.create_unified_job(**launch_kwargs)
             terraform_job.signal_start()
-        elif item.provision_workflow and not target_provider:
-            # Only use global provision_workflow fallback when no specific provider was requested
+        elif item.provision_workflow:
+            # Unknown or omitted providers fall back to the global provision workflow.
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
             launch_kwargs = {}
             if launch_extra_vars:
                 launch_kwargs['extra_vars'] = launch_extra_vars
+            enforce_opa_launch_policy(request, item.provision_workflow, launch_kwargs, source='catalog', action='deploy', metadata=catalog_opa_metadata)
             workflow_job = item.provision_workflow.create_unified_job(**launch_kwargs)
             workflow_job.signal_start()
 
@@ -5618,6 +5799,8 @@ class CatalogItemDeploy(GenericAPIView):
             extra_vars=deployment_extra_vars,
             last_failed_workflow_job=None,
             target_provider=target_provider or '',
+            expires_at=expires_at,
+            auto_deprovision=auto_deprovision,
         )
         if workflow_job:
             deployment.append_history_entry('provision', job=workflow_job, status='running')
@@ -5626,9 +5809,7 @@ class CatalogItemDeploy(GenericAPIView):
             deployment.append_history_entry('provision', job=terraform_job, status='running')
             deployment.save(update_fields=['provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         headers = {'Location': deployment.get_absolute_url(request)}
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
@@ -5654,6 +5835,7 @@ class CatalogDeploymentDeprovision(GenericAPIView):
 
     model = models.CatalogDeployment
     serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'deprovision'
     resource_purpose = 'deprovision a catalog deployment'
 
     def post(self, request, *args, **kwargs):
@@ -5677,11 +5859,23 @@ class CatalogDeploymentDeprovision(GenericAPIView):
                 wf_id = item.provider_deprovision_workflows[stored_provider]
                 try:
                     from awx.main.models import WorkflowJobTemplate
+
                     resolved_deprovision_workflow = WorkflowJobTemplate.objects.get(pk=wf_id)
                 except WorkflowJobTemplate.DoesNotExist:
                     pass
+                else:
+                    mismatch = _catalog_validate_related_object_org(
+                        item,
+                        resolved_deprovision_workflow,
+                        'provider_deprovision_workflows',
+                    )
+                    if mismatch is not None:
+                        return mismatch
             if resolved_deprovision_workflow is None:
                 resolved_deprovision_workflow = item.deprovision_workflow
+                mismatch = _catalog_validate_related_object_org(item, resolved_deprovision_workflow, 'deprovision_workflow')
+                if mismatch is not None:
+                    return mismatch
 
         if resolved_deprovision_workflow:
             launch_kwargs = {}
@@ -5702,9 +5896,7 @@ class CatalogDeploymentDeprovision(GenericAPIView):
             )
         deployment.save(update_fields=['status', 'deprovision_job', 'last_deprovision_vars', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
 
 
@@ -5745,12 +5937,21 @@ class CatalogDeploymentRetry(GenericAPIView):
         terraform_job = None
         retry_from_workflow = deployment.last_failed_workflow_job or deployment.provision_job
         if retry_from_workflow and retry_from_workflow.status in ['failed', 'canceled', 'error'] and not retry_from_workflow.is_sliced_job:
+            mismatch = _catalog_validate_related_object_org(item, retry_from_workflow, 'last_failed_workflow_job')
+            if mismatch is not None:
+                return mismatch
             workflow_job = retry_from_workflow.create_resume_workflow_job()
             workflow_job.signal_start()
         elif item.terraform_job_template:
+            mismatch = _catalog_validate_related_object_org(item, item.terraform_job_template, 'terraform_job_template')
+            if mismatch is not None:
+                return mismatch
             terraform_job = item.terraform_job_template.create_unified_job(extra_vars=json.dumps(launch_extra_vars))
             terraform_job.signal_start()
         elif item.provision_workflow:
+            mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
+            if mismatch is not None:
+                return mismatch
             workflow_job = item.provision_workflow.create_unified_job(extra_vars=launch_extra_vars)
             workflow_job.signal_start()
 
@@ -5773,9 +5974,7 @@ class CatalogDeploymentRetry(GenericAPIView):
             deployment.append_history_entry('retry', job=terraform_job, status='running', details={'mode': 'relaunch'})
         deployment.save(update_fields=['status', 'provision_job', 'terraform_provision_job', 'extra_vars', 'last_failed_workflow_job', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
 
 
@@ -5792,6 +5991,7 @@ class CatalogDeploymentCancel(GenericAPIView):
 
     model = models.CatalogDeployment
     serializer_class = serializers.EmptySerializer
+    obj_permission_type = 'cancel'
     resource_purpose = 'cancel an in-progress catalog deployment'
 
     def post(self, request, *args, **kwargs):
@@ -5824,10 +6024,104 @@ class CatalogDeploymentCancel(GenericAPIView):
         )
         deployment.save(update_fields=['status', 'provisioning_history'])
 
-        serializer = serializers.CatalogDeploymentSerializer(
-            deployment, context=self.get_serializer_context()
-        )
+        serializer = serializers.CatalogDeploymentSerializer(deployment, context=self.get_serializer_context())
         return Response(serializer.data)
+
+
+def _cloud_admin_orgs(user):
+    return models.Organization.accessible_objects(user, 'admin_role')
+
+
+def _user_can_read_cloud(user):
+    return bool(user.is_superuser or user.is_system_auditor or _cloud_admin_orgs(user).exists())
+
+
+def _user_can_manage_cloud(user):
+    return bool(user.is_superuser or _cloud_admin_orgs(user).exists())
+
+
+def _get_request_organization_id(request):
+    return (
+        request.data.get('organization')
+        or request.data.get('organization_id')
+        or request.query_params.get('organization')
+        or request.query_params.get('organization_id')
+    )
+
+
+def _resolve_cloud_organization(request, allow_auditor=False):
+    raw_org_id = _get_request_organization_id(request)
+    if raw_org_id in (None, ''):
+        if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
+            return None
+        admin_orgs = _cloud_admin_orgs(request.user)
+        count = admin_orgs.count()
+        if count == 1:
+            return admin_orgs.first()
+        if count == 0:
+            raise PermissionDenied(_('You do not have permission to manage cloud provider state.'))
+        raise ParseError(_('Organization is required because the user administers multiple organizations.'))
+
+    try:
+        org_id = int(raw_org_id)
+    except (TypeError, ValueError):
+        raise ParseError(_('Organization must be a valid integer.'))
+
+    organization = get_object_or_400(models.Organization, pk=org_id)
+    if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
+        return organization
+    if not _cloud_admin_orgs(request.user).filter(pk=organization.pk).exists():
+        raise PermissionDenied(_('You do not have permission to manage cloud resources for this organization.'))
+    return organization
+
+
+def _get_or_create_cloud_provider_state(provider_id, organization):
+    state = models.CloudProviderState.objects.filter(
+        provider_id=provider_id,
+        organization=organization,
+    ).first()
+    if state is not None:
+        return state
+    return models.CloudProviderState.objects.create(provider_id=provider_id, organization=organization)
+
+
+def _resolve_cloud_connection(request, provider_id, credential_id=None):
+    connection_id = request.data.get('connection_id') or request.query_params.get('connection_id')
+    raw_organization_id = _get_request_organization_id(request)
+    organization_id = None
+    if raw_organization_id not in (None, ''):
+        try:
+            organization_id = int(raw_organization_id)
+        except (TypeError, ValueError):
+            raise ParseError(_('Organization must be a valid integer.'))
+
+    qs = request.user.get_queryset(models.CloudProviderConnection).filter(provider_id=provider_id)
+
+    if connection_id not in (None, ''):
+        try:
+            connection_id = int(connection_id)
+        except (TypeError, ValueError):
+            raise ParseError(_('connection_id must be a valid integer.'))
+        try:
+            connection = qs.get(pk=connection_id)
+        except models.CloudProviderConnection.DoesNotExist:
+            raise PermissionDenied(_('Cloud provider connection is not accessible.'))
+        if credential_id is not None and connection.credential_id != credential_id:
+            raise ParseError(_('connection_id does not match credential_id.'))
+        if organization_id is not None and connection.organization_id != organization_id:
+            raise ParseError(_('connection_id does not match organization.'))
+        return connection
+
+    if credential_id is not None:
+        qs = qs.filter(credential_id=credential_id)
+    if organization_id is not None:
+        qs = qs.filter(organization_id=organization_id)
+    count = qs.count()
+    if count == 1:
+        return qs.first()
+    if count == 0:
+        raise PermissionDenied(_('No accessible cloud provider connection was found.'))
+    raise ParseError(_('connection_id is required because multiple accessible connections match this request.'))
 
 
 class CloudProviderConnectionList(ListCreateAPIView):
@@ -5838,19 +6132,31 @@ class CloudProviderConnectionList(ListCreateAPIView):
 
     model = models.CloudProviderConnection
     serializer_class = serializers.CloudProviderConnectionSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (ModelAccessPermission,)
+
+    def get(self, request, *args, **kwargs):
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view cloud provider connections.'))
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().post(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = models.CloudProviderConnection.objects.all()
+        qs = self.request.user.get_queryset(self.model)
         provider_id = self.request.query_params.get('provider_id')
         if provider_id:
             qs = qs.filter(provider_id=provider_id)
+        organization_id = self.request.query_params.get('organization') or self.request.query_params.get('organization_id')
+        if organization_id not in (None, ''):
+            try:
+                organization_id = int(organization_id)
+            except (TypeError, ValueError):
+                raise ParseError(_('Organization must be a valid integer.'))
+            qs = qs.filter(organization_id=organization_id)
         return qs
-
-    def post(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can manage cloud connections.'))
-        return super().post(request, *args, **kwargs)
 
 
 class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
@@ -5862,17 +6168,27 @@ class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
 
     model = models.CloudProviderConnection
     serializer_class = serializers.CloudProviderConnectionSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (ModelAccessPermission,)
 
-    def destroy(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can delete cloud connections.'))
-        return super().destroy(request, *args, **kwargs)
+    def get(self, request, *args, **kwargs):
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view cloud provider connections.'))
+        return super().get(request, *args, **kwargs)
 
-    def update(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can update cloud connections.'))
-        return super().update(request, *args, **kwargs)
+    def patch(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().patch(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().put(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
+        return super().delete(request, *args, **kwargs)
 
 
 class CloudProviderStateDetail(GenericAPIView):
@@ -5885,25 +6201,176 @@ class CloudProviderStateDetail(GenericAPIView):
     """
 
     serializer_class = serializers.CloudProviderStateSerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
 
-    def _get_or_create(self, provider_id):
-        obj, _ = models.CloudProviderState.objects.get_or_create(provider_id=provider_id)
-        return obj
+    def _get_or_create(self, provider_id, organization):
+        return _get_or_create_cloud_provider_state(provider_id, organization)
 
     def get(self, request, provider_id, *args, **kwargs):
-        obj = self._get_or_create(provider_id)
+        if not _user_can_read_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to view provider state.'))
+        organization = _resolve_cloud_organization(request, allow_auditor=True)
+        obj = self._get_or_create(provider_id, organization)
         serializer = self.get_serializer(obj)
         return Response(serializer.data)
 
     def patch(self, request, provider_id, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied(_('Only system administrators can update provider state.'))
-        obj = self._get_or_create(provider_id)
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to update provider state.'))
+        organization = _resolve_cloud_organization(request)
+        obj = self._get_or_create(provider_id, organization)
         serializer = self.get_serializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        serializer.save(provider_id=provider_id, organization=organization)
         return Response(serializer.data)
+
+
+_CLOUD_INVENTORY_AI_SYSTEM_PROMPT = """You are an AWX inventory generation expert.
+Convert cloud provider resource metadata into a valid Ansible inventory in INI format.
+Group resources by provider, location, resource group, cluster, node, and status when useful.
+Use safe group names and safe variable names.
+Never include secrets, credentials, tokens, or API keys.
+Output only raw INI content. Do not include markdown fences or explanatory prose."""
+
+
+def _strip_ai_inventory_fences(text):
+    return re.sub(r'\n?```\s*$', '', re.sub(r'^```(?:ini|ansible|yaml)?\n?', '', text or '', flags=re.IGNORECASE)).strip()
+
+
+def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_source):
+    if not getattr(settings, 'AI_ENABLED', False):
+        return None, 'disabled', None, None
+
+    try:
+        from awx.api.views.ai import _PROVIDER_DEFAULTS, _call_ai_provider, _check_rate_limit, _provider_configured
+    except Exception:
+        logger.exception('Could not load AI proxy helpers for cloud inventory mapping.')
+        return None, 'unavailable', None, None
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        return None, 'rate_limited', None, None
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    if not _provider_configured(provider):
+        return None, 'not_configured', provider, None
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    base_url = getattr(settings, 'AI_API_URL', '')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
+
+    resource_sample = [
+        {
+            'kind': resource.get('kind'),
+            'name': resource.get('name'),
+            'groups': resource.get('groups'),
+            'variables': resource.get('variables'),
+        }
+        for resource in resources
+    ]
+    messages = [
+        {
+            'role': 'user',
+            'content': json.dumps(
+                {
+                    'provider': provider_id,
+                    'resources': resource_sample,
+                    'fallback_inventory': deterministic_source,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+        }
+    ]
+    try:
+        content = _call_ai_provider(provider, model, messages, max_tokens, _CLOUD_INVENTORY_AI_SYSTEM_PROMPT, api_key, base_url)
+    except Exception as exc:
+        logger.warning('Could not parse cloud inventory AI mapping response: %s', exc)
+        return None, 'provider_error', provider, model
+
+    source = _strip_ai_inventory_fences(content)
+    plan = parse_inventory_source(source)
+    if count_inventory_plan_hosts(plan) == 0 and not plan.get('groups'):
+        return None, 'empty_response', provider, model
+    return plan, 'used', provider, model
+
+
+class CloudProviderInventorySuggestions(GenericAPIView):
+    """
+    POST /api/v2/catalog_cloud/provider_state/<provider_id>/inventory_suggestions/
+
+    Builds an AWX static-inventory suggestion from org-scoped pulled cloud
+    provider state. When the AI assistant is configured, the deterministic
+    inventory is refined through the configured model provider; otherwise the
+    deterministic plan is returned.
+    """
+
+    serializer_class = serializers.EmptySerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, provider_id, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to map cloud resources to inventory.'))
+
+        connection = None
+        raw_connection_id = request.data.get('connection_id') or request.query_params.get('connection_id')
+        if raw_connection_id not in (None, ''):
+            connection = _resolve_cloud_connection(request, provider_id)
+            if _get_request_organization_id(request) not in (None, ''):
+                _resolve_cloud_organization(request)
+            organization = connection.organization
+            connection_id = str(connection.pk)
+        else:
+            organization = _resolve_cloud_organization(request)
+            connection_id = None
+
+        state = models.CloudProviderState.objects.filter(provider_id=provider_id, organization=organization).first()
+        if state is None or not state.provider_data:
+            return Response(
+                {'detail': _('Pull provider data before requesting inventory suggestions.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        sample_limit = request.data.get('sample_limit') or request.query_params.get('sample_limit') or 50
+        deterministic_plan, resource_counts, resources = build_cloud_inventory_suggestion(
+            provider_id,
+            state.provider_data,
+            organization_id=organization.pk if organization else None,
+            connection_id=connection_id,
+            sample_limit=sample_limit,
+        )
+        if count_inventory_plan_hosts(deterministic_plan) == 0:
+            return Response(
+                {'detail': _('No mappable cloud resources were found in provider state.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ai_plan, ai_status, ai_provider, ai_model = _call_cloud_inventory_ai(
+            request,
+            provider_id,
+            resources,
+            deterministic_plan['source'],
+        )
+        suggestion = ai_plan or deterministic_plan
+
+        return Response(
+            {
+                'provider': provider_id,
+                'organization': organization.pk if organization else None,
+                'connection_id': int(connection_id) if connection_id else None,
+                'pulled_at': state.pulled_at.isoformat() if state.pulled_at else None,
+                'resource_counts': resource_counts,
+                'resource_count': sum(resource_counts.values()),
+                'ai_used': ai_status == 'used',
+                'ai_status': ai_status,
+                'ai_provider': ai_provider,
+                'ai_model': ai_model,
+                'suggestion': suggestion,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class CatalogDigitalOceanConnectorValidate(GenericAPIView):
@@ -5915,7 +6382,7 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'validate DigitalOcean cloud connector'
 
     @staticmethod
@@ -5930,6 +6397,9 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
         return token
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to validate cloud provider connections.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
@@ -5950,6 +6420,7 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'digitalocean', credential_id)
         do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
         if not do_token:
             return Response(
@@ -5972,6 +6443,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': _('Could not reach DigitalOcean API. Check network connectivity.'),
@@ -5982,6 +6455,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': _('DigitalOcean API request timed out.'),
@@ -6010,6 +6485,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
                 {
                     'provider': 'digitalocean',
                     'credential_id': credential_id,
+                    'connection_id': connection.pk,
+                    'organization': connection.organization_id,
                     'validated': False,
                     'status': 'misconfigured',
                     'detail': detail,
@@ -6023,6 +6500,8 @@ class CatalogDigitalOceanConnectorValidate(GenericAPIView):
             {
                 'provider': 'digitalocean',
                 'credential_id': credential_id,
+                'connection_id': connection.pk,
+                'organization': connection.organization_id,
                 'validated': True,
                 'status': 'connected',
                 'account_email': account.get('email'),
@@ -6042,7 +6521,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull DigitalOcean image catalog and pricing'
 
     @staticmethod
@@ -6072,9 +6551,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 except Exception:
                     pass
                 if response.status_code == 401:
-                    message = _(
-                        '%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)'
-                    ) % {'message': message}
+                    message = _('%(message)s (Use a valid DigitalOcean Personal Access Token in do_token.)') % {'message': message}
                 raise ParseError(_('DigitalOcean API error: %(message)s') % {'message': message})
 
             payload = response.json()
@@ -6085,6 +6562,9 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         return items
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response({'credential_id': [_('This field is required.')]}, status=status.HTTP_400_BAD_REQUEST)
@@ -6105,6 +6585,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'digitalocean', credential_id)
         do_token = self._normalize_do_token(credential.get_input('do_token', default=''))
         if not do_token:
             return Response(
@@ -6208,6 +6689,8 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         response_data = {
             'provider': 'digitalocean',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': pulled_at.isoformat(),
             'image_count': len(image_results),
             'pricing_count': len(pricing_results),
@@ -6220,7 +6703,7 @@ class CatalogDigitalOceanPullImages(GenericAPIView):
         }
 
         # Persist pulled data to the database so it survives across sessions.
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='digitalocean')
+        state = _get_or_create_cloud_provider_state('digitalocean', connection.organization)
         state.pulled_at = pulled_at
         state.provider_data = response_data
         state.save(update_fields=['pulled_at', 'provider_data'])
@@ -6238,10 +6721,13 @@ class CatalogProxmoxPullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull Proxmox VE cluster inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6268,6 +6754,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'proxmox', credential_id)
         pm_api_url = (credential.get_input('pm_api_url', default='') or '').rstrip('/')
         pm_api_token_id = credential.get_input('pm_api_token_id', default='') or ''
         pm_api_token_secret = credential.get_input('pm_api_token_secret', default='') or ''
@@ -6285,10 +6772,12 @@ class CatalogProxmoxPullResources(GenericAPIView):
             )
 
         session = requests.Session()
-        session.headers.update({
-            'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
-            'Accept': 'application/json',
-        })
+        session.headers.update(
+            {
+                'Authorization': f'PVEAPIToken={pm_api_token_id}={pm_api_token_secret}',
+                'Accept': 'application/json',
+            }
+        )
         session.verify = not bool(pm_tls_insecure)
 
         def _get(path):
@@ -6300,10 +6789,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
                     detail = resp.json().get('errors') or resp.json().get('message') or detail
                 except Exception:
                     pass
-                raise ParseError(
-                    _('Proxmox API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('Proxmox API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             return resp.json().get('data', []) or []
 
         # ── cluster/resources gives a flat list of every resource ───────────
@@ -6318,15 +6804,17 @@ class CatalogProxmoxPullResources(GenericAPIView):
         for item in raw_resources:
             rtype = item.get('type')
             if rtype == 'node':
-                node_results.append({
-                    'node': item.get('node', ''),
-                    'status': item.get('status', 'unknown'),
-                    'type': 'node',
-                    'maxcpu': item.get('maxcpu', 0),
-                    'maxmem': item.get('maxmem', 0),
-                    'maxdisk': item.get('maxdisk', 0),
-                    'uptime': item.get('uptime', 0),
-                })
+                node_results.append(
+                    {
+                        'node': item.get('node', ''),
+                        'status': item.get('status', 'unknown'),
+                        'type': 'node',
+                        'maxcpu': item.get('maxcpu', 0),
+                        'maxmem': item.get('maxmem', 0),
+                        'maxdisk': item.get('maxdisk', 0),
+                        'uptime': item.get('uptime', 0),
+                    }
+                )
                 node_names.append(item.get('node', ''))
             elif rtype == 'qemu':
                 entry = {
@@ -6345,33 +6833,37 @@ class CatalogProxmoxPullResources(GenericAPIView):
                 else:
                     vm_results.append(entry)
             elif rtype == 'lxc':
-                container_results.append({
-                    'vmid': item.get('vmid', 0),
-                    'name': item.get('name', ''),
-                    'status': item.get('status', 'stopped'),
-                    'node': item.get('node', ''),
-                    'cpus': item.get('maxcpu', 0),
-                    'maxmem': item.get('maxmem', 0),
-                    'maxdisk': item.get('maxdisk', 0),
-                    'uptime': item.get('uptime', 0),
-                    'type': 'lxc',
-                })
+                container_results.append(
+                    {
+                        'vmid': item.get('vmid', 0),
+                        'name': item.get('name', ''),
+                        'status': item.get('status', 'stopped'),
+                        'node': item.get('node', ''),
+                        'cpus': item.get('maxcpu', 0),
+                        'maxmem': item.get('maxmem', 0),
+                        'maxdisk': item.get('maxdisk', 0),
+                        'uptime': item.get('uptime', 0),
+                        'type': 'lxc',
+                    }
+                )
 
         # ── storage ──────────────────────────────────────────────────────────
         storage_raw = _get('/storage')
         storage_results = []
         for s in storage_raw:
-            storage_results.append({
-                'storage': s.get('storage', ''),
-                'type': s.get('type', ''),
-                'status': 'active' if s.get('active', 0) else 'inactive',
-                'nodes': s.get('nodes', ''),
-                'avail': s.get('avail', 0),
-                'total': s.get('total', 0),
-                'used': s.get('used', 0),
-                'shared': bool(s.get('shared', 0)),
-                'content': s.get('content', ''),
-            })
+            storage_results.append(
+                {
+                    'storage': s.get('storage', ''),
+                    'type': s.get('type', ''),
+                    'status': 'active' if s.get('active', 0) else 'inactive',
+                    'nodes': s.get('nodes', ''),
+                    'avail': s.get('avail', 0),
+                    'total': s.get('total', 0),
+                    'used': s.get('used', 0),
+                    'shared': bool(s.get('shared', 0)),
+                    'content': s.get('content', ''),
+                }
+            )
 
         # ── networks (per-node) ───────────────────────────────────────────────
         network_results = []
@@ -6381,22 +6873,26 @@ class CatalogProxmoxPullResources(GenericAPIView):
             except Exception:
                 continue
             for iface in ifaces:
-                network_results.append({
-                    'iface': iface.get('iface', ''),
-                    'type': iface.get('type', 'eth'),
-                    'node': node_name,
-                    'active': bool(iface.get('active', 0)),
-                    'address': iface.get('address', ''),
-                    'netmask': iface.get('netmask', ''),
-                    'cidr': iface.get('cidr', ''),
-                    'bridge_ports': iface.get('bridge_ports', ''),
-                    'comments': iface.get('comments', ''),
-                })
+                network_results.append(
+                    {
+                        'iface': iface.get('iface', ''),
+                        'type': iface.get('type', 'eth'),
+                        'node': node_name,
+                        'active': bool(iface.get('active', 0)),
+                        'address': iface.get('address', ''),
+                        'netmask': iface.get('netmask', ''),
+                        'cidr': iface.get('cidr', ''),
+                        'bridge_ports': iface.get('bridge_ports', ''),
+                        'comments': iface.get('comments', ''),
+                    }
+                )
 
         pulled_at = now().isoformat()
         response_data = {
             'provider': 'proxmox',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': pulled_at,
             'node_count': len(node_results),
             'vm_count': len(vm_results),
@@ -6412,12 +6908,8 @@ class CatalogProxmoxPullResources(GenericAPIView):
             'networks': network_results,
         }
 
-        # Look up the connection record so we can key the data by connection ID.
-        # This allows multiple Proxmox connections to coexist in provider_data.
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='proxmox', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        # Key per-connection data inside the org-scoped provider state row.
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': pulled_at,
@@ -6429,7 +6921,7 @@ class CatalogProxmoxPullResources(GenericAPIView):
             'networks': network_results,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='proxmox')
+        state = _get_or_create_cloud_provider_state('proxmox', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing
@@ -6449,10 +6941,13 @@ class CatalogVmwarePullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull VMware vSphere inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6479,6 +6974,7 @@ class CatalogVmwarePullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'vmware', credential_id)
         vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
         vcenter_user = credential.get_input('username', default='') or ''
         vcenter_pass = credential.get_input('password', default='') or ''
@@ -6507,25 +7003,21 @@ class CatalogVmwarePullResources(GenericAPIView):
         try:
             auth_resp = session.post(auth_url, auth=(vcenter_user, vcenter_pass), timeout=20)
         except requests.RequestException as exc:
-            raise ParseError(
-                _('Could not connect to vCenter (%(host)s): %(exc)s')
-                % {'host': vcenter_host, 'exc': str(exc)}
-            )
+            raise ParseError(_('Could not connect to vCenter (%(host)s): %(exc)s') % {'host': vcenter_host, 'exc': str(exc)})
 
         if not auth_resp.ok:
-            raise ParseError(
-                _('vCenter authentication failed (%(status)s). Check credentials.')
-                % {'status': auth_resp.status_code}
-            )
+            raise ParseError(_('vCenter authentication failed (%(status)s). Check credentials.') % {'status': auth_resp.status_code})
 
         session_token = auth_resp.json().get('value', '')
         if not session_token:
             raise ParseError(_('vCenter returned an empty session token.'))
 
-        session.headers.update({
-            'vmware-api-session-id': session_token,
-            'Accept': 'application/json',
-        })
+        session.headers.update(
+            {
+                'vmware-api-session-id': session_token,
+                'Accept': 'application/json',
+            }
+        )
 
         def _get(path):
             url = f'{vcenter_host}/rest{path}'
@@ -6536,19 +7028,13 @@ class CatalogVmwarePullResources(GenericAPIView):
                     detail = resp.json().get('value', {}).get('messages', [{}])[0].get('default_message', detail)
                 except Exception:
                     pass
-                raise ParseError(
-                    _('vCenter API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('vCenter API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             return resp.json().get('value', []) or []
 
         try:
             # ── Datacenters ──────────────────────────────────────────────────
             raw_dcs = _get('/vcenter/datacenter')
-            datacenters = [
-                {'id': dc.get('datacenter', ''), 'name': dc.get('name', '')}
-                for dc in raw_dcs
-            ]
+            datacenters = [{'id': dc.get('datacenter', ''), 'name': dc.get('name', '')} for dc in raw_dcs]
 
             # ── Clusters ────────────────────────────────────────────────────
             raw_clusters = _get('/vcenter/cluster')
@@ -6628,6 +7114,8 @@ class CatalogVmwarePullResources(GenericAPIView):
         response_data = {
             'provider': 'vmware',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'pulled_at': now().isoformat(),
             'datacenter_count': len(datacenters),
             'cluster_count': len(clusters),
@@ -6643,10 +7131,7 @@ class CatalogVmwarePullResources(GenericAPIView):
             'datastores': datastores,
         }
 
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='vmware', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': now().isoformat(),
@@ -6658,7 +7143,7 @@ class CatalogVmwarePullResources(GenericAPIView):
             'datastores': datastores,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='vmware')
+        state = _get_or_create_cloud_provider_state('vmware', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing
@@ -6679,10 +7164,13 @@ class CatalogAzurePullResources(GenericAPIView):
     """
 
     serializer_class = serializers.EmptySerializer
-    permission_classes = (IsSystemAdminOrAuditor,)
+    permission_classes = (IsAuthenticated,)
     resource_purpose = 'pull Azure subscription inventory'
 
     def post(self, request, *args, **kwargs):
+        if not _user_can_manage_cloud(request.user):
+            raise PermissionDenied(_('You do not have permission to pull cloud provider data.'))
+
         credential_id = request.data.get('credential_id')
         if credential_id is None:
             return Response(
@@ -6709,6 +7197,7 @@ class CatalogAzurePullResources(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        connection = _resolve_cloud_connection(request, 'azure', credential_id)
         subscription_id = credential.get_input('arm_subscription_id', default='') or ''
         client_id = credential.get_input('arm_client_id', default='') or ''
         client_secret = credential.get_input('arm_client_secret', default='') or ''
@@ -6745,11 +7234,14 @@ class CatalogAzurePullResources(GenericAPIView):
                 'scope': 'https://management.microsoftazure.de/.default',
             },
         }
-        endpoints = env_map.get(environment, {
-            'login': 'https://login.microsoftonline.com',
-            'arm': 'https://management.azure.com',
-            'scope': 'https://management.azure.com/.default',
-        })
+        endpoints = env_map.get(
+            environment,
+            {
+                'login': 'https://login.microsoftonline.com',
+                'arm': 'https://management.azure.com',
+                'scope': 'https://management.azure.com/.default',
+            },
+        )
 
         arm_base = endpoints['arm'].rstrip('/')
 
@@ -6767,19 +7259,14 @@ class CatalogAzurePullResources(GenericAPIView):
                 timeout=20,
             )
         except requests.RequestException as exc:
-            raise ParseError(
-                _('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)}
-            )
+            raise ParseError(_('Could not reach Azure login endpoint: %(exc)s') % {'exc': str(exc)})
 
         if not token_resp.ok:
             try:
                 error_detail = token_resp.json().get('error_description', token_resp.text)
             except Exception:
                 error_detail = token_resp.text
-            raise ParseError(
-                _('Azure authentication failed (%(status)s): %(detail)s')
-                % {'status': token_resp.status_code, 'detail': error_detail}
-            )
+            raise ParseError(_('Azure authentication failed (%(status)s): %(detail)s') % {'status': token_resp.status_code, 'detail': error_detail})
 
         access_token = token_resp.json().get('access_token', '')
         if not access_token:
@@ -6794,10 +7281,12 @@ class CatalogAzurePullResources(GenericAPIView):
         }
 
         arm_session = requests.Session()
-        arm_session.headers.update({
-            'Authorization': f'Bearer {access_token}',
-            'Accept': 'application/json',
-        })
+        arm_session.headers.update(
+            {
+                'Authorization': f'Bearer {access_token}',
+                'Accept': 'application/json',
+            }
+        )
 
         def _arm_get(path, api_version):
             url = f'{arm_base}{path}'
@@ -6810,10 +7299,7 @@ class CatalogAzurePullResources(GenericAPIView):
                     detail = err.get('error', {}).get('message', detail)
                 except Exception:
                     pass
-                raise ParseError(
-                    _('Azure API error (%(status)s): %(detail)s')
-                    % {'status': resp.status_code, 'detail': detail}
-                )
+                raise ParseError(_('Azure API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             data = resp.json()
             return data.get('value', []) or []
 
@@ -6868,16 +7354,18 @@ class CatalogAzurePullResources(GenericAPIView):
             storage_profile = props.get('storageProfile', {})
             os_disk = storage_profile.get('osDisk', {})
             # Power state comes from instance view; omit to avoid per-VM calls
-            vms.append({
-                'id': vm.get('id', ''),
-                'name': vm.get('name', ''),
-                'location': vm.get('location', ''),
-                'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
-                'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
-                'os_type': os_disk.get('osType', ''),
-                'provisioning_state': props.get('provisioningState', ''),
-                'tags': vm.get('tags') or {},
-            })
+            vms.append(
+                {
+                    'id': vm.get('id', ''),
+                    'name': vm.get('name', ''),
+                    'location': vm.get('location', ''),
+                    'resource_group': vm.get('id', '').split('/')[4] if vm.get('id') else '',
+                    'vm_size': props.get('hardwareProfile', {}).get('vmSize', ''),
+                    'os_type': os_disk.get('osType', ''),
+                    'provisioning_state': props.get('provisioningState', ''),
+                    'tags': vm.get('tags') or {},
+                }
+            )
 
         # ── Virtual Networks ──────────────────────────────────────────────────
         raw_vnets = _arm_get(
@@ -6949,19 +7437,21 @@ class CatalogAzurePullResources(GenericAPIView):
                 props = img.get('properties', {})
                 os_disk = props.get('storageProfile', {}).get('osDisk', {})
                 rg = img.get('id', '').split('/')[4] if img.get('id') else ''
-                vm_images.append({
-                    'id': img.get('id', ''),
-                    'name': img.get('name', ''),
-                    'publisher': '',
-                    'offer': '',
-                    'sku': '',
-                    'version': '',
-                    'os_type': os_disk.get('osType', ''),
-                    'image_type': 'custom',
-                    'location': img.get('location', ''),
-                    'urn': img.get('id', ''),
-                    'description': f'Custom image · resource group: {rg}',
-                })
+                vm_images.append(
+                    {
+                        'id': img.get('id', ''),
+                        'name': img.get('name', ''),
+                        'publisher': '',
+                        'offer': '',
+                        'sku': '',
+                        'version': '',
+                        'os_type': os_disk.get('osType', ''),
+                        'image_type': 'custom',
+                        'location': img.get('location', ''),
+                        'urn': img.get('id', ''),
+                        'description': f'Custom image · resource group: {rg}',
+                    }
+                )
         except Exception:
             pass
 
@@ -6976,26 +7466,27 @@ class CatalogAzurePullResources(GenericAPIView):
                 gallery_rg = gallery.get('id', '').split('/')[4] if gallery.get('id') else ''
                 try:
                     gallery_images = _arm_get(
-                        f'{sub_prefix}/resourceGroups/{gallery_rg}'
-                        f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
+                        f'{sub_prefix}/resourceGroups/{gallery_rg}' f'/providers/Microsoft.Compute/galleries/{gallery_name}/images',
                         '2023-07-01',
                     )
                     for gimg in gallery_images:
                         gprops = gimg.get('properties', {})
                         ident = gprops.get('identifier', {})
-                        vm_images.append({
-                            'id': gimg.get('id', ''),
-                            'name': gimg.get('name', ''),
-                            'publisher': ident.get('publisher', ''),
-                            'offer': ident.get('offer', ''),
-                            'sku': ident.get('sku', ''),
-                            'version': '',
-                            'os_type': gprops.get('osType', ''),
-                            'image_type': 'gallery',
-                            'location': gimg.get('location', ''),
-                            'urn': gimg.get('id', ''),
-                            'description': f'Compute Gallery: {gallery_name}',
-                        })
+                        vm_images.append(
+                            {
+                                'id': gimg.get('id', ''),
+                                'name': gimg.get('name', ''),
+                                'publisher': ident.get('publisher', ''),
+                                'offer': ident.get('offer', ''),
+                                'sku': ident.get('sku', ''),
+                                'version': '',
+                                'os_type': gprops.get('osType', ''),
+                                'image_type': 'gallery',
+                                'location': gimg.get('location', ''),
+                                'urn': gimg.get('id', ''),
+                                'description': f'Compute Gallery: {gallery_name}',
+                            }
+                        )
                 except Exception:
                     pass
         except Exception:
@@ -7004,14 +7495,50 @@ class CatalogAzurePullResources(GenericAPIView):
         # 3 — Popular marketplace images: resolve latest version via ARM
         _CURATED = [
             # Ubuntu
-            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS Gen2'},
+            {
+                'publisher': 'Canonical',
+                'offer': '0001-com-ubuntu-server-jammy',
+                'sku': '22_04-lts-gen2',
+                'os_type': 'Linux',
+                'name': 'Ubuntu Server 22.04 LTS Gen2',
+            },
             {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-jammy', 'sku': '22_04-lts', 'os_type': 'Linux', 'name': 'Ubuntu Server 22.04 LTS'},
-            {'publisher': 'Canonical', 'offer': '0001-com-ubuntu-server-focal', 'sku': '20_04-lts-gen2', 'os_type': 'Linux', 'name': 'Ubuntu Server 20.04 LTS Gen2'},
+            {
+                'publisher': 'Canonical',
+                'offer': '0001-com-ubuntu-server-focal',
+                'sku': '20_04-lts-gen2',
+                'os_type': 'Linux',
+                'name': 'Ubuntu Server 20.04 LTS Gen2',
+            },
             # Windows Server
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter-azure-edition', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter Azure Edition'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2022-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2022 Datacenter'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2019-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2019 Datacenter'},
-            {'publisher': 'MicrosoftWindowsServer', 'offer': 'WindowsServer', 'sku': '2016-datacenter', 'os_type': 'Windows', 'name': 'Windows Server 2016 Datacenter'},
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2022-datacenter-azure-edition',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2022 Datacenter Azure Edition',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2022-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2022 Datacenter',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2019-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2019 Datacenter',
+            },
+            {
+                'publisher': 'MicrosoftWindowsServer',
+                'offer': 'WindowsServer',
+                'sku': '2016-datacenter',
+                'os_type': 'Windows',
+                'name': 'Windows Server 2016 Datacenter',
+            },
             # RHEL
             {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '9-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 9 LVM Gen2'},
             {'publisher': 'RedHat', 'offer': 'RHEL', 'sku': '8-lvm-gen2', 'os_type': 'Linux', 'name': 'Red Hat Enterprise Linux 8 LVM Gen2'},
@@ -7041,19 +7568,21 @@ class CatalogAzurePullResources(GenericAPIView):
                 if vresp.ok:
                     versions = vresp.json()
                     latest = versions[0].get('name', 'latest') if versions else 'latest'
-                    vm_images.append({
-                        'id': f'marketplace/{pub}/{offer}/{sku}',
-                        'name': curated['name'],
-                        'publisher': pub,
-                        'offer': offer,
-                        'sku': sku,
-                        'version': latest,
-                        'os_type': curated['os_type'],
-                        'image_type': 'marketplace',
-                        'location': primary_location,
-                        'urn': f'{pub}:{offer}:{sku}:{latest}',
-                        'description': '',
-                    })
+                    vm_images.append(
+                        {
+                            'id': f'marketplace/{pub}/{offer}/{sku}',
+                            'name': curated['name'],
+                            'publisher': pub,
+                            'offer': offer,
+                            'sku': sku,
+                            'version': latest,
+                            'os_type': curated['os_type'],
+                            'image_type': 'marketplace',
+                            'location': primary_location,
+                            'urn': f'{pub}:{offer}:{sku}:{latest}',
+                            'description': '',
+                        }
+                    )
             except Exception:
                 pass
 
@@ -7062,8 +7591,7 @@ class CatalogAzurePullResources(GenericAPIView):
         try:
             _sku_api = '2021-07-01'
             skus_resp = arm_session.get(
-                f'https://management.azure.com/subscriptions/{subscription_id}'
-                f'/providers/Microsoft.Compute/skus',
+                f'https://management.azure.com/subscriptions/{subscription_id}' f'/providers/Microsoft.Compute/skus',
                 params={
                     'api-version': _sku_api,
                     '$filter': f"location eq '{primary_location}'",
@@ -7075,35 +7603,31 @@ class CatalogAzurePullResources(GenericAPIView):
                     if sku_item.get('resourceType') != 'virtualMachines':
                         continue
                     # Skip location-restricted SKUs
-                    if any(
-                        r.get('type') == 'Location'
-                        for r in sku_item.get('restrictions', [])
-                    ):
+                    if any(r.get('type') == 'Location' for r in sku_item.get('restrictions', [])):
                         continue
-                    caps = {
-                        c['name']: c['value']
-                        for c in sku_item.get('capabilities', [])
-                    }
+                    caps = {c['name']: c['value'] for c in sku_item.get('capabilities', [])}
                     # Zones for this location
                     zones = []
                     for li in sku_item.get('locationInfo', []):
                         if li.get('location', '').lower() == primary_location.lower():
                             zones = sorted(li.get('zones', []))
-                    vm_sizes.append({
-                        'name': sku_item.get('name', ''),
-                        'tier': sku_item.get('tier', ''),
-                        'family': sku_item.get('family', ''),
-                        'vcpus': int(caps.get('vCPUs', 0) or 0),
-                        'memory_gb': float(caps.get('MemoryGB', 0) or 0),
-                        'gpus': int(caps.get('GPUs', 0) or 0),
-                        'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
-                        'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
-                        'premium_io': caps.get('PremiumIO', '').lower() == 'true',
-                        'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
-                        'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
-                        'zones': zones,
-                        'location': primary_location,
-                    })
+                    vm_sizes.append(
+                        {
+                            'name': sku_item.get('name', ''),
+                            'tier': sku_item.get('tier', ''),
+                            'family': sku_item.get('family', ''),
+                            'vcpus': int(caps.get('vCPUs', 0) or 0),
+                            'memory_gb': float(caps.get('MemoryGB', 0) or 0),
+                            'gpus': int(caps.get('GPUs', 0) or 0),
+                            'max_data_disks': int(caps.get('MaxDataDiskCount', 0) or 0),
+                            'max_nics': int(caps.get('MaxNetworkInterfaces', 0) or 0),
+                            'premium_io': caps.get('PremiumIO', '').lower() == 'true',
+                            'ultra_ssd': caps.get('UltraSSDAvailable', '').lower() == 'true',
+                            'accelerated_networking': caps.get('AcceleratedNetworkingEnabled', '').lower() == 'true',
+                            'zones': zones,
+                            'location': primary_location,
+                        }
+                    )
                 vm_sizes.sort(key=lambda s: (s['family'], s['name']))
         except Exception:
             pass
@@ -7114,11 +7638,7 @@ class CatalogAzurePullResources(GenericAPIView):
             prices_url = 'https://prices.azure.com/api/retail/prices'
             prices_params: dict = {
                 'api-version': '2023-01-01-preview',
-                '$filter': (
-                    f"serviceName eq 'Virtual Machines' and "
-                    f"armRegionName eq '{primary_location}' and "
-                    f"priceType eq 'Consumption'"
-                ),
+                '$filter': (f"serviceName eq 'Virtual Machines' and " f"armRegionName eq '{primary_location}' and " f"priceType eq 'Consumption'"),
             }
             while True:
                 pr = requests.get(prices_url, params=prices_params, timeout=20)
@@ -7149,6 +7669,8 @@ class CatalogAzurePullResources(GenericAPIView):
         response_data = {
             'provider': 'azure',
             'credential_id': credential_id,
+            'connection_id': connection.pk,
+            'organization': connection.organization_id,
             'subscription_id': subscription_id,
             'pulled_at': now().isoformat(),
             'resource_group_count': len(resource_groups),
@@ -7169,10 +7691,7 @@ class CatalogAzurePullResources(GenericAPIView):
             'accessible_subscriptions': accessible_subscriptions,
         }
 
-        conn_obj = models.CloudProviderConnection.objects.filter(
-            provider_id='azure', credential_id=credential_id
-        ).first()
-        conn_key = str(conn_obj.pk) if conn_obj else f'cred_{credential_id}'
+        conn_key = str(connection.pk)
 
         conn_data = {
             'pulled_at': now().isoformat(),
@@ -7185,7 +7704,7 @@ class CatalogAzurePullResources(GenericAPIView):
             'vm_sizes': vm_sizes,
         }
 
-        state, _ = models.CloudProviderState.objects.get_or_create(provider_id='azure')
+        state = _get_or_create_cloud_provider_state('azure', connection.organization)
         existing = state.provider_data if isinstance(state.provider_data, dict) else {}
         existing[conn_key] = conn_data
         state.provider_data = existing

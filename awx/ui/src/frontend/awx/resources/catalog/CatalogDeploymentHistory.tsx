@@ -40,11 +40,7 @@ import { useAwxGetAllPages } from '../../common/useAwxGetAllPages';
 import { WorkflowOutputNode } from '../../views/jobs/WorkflowOutput/WorkflowOutputNode';
 import { CustomEdge, CustomNode } from '../templates/WorkflowVisualizer/components';
 import { getNodeLabel } from '../templates/WorkflowVisualizer/wizard/helpers';
-import {
-  GRAPH_ID,
-  NODE_DIAMETER,
-  START_NODE_ID,
-} from '../templates/WorkflowVisualizer/constants';
+import { GRAPH_ID, NODE_DIAMETER, START_NODE_ID } from '../templates/WorkflowVisualizer/constants';
 import { useCreateEdge } from '../templates/WorkflowVisualizer/hooks';
 import { EdgeStatus } from '../templates/WorkflowVisualizer/types';
 import { secondsToHHMMSS } from '../../../../framework/utils/dateTimeHelpers';
@@ -52,8 +48,8 @@ import type { WorkflowNode } from '../../interfaces/WorkflowNode';
 import { StatusCell } from '../../../common/Status';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
-import { AwxRoute } from '../../main/AwxRoutes';
 import { CatalogDeployment } from '../../interfaces/CatalogDeployment';
+import { historyJobOutputRoute, isWorkflowHistoryJob } from './catalogJobRoutes';
 
 type HistoryEntry = CatalogDeployment['provisioning_history'][number] & { _idx: number };
 
@@ -69,7 +65,11 @@ function formatDuration(startIso: string, finishIso?: string): string {
   return `${s}s`;
 }
 
-function historyEntryDuration(entry: { created: string; finished?: string; status: string }): string {
+function historyEntryDuration(entry: {
+  created: string;
+  finished?: string;
+  status: string;
+}): string {
   if (!entry.finished && entry.status !== 'running') return '-';
   return formatDuration(entry.created, entry.finished);
 }
@@ -123,7 +123,11 @@ function HistoryWorkflowTopology({ jobId }: { jobId: number }) {
         })
     );
     vis.fromModel(
-      { nodes: [], edges: [], graph: { id: GRAPH_ID, type: 'graph', layout: 'Dagre', visible: false } },
+      {
+        nodes: [],
+        edges: [],
+        graph: { id: GRAPH_ID, type: 'graph', layout: 'Dagre', visible: false },
+      },
       false
     );
     return vis;
@@ -156,8 +160,9 @@ function HistoryWorkflowTopology({ jobId }: { jobId: number }) {
       n.always_nodes.forEach((id) =>
         edges.push(createEdge(nodeId, id.toString(), EdgeStatus.info))
       );
-      const time =
-        n.summary_fields?.job?.elapsed ? secondsToHHMMSS(n.summary_fields.job.elapsed) : '';
+      const time = n.summary_fields?.job?.elapsed
+        ? secondsToHHMMSS(n.summary_fields.job.elapsed)
+        : '';
       const status = (n.summary_fields.job?.status as NodeStatus) || undefined;
       const node = {
         id: nodeId,
@@ -187,9 +192,7 @@ function HistoryWorkflowTopology({ jobId }: { jobId: number }) {
       return node;
     });
     const nonRootNodes = edges.map((e) => e.target);
-    const rootNodes = nodes.filter(
-      (n) => !nonRootNodes.includes(n.id) && n.id !== START_NODE_ID
-    );
+    const rootNodes = nodes.filter((n) => !nonRootNodes.includes(n.id) && n.id !== START_NODE_ID);
     rootNodes.forEach((n) => edges.push(createEdge(START_NODE_ID, n.id, EdgeStatus.info)));
     visualization.fromModel(
       {
@@ -237,7 +240,7 @@ function HistoryWorkflowTopology({ jobId }: { jobId: number }) {
 
 function HistoryExpandedRow({ entry }: { entry: HistoryEntry }) {
   const hasDetails = entry.details && Object.keys(entry.details).length > 0;
-  if (entry.job_id) {
+  if (entry.job_id && isWorkflowHistoryJob(entry)) {
     return <HistoryWorkflowTopology jobId={entry.job_id} />;
   }
   if (!hasDetails) return null;
@@ -263,14 +266,15 @@ export function CatalogDeploymentHistory() {
   const getPageUrl = useGetPageUrl();
   const pageNavigate = usePageNavigate();
 
-  const { data: deployment, error, isLoading, refresh } = useGetItem<CatalogDeployment>(
-    awxAPI`/catalog_deployments`,
-    id
-  );
+  const {
+    data: deployment,
+    error,
+    isLoading,
+    refresh,
+  } = useGetItem<CatalogDeployment>(awxAPI`/catalog_deployments`, id);
 
   const items = useMemo<HistoryEntry[]>(
-    () =>
-      (deployment?.provisioning_history ?? []).map((entry, idx) => ({ ...entry, _idx: idx })),
+    () => (deployment?.provisioning_history ?? []).map((entry, idx) => ({ ...entry, _idx: idx })),
     [deployment]
   );
 
@@ -284,9 +288,7 @@ export function CatalogDeploymentHistory() {
       {
         header: t('Action'),
         cell: (entry) => (
-          <TextCell
-            text={entry.action.charAt(0).toUpperCase() + entry.action.slice(1)}
-          />
+          <TextCell text={entry.action.charAt(0).toUpperCase() + entry.action.slice(1)} />
         ),
       },
       {
@@ -308,20 +310,20 @@ export function CatalogDeploymentHistory() {
       },
       {
         header: t('Job'),
-        cell: (entry) =>
-          entry.job_id ? (
+        cell: (entry) => {
+          const route = historyJobOutputRoute(entry);
+          return entry.job_id ? (
             <TextCell
               text={t('Job #{{id}}', { id: entry.job_id })}
-              to={getPageUrl(AwxRoute.TerraformJobPage, { params: { id: String(entry.job_id) } })}
+              to={route ? getPageUrl(route.route, { params: route.params }) : undefined}
               onClick={() =>
-                pageNavigate(AwxRoute.TerraformJobPage, {
-                  params: { id: String(entry.job_id) },
-                })
+                route ? pageNavigate(route.route, { params: route.params }) : undefined
               }
             />
           ) : (
             <TextCell text="-" />
-          ),
+          );
+        },
       },
     ],
     [t, getPageUrl, pageNavigate]

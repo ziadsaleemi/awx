@@ -5,13 +5,13 @@ Unit tests for awx.main.tasks.terraform.RunTerraformJob
 These tests run without a database (no @pytest.mark.django_db) and rely
 entirely on mocks.
 """
+
 import json
 from unittest import mock
 
 import pytest
 
-from awx.main.tasks.terraform import RunTerraformJob, _HOST_IP_KEY_RE
-
+from awx.main.tasks.terraform import RunTerraformJob, _HOST_IP_KEY_RE, _first_string_output
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,6 +79,18 @@ def test_host_ip_regex_no_match():
     assert not _HOST_IP_KEY_RE.search('instance_id')
 
 
+def test_first_string_output_returns_first_present_value():
+    outputs = {'cloud_init_user': 'ansible', 'admin_username': 'azureuser'}
+
+    assert _first_string_output(outputs, ('ansible_user', 'cloud_init_user')) == 'ansible'
+
+
+def test_first_string_output_ignores_empty_and_non_string_values():
+    outputs = {'cloud_init_user': '', 'admin_username': ['azureuser'], 'ssh_user': 'deployer'}
+
+    assert _first_string_output(outputs, ('cloud_init_user', 'admin_username', 'ssh_user')) == 'deployer'
+
+
 # ---------------------------------------------------------------------------
 # _write_tfvars
 # ---------------------------------------------------------------------------
@@ -123,9 +135,7 @@ class TestWriteTfvars:
         assert result is None
 
     def test_filters_undeclared_variables_to_root_module(self, tmp_path):
-        (tmp_path / 'main.tf').write_text(
-            'variable "region" {\n  type = string\n}\n'
-        )
+        (tmp_path / 'main.tf').write_text('variable "region" {\n  type = string\n}\n')
         task = _make_task()
         inst = _make_instance(extra_vars='{"region": "us-east-1", "vm_id": "1234"}')
 
@@ -161,9 +171,7 @@ class TestLocalStateWarning:
         assert kind == 'local'
 
     def test_explicit_local_backend_detected(self, tmp_path):
-        (tmp_path / 'main.tf').write_text(
-            'terraform {\n  backend "local" {}\n}\n'
-        )
+        (tmp_path / 'main.tf').write_text('terraform {\n  backend "local" {}\n}\n')
         task = _make_task()
 
         kind = task._root_terraform_backend_kind(str(tmp_path))
@@ -171,9 +179,7 @@ class TestLocalStateWarning:
         assert kind == 'local'
 
     def test_remote_backend_detected(self, tmp_path):
-        (tmp_path / 'main.tf').write_text(
-            'terraform {\n  backend "s3" {}\n}\n'
-        )
+        (tmp_path / 'main.tf').write_text('terraform {\n  backend "s3" {}\n}\n')
         task = _make_task()
 
         kind = task._root_terraform_backend_kind(str(tmp_path))
@@ -208,9 +214,7 @@ class TestLocalStateWarning:
         assert 'destroy/deprovision' in warning
 
     def test_warning_not_emitted_for_remote_backend(self, tmp_path):
-        (tmp_path / 'main.tf').write_text(
-            'terraform {\n  backend "gcs" {}\n}\n'
-        )
+        (tmp_path / 'main.tf').write_text('terraform {\n  backend "gcs" {}\n}\n')
         task = _make_task()
 
         warning = task._local_state_warning_message(str(tmp_path), 'destroy')
@@ -259,9 +263,9 @@ class TestRunTerraform:
         inst = _make_instance(terraform_operation='apply')
 
         mock_popen.side_effect = [
-            self._make_popen(0, 'Initializing...'),       # init
-            self._make_popen(0, 'Plan: 1 to add.'),       # plan
-            self._make_popen(0, 'Apply complete!'),        # apply
+            self._make_popen(0, 'Initializing...'),  # init
+            self._make_popen(0, 'Plan: 1 to add.'),  # plan
+            self._make_popen(0, 'Apply complete!'),  # apply
         ]
         with mock.patch.object(task, 'get_instance_timeout', return_value=0):
             with mock.patch('awx.main.tasks.terraform.tempfile.mkdtemp', return_value=str(tmp_path / 'tfplan')):
@@ -329,9 +333,7 @@ class TestPopulateInventory:
     @mock.patch('awx.main.tasks.terraform.Group')
     @mock.patch('awx.main.tasks.terraform.Host')
     @mock.patch('awx.main.tasks.terraform.Inventory')
-    def test_creates_hosts_from_host_ip_outputs(
-        self, mock_inventory_cls, mock_host_cls, mock_group_cls
-    ):
+    def test_creates_hosts_from_host_ip_outputs(self, mock_inventory_cls, mock_host_cls, mock_group_cls):
         task = _make_task()
         inst = _make_instance(target_inventory_id=42, target_group='')
 
@@ -346,6 +348,7 @@ class TestPopulateInventory:
         with mock.patch.object(task, 'get_instance_timeout', return_value=0):
             with mock.patch.object(task, '_run_cmd', return_value=(0, tf_output)):
                 from unittest.mock import patch
+
                 with patch('awx.main.tasks.terraform.transaction') as mock_txn:
                     mock_txn.atomic.return_value.__enter__ = mock.MagicMock(return_value=None)
                     mock_txn.atomic.return_value.__exit__ = mock.MagicMock(return_value=False)
@@ -354,8 +357,38 @@ class TestPopulateInventory:
         mock_host_cls.objects.get_or_create.assert_called_once_with(
             inventory=mock_inventory,
             name='10.0.0.1',
-            defaults={'variables': json.dumps({'ansible_host': '10.0.0.1', 'terraform_output_key': 'host_ip_web', 'terraform_job_id': 1})},
+            defaults={
+                'variables': json.dumps(
+                    {'ansible_host': '10.0.0.1', 'ansible_remote_tmp': '/tmp/ansible', 'terraform_output_key': 'host_ip_web', 'terraform_job_id': 1}
+                )
+            },
         )
+
+    @mock.patch('awx.main.tasks.terraform.Group')
+    @mock.patch('awx.main.tasks.terraform.Host')
+    @mock.patch('awx.main.tasks.terraform.Inventory')
+    def test_creates_hosts_with_terraform_ansible_user_output(self, mock_inventory_cls, mock_host_cls, mock_group_cls):
+        task = _make_task()
+        inst = _make_instance(target_inventory_id=42, target_group='')
+
+        mock_inventory = mock.MagicMock()
+        mock_inventory_cls.objects.get.return_value = mock_inventory
+        mock_host = mock.MagicMock()
+        mock_host_cls.objects.get_or_create.return_value = (mock_host, True)
+
+        tf_output = self._terraform_output({'host_ip_web': '10.0.0.1', 'cloud_init_user': 'ansible'})
+
+        with mock.patch.object(task, 'get_instance_timeout', return_value=0):
+            with mock.patch.object(task, '_run_cmd', return_value=(0, tf_output)):
+                with mock.patch('awx.main.tasks.terraform.transaction') as mock_txn:
+                    mock_txn.atomic.return_value.__enter__ = mock.MagicMock(return_value=None)
+                    mock_txn.atomic.return_value.__exit__ = mock.MagicMock(return_value=False)
+                    task._populate_inventory(inst, '/tmp', {})
+
+        variables = json.loads(mock_host_cls.objects.get_or_create.call_args.kwargs['defaults']['variables'])
+        assert variables['ansible_host'] == '10.0.0.1'
+        assert variables['ansible_user'] == 'ansible'
+        assert variables['ansible_remote_tmp'] == '/tmp/ansible'
 
     def test_skips_when_no_host_ip_outputs(self):
         task = _make_task()
@@ -386,9 +419,7 @@ class TestPopulateInventory:
         task = _make_task()
         inst = _make_instance(target_inventory_id=42, target_group='')
 
-        tf_output = json.dumps(
-            {'host_ip_nodes': {'value': ['10.0.0.1', '10.0.0.2'], 'type': 'list'}}
-        )
+        tf_output = json.dumps({'host_ip_nodes': {'value': ['10.0.0.1', '10.0.0.2'], 'type': 'list'}})
 
         with mock.patch.object(task, 'get_instance_timeout', return_value=0):
             with mock.patch.object(task, '_run_cmd', return_value=(0, tf_output)):
@@ -403,10 +434,7 @@ class TestPopulateInventory:
 
         # Both IPs should have been registered
         assert mock_host.objects.get_or_create.call_count == 2
-        created_names = {
-            call.kwargs['name']
-            for call in mock_host.objects.get_or_create.call_args_list
-        }
+        created_names = {call.kwargs['name'] for call in mock_host.objects.get_or_create.call_args_list}
         assert created_names == {'10.0.0.1', '10.0.0.2'}
 
 
@@ -425,9 +453,7 @@ class TestRunStatusTransitions:
         task.sync_and_copy = mock.MagicMock()
         task._write_tfvars = mock.MagicMock(return_value=None)
         task._build_env = mock.MagicMock(return_value=({}, {}))
-        task._run_terraform = mock.MagicMock(
-            return_value=(terraform_rc, 'output text', None)
-        )
+        task._run_terraform = mock.MagicMock(return_value=(terraform_rc, 'output text', None))
         task._populate_inventory = mock.MagicMock()
 
     def test_successful_apply_marks_job_successful(self, tmp_path):

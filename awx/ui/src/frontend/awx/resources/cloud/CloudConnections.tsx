@@ -24,7 +24,6 @@ import { useGet } from '../../../common/crud/useGet';
 import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
 import { EmptyStateUnauthorized } from '../../../../framework/components/EmptyStateUnauthorized';
 import { awxAPI } from '../../common/api/awx-utils';
-import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { CubesIcon, PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import { Credential } from '../../interfaces/Credential';
 import {
@@ -37,6 +36,7 @@ import {
   updateCloudConnectionApi,
 } from './cloudConnectionStore';
 import { cloudProviders } from './cloudProviders';
+import { useCloudOrganization } from './useCloudOrganization';
 import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import AWSLogo from '../../../assets/aws.svg';
 import AzureLogo from '../../../assets/azure.svg';
@@ -114,12 +114,12 @@ function overallStatus(entries: CloudConnectionEntry[]): CloudConnectionStatus {
 
 export function CloudConnections() {
   const { t } = useTranslation();
-  const { activeAwxUser } = useAwxActiveUser();
+  const { canReadCloud, canManageCloud, organizationId } = useCloudOrganization();
   const [activeModalProviderId, setActiveModalProviderId] = useState<string | null>(null);
   const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>({});
 
   const refreshConnections = useCallback(() => {
-    void fetchCloudConnections().then((entries) => {
+    void fetchCloudConnections(undefined, organizationId).then((entries) => {
       const grouped: Record<string, CloudConnectionEntry[]> = {};
       for (const e of entries) {
         if (!grouped[e.providerId]) grouped[e.providerId] = [];
@@ -127,16 +127,13 @@ export function CloudConnections() {
       }
       setConnections(grouped);
     });
-  }, []);
+  }, [organizationId]);
 
   useEffect(() => {
     refreshConnections();
   }, [refreshConnections]);
 
-  const canManageCloud =
-    Boolean(activeAwxUser?.is_superuser) || Boolean(activeAwxUser?.is_system_auditor);
-
-  if (!canManageCloud) {
+  if (!canReadCloud) {
     return (
       <PageLayout>
         <PageHeader
@@ -216,6 +213,8 @@ export function CloudConnections() {
       {activeModalProviderId && (
         <ConnectionModal
           providerId={activeModalProviderId}
+          userOrgId={organizationId}
+          canManageCloud={canManageCloud}
           onClose={() => {
             setActiveModalProviderId(null);
             refreshConnections();
@@ -226,17 +225,22 @@ export function CloudConnections() {
   );
 }
 
-export function ConnectionModal(props: { providerId: string; onClose: () => void }) {
+export function ConnectionModal(props: {
+  providerId: string;
+  onClose: () => void;
+  userOrgId?: number | null;
+  canManageCloud?: boolean;
+}) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
-  const { providerId, onClose } = props;
+  const { providerId, onClose, userOrgId, canManageCloud = true } = props;
 
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [entries, setEntries] = useState<CloudConnectionEntry[]>([]);
 
   const refreshModalConnections = useCallback(() => {
-    void fetchCloudConnections(providerId).then(setEntries);
-  }, [providerId]);
+    void fetchCloudConnections(providerId, userOrgId).then(setEntries);
+  }, [providerId, userOrgId]);
 
   useEffect(() => {
     refreshModalConnections();
@@ -245,7 +249,7 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
   const { data } = useGet<CredentialListResponse>(
     awxAPI`/credentials/?order_by=name&page_size=200`
   );
-  const credentials = data?.results ?? [];
+  const credentials = useMemo(() => data?.results ?? [], [data?.results]);
 
   const cloudCredentials = useMemo(() => {
     const filtered = credentials.filter((credential) => {
@@ -306,9 +310,11 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
       if (providerId === 'digitalocean') {
         const validation = await postRequest<
           ConnectorValidationResponse,
-          { credential_id: number }
+          { credential_id: number; connection_id: string; organization?: number | null }
         >(awxAPI`/catalog_cloud/connectors/digitalocean/validate/`, {
           credential_id: credentialId,
+          connection_id: entryId,
+          organization: userOrgId ?? null,
         });
         if (!validation.validated) {
           throw new Error(validation.detail ?? t('DigitalOcean validation failed.'));
@@ -373,6 +379,7 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
       credentialId,
       credentialName: cred?.name ?? '',
       error: '',
+      organizationId: userOrgId ?? null,
     });
     refreshModalConnections();
     await onConnect(newEntry.id, credentialId);
@@ -456,6 +463,7 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
                       <Button
                         variant="secondary"
                         size="sm"
+                        isDisabled={!canManageCloud}
                         onClick={() => void onDisconnect(entry.id)}
                         style={{ marginRight: '0.4rem' }}
                       >
@@ -468,7 +476,7 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
                           variant="primary"
                           size="sm"
                           isLoading={connectingId === entry.id}
-                          isDisabled={connectingId !== null}
+                          isDisabled={!canManageCloud || connectingId !== null}
                           onClick={() => void onConnect(entry.id, entry.credentialId!)}
                           style={{ marginRight: '0.4rem' }}
                         >
@@ -479,7 +487,7 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
                     <Button
                       variant="plain"
                       size="sm"
-                      isDisabled={!!connectingId}
+                      isDisabled={!canManageCloud || !!connectingId}
                       onClick={() => void onRemove(entry.id)}
                       aria-label={t('Remove connection')}
                     >
@@ -494,12 +502,14 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
 
         {entries.length === 0 && !showAddForm && (
           <div style={{ color: '#888', textAlign: 'center', padding: '0.5rem 0' }}>
-            {t('No connections yet. Click "Add connection" below.')}
+            {canManageCloud
+              ? t('No connections yet. Click "Add connection" below.')
+              : t('No connections yet.')}
           </div>
         )}
 
         {/* Add connection form */}
-        {showAddForm ? (
+        {canManageCloud && showAddForm ? (
           <div
             style={{
               border: '1px solid var(--pf-v5-global--BorderColor--100)',
@@ -559,13 +569,13 @@ export function ConnectionModal(props: { providerId: string; onClose: () => void
               </Button>
             </div>
           </div>
-        ) : (
+        ) : canManageCloud ? (
           <div>
             <Button variant="link" icon={<PlusCircleIcon />} onClick={() => setShowAddForm(true)}>
               {t('Add connection')}
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
     </Modal>
   );

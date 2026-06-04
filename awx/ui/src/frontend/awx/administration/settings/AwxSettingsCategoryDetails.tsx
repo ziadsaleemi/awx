@@ -21,6 +21,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxSettingsOptionsAction } from './AwxSettingsForm';
+import { ExternalAutomationSmokePanel } from './ExternalAutomationSmokePanel';
 import { useAwxSettingsGroups, useAwxSettingsGroupsBase } from './useAwxSettingsGroups';
 
 export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
@@ -79,6 +80,10 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
         headerActions={<PageActions actions={actions} position={DropdownPosition.right} />}
       />
       <AwxSettingsCategoryDetails options={categoryOptions} data={all.data} />
+      {categoryId === 'eda' ? <ExternalAutomationSmokePanel /> : null}
+      {categoryId === 'policyascode' ? (
+        <ExternalAutomationSmokePanel includeEda={false} includeOpa includeGatekeeper />
+      ) : null}
     </PageLayout>
   );
 }
@@ -107,6 +112,7 @@ export function AwxSettingsCategoryDetail(props: {
     case 'field':
       return <PageDetail label={option.label}>{props.data[props.name] as string}</PageDetail>;
     case 'integer':
+    case 'float':
       return <PageDetail label={option.label}>{props.data[props.name] as number}</PageDetail>;
 
     case 'boolean':

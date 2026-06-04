@@ -768,6 +768,8 @@ ROLE_DEFINITION_TO_ROLE_FIELD = {
     'Organization Audit': 'auditor_role',
     'Organization Execute': 'execute_role',
     'Organization Approval': 'approval_role',
+    'CatalogItem Admin': 'admin_role',
+    'CatalogItem Use': 'use_role',
 }
 
 

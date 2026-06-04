@@ -31,14 +31,16 @@ export function useSurveyToolbarActions(
 
   const isJobTemplate = templateType === 'job_template';
   const isTerraformTemplate = templateType === 'terraform_job_template';
-  const resourcePath = isTerraformTemplate ? 'terraform_job_templates' : isJobTemplate ? 'job_templates' : 'workflow_job_templates';
+  const resourcePath = isTerraformTemplate
+    ? 'terraform_job_templates'
+    : isJobTemplate
+      ? 'job_templates'
+      : 'workflow_job_templates';
 
   const { openManageQuestionOrder } = useManageSurveyQuestions(isJobTemplate, isTerraformTemplate);
 
   const { data: options } = useOptions<OptionsResponse<ActionsResponse>>(
-    id
-      ? awxAPI`/${resourcePath}/${id.toString()}/`
-      : ''
+    id ? awxAPI`/${resourcePath}/${id.toString()}/` : ''
   );
   const canModifySurvey = Boolean(options && options.actions && options.actions['PUT']);
 
@@ -61,8 +63,8 @@ export function useSurveyToolbarActions(
             isTerraformTemplate
               ? AwxRoute.AddTerraformTemplateSurvey
               : isJobTemplate
-              ? AwxRoute.AddJobTemplateSurvey
-              : AwxRoute.AddWorkflowJobTemplateSurvey,
+                ? AwxRoute.AddJobTemplateSurvey
+                : AwxRoute.AddWorkflowJobTemplateSurvey,
             {
               params: { id },
             }
@@ -96,6 +98,15 @@ export function useSurveyToolbarActions(
             ),
       },
     ],
-    [t, openManageQuestionOrder, deleteQuestions, canModifySurvey, id, pageNavigate, isJobTemplate, isTerraformTemplate]
+    [
+      t,
+      openManageQuestionOrder,
+      deleteQuestions,
+      canModifySurvey,
+      id,
+      pageNavigate,
+      isJobTemplate,
+      isTerraformTemplate,
+    ]
   );
 }

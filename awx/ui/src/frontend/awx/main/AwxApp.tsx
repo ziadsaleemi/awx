@@ -1,34 +1,31 @@
 import { useEffect } from 'react';
 import { PageApp } from '../../../framework/PageNavigation/PageApp';
-import { awxAPI } from '../common/api/awx-utils';
+import { useAwxActiveUser } from '../common/useAwxActiveUser';
 import { AwxMasthead } from './AwxMasthead';
 import { AwxSessionTimeoutWarning } from './AwxSessionTimeoutWarning';
+import { prefetchAwxUrls } from './awxPrefetch';
 import { useAwxNavigation } from './useAwxNavigation';
 
 /**
- * Prefetches key API data on app load so frequently-visited pages
- * (Overview dashboard, Instances) appear to load instantly.
- * The browser HTTP cache handles deduplication, so these requests
- * are effectively free when the same data is requested shortly after.
+ * Prefetches key API data on app load so frequently visited pages and resource
+ * count lookups can reuse the SWR cache instead of starting cold.
  */
-function useAwxPrefetch() {
+function useAwxPrefetch(includeAdminResources: boolean) {
   useEffect(() => {
-    const urls = [
-      awxAPI`/dashboard/`,
-      awxAPI`/instances/?page_size=50`,
-      awxAPI`/config/`,
-    ];
-    for (const url of urls) {
-      void fetch(url).catch(() => {
-        // Prefetch errors are non-fatal — the actual component fetch will retry
-      });
-    }
-  }, []);
+    const timeoutId = window.setTimeout(() => {
+      prefetchAwxUrls({ includeAdminResources });
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [includeAdminResources]);
 }
 
 export function AwxApp() {
   const navigation = useAwxNavigation();
-  useAwxPrefetch();
+  const { activeAwxUser } = useAwxActiveUser();
+  const includeAdminResources = Boolean(
+    activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
+  );
+  useAwxPrefetch(includeAdminResources);
   return (
     <>
       <AwxSessionTimeoutWarning />

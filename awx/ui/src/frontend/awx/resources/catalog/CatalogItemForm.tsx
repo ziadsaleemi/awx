@@ -49,7 +49,6 @@ import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { Survey } from '../../interfaces/Survey';
 import { PageFormGroup } from '../../../../framework/PageForm/Inputs/PageFormGroup';
 import { Controller, useController, useFieldArray, useFormContext } from 'react-hook-form';
-import { parseCatalogDynamicFieldNames } from './catalogNaming';
 
 interface ProviderConfig {
   provider: string;
@@ -73,27 +72,34 @@ interface CatalogItemFormValues {
   provision_workflow: number | null;
   terraform_job_template: number | null;
   deprovision_workflow: number | null;
+  configure_workflow: number | null;
+  validate_workflow: number | null;
   override_workflow_limit: boolean;
   browse_enabled: boolean;
   extra_vars_schema: string;
+  default_lease_minutes: number | null;
+  require_lease: boolean;
   provider_configs: ProviderConfig[];
-  provider_field_configs: Record<string, {
-    disabled_fields: string[];
-    hidden_fields: string[];
-    field_templates: Record<string, string>;
-    dynamic_field_sources: Record<string, string>;
-    target_inventory?: string | null;
-    target_group?: string;
-    vm_size_settings?: {
-      enabled: boolean;
-      allow_manual: boolean;
-      cpu_variable: string;
-      ram_variable: string;
-      cpu_limit: number | null;
-      ram_limit: number | null;
-      require_approval: boolean;
-    };
-  }>;
+  provider_field_configs: Record<
+    string,
+    {
+      disabled_fields: string[];
+      hidden_fields: string[];
+      field_templates: Record<string, string>;
+      dynamic_field_sources: Record<string, string>;
+      target_inventory?: string | null;
+      target_group?: string;
+      vm_size_settings?: {
+        enabled: boolean;
+        allow_manual: boolean;
+        cpu_variable: string;
+        ram_variable: string;
+        cpu_limit: number | null;
+        ram_limit: number | null;
+        require_approval: boolean;
+      };
+    }
+  >;
 }
 
 const StyledUploadButton = styled.label`
@@ -232,11 +238,17 @@ function makeDefaultValues(item?: CatalogItem): CatalogItemFormValues {
       item?.terraform_job_template ?? item?.summary_fields?.terraform_job_template?.id ?? null,
     deprovision_workflow:
       item?.deprovision_workflow ?? item?.summary_fields?.deprovision_workflow?.id ?? null,
+    configure_workflow:
+      item?.configure_workflow ?? item?.summary_fields?.configure_workflow?.id ?? null,
+    validate_workflow:
+      item?.validate_workflow ?? item?.summary_fields?.validate_workflow?.id ?? null,
     override_workflow_limit: item?.override_workflow_limit ?? true,
     browse_enabled: item?.browse_enabled ?? true,
     extra_vars_schema: item?.extra_vars_schema
       ? JSON.stringify(item.extra_vars_schema, null, 2)
       : '',
+    default_lease_minutes: item?.default_lease_minutes ?? null,
+    require_lease: item?.require_lease ?? false,
     provider_configs: buildProviderConfigs(item),
     provider_field_configs: item?.provider_field_configs ?? {},
   };
@@ -260,7 +272,8 @@ function buildProviderConfigs(item?: CatalogItem): ProviderConfig[] {
     provider,
     tft_id: (item?.cloud_backends as Record<string, number> | null)?.[provider] ?? null,
     wjt_id: (item?.provider_workflows as Record<string, number> | null)?.[provider] ?? null,
-    dwjt_id: (item?.provider_deprovision_workflows as Record<string, number> | null)?.[provider] ?? null,
+    dwjt_id:
+      (item?.provider_deprovision_workflows as Record<string, number> | null)?.[provider] ?? null,
     enabled: item?.available_providers?.includes(provider) ?? false,
   }));
 }
@@ -288,30 +301,34 @@ export function CreateCatalogItem() {
       provision_workflow: values.provision_workflow,
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
+      configure_workflow: values.configure_workflow,
+      validate_workflow: values.validate_workflow,
       override_workflow_limit: values.override_workflow_limit,
       browse_enabled: values.browse_enabled,
       extra_vars_schema,
+      default_lease_minutes: values.default_lease_minutes ?? null,
+      require_lease: values.require_lease,
       cloud_backends:
-        values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.tft_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.tft_id != null)
+                .filter((e) => e.provider && e.tft_id !== null)
                 .map((e) => [e.provider, e.tft_id as number])
             )
           : null,
       provider_workflows:
-        values.provider_configs.filter((e) => e.provider && e.wjt_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.wjt_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.wjt_id != null)
+                .filter((e) => e.provider && e.wjt_id !== null)
                 .map((e) => [e.provider, e.wjt_id as number])
             )
           : null,
       provider_deprovision_workflows:
-        values.provider_configs.filter((e) => e.provider && e.dwjt_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.dwjt_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.dwjt_id != null)
+                .filter((e) => e.provider && e.dwjt_id !== null)
                 .map((e) => [e.provider, e.dwjt_id as number])
             )
           : null,
@@ -379,30 +396,32 @@ export function EditCatalogItem() {
       provision_workflow: values.provision_workflow,
       terraform_job_template: values.terraform_job_template,
       deprovision_workflow: values.deprovision_workflow,
+      configure_workflow: values.configure_workflow,
+      validate_workflow: values.validate_workflow,
       override_workflow_limit: values.override_workflow_limit,
       browse_enabled: values.browse_enabled,
       extra_vars_schema,
       cloud_backends:
-        values.provider_configs.filter((e) => e.provider && e.tft_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.tft_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.tft_id != null)
+                .filter((e) => e.provider && e.tft_id !== null)
                 .map((e) => [e.provider, e.tft_id as number])
             )
           : null,
       provider_workflows:
-        values.provider_configs.filter((e) => e.provider && e.wjt_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.wjt_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.wjt_id != null)
+                .filter((e) => e.provider && e.wjt_id !== null)
                 .map((e) => [e.provider, e.wjt_id as number])
             )
           : null,
       provider_deprovision_workflows:
-        values.provider_configs.filter((e) => e.provider && e.dwjt_id != null).length > 0
+        values.provider_configs.filter((e) => e.provider && e.dwjt_id !== null).length > 0
           ? Object.fromEntries(
               values.provider_configs
-                .filter((e) => e.provider && e.dwjt_id != null)
+                .filter((e) => e.provider && e.dwjt_id !== null)
                 .map((e) => [e.provider, e.dwjt_id as number])
             )
           : null,
@@ -414,6 +433,8 @@ export function EditCatalogItem() {
         Object.keys(values.provider_field_configs).length > 0
           ? values.provider_field_configs
           : null,
+      default_lease_minutes: values.default_lease_minutes ?? null,
+      require_lease: values.require_lease,
     };
     await requestPatch<typeof payload>(awxAPI`/catalog_items/${id}/`, payload);
     pageNavigate(AwxRoute.CatalogItemPage, { params: { id } });
@@ -517,6 +538,59 @@ function CatalogItemFormInputs() {
                 placeholder={extraVarsSchemaPlaceholder}
               />
             </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 16,
+                alignItems: 'start',
+              }}
+            >
+              <GlobalWorkflowPicker
+                name="configure_workflow"
+                label={t('Configure workflow')}
+                labelHelp={t(
+                  'Optional workflow to run automatically after a successful provision to configure the new resource. Runs before validate workflow if set.'
+                )}
+              />
+              <GlobalWorkflowPicker
+                name="validate_workflow"
+                label={t('Validate workflow')}
+                labelHelp={t(
+                  'Optional workflow to run after configure workflow (or after provision if no configure workflow is set) to validate the resource is healthy.'
+                )}
+              />
+            </div>
+
+            {/* ---- Lease / TTL settings ---- */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 16,
+                alignItems: 'start',
+              }}
+            >
+              <PageFormTextInput<CatalogItemFormValues>
+                name="default_lease_minutes"
+                label={t('Default lease (minutes)')}
+                labelHelpTitle={t('Default lease')}
+                labelHelp={t(
+                  'Pre-fills the lease duration picker in the deploy form. Leave blank for no default. Example: 480 for 8 hours.'
+                )}
+                placeholder={t('e.g. 480')}
+                type="number"
+              />
+              <PageFormCheckbox<CatalogItemFormValues>
+                name="require_lease"
+                label={t('Require lease on every deployment')}
+                labelHelpTitle={t('Require lease')}
+                labelHelp={t(
+                  'When enabled, deployers must choose a lease duration before submitting. Deployments without a TTL will be rejected.'
+                )}
+              />
+            </div>
           </div>
         </PageTab>
         <PageTab label={t('Cloud providers')}>
@@ -543,6 +617,112 @@ const PROVIDER_LABELS: Record<string, string> = {
   aws: 'Amazon AWS',
 };
 
+// ── Global top-level workflow picker ─────────────────────────────────────────
+
+function GlobalWorkflowPicker({
+  name,
+  label,
+  labelHelp,
+}: {
+  name: 'configure_workflow' | 'validate_workflow';
+  label: string;
+  labelHelp?: string;
+}) {
+  const { t } = useTranslation();
+  const { control, watch } = useFormContext<CatalogItemFormValues>();
+  const openSelect = useSelectWorkflowJobTemplate();
+  const [localName, setLocalName] = useState<string | null>(null);
+  const idValue = watch(name);
+
+  const { data: wjtInfo } = useGet<{ id: number; name: string }>(
+    idValue !== null && localName === null
+      ? awxAPI`/workflow_job_templates/${String(idValue)}/`
+      : undefined
+  );
+  useEffect(() => {
+    if (wjtInfo?.name) setLocalName(wjtInfo.name);
+  }, [wjtInfo?.name]);
+
+  const queryOptions = async (options: {
+    next?: string | number;
+    search?: string;
+    signal?: AbortSignal;
+  }) => {
+    const params = new URLSearchParams();
+    params.set('page_size', '20');
+    params.set('order_by', 'name');
+    if (options.next) params.set('name__gt', String(options.next));
+    if (options.search) params.set('name__icontains', options.search);
+    try {
+      const url = awxAPI`/workflow_job_templates/` + '?' + params.toString();
+      const response = await requestGet<AwxItemsResponse<{ id: number; name: string }>>(
+        url,
+        options.signal
+      );
+      const results = response.results ?? [];
+      return {
+        remaining: response.count - results.length,
+        options: results.map((r) => ({ label: r.name, value: r.id })),
+        next: results[results.length - 1]?.name,
+      };
+    } catch {
+      return { remaining: 0, options: [], next: 0 };
+    }
+  };
+
+  return (
+    <FormGroup label={label}>
+      {labelHelp ? (
+        <div style={{ color: 'var(--pf-v5-global--Color--200)', fontSize: '0.875rem' }}>
+          {labelHelp}
+        </div>
+      ) : null}
+      <Controller
+        control={control}
+        name={name}
+        shouldUnregister={false}
+        render={({ field }) => (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PageAsyncSingleSelect<number>
+                id={`global-wjt-${name}`}
+                placeholder={t('Select workflow job template')}
+                queryPlaceholder={t('Loading workflows…')}
+                queryErrorText={t('Error loading workflows')}
+                value={(idValue as number) ?? undefined}
+                onSelect={(v) => {
+                  field.onChange(v ?? null);
+                  setLocalName(null);
+                }}
+                queryOptions={queryOptions}
+                queryLabel={(v) => <>{localName ?? `#${String(v)}`}</>}
+                onBrowse={() =>
+                  openSelect((wjt) => {
+                    field.onChange(wjt.id);
+                    setLocalName(wjt.name);
+                  })
+                }
+              />
+            </div>
+            {idValue !== null && (
+              <Button
+                variant="plain"
+                onClick={() => {
+                  field.onChange(null);
+                  setLocalName(null);
+                }}
+                aria-label={t('Clear')}
+              >
+                ✕
+              </Button>
+            )}
+          </div>
+        )}
+      />
+    </FormGroup>
+  );
+}
+
 interface CloudConnectionApiResult {
   count: number;
   results: Array<{
@@ -562,7 +742,7 @@ function ProviderWjtSelector({ index }: { index: number }) {
   const idValue = providerConfigs[index]?.wjt_id ?? null;
 
   const { data: wjtInfo } = useGet<{ id: number; name: string }>(
-    idValue != null && localName === null
+    idValue !== null && localName === null
       ? awxAPI`/workflow_job_templates/${String(idValue)}/`
       : undefined
   );
@@ -601,8 +781,7 @@ function ProviderWjtSelector({ index }: { index: number }) {
     <FormGroup label={t('Survey workflow')}>
       <Controller
         control={control}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        name={`provider_configs.${index}.wjt_id` as any}
+        name={`provider_configs.${index}.wjt_id` as const}
         shouldUnregister={false}
         render={({ field }) => (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -627,7 +806,7 @@ function ProviderWjtSelector({ index }: { index: number }) {
                 }
               />
             </div>
-            {idValue != null && (
+            {idValue !== null && (
               <Button
                 variant="plain"
                 onClick={() => {
@@ -655,7 +834,7 @@ function ProviderDeprovisionWjtSelector({ index }: { index: number }) {
   const idValue = providerConfigs[index]?.dwjt_id ?? null;
 
   const { data: wjtInfo } = useGet<{ id: number; name: string }>(
-    idValue != null && localName === null
+    idValue !== null && localName === null
       ? awxAPI`/workflow_job_templates/${String(idValue)}/`
       : undefined
   );
@@ -694,8 +873,7 @@ function ProviderDeprovisionWjtSelector({ index }: { index: number }) {
     <FormGroup label={t('Deprovision workflow')}>
       <Controller
         control={control}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        name={`provider_configs.${index}.dwjt_id` as any}
+        name={`provider_configs.${index}.dwjt_id` as const}
         shouldUnregister={false}
         render={({ field }) => (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -720,7 +898,7 @@ function ProviderDeprovisionWjtSelector({ index }: { index: number }) {
                 }
               />
             </div>
-            {idValue != null && (
+            {idValue !== null && (
               <Button
                 variant="plain"
                 onClick={() => {
@@ -744,10 +922,14 @@ function CloudProvidersTab() {
   const { control, watch } = useFormContext<CatalogItemFormValues>();
   const { fields, append } = useFieldArray({ control, name: 'provider_configs' });
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+  const organizationId = watch('organization');
 
-  const { data: connectionsData } = useGet<CloudConnectionApiResult>(
-    awxAPI`/catalog_cloud/connections/`
-  );
+  const connectionsUrl =
+    organizationId !== null
+      ? `${awxAPI`/catalog_cloud/connections/`}?organization=${organizationId.toString()}`
+      : awxAPI`/catalog_cloud/connections/`;
+
+  const { data: connectionsData } = useGet<CloudConnectionApiResult>(connectionsUrl);
 
   const providerConfigs = watch('provider_configs');
 
@@ -761,7 +943,7 @@ function CloudProvidersTab() {
         append({ provider: pid, tft_id: null, wjt_id: null, dwjt_id: null, enabled: false });
       }
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionsData]);
 
   // Group connections by provider_id
@@ -780,9 +962,7 @@ function CloudProvidersTab() {
   return (
     <div style={{ marginTop: 16 }}>
       <p style={{ color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
-        {t(
-          'Enable cloud providers for this catalog item and select the survey workflow for each.'
-        )}
+        {t('Enable cloud providers for this catalog item and select the survey workflow for each.')}
       </p>
       {fields.length > 0 ? (
         <DataList aria-label={t('Cloud provider configurations')} isCompact>
@@ -902,409 +1082,6 @@ function CloudProvidersTab() {
   );
 }
 
-function CatalogDynamicFieldSelector() {
-  const { t } = useTranslation();
-  const { setValue, watch } = useFormContext<CatalogItemFormValues>();
-  const [fieldTemplates, setFieldTemplates] = useState<Record<string, string>>({});
-  const [cursorPositions, setCursorPositions] = useState<Record<string, number>>({});
-  const fieldInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  const selectedProvisionWorkflowId = watch('provision_workflow');
-  const selectedDynamicFieldRaw = watch('dynamic_name_field') ?? '';
-  const configuredDynamicFieldTemplates = watch('dynamic_field_templates') ?? {};
-  const configuredDisabledDeployFields = watch('deploy_disabled_fields') ?? [];
-  const configuredHiddenDeployFields = watch('deploy_hidden_fields') ?? [];
-  const extraVarsSchema = watch('extra_vars_schema');
-  const selectedDynamicFields = useMemo(
-    () => parseCatalogDynamicFieldNames(selectedDynamicFieldRaw),
-    [selectedDynamicFieldRaw]
-  );
-
-  const { data: survey } = useGet<Survey>(
-    selectedProvisionWorkflowId
-      ? awxAPI`/workflow_job_templates/${selectedProvisionWorkflowId.toString()}/survey_spec/`
-      : undefined
-  );
-
-  const surveyVariables = useMemo(() => {
-    const names = new Set<string>();
-    for (const variable of survey?.spec?.map((question) => question.variable) ?? []) {
-      if (templateVariablePattern.test(variable)) {
-        names.add(variable);
-      }
-    }
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [survey?.spec]);
-
-  const controlledFields = useMemo(() => {
-    const names = new Set<string>();
-
-    for (const variable of surveyVariables) {
-      names.add(variable);
-    }
-
-    for (const variable of selectedDynamicFields) {
-      if (templateVariablePattern.test(variable)) {
-        names.add(variable);
-      }
-    }
-
-    for (const variable of Object.keys(configuredDynamicFieldTemplates)) {
-      if (templateVariablePattern.test(variable)) {
-        names.add(variable);
-      }
-    }
-
-    for (const variable of configuredDisabledDeployFields) {
-      if (typeof variable === 'string' && templateVariablePattern.test(variable)) {
-        names.add(variable);
-      }
-    }
-
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [
-    configuredDisabledDeployFields,
-    configuredDynamicFieldTemplates,
-    selectedDynamicFields,
-    surveyVariables,
-  ]);
-
-  const disabledDeployFieldSet = useMemo(() => {
-    const names = new Set<string>();
-    for (const field of configuredDisabledDeployFields) {
-      if (typeof field === 'string' && templateVariablePattern.test(field)) {
-        names.add(field);
-      }
-    }
-    return names;
-  }, [configuredDisabledDeployFields]);
-
-  const hiddenDeployFieldSet = useMemo(() => {
-    const names = new Set<string>();
-    for (const field of configuredHiddenDeployFields) {
-      if (typeof field === 'string' && templateVariablePattern.test(field)) {
-        names.add(field);
-      }
-    }
-    return names;
-  }, [configuredHiddenDeployFields]);
-
-  const availableVariables = useMemo(() => {
-    const variableNames = new Set<string>();
-    variableNames.add('user_org_name');
-
-    for (const variable of parseSchemaVariableNames(extraVarsSchema)) {
-      variableNames.add(variable);
-    }
-
-    for (const variable of surveyVariables) {
-      variableNames.add(variable);
-    }
-
-    // Keep dynamic field suggestions stable even when workflow fields are on a different tab.
-    for (const variable of selectedDynamicFields) {
-      if (templateVariablePattern.test(variable)) {
-        variableNames.add(variable);
-      }
-    }
-
-    for (const variable of Object.keys(configuredDynamicFieldTemplates)) {
-      if (templateVariablePattern.test(variable)) {
-        variableNames.add(variable);
-      }
-    }
-
-    for (const variable of configuredDisabledDeployFields) {
-      if (typeof variable === 'string' && templateVariablePattern.test(variable)) {
-        variableNames.add(variable);
-      }
-    }
-
-    return [...variableNames].sort((a, b) => a.localeCompare(b));
-  }, [
-    configuredDisabledDeployFields,
-    configuredDynamicFieldTemplates,
-    extraVarsSchema,
-    selectedDynamicFields,
-    surveyVariables,
-  ]);
-
-  useEffect(() => {
-    const nextDynamicFields = controlledFields;
-    if (nextDynamicFields.join(',') !== selectedDynamicFields.join(',')) {
-      setValue('dynamic_name_field', nextDynamicFields.join(','), {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    }
-  }, [controlledFields, selectedDynamicFields, setValue]);
-
-  useEffect(() => {
-    setFieldTemplates((prev) => {
-      const next = { ...prev };
-      let changed = false;
-
-      for (const [field, template] of Object.entries(configuredDynamicFieldTemplates)) {
-        if (!templateVariablePattern.test(field)) {
-          continue;
-        }
-        if (typeof template !== 'string') {
-          continue;
-        }
-        if (next[field] !== template) {
-          next[field] = template;
-          changed = true;
-        }
-      }
-
-      return changed ? next : prev;
-    });
-  }, [configuredDynamicFieldTemplates]);
-
-  useEffect(() => {
-    setFieldTemplates((prev) => {
-      const next = { ...prev };
-      for (const field of controlledFields) {
-        if (!(field in next)) {
-          next[field] = `{${field}}`;
-        }
-      }
-      return next;
-    });
-  }, [controlledFields]);
-
-  useEffect(() => {
-    const nextTemplates: Record<string, string> = {};
-    for (const field of controlledFields) {
-      nextTemplates[field] = fieldTemplates[field] ?? '';
-    }
-
-    const currentTemplates: Record<string, string> = {};
-    for (const field of controlledFields) {
-      currentTemplates[field] = configuredDynamicFieldTemplates[field] ?? '';
-    }
-
-    if (JSON.stringify(nextTemplates) !== JSON.stringify(currentTemplates)) {
-      setValue('dynamic_field_templates', nextTemplates, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    }
-  }, [configuredDynamicFieldTemplates, controlledFields, fieldTemplates, setValue]);
-
-  useEffect(() => {
-    const normalizedDisabledFields = controlledFields.filter((field) =>
-      disabledDeployFieldSet.has(field)
-    );
-    if (
-      JSON.stringify(normalizedDisabledFields) !== JSON.stringify(configuredDisabledDeployFields)
-    ) {
-      setValue('deploy_disabled_fields', normalizedDisabledFields, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    }
-  }, [configuredDisabledDeployFields, controlledFields, disabledDeployFieldSet, setValue]);
-
-  useEffect(() => {
-    const normalizedHiddenFields = controlledFields.filter((field) =>
-      hiddenDeployFieldSet.has(field)
-    );
-    if (JSON.stringify(normalizedHiddenFields) !== JSON.stringify(configuredHiddenDeployFields)) {
-      setValue('deploy_hidden_fields', normalizedHiddenFields, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    }
-  }, [configuredHiddenDeployFields, controlledFields, hiddenDeployFieldSet, setValue]);
-
-  return (
-    <PageFormGroup
-      fieldId="catalog_dynamic_field_selector"
-      label={t('Dynamic deploy field')}
-      labelHelpTitle={t('Dynamic deploy field')}
-      labelHelp={t(
-        'Survey fields are loaded automatically. Configure each field value and deploy-form locking below.'
-      )}
-      helperText={t(
-        'All survey fields are listed automatically. Type { to browse variables for each field value. These values are independent from Name template. Use Disable or Hide per field for deploy form behavior.'
-      )}
-    >
-      {controlledFields.length > 0 && (
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {controlledFields.map((field) => {
-            const fieldTemplate = fieldTemplates[field] ?? '';
-            const cursorPosition = cursorPositions[field] ?? fieldTemplate.length;
-            const tokenContext = getTemplateTokenContext(fieldTemplate, cursorPosition);
-            const typedFragment = tokenContext?.typedFragment?.toLowerCase() ?? '';
-            const filteredVariables = tokenContext
-              ? availableVariables.filter((variable) =>
-                  variable.toLowerCase().startsWith(typedFragment)
-                )
-              : [];
-
-            const insertVariable = (variable: string) => {
-              const insertedToken = `{${variable}}`;
-              let updatedTemplate = fieldTemplate;
-              let nextCursorPosition = fieldTemplate.length + insertedToken.length;
-
-              if (tokenContext) {
-                const beforeToken = fieldTemplate.slice(0, tokenContext.openBraceIndex);
-                const afterToken = fieldTemplate.slice(tokenContext.cursorPosition);
-                updatedTemplate = `${beforeToken}${insertedToken}${afterToken}`;
-                nextCursorPosition = beforeToken.length + insertedToken.length;
-              } else {
-                const needsSpacer = fieldTemplate.length > 0 && !fieldTemplate.endsWith(' ');
-                updatedTemplate = `${fieldTemplate}${needsSpacer ? ' ' : ''}${insertedToken}`;
-                nextCursorPosition = updatedTemplate.length;
-              }
-
-              setFieldTemplates((prev) => ({
-                ...prev,
-                [field]: updatedTemplate,
-              }));
-
-              setCursorPositions((prev) => ({
-                ...prev,
-                [field]: nextCursorPosition,
-              }));
-
-              window.requestAnimationFrame(() => {
-                const input = fieldInputRefs.current[field];
-                input?.focus();
-                input?.setSelectionRange(nextCursorPosition, nextCursorPosition);
-              });
-            };
-
-            return (
-              <DynamicFieldRow key={field}>
-                <div style={{ minWidth: 160, fontWeight: 600, fontSize: '0.875rem' }}>{field}</div>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <TextInput
-                    id={`dynamic_field_${field}`}
-                    ref={(element) => {
-                      fieldInputRefs.current[field] = element;
-                    }}
-                    value={fieldTemplate}
-                    onChange={(_event, nextValue) => {
-                      setFieldTemplates((prev) => ({
-                        ...prev,
-                        [field]: nextValue,
-                      }));
-                      setCursorPositions((prev) => ({
-                        ...prev,
-                        [field]: nextValue.length,
-                      }));
-                    }}
-                    onClick={(event) => {
-                      const nextCursorPosition =
-                        event.currentTarget.selectionStart ?? fieldTemplate.length;
-                      setCursorPositions((prev) => ({
-                        ...prev,
-                        [field]: nextCursorPosition,
-                      }));
-                    }}
-                    onKeyUp={(event) => {
-                      const nextCursorPosition =
-                        event.currentTarget.selectionStart ?? fieldTemplate.length;
-                      setCursorPositions((prev) => ({
-                        ...prev,
-                        [field]: nextCursorPosition,
-                      }));
-                    }}
-                    onSelect={(event) => {
-                      const nextCursorPosition =
-                        event.currentTarget.selectionStart ?? fieldTemplate.length;
-                      setCursorPositions((prev) => ({
-                        ...prev,
-                        [field]: nextCursorPosition,
-                      }));
-                    }}
-                    placeholder={t('Enter template, for example {vm_name}-{env}')}
-                    autoComplete="off"
-                  />
-                  {filteredVariables.length > 0 && tokenContext && (
-                    <SuggestionDropdown>
-                      {filteredVariables.map((variable) => (
-                        <SuggestionItem
-                          key={`${field}-${variable}`}
-                          variant="plain"
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            insertVariable(variable);
-                          }}
-                        >
-                          {`{${variable}}`}
-                        </SuggestionItem>
-                      ))}
-                    </SuggestionDropdown>
-                  )}
-                </div>
-                <Checkbox
-                  id={`disable_deploy_field_${field}`}
-                  label={t('Disable')}
-                  isChecked={disabledDeployFieldSet.has(field)}
-                  onChange={(_event, isChecked) => {
-                    const nextDisabledSet = new Set(disabledDeployFieldSet);
-                    if (isChecked) {
-                      nextDisabledSet.add(field);
-                    } else {
-                      nextDisabledSet.delete(field);
-                    }
-                    const nextDisabledFields = controlledFields.filter((name) =>
-                      nextDisabledSet.has(name)
-                    );
-                    setValue('deploy_disabled_fields', nextDisabledFields, {
-                      shouldDirty: true,
-                      shouldValidate: true,
-                    });
-                  }}
-                />
-                <Checkbox
-                  id={`hide_deploy_field_${field}`}
-                  label={t('Hide')}
-                  isChecked={hiddenDeployFieldSet.has(field)}
-                  onChange={(_event, isChecked) => {
-                    const nextHiddenSet = new Set(hiddenDeployFieldSet);
-                    if (isChecked) {
-                      nextHiddenSet.add(field);
-                    } else {
-                      nextHiddenSet.delete(field);
-                    }
-                    const nextHiddenFields = controlledFields.filter((name) =>
-                      nextHiddenSet.has(name)
-                    );
-                    setValue('deploy_hidden_fields', nextHiddenFields, {
-                      shouldDirty: true,
-                      shouldValidate: true,
-                    });
-                  }}
-                />
-              </DynamicFieldRow>
-            );
-          })}
-        </div>
-      )}
-
-      {controlledFields.length > 0 && (
-        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: '0.85rem' }}>
-            {t('Current dynamic fields: {{fields}}', {
-              fields: controlledFields.join(', '),
-            })}
-          </span>
-        </div>
-      )}
-
-      {surveyVariables.length === 0 && (
-        <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
-          {t('Select a provision workflow with survey fields to configure dynamic field controls.')}
-        </div>
-      )}
-    </PageFormGroup>
-  );
-}
-
 // ─── Per-Provider Form Fields Tab ─────────────────────────────────────────────
 
 const PROVIDER_SOURCE_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
@@ -1394,12 +1171,11 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
   const [grpCursor, setGrpCursor] = useState(0);
   const invInputRef = useRef<HTMLInputElement | null>(null);
   const grpInputRef = useRef<HTMLInputElement | null>(null);
-  const [lastFocusedTarget, setLastFocusedTarget] = useState<'target_inventory' | 'target_group'>('target_inventory');
-
-  const allTemplateVars = useMemo(
-    () => ['user_org_name', ...surveyVariables],
-    [surveyVariables]
+  const [lastFocusedTarget, setLastFocusedTarget] = useState<'target_inventory' | 'target_group'>(
+    'target_inventory'
   );
+
+  const allTemplateVars = useMemo(() => ['user_org_name', ...surveyVariables], [surveyVariables]);
 
   const disabledSet = useMemo(() => new Set(cfg.disabled_fields), [cfg.disabled_fields]);
   const hiddenSet = useMemo(() => new Set(cfg.hidden_fields), [cfg.hidden_fields]);
@@ -1468,8 +1244,13 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
 
   if (!wjtId) {
     return (
-      <div style={{ marginTop: 16, fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
-        {t('No workflow job template linked for {{provider}}. Assign one in the Cloud providers tab to configure field overrides.', { provider: PROVIDER_LABELS[provider] ?? provider })}
+      <div
+        style={{ marginTop: 16, fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}
+      >
+        {t(
+          'No workflow job template linked for {{provider}}. Assign one in the Cloud providers tab to configure field overrides.',
+          { provider: PROVIDER_LABELS[provider] ?? provider }
+        )}
       </div>
     );
   }
@@ -1488,8 +1269,12 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
         <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 4 }}>
           {t('Provisioning target')}
         </div>
-        <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 10 }}>
-          {t('Use {variable} syntax to dynamically resolve the target inventory and group from survey variable values.')}
+        <p
+          style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 10 }}
+        >
+          {t(
+            'Use {variable} syntax to dynamically resolve the target inventory and group from survey variable values.'
+          )}
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
           {/* Target inventory template input */}
@@ -1510,7 +1295,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 id={`pft_inv_${provider}`}
                 ref={invInputRef}
                 value={String(cfg.target_inventory ?? '')}
-                placeholder="{org_name}_inventory"
+                placeholder={t('{org_name}_inventory')}
                 autoComplete="off"
                 aria-label={t('Target inventory template')}
                 onFocus={() => setLastFocusedTarget('target_inventory')}
@@ -1527,7 +1312,9 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 const tokenCtx = getTemplateTokenContext(tmpl, invCursor);
                 if (!tokenCtx) return null;
                 const fragment = tokenCtx.typedFragment.toLowerCase();
-                const suggestions = allTemplateVars.filter((v) => v.toLowerCase().startsWith(fragment));
+                const suggestions = allTemplateVars.filter((v) =>
+                  v.toLowerCase().startsWith(fragment)
+                );
                 if (suggestions.length === 0) return null;
                 return (
                   <SuggestionDropdown>
@@ -1566,7 +1353,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 id={`pft_grp_${provider}`}
                 ref={grpInputRef}
                 value={cfg.target_group ?? ''}
-                placeholder="{env}_servers"
+                placeholder={t('{env}_servers')}
                 autoComplete="off"
                 aria-label={t('Target group template')}
                 onFocus={() => setLastFocusedTarget('target_group')}
@@ -1583,7 +1370,9 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 const tokenCtx = getTemplateTokenContext(tmpl, grpCursor);
                 if (!tokenCtx) return null;
                 const fragment = tokenCtx.typedFragment.toLowerCase();
-                const suggestions = allTemplateVars.filter((v) => v.toLowerCase().startsWith(fragment));
+                const suggestions = allTemplateVars.filter((v) =>
+                  v.toLowerCase().startsWith(fragment)
+                );
                 if (suggestions.length === 0) return null;
                 return (
                   <SuggestionDropdown>
@@ -1607,7 +1396,13 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
         </div>
         {allTemplateVars.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 6 }}>
+            <p
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--pf-v5-global--Color--200)',
+                marginBottom: 6,
+              }}
+            >
               {t('Available variables (click to insert into focused field):')}
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -1639,7 +1434,13 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
         </div>
       )}
       {surveyVariables.length > 0 && (
-        <p style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 12 }}>
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--pf-v5-global--Color--200)',
+            marginBottom: 12,
+          }}
+        >
           {t(
             'Configure each survey field for {{provider}} deployments. Set a default value template, or mark the field as disabled or hidden in the deploy form.',
             { provider: PROVIDER_LABELS[provider] ?? provider }
@@ -1662,7 +1463,9 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
               <div style={{ flex: 1, position: 'relative' }}>
                 <TextInput
                   id={`${provider}_tmpl_${variable}`}
-                  ref={(el) => { fieldInputRefs.current[variable] = el; }}
+                  ref={(el) => {
+                    fieldInputRefs.current[variable] = el;
+                  }}
                   value={tmpl}
                   placeholder={t('Default value, e.g. {{{variable}}}', { variable })}
                   autoComplete="off"
@@ -1672,9 +1475,18 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                     setCursorPositions((prev) => ({ ...prev, [variable]: val.length }));
                     saveConfig({ field_templates: next });
                   }}
-                  onClick={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
-                  onKeyUp={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
-                  onSelect={(e) => { const p = e.currentTarget.selectionStart ?? tmpl.length; setCursorPositions((prev) => ({ ...prev, [variable]: p })); }}
+                  onClick={(e) => {
+                    const p = e.currentTarget.selectionStart ?? tmpl.length;
+                    setCursorPositions((prev) => ({ ...prev, [variable]: p }));
+                  }}
+                  onKeyUp={(e) => {
+                    const p = e.currentTarget.selectionStart ?? tmpl.length;
+                    setCursorPositions((prev) => ({ ...prev, [variable]: p }));
+                  }}
+                  onSelect={(e) => {
+                    const p = e.currentTarget.selectionStart ?? tmpl.length;
+                    setCursorPositions((prev) => ({ ...prev, [variable]: p }));
+                  }}
                 />
                 {suggestions.length > 0 && tokenCtx && (
                   <SuggestionDropdown>
@@ -1682,7 +1494,10 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                       <SuggestionItem
                         key={`${variable}-${v}`}
                         variant="plain"
-                        onMouseDown={(e) => { e.preventDefault(); insertVariable(v, variable); }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          insertVariable(v, variable);
+                        }}
                       >
                         {`{${v}}`}
                       </SuggestionItem>
@@ -1696,7 +1511,8 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 isChecked={disabledSet.has(variable)}
                 onChange={(_e, checked) => {
                   const next = new Set(disabledSet);
-                  if (checked) next.add(variable); else next.delete(variable);
+                  if (checked) next.add(variable);
+                  else next.delete(variable);
                   saveConfig({ disabled_fields: [...next] });
                 }}
               />
@@ -1706,13 +1522,20 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 isChecked={hiddenSet.has(variable)}
                 onChange={(_e, checked) => {
                   const next = new Set(hiddenSet);
-                  if (checked) next.add(variable); else next.delete(variable);
+                  if (checked) next.add(variable);
+                  else next.delete(variable);
                   saveConfig({ hidden_fields: [...next] });
                 }}
               />
               {(PROVIDER_SOURCE_OPTIONS[provider]?.length ?? 0) > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 200 }}>
-                  <span style={{ fontSize: '0.8rem', whiteSpace: 'nowrap', color: 'var(--pf-v5-global--Color--200)' }}>
+                  <span
+                    style={{
+                      fontSize: '0.8rem',
+                      whiteSpace: 'nowrap',
+                      color: 'var(--pf-v5-global--Color--200)',
+                    }}
+                  >
                     {t('Source:')}
                   </span>
                   <FormSelect
@@ -1755,8 +1578,12 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
         <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 12 }}>
           {t('VM Size Settings')}
         </div>
-        <p style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 14 }}>
-          {t('Control how VM size presets are shown in the deploy form and set limits that trigger admin approval.')}
+        <p
+          style={{ fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 14 }}
+        >
+          {t(
+            'Control how VM size presets are shown in the deploy form and set limits that trigger admin approval.'
+          )}
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Switch
@@ -1764,72 +1591,130 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
             label={t('Show VM size selector')}
             labelOff={t('Show VM size selector')}
             isChecked={cfg.vm_size_settings?.enabled !== false}
-            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), enabled: checked } })}
+            onChange={(_e, checked) =>
+              saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), enabled: checked } })
+            }
           />
           <Switch
             id={`${provider}_vms_allow_manual`}
             label={t('Allow users to manually enter CPU / RAM')}
             labelOff={t('Allow users to manually enter CPU / RAM')}
             isChecked={cfg.vm_size_settings?.allow_manual === true}
-            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), allow_manual: checked } })}
+            onChange={(_e, checked) =>
+              saveConfig({
+                vm_size_settings: { ...defaultVmSizeSettings(cfg), allow_manual: checked },
+              })
+            }
           />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
             <div>
               <label
                 htmlFor={`${provider}_vms_cpu_var`}
-                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+                style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  marginBottom: 4,
+                }}
               >
                 {t('CPU survey variable name')}
               </label>
               <TextInput
                 id={`${provider}_vms_cpu_var`}
                 value={cfg.vm_size_settings?.cpu_variable ?? ''}
-                placeholder="num_cpus"
-                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), cpu_variable: val } })}
+                placeholder={t('num_cpus')}
+                onChange={(_e, val) =>
+                  saveConfig({
+                    vm_size_settings: { ...defaultVmSizeSettings(cfg), cpu_variable: val },
+                  })
+                }
               />
             </div>
             <div>
               <label
                 htmlFor={`${provider}_vms_ram_var`}
-                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+                style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  marginBottom: 4,
+                }}
               >
                 {t('RAM survey variable name')}
               </label>
               <TextInput
                 id={`${provider}_vms_ram_var`}
                 value={cfg.vm_size_settings?.ram_variable ?? ''}
-                placeholder="ram_gb"
-                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), ram_variable: val } })}
+                placeholder={t('ram_gb')}
+                onChange={(_e, val) =>
+                  saveConfig({
+                    vm_size_settings: { ...defaultVmSizeSettings(cfg), ram_variable: val },
+                  })
+                }
               />
             </div>
             <div>
               <label
                 htmlFor={`${provider}_vms_cpu_limit`}
-                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+                style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  marginBottom: 4,
+                }}
               >
                 {t('CPU limit (cores, blank = unlimited)')}
               </label>
               <TextInput
                 id={`${provider}_vms_cpu_limit`}
                 type="number"
-                value={cfg.vm_size_settings?.cpu_limit !== null && cfg.vm_size_settings?.cpu_limit !== undefined ? String(cfg.vm_size_settings.cpu_limit) : ''}
+                value={
+                  cfg.vm_size_settings?.cpu_limit !== null &&
+                  cfg.vm_size_settings?.cpu_limit !== undefined
+                    ? String(cfg.vm_size_settings.cpu_limit)
+                    : ''
+                }
                 placeholder={t('e.g. 8')}
-                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), cpu_limit: val === '' ? null : Number(val) } })}
+                onChange={(_e, val) =>
+                  saveConfig({
+                    vm_size_settings: {
+                      ...defaultVmSizeSettings(cfg),
+                      cpu_limit: val === '' ? null : Number(val),
+                    },
+                  })
+                }
               />
             </div>
             <div>
               <label
                 htmlFor={`${provider}_vms_ram_limit`}
-                style={{ display: 'block', fontSize: '0.8rem', color: 'var(--pf-v5-global--Color--200)', marginBottom: 4 }}
+                style={{
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  color: 'var(--pf-v5-global--Color--200)',
+                  marginBottom: 4,
+                }}
               >
                 {t('RAM limit (GB, blank = unlimited)')}
               </label>
               <TextInput
                 id={`${provider}_vms_ram_limit`}
                 type="number"
-                value={cfg.vm_size_settings?.ram_limit !== null && cfg.vm_size_settings?.ram_limit !== undefined ? String(cfg.vm_size_settings.ram_limit) : ''}
+                value={
+                  cfg.vm_size_settings?.ram_limit !== null &&
+                  cfg.vm_size_settings?.ram_limit !== undefined
+                    ? String(cfg.vm_size_settings.ram_limit)
+                    : ''
+                }
                 placeholder={t('e.g. 32')}
-                onChange={(_e, val) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), ram_limit: val === '' ? null : Number(val) } })}
+                onChange={(_e, val) =>
+                  saveConfig({
+                    vm_size_settings: {
+                      ...defaultVmSizeSettings(cfg),
+                      ram_limit: val === '' ? null : Number(val),
+                    },
+                  })
+                }
               />
             </div>
           </div>
@@ -1838,7 +1723,11 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
             label={t('Require admin approval when limits are exceeded')}
             labelOff={t('Require admin approval when limits are exceeded')}
             isChecked={cfg.vm_size_settings?.require_approval === true}
-            onChange={(_e, checked) => saveConfig({ vm_size_settings: { ...defaultVmSizeSettings(cfg), require_approval: checked } })}
+            onChange={(_e, checked) =>
+              saveConfig({
+                vm_size_settings: { ...defaultVmSizeSettings(cfg), require_approval: checked },
+              })
+            }
           />
         </div>
       </div>

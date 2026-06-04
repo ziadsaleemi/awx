@@ -1,0 +1,25 @@
+
+        digraph g {
+        rankdir = LR
+        RUN_NA_0 [color = black]
+RUN_NA_1 [color = black]
+RUN_NA_2 [color = black]
+RUN_NA_3 [color = black]
+RUN_NA_4 [color = black]
+RUN_NA_5 [color = black]
+RUN_NA_6 [color = black]
+RUN_NA_7 [color = black]
+RUN_NA_8 [color = black]
+RUN_NA_9 [color = black]
+RUN_NA_0 -> RUN_NA_1 [ label="failure_nodes" ];
+RUN_NA_1 -> RUN_NA_5 [ label="failure_nodes" ];
+RUN_NA_2 -> RUN_NA_6 [ label="failure_nodes" ];
+RUN_NA_6 -> RUN_NA_9 [ label="failure_nodes" ];
+RUN_NA_0 -> RUN_NA_2 [ label="success_nodes" ];
+RUN_NA_1 -> RUN_NA_4 [ label="success_nodes" ];
+RUN_NA_3 -> RUN_NA_6 [ label="success_nodes" ];
+RUN_NA_6 -> RUN_NA_8 [ label="success_nodes" ];
+RUN_NA_0 -> RUN_NA_3 [ label="always_nodes" ];
+RUN_NA_4 -> RUN_NA_6 [ label="always_nodes" ];
+RUN_NA_6 -> RUN_NA_7 [ label="always_nodes" ];
+}

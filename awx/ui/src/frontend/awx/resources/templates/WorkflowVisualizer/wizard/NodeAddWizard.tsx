@@ -24,13 +24,33 @@ interface NewGraphNode extends NodeModel {
       };
       identifier?: string;
       all_parents_must_converge: boolean;
+      node_type?: string;
+      eda_rulebook_name?: string;
+      eda_activation_id?: string;
+      eda_event_source?: string;
+      eda_event_source_status?: string;
+      ai_task_prompt?: string;
+      ai_task_model?: string;
+      ai_task_approval_required?: boolean;
       summary_fields: {
-        unified_job_template: {
+        unified_job_template?: {
           id: number;
           name: string;
           description: string;
           unified_job_type: string;
           timeout?: number;
+        };
+        eda_rulebook?: {
+          name: string;
+          activation_id?: string;
+          event_source?: string;
+          event_source_status?: string;
+        };
+        ai_task?: {
+          prompt: string;
+          model?: string;
+          approval_required?: boolean;
+          status?: string;
         };
       };
     };
@@ -93,7 +113,9 @@ export function NodeAddWizard() {
           return true;
         }
         if (
-          (node_type === RESOURCE_TYPE.workflow_job || node_type === RESOURCE_TYPE.job) &&
+          (node_type === RESOURCE_TYPE.workflow_job ||
+            node_type === RESOURCE_TYPE.job ||
+            node_type === RESOURCE_TYPE.terraform_job) &&
           resource &&
           launch_config
         ) {
@@ -111,7 +133,12 @@ export function NodeAddWizard() {
         if (Object.keys(wizardData).length === 0) {
           return true;
         }
-        if (node_type && ![RESOURCE_TYPE.workflow_job, RESOURCE_TYPE.job].includes(node_type)) {
+        if (
+          node_type &&
+          ![RESOURCE_TYPE.workflow_job, RESOURCE_TYPE.job, RESOURCE_TYPE.terraform_job].includes(
+            node_type
+          )
+        ) {
           return true;
         }
         return !launch_config?.survey_enabled;
@@ -134,6 +161,13 @@ export function NodeAddWizard() {
       node_type,
       resource,
       approval_timeout,
+      eda_activation_id,
+      eda_event_source,
+      eda_event_source_status,
+      eda_rulebook_name,
+      ai_task_prompt,
+      ai_task_model,
+      ai_task_approval_required,
       node_alias,
       node_convergence,
       node_days_to_keep,
@@ -154,7 +188,13 @@ export function NodeAddWizard() {
       }
     }
 
-    const nodeName = getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
+    const isEdaNode = node_type === RESOURCE_TYPE.eda_rulebook;
+    const isAiNode = node_type === RESOURCE_TYPE.ai_task;
+    const nodeName = isEdaNode
+      ? eda_rulebook_name
+      : isAiNode
+        ? ai_task_prompt?.split('\n')[0].slice(0, 60) || t('AI task')
+        : getValueBasedOnJobType(node_type, resource?.name || '', approval_name);
     const nodeLabel = node_alias === '' ? nodeName : node_alias;
     let nodeToCreate: NewGraphNode = {
       id: `${nodes.length + 1}-unsavedNode`,
@@ -173,18 +213,50 @@ export function NodeAddWizard() {
           extra_data: {
             days: node_days_to_keep,
           },
+          node_type: isEdaNode
+            ? RESOURCE_TYPE.eda_rulebook
+            : isAiNode
+              ? RESOURCE_TYPE.ai_task
+              : undefined,
+          eda_rulebook_name: isEdaNode ? eda_rulebook_name : undefined,
+          eda_activation_id: isEdaNode ? eda_activation_id : undefined,
+          eda_event_source: isEdaNode ? eda_event_source : undefined,
+          eda_event_source_status: isEdaNode ? eda_event_source_status : undefined,
+          ai_task_prompt: isAiNode ? ai_task_prompt : undefined,
+          ai_task_model: isAiNode ? ai_task_model : undefined,
+          ai_task_approval_required: isAiNode ? ai_task_approval_required : undefined,
           summary_fields: {
-            unified_job_template: {
-              id: Number(resource?.id || 0),
-              name: nodeName,
-              description: getValueBasedOnJobType(
-                node_type,
-                resource?.description || '',
-                approval_description
-              ),
-              unified_job_type: node_type,
-              timeout: approval_timeout,
-            },
+            ...(isEdaNode
+              ? {
+                  eda_rulebook: {
+                    name: eda_rulebook_name,
+                    activation_id: eda_activation_id,
+                    event_source: eda_event_source,
+                    event_source_status: eda_event_source_status,
+                  },
+                }
+              : isAiNode
+                ? {
+                    ai_task: {
+                      prompt: ai_task_prompt,
+                      model: ai_task_model,
+                      approval_required: ai_task_approval_required,
+                      status: 'pending',
+                    },
+                  }
+                : {
+                    unified_job_template: {
+                      id: Number(resource?.id || 0),
+                      name: nodeName,
+                      description: getValueBasedOnJobType(
+                        node_type,
+                        resource?.description || '',
+                        approval_description
+                      ),
+                      unified_job_type: node_type,
+                      timeout: approval_timeout,
+                    },
+                  }),
           },
         },
         launch_data: promptValues,
@@ -212,10 +284,13 @@ export function NodeAddWizard() {
       model.edges?.push(newEdge);
     }
 
-    if (node_type !== RESOURCE_TYPE.workflow_approval) {
+    if (
+      node_type !== RESOURCE_TYPE.workflow_approval &&
+      nodeToCreate.data.resource.summary_fields.unified_job_template
+    ) {
       delete nodeToCreate.data.resource.summary_fields.unified_job_template.timeout;
     }
-    if (resource && !hasDaysToKeep(resource)) {
+    if (isEdaNode || isAiNode || (resource && !hasDaysToKeep(resource))) {
       delete nodeToCreate.data.resource.extra_data;
     }
     if (node_alias === '') {

@@ -1,0 +1,5514 @@
+# Copyright (c) 2024 Red Hat, Inc.
+# All Rights Reserved.
+
+import json
+import time
+import logging
+import re
+import shutil
+import urllib.parse
+from base64 import urlsafe_b64decode
+from collections import defaultdict
+from datetime import timedelta, timezone
+from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
+
+import requests
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import connection, transaction
+from django.utils.dateparse import parse_datetime
+from django.utils.text import slugify
+from django.utils.timezone import now
+from django.utils.translation import gettext_lazy as _
+from rest_framework import status
+from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from rest_framework.permissions import IsAuthenticated
+
+from ansible_base.rbac.permission_registry import permission_registry
+
+from awx.api.permissions import IsSystemAdmin
+from awx.api.serializers import (
+    CatalogItemSerializer,
+    ConstructedInventorySerializer,
+    GroupSerializer,
+    HostSerializer,
+    InventorySerializer,
+    InventorySourceSerializer,
+    JobTemplateSerializer,
+    ProjectSerializer,
+    ScheduleSerializer,
+    TerraformJobTemplateSerializer,
+    WorkflowJobTemplateNodeDetailSerializer,
+    WorkflowJobTemplateSerializer,
+)
+from awx.api.views.opa import DEFAULT_POLICIES, OPAPolicyEngine, check_opa_policy
+from awx.conf.models import Setting
+from awx.main import models
+from awx.main.access import get_user_queryset
+from awx.main.constants import SURVEY_TYPE_MAPPING
+from awx.main.models.rbac import give_creator_permissions
+from awx.main.redact import UriCleaner
+from awx.main.tasks.system import clear_setting_cache
+from awx.main.utils import parse_yaml_or_json
+from awx.main.utils.encryption import encrypt_value
+from awx.main.utils.eda import (
+    EDAControllerClient,
+    EDAControllerError,
+    configured_url as eda_configured_url,
+    connection_status as eda_connection_status,
+)
+from awx.main.utils.cloud_inventory import collect_cloud_inventory_resources
+from awx.main.utils.filters import SmartFilter
+
+logger = logging.getLogger('awx.api.views.ai')
+
+# Simple in-memory rate limiter: {user_id: [timestamps]}
+_rate_limit_store: dict = defaultdict(list)
+
+_OPENAI_CODEX_DEVICE_CODE_URL = 'https://auth.openai.com/api/accounts/deviceauth/usercode'
+_OPENAI_CODEX_DEVICE_VERIFY_URL = 'https://auth.openai.com/codex/device'
+_OPENAI_CODEX_DEVICE_CALLBACK_URI = 'https://auth.openai.com/deviceauth/callback'
+_OPENAI_CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token'
+_OPENAI_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
+_OPENAI_CODEX_MODELS_URL = 'https://api.openai.com/v1/models'
+_OPENAI_CODEX_USER_AGENT = 'awx-codex-device-client/1.0'
+_OPENAI_MODEL_EXCLUDE_TOKENS = (
+    'embedding',
+    'moderation',
+    'transcribe',
+    'tts',
+    'realtime',
+    'image',
+    'search',
+    'whisper',
+    'dall-e',
+)
+_AI_CONTEXT_LIST_LIMIT = 25
+_AI_DIRECT_LIST_LIMIT = 200
+_AI_RESOURCE_PREVIEW_LIMIT = 10
+_AI_PROJECT_FILE_MAX_BYTES = 256 * 1024
+_AI_PROJECT_FILE_ALLOWED_SUFFIXES = {'.cfg', '.ini', '.j2', '.json', '.md', '.toml', '.txt', '.yaml', '.yml'}
+_AI_PROJECT_FILE_BLOCKED_PARTS = {'.git', '.hg', '.svn', '__pycache__'}
+_AI_JOB_OUTPUT_CONTEXT_MAX_CHARS = 24000
+_AI_JOB_CODE_CONTEXT_MAX_CHARS = 32000
+_AI_JOB_CODE_CONTEXT_MAX_FILES = 8
+_AI_JOB_CONTEXT_FILE_ALLOWED_SUFFIXES = _AI_PROJECT_FILE_ALLOWED_SUFFIXES | {'.tf', '.tfvars'}
+_AI_PROJECT_LOCAL_PATH_MAX_LENGTH = 128
+_AI_PROJECT_WORKSPACE_FLAGS = ('create_local_path', 'create_workspace', 'create_project_workspace')
+_AI_DESTRUCTIVE_OPERATIONS = {'delete', 'detach', 'update'}
+_AI_PRIVILEGED_RESOURCE_TYPES = {'credential_reference', 'role_assignment'}
+
+_CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
+    'input_inventories',
+    'input_inventory_ids',
+    'source_inventories',
+    'source_inventory_ids',
+)
+_AI_HOST_GROUP_FIELDS = ('groups', 'group_ids', 'group', 'group_id')
+
+# ChatGPT device-login OAuth tokens do not reliably expose /v1/models.
+# Keep this aligned with the ChatGPT Codex responses backend; older generic GPT/Codex
+# names are accepted by settings history but rejected by ChatGPT-backed Codex calls.
+_OPENAI_CODEX_MODEL_CATALOG = [
+    'gpt-5.5',
+    'gpt-5.4',
+]
+
+# Provider → default base URL and chat completions path
+_PROVIDER_DEFAULTS = {
+    'openai': {
+        'base_url': 'https://api.openai.com/v1',
+        'path': '/chat/completions',
+        'model': 'gpt-4o',
+    },
+    'azure_openai': {
+        'base_url': '',  # Must be configured; format: https://<resource>.openai.azure.com/
+        'path': '/openai/deployments/{model}/chat/completions?api-version=2024-02-01',
+        'model': 'gpt-4o',
+    },
+    'redhat_ai': {
+        'base_url': 'https://api.openai.com/v1',  # Red Hat AI is OAI-compatible; override URL in settings
+        'path': '/chat/completions',
+        'model': 'mistralai/Mistral-7B-Instruct-v0.3',
+    },
+    'watsonx': {
+        'base_url': '',  # Region-specific; e.g. https://us-south.ml.cloud.ibm.com
+        'path': '/ml/v1/text/chat?version=2024-05-31',
+        'model': 'ibm/granite-13b-chat-v2',
+    },
+    'gemini': {
+        'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
+        'path': '/chat/completions',
+        'model': 'gemini-1.5-pro',
+    },
+    'openai_codex': {
+        'base_url': _OPENAI_CODEX_RESPONSES_URL,
+        'path': '',
+        'model': 'gpt-5.5',
+    },
+}
+
+_AI_RESOURCE_TYPE_ALIASES = {
+    'catalog': 'catalog_item',
+    'catalog_item': 'catalog_item',
+    'catalog_items': 'catalog_item',
+    'constructed_inventory': 'constructed_inventory',
+    'constructed_inventories': 'constructed_inventory',
+    'credential_reference': 'credential_reference',
+    'credential_references': 'credential_reference',
+    'group': 'group',
+    'groups': 'group',
+    'host': 'host',
+    'hosts': 'host',
+    'inventory': 'inventory',
+    'inventories': 'inventory',
+    'inventory_source': 'inventory_source',
+    'inventory_sources': 'inventory_source',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'project': 'project',
+    'project_file': 'project_file',
+    'project_files': 'project_file',
+    'project_content': 'project_file',
+    'project_contents': 'project_file',
+    'playbook_file': 'project_file',
+    'playbook_files': 'project_file',
+    'role_file': 'project_file',
+    'role_files': 'project_file',
+    'projects': 'project',
+    'permission_assignment': 'role_assignment',
+    'permission_assignments': 'role_assignment',
+    'role_assignment': 'role_assignment',
+    'role_assignments': 'role_assignment',
+    'schedule': 'schedule',
+    'schedules': 'schedule',
+    'smart_inventory': 'smart_inventory',
+    'smart_inventories': 'smart_inventory',
+    'survey': 'survey_spec',
+    'surveys': 'survey_spec',
+    'survey_question': 'survey_spec',
+    'survey_questions': 'survey_spec',
+    'survey_spec': 'survey_spec',
+    'survey_specs': 'survey_spec',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_OPERATION_ALIASES = {
+    'associate': 'attach',
+    'disassociate': 'detach',
+    'remove': 'delete',
+    'destroy': 'delete',
+}
+
+_AI_RESOURCE_TYPES = {
+    'catalog_item': {
+        'model': models.CatalogItem,
+        'serializer': CatalogItemSerializer,
+        'audit_relation': 'catalog_item',
+    },
+    'constructed_inventory': {
+        'model': models.Inventory,
+        'serializer': ConstructedInventorySerializer,
+        'audit_relation': 'inventory',
+        'forced_data': {'kind': 'constructed'},
+    },
+    'group': {
+        'model': models.Group,
+        'serializer': GroupSerializer,
+        'audit_relation': 'group',
+    },
+    'host': {
+        'model': models.Host,
+        'serializer': HostSerializer,
+        'audit_relation': 'host',
+    },
+    'inventory': {
+        'model': models.Inventory,
+        'serializer': InventorySerializer,
+        'audit_relation': 'inventory',
+        'default_data': {'kind': ''},
+    },
+    'inventory_source': {
+        'model': models.InventorySource,
+        'serializer': InventorySourceSerializer,
+        'audit_relation': 'inventory_source',
+    },
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
+    },
+    'project': {
+        'model': models.Project,
+        'serializer': ProjectSerializer,
+        'audit_relation': 'project',
+    },
+    'schedule': {
+        'model': models.Schedule,
+        'serializer': ScheduleSerializer,
+        'audit_relation': 'schedule',
+    },
+    'smart_inventory': {
+        'model': models.Inventory,
+        'serializer': InventorySerializer,
+        'audit_relation': 'inventory',
+        'forced_data': {'kind': 'smart'},
+    },
+    'workflow_job_template': {
+        'model': models.WorkflowJobTemplate,
+        'serializer': WorkflowJobTemplateSerializer,
+        'audit_relation': 'workflow_job_template',
+    },
+}
+
+_AI_CREDENTIAL_REFERENCE_TARGET_ALIASES = {
+    'inventory_source': 'inventory_source',
+    'inventory_sources': 'inventory_source',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'schedule': 'schedule',
+    'schedules': 'schedule',
+    'workflow_job_template_node': 'workflow_job_template_node',
+    'workflow_job_template_nodes': 'workflow_job_template_node',
+    'workflow_node': 'workflow_job_template_node',
+    'workflow_nodes': 'workflow_job_template_node',
+    'workflow_template_node': 'workflow_job_template_node',
+    'workflow_template_nodes': 'workflow_job_template_node',
+}
+
+_AI_CREDENTIAL_REFERENCE_TARGETS = {
+    'inventory_source': {
+        'model': models.InventorySource,
+        'serializer': InventorySourceSerializer,
+        'audit_relation': 'inventory_source',
+    },
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
+    },
+    'schedule': {
+        'model': models.Schedule,
+        'serializer': ScheduleSerializer,
+        'audit_relation': 'schedule',
+    },
+    'workflow_job_template_node': {
+        'model': models.WorkflowJobTemplateNode,
+        'serializer': WorkflowJobTemplateNodeDetailSerializer,
+        'audit_relation': 'workflow_job_template_node',
+    },
+}
+
+_AI_ROLE_ASSIGNMENT_TARGET_ALIASES = {
+    'catalog': 'catalog_item',
+    'catalog_item': 'catalog_item',
+    'catalog_items': 'catalog_item',
+    'credential': 'credential',
+    'credentials': 'credential',
+    'inventory': 'inventory',
+    'inventories': 'inventory',
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'organization': 'organization',
+    'organizations': 'organization',
+    'project': 'project',
+    'projects': 'project',
+    'team': 'team',
+    'teams': 'team',
+    'terraform_job_template': 'terraform_job_template',
+    'terraform_job_templates': 'terraform_job_template',
+    'terraform_template': 'terraform_job_template',
+    'terraform_templates': 'terraform_job_template',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_ROLE_ASSIGNMENT_TARGETS = {
+    'catalog_item': {'model': models.CatalogItem, 'audit_relation': 'catalog_item'},
+    'credential': {'model': models.Credential, 'audit_relation': 'credential'},
+    'inventory': {'model': models.Inventory, 'audit_relation': 'inventory'},
+    'job_template': {'model': models.JobTemplate, 'audit_relation': 'job_template'},
+    'organization': {'model': models.Organization, 'audit_relation': 'organization'},
+    'project': {'model': models.Project, 'audit_relation': 'project'},
+    'team': {'model': models.Team, 'audit_relation': 'team'},
+    'terraform_job_template': {'model': models.TerraformJobTemplate, 'audit_relation': 'terraform_job_template'},
+    'workflow_job_template': {'model': models.WorkflowJobTemplate, 'audit_relation': 'workflow_job_template'},
+}
+
+_AI_SURVEY_SPEC_TARGET_ALIASES = {
+    'job_template': 'job_template',
+    'job_templates': 'job_template',
+    'terraform_job_template': 'terraform_job_template',
+    'terraform_job_templates': 'terraform_job_template',
+    'terraform_template': 'terraform_job_template',
+    'terraform_templates': 'terraform_job_template',
+    'workflow': 'workflow_job_template',
+    'workflow_job_template': 'workflow_job_template',
+    'workflow_job_templates': 'workflow_job_template',
+}
+
+_AI_SURVEY_SPEC_TARGETS = {
+    'job_template': {
+        'model': models.JobTemplate,
+        'serializer': JobTemplateSerializer,
+        'audit_relation': 'job_template',
+    },
+    'terraform_job_template': {
+        'model': models.TerraformJobTemplate,
+        'serializer': TerraformJobTemplateSerializer,
+        'audit_relation': 'terraform_job_template',
+    },
+    'workflow_job_template': {
+        'model': models.WorkflowJobTemplate,
+        'serializer': WorkflowJobTemplateSerializer,
+        'audit_relation': 'workflow_job_template',
+    },
+}
+
+_AI_SURVEY_TYPE_ALIASES = {
+    'choice': 'multiplechoice',
+    'choices': 'multiplechoice',
+    'int': 'integer',
+    'multi_choice': 'multiselect',
+    'multi_select': 'multiselect',
+    'multi_select_choice': 'multiselect',
+    'multiple_choice': 'multiplechoice',
+    'multiple_select': 'multiselect',
+    'number': 'float',
+    'select': 'multiplechoice',
+    'single_choice': 'multiplechoice',
+    'single_select': 'multiplechoice',
+    'str': 'text',
+    'string': 'text',
+}
+
+_AI_ROLE_FIELD_ALIASES = {
+    'admin': 'admin_role',
+    'administrator': 'admin_role',
+    'approve': 'approval_role',
+    'approval': 'approval_role',
+    'auditor': 'auditor_role',
+    'execute': 'execute_role',
+    'execution': 'execute_role',
+    'inventory_admin': 'inventory_admin_role',
+    'job_template_admin': 'job_template_admin_role',
+    'member': 'member_role',
+    'project_admin': 'project_admin_role',
+    'read': 'read_role',
+    'update': 'update_role',
+    'use': 'use_role',
+    'workflow_admin': 'workflow_admin_role',
+}
+
+_SENSITIVE_KEY_RE = re.compile(r'(password|secret|token|private[_-]?key|api[_-]?key|credential)', re.IGNORECASE)
+
+
+class DeviceAuthError(Exception):
+    pass
+
+
+class DeviceAuthPending(Exception):
+    pass
+
+
+class DeviceAuthExpired(Exception):
+    pass
+
+
+class AIProviderError(Exception):
+    def __init__(self, detail, status_code=status.HTTP_502_BAD_GATEWAY):
+        self.detail = detail
+        self.status_code = status_code
+        super().__init__(str(detail))
+
+
+class AIResourceActionApplyError(Exception):
+    def __init__(self, operations):
+        self.operations = operations
+        super().__init__('AI resource action apply failed validation.')
+
+
+def _check_rate_limit(user_id: int, limit: int) -> bool:
+    """Return True if the request is allowed, False if rate-limited."""
+    now = time.time()
+    window_start = now - 60
+    timestamps = _rate_limit_store[user_id]
+    # Prune old entries
+    _rate_limit_store[user_id] = [t for t in timestamps if t > window_start]
+    if len(_rate_limit_store[user_id]) >= limit:
+        return False
+    _rate_limit_store[user_id].append(now)
+    return True
+
+
+def _build_request_payload(provider: str, model: str, messages: list, max_tokens: int, system_prompt: str) -> dict:
+    """Build the chat-completions request body for the given provider."""
+    full_messages = _messages_with_system(messages, system_prompt)
+
+    if provider == 'watsonx':
+        # watsonx uses a slightly different schema
+        return {
+            'model_id': model,
+            'messages': full_messages,
+            'parameters': {'max_new_tokens': max_tokens},
+        }
+
+    return {
+        'model': model,
+        'messages': full_messages,
+        'max_tokens': max_tokens,
+    }
+
+
+def _build_url(provider: str, base_url: str, model: str) -> str:
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    path = defaults['path'].replace('{model}', urllib.parse.quote(model, safe=''))
+    base = (base_url or defaults['base_url']).rstrip('/')
+    return base + path
+
+
+def _build_headers(provider: str, api_key: str) -> dict:
+    headers = {'Content-Type': 'application/json'}
+    if provider == 'azure_openai':
+        headers['api-key'] = api_key
+    else:
+        headers['Authorization'] = f'Bearer {api_key}'
+    return headers
+
+
+def _messages_with_system(messages: list, system_prompt: str) -> list:
+    if any(m.get('role') == 'system' for m in messages):
+        return messages
+    return [{'role': 'system', 'content': system_prompt}] + messages
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    try:
+        _header, payload, *_rest = token.split('.')
+        padded = payload + '=' * (-len(payload) % 4)
+        decoded = urlsafe_b64decode(padded.encode('ascii')).decode('utf-8')
+        data = json.loads(decoded)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _jwt_scopes(token: str) -> set:
+    payload = _decode_jwt_payload(token)
+    raw = payload.get('scope') or payload.get('scp') or ''
+    if isinstance(raw, str):
+        return {scope for scope in raw.split() if scope}
+    if isinstance(raw, list):
+        return {str(scope) for scope in raw if str(scope)}
+    return set()
+
+
+def _openai_codex_runtime(token: str) -> dict:
+    payload = _decode_jwt_payload(token)
+    auth_payload = payload.get('https://api.openai.com/auth')
+    openai_auth = auth_payload if isinstance(auth_payload, dict) else {}
+    scopes = _jwt_scopes(token)
+    return {
+        'chatgpt_account_id': str(openai_auth.get('chatgpt_account_id') or '') or None,
+        'chatgpt_plan_type': str(openai_auth.get('chatgpt_plan_type') or '') or None,
+        'use_codex_backend': 'api.responses.write' in scopes or 'model.request' not in scopes,
+    }
+
+
+_CODEX_UNSUPPORTED_MODELS = frozenset(
+    {
+        'gpt-4o',
+        'gpt-4o-2024-05-13',
+        'gpt-4o-2024-08-06',
+        'gpt-4o-2024-11-20',
+        'gpt-4o-audio-preview',
+        'gpt-4o-mini',
+        'gpt-4-turbo',
+        'gpt-4-turbo-preview',
+        'gpt-4-32k',
+        'gpt-4-32k-0613',
+        'gpt-4-0613',
+        'gpt-4-0314',
+    }
+)
+
+
+def _codex_model_name(model: str) -> str:
+    if _openai_codex_model_supported(model):
+        return model
+    return _PROVIDER_DEFAULTS['openai_codex']['model']
+
+
+def _codex_input_messages(messages: list, system_prompt: str) -> tuple:
+    full_messages = _messages_with_system(messages, system_prompt)
+    system_message = next((message for message in full_messages if message.get('role') == 'system'), None)
+    instructions = system_message.get('content') if system_message else 'You are a helpful AI assistant.'
+    input_messages = []
+
+    for index, message in enumerate(message for message in full_messages if message.get('role') != 'system'):
+        role = message.get('role')
+        content = message.get('content')
+        if role == 'assistant':
+            input_messages.append(
+                {
+                    'type': 'message',
+                    'role': 'assistant',
+                    'status': 'completed',
+                    'id': f'msg_past_{index}',
+                    'content': content,
+                }
+            )
+        else:
+            input_messages.append({'type': 'message', 'role': role, 'content': content})
+
+    return instructions, input_messages
+
+
+def _parse_codex_sse_data(data: dict, current: str) -> str:
+    if data.get('type') == 'response.output_text.delta' and data.get('delta'):
+        return current + str(data['delta'])
+
+    response = data.get('response')
+    if isinstance(response, dict):
+        output_text = response.get('output_text')
+        if isinstance(output_text, dict) and output_text.get('delta'):
+            return current + str(output_text['delta'])
+
+        output = response.get('output')
+        if isinstance(output, list) and output:
+            content = output[0].get('content') if isinstance(output[0], dict) else None
+            if isinstance(content, list) and content:
+                text = content[0].get('text') if isinstance(content[0], dict) else None
+                if isinstance(text, dict) and text.get('delta'):
+                    return current + str(text['delta'])
+                if isinstance(text, str):
+                    return text
+
+    message = data.get('message')
+    if isinstance(message, dict):
+        content = message.get('content')
+        if isinstance(content, dict):
+            parts = content.get('parts')
+            if isinstance(parts, list) and parts:
+                return str(parts[0])
+
+    return current
+
+
+def _setting_changed(key: str, value) -> bool:
+    try:
+        settings._awx_conf_memoizedcache
+    except AttributeError:
+        settings._awx_conf_memoizedcache = {}
+
+    setting = Setting.objects.filter(key=key, user__isnull=True).order_by('pk').first()
+    if not setting:
+        Setting.objects.create(key=key, value=value)
+        return True
+    if setting.value != value:
+        setting.value = value
+        setting.save(update_fields=['value'])
+        return True
+    return False
+
+
+def _save_ai_settings(values: dict) -> None:
+    changed = [key for key, value in values.items() if _setting_changed(key, value)]
+    if changed:
+        connection.on_commit(lambda: clear_setting_cache(changed))
+
+
+def _openai_codex_configured() -> bool:
+    return bool(getattr(settings, 'AI_OPENAI_CODEX_ACCESS_TOKEN', ''))
+
+
+def _provider_configured(provider: str) -> bool:
+    if provider == 'openai_codex':
+        return _openai_codex_configured()
+    return bool(getattr(settings, 'AI_API_KEY', ''))
+
+
+def _normalize_model_list(values) -> list:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        return []
+
+    normalized = []
+    seen = set()
+    for raw_value in values:
+        if not isinstance(raw_value, str):
+            continue
+        value = raw_value.strip()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
+
+
+def _openai_model_allowed(model_id: str) -> bool:
+    lowered = model_id.lower()
+    if any(token in lowered for token in _OPENAI_MODEL_EXCLUDE_TOKENS):
+        return False
+    return lowered.startswith(('gpt', 'o1', 'o3', 'o4', 'chatgpt'))
+
+
+def _openai_codex_model_supported(model_id: str) -> bool:
+    return model_id in _OPENAI_CODEX_MODEL_CATALOG
+
+
+def _openai_codex_model_options(values) -> list:
+    return [model for model in _normalize_model_list(values) if _openai_codex_model_supported(model)]
+
+
+def _openai_codex_cached_models() -> list:
+    return _openai_codex_model_options(getattr(settings, 'AI_OPENAI_CODEX_AVAILABLE_MODELS', []))
+
+
+def _openai_codex_available_models() -> list:
+    return _openai_codex_cached_models() or list(_OPENAI_CODEX_MODEL_CATALOG)
+
+
+def _openai_codex_effective_default_model(models: list | None = None) -> str:
+    model_options = _openai_codex_model_options(models) or _openai_codex_available_models()
+    configured_model = str(getattr(settings, 'AI_MODEL_NAME', '') or '').strip()
+    if configured_model and configured_model in model_options:
+        return configured_model
+
+    provider_default = _PROVIDER_DEFAULTS['openai_codex']['model']
+    if provider_default in model_options:
+        return provider_default
+    return model_options[0] if model_options else provider_default
+
+
+def _openai_codex_model_payload(models: list | None = None, source: str | None = None, model_fetch_error: str = '', default_model: str | None = None) -> dict:
+    cached_models = _openai_codex_cached_models()
+    model_options = _openai_codex_model_options(models) or cached_models or list(_OPENAI_CODEX_MODEL_CATALOG)
+    return {
+        'configured': _openai_codex_configured(),
+        'models': model_options,
+        'default_model': default_model or _openai_codex_effective_default_model(model_options),
+        'source': source or ('cached' if cached_models else 'curated'),
+        'model_fetch_error': str(model_fetch_error) if model_fetch_error else '',
+    }
+
+
+def _fetch_openai_codex_models(access_token: str | None = None) -> tuple:
+    access_token = access_token or _get_openai_codex_access_token()
+    if not access_token:
+        raise AIProviderError(
+            _('OpenAI Codex device login is not connected. Connect it before refreshing models.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        response = requests.get(
+            _OPENAI_CODEX_MODELS_URL,
+            headers={'Authorization': f'Bearer {access_token}', 'User-Agent': _OPENAI_CODEX_USER_AGENT},
+            timeout=20,
+        )
+        if response.status_code == 200:
+            payload = response.json()
+            models = _openai_codex_model_options(
+                [
+                    str(item['id'])
+                    for item in payload.get('data', [])
+                    if isinstance(item, dict) and isinstance(item.get('id'), str) and _openai_model_allowed(str(item['id']))
+                ]
+            )
+            if models:
+                return models, 'live', ''
+            return list(_OPENAI_CODEX_MODEL_CATALOG), 'curated', _('OpenAI returned no compatible chat models; using the curated Codex catalog.')
+
+        logger.info('OpenAI Codex model refresh fell back to curated catalog after status %d.', response.status_code)
+        return list(_OPENAI_CODEX_MODEL_CATALOG), 'curated', _('OpenAI model refresh used the curated Codex catalog.')
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        logger.warning('OpenAI Codex model refresh failed: %s', exc)
+        return list(_OPENAI_CODEX_MODEL_CATALOG), 'curated', _('Could not fetch live OpenAI models; using the curated Codex catalog.')
+
+
+def _token_expired_or_expiring(expires_at_value) -> bool:
+    if not expires_at_value:
+        return False
+    expires_at = parse_datetime(str(expires_at_value))
+    if not expires_at:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= now() + timedelta(minutes=1)
+
+
+def _save_openai_codex_token(data: dict) -> dict:
+    access_token = data.get('access_token')
+    if not access_token:
+        raise DeviceAuthError('Token exchange succeeded without an access token.')
+
+    runtime = _openai_codex_runtime(access_token)
+    account_id = runtime.get('chatgpt_account_id') or ''
+    plan_type = runtime.get('chatgpt_plan_type') or ''
+    expires_at = ''
+    if data.get('expires_in'):
+        expires_at = (now() + timedelta(seconds=int(data.get('expires_in')))).isoformat()
+
+    values = {
+        'AI_OPENAI_CODEX_ACCESS_TOKEN': access_token,
+        'AI_OPENAI_CODEX_REFRESH_TOKEN': data.get('refresh_token') or getattr(settings, 'AI_OPENAI_CODEX_REFRESH_TOKEN', ''),
+        'AI_OPENAI_CODEX_TOKEN_EXPIRES_AT': expires_at,
+        'AI_OPENAI_CODEX_SCOPE': data.get('scope') or getattr(settings, 'AI_OPENAI_CODEX_SCOPE', ''),
+        'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID': account_id,
+        'AI_OPENAI_CODEX_PLAN_TYPE': plan_type,
+    }
+    _save_ai_settings(values)
+    return values
+
+
+def _refresh_openai_codex_token() -> str | None:
+    refresh_token = getattr(settings, 'AI_OPENAI_CODEX_REFRESH_TOKEN', '')
+    if not refresh_token:
+        return None
+
+    payload = {
+        'grant_type': 'refresh_token',
+        'client_id': getattr(settings, 'AI_OPENAI_CODEX_CLIENT_ID', ''),
+        'refresh_token': refresh_token,
+    }
+    response = requests.post(
+        _OPENAI_CODEX_TOKEN_URL,
+        data=payload,
+        headers={'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': _OPENAI_CODEX_USER_AGENT},
+        timeout=15,
+    )
+    if response.status_code >= 400:
+        return None
+
+    data = response.json()
+    values = _save_openai_codex_token(data)
+    return values['AI_OPENAI_CODEX_ACCESS_TOKEN']
+
+
+def _get_openai_codex_access_token() -> str | None:
+    access_token = getattr(settings, 'AI_OPENAI_CODEX_ACCESS_TOKEN', '')
+    if not access_token:
+        return None
+    if _token_expired_or_expiring(getattr(settings, 'AI_OPENAI_CODEX_TOKEN_EXPIRES_AT', '')):
+        return _refresh_openai_codex_token() or access_token
+    return access_token
+
+
+def _start_openai_codex_device_code(scope: str | None = None) -> dict:
+    client_id = getattr(settings, 'AI_OPENAI_CODEX_CLIENT_ID', '')
+    if not client_id:
+        raise DeviceAuthError('AI_OPENAI_CODEX_CLIENT_ID is not configured.')
+
+    payload = {
+        'client_id': client_id,
+        'scope': scope or getattr(settings, 'AI_OPENAI_CODEX_SCOPE', ''),
+    }
+    response = requests.post(
+        _OPENAI_CODEX_DEVICE_CODE_URL,
+        json=payload,
+        headers={'Content-Type': 'application/json', 'User-Agent': _OPENAI_CODEX_USER_AGENT},
+        timeout=15,
+    )
+    if response.status_code == 404:
+        raise DeviceAuthError('OpenAI Codex device login is not enabled for this account.')
+    if response.status_code >= 400:
+        raise DeviceAuthError(f'Failed to start OpenAI Codex device login: {response.text[:300]}')
+
+    data = response.json()
+    if not {'device_auth_id', 'user_code'}.issubset(data):
+        raise DeviceAuthError('Device code response was missing required fields.')
+
+    return {
+        'device_code': data['device_auth_id'],
+        'device_auth_id': data['device_auth_id'],
+        'user_code': data['user_code'],
+        'verification_uri': _OPENAI_CODEX_DEVICE_VERIFY_URL,
+        'verification_uri_complete': _OPENAI_CODEX_DEVICE_VERIFY_URL,
+        'expires_in': int(data.get('expires_in') or 900),
+        'interval': int(data.get('interval') or 5),
+    }
+
+
+def _poll_openai_codex_authorization_code(device_code: str, user_code: str) -> tuple | None:
+    response = requests.post(
+        _OPENAI_CODEX_DEVICE_CODE_URL.replace('/usercode', '/token'),
+        json={'device_auth_id': device_code, 'user_code': user_code},
+        headers={'Content-Type': 'application/json', 'User-Agent': _OPENAI_CODEX_USER_AGENT},
+        timeout=15,
+    )
+    if response.status_code in {403, 404}:
+        return None
+    if response.status_code >= 400:
+        raise DeviceAuthError(f'OpenAI Codex device polling failed: status {response.status_code}.')
+
+    data = response.json()
+    authorization_code = data.get('authorization_code')
+    code_verifier = data.get('code_verifier')
+    if not authorization_code or not code_verifier:
+        raise DeviceAuthError('Device polling succeeded without an authorization code.')
+    return str(authorization_code), str(code_verifier)
+
+
+def _exchange_openai_codex_authorization_code(authorization_code: str, code_verifier: str) -> dict:
+    payload = {
+        'grant_type': 'authorization_code',
+        'code': authorization_code,
+        'redirect_uri': _OPENAI_CODEX_DEVICE_CALLBACK_URI,
+        'client_id': getattr(settings, 'AI_OPENAI_CODEX_CLIENT_ID', ''),
+        'code_verifier': code_verifier,
+    }
+    response = requests.post(
+        _OPENAI_CODEX_TOKEN_URL,
+        data=payload,
+        headers={'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': _OPENAI_CODEX_USER_AGENT},
+        timeout=15,
+    )
+    data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+    if response.status_code >= 400:
+        error = data.get('error')
+        if error in {'expired_token', 'access_denied'}:
+            raise DeviceAuthExpired()
+        raise DeviceAuthError(f"OpenAI Codex token exchange failed: {error or 'unknown_error'}.")
+    return data
+
+
+def _poll_openai_codex_device_code_once(device_code: str, user_code: str | None) -> dict:
+    if not user_code:
+        raise DeviceAuthError('User code is required for OpenAI Codex device polling.')
+
+    authorization = _poll_openai_codex_authorization_code(device_code, user_code)
+    if authorization is None:
+        raise DeviceAuthPending()
+
+    authorization_code, code_verifier = authorization
+    data = _exchange_openai_codex_authorization_code(authorization_code, code_verifier)
+    return _save_openai_codex_token(data)
+
+
+def _call_openai_codex(model: str, messages: list, system_prompt: str) -> str:
+    access_token = _get_openai_codex_access_token()
+    if not access_token:
+        raise AIProviderError(
+            _('OpenAI Codex device login is not connected. Connect it in Settings → AI Assistant.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    runtime = _openai_codex_runtime(access_token)
+    account_id = runtime.get('chatgpt_account_id') or getattr(settings, 'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID', '')
+    if not account_id:
+        raise AIProviderError(_('OpenAI Codex token is missing a ChatGPT account id. Reconnect device login.'))
+
+    instructions, input_messages = _codex_input_messages(messages, system_prompt)
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'chatgpt-account-id': account_id,
+        'OpenAI-Beta': 'responses=experimental',
+        'originator': 'pi',
+        'accept': 'text/event-stream',
+        'content-type': 'application/json',
+        'User-Agent': _OPENAI_CODEX_USER_AGENT,
+    }
+    body = {
+        'model': _codex_model_name(model),
+        'store': False,
+        'stream': True,
+        'instructions': instructions,
+        'input': input_messages,
+    }
+
+    response = requests.post(_OPENAI_CODEX_RESPONSES_URL, headers=headers, json=body, timeout=90, stream=True)
+    if response.status_code == 401:
+        raise AIProviderError(_('OpenAI Codex rejected the device token. Reconnect device login.'))
+    if not response.ok:
+        logger.warning('OpenAI Codex provider returned %d: %s', response.status_code, response.text[:500])
+        raise AIProviderError(_('OpenAI Codex returned an error. Check settings and try again.'))
+
+    assistant_content = ''
+    last_payload = None
+    for raw_line in response.iter_lines(decode_unicode=True):
+        if isinstance(raw_line, bytes):
+            line = raw_line.decode('utf-8', errors='ignore').strip()
+        else:
+            line = (raw_line or '').strip()
+        if not line or not line.startswith('data: '):
+            continue
+        data_string = line.removeprefix('data: ').strip()
+        if data_string == '[DONE]':
+            break
+        try:
+            parsed = json.loads(data_string)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            last_payload = parsed
+            assistant_content = _parse_codex_sse_data(parsed, assistant_content)
+
+    if assistant_content:
+        return assistant_content.strip()
+    if last_payload:
+        return str(last_payload)[:1000]
+    raise AIProviderError(_('OpenAI Codex did not return a response.'))
+
+
+def _call_ai_provider(provider: str, model: str, messages: list, max_tokens: int, system_prompt: str, api_key: str, base_url: str) -> str:
+    if provider == 'openai_codex':
+        return _call_openai_codex(model, messages, system_prompt)
+
+    url = _build_url(provider, base_url, model)
+    headers = _build_headers(provider, api_key)
+    payload = _build_request_payload(provider, model, messages, max_tokens, system_prompt)
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    except requests.exceptions.ConnectionError as exc:
+        logger.error('AI proxy connection error: %s', exc)
+        raise AIProviderError(_('Could not connect to the AI provider. Check AI_API_URL in settings.'))
+    except requests.exceptions.Timeout:
+        raise AIProviderError(_('The AI provider did not respond in time. Please try again.'), status.HTTP_504_GATEWAY_TIMEOUT)
+
+    if resp.status_code == 401:
+        raise AIProviderError(_('AI provider rejected the API key. Check AI_API_KEY in settings.'))
+
+    if not resp.ok:
+        logger.warning('AI provider returned %d: %s', resp.status_code, resp.text[:500])
+        raise AIProviderError(_('The AI provider returned an error. Check your settings and try again.'))
+
+    try:
+        data = resp.json()
+    except ValueError:
+        logger.error('AI provider returned non-JSON response')
+        raise AIProviderError(_('Unexpected response from AI provider.'))
+
+    try:
+        if provider == 'watsonx':
+            return data['results'][0]['generated_text']
+        return data['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as exc:
+        logger.error('Could not parse AI provider response: %s | raw: %s', exc, json.dumps(data)[:500])
+        raise AIProviderError(_('Could not parse the AI provider response.'))
+
+
+def _related_context(value):
+    if value is None:
+        return None
+    if hasattr(value, 'pk') and hasattr(value, '_meta'):
+        summary = {'id': value.pk}
+        label = getattr(value, 'name', None) or getattr(value, 'username', None)
+        if label:
+            summary['name'] = label
+        return summary
+    return value
+
+
+def _read_attr_path(obj, attr_path: str):
+    value = obj
+    for attr in attr_path.split('.'):
+        if value is None:
+            return None
+        value = getattr(value, attr, None)
+    return value
+
+
+def _visible_hosts_queryset(user):
+    return get_user_queryset(user, models.Host).exclude(inventory__kind='constructed').select_related('inventory').distinct()
+
+
+def _visible_resource_specs():
+    return [
+        {
+            'key': 'hosts',
+            'singular': 'host',
+            'plural': 'hosts',
+            'patterns': (r'\bhosts?\b',),
+            'queryset': _visible_hosts_queryset,
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('inventory', 'inventory'), ('enabled', 'enabled')),
+        },
+        {
+            'key': 'groups',
+            'singular': 'group',
+            'plural': 'groups',
+            'patterns': (r'\bgroups?\b',),
+            'model': models.Group,
+            'select_related': ('inventory',),
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('inventory', 'inventory')),
+        },
+        {
+            'key': 'inventories',
+            'singular': 'inventory',
+            'plural': 'inventories',
+            'patterns': (r'\binventories\b', r'\binventory\b(?!\s+sources?\b)'),
+            'model': models.Inventory,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('kind', 'kind'), ('organization', 'organization')),
+        },
+        {
+            'key': 'inventory_sources',
+            'singular': 'inventory source',
+            'plural': 'inventory sources',
+            'patterns': (r'\binventory sources?\b',),
+            'model': models.InventorySource,
+            'select_related': ('inventory', 'source_project'),
+            'order_by': ('inventory__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('source', 'source'), ('inventory', 'inventory'), ('source_project', 'source_project')),
+        },
+        {
+            'key': 'projects',
+            'singular': 'project',
+            'plural': 'projects',
+            'patterns': (r'\bprojects?\b',),
+            'model': models.Project,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('scm_type', 'scm_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'job_templates',
+            'singular': 'job template',
+            'plural': 'job templates',
+            'patterns': (r'(?<!workflow )(?<!terraform )\bjob templates?\b', r'(?<!workflow )(?<!terraform )\btemplates?\b'),
+            'model': models.JobTemplate,
+            'select_related': ('project', 'inventory', 'organization'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('project', 'project'), ('inventory', 'inventory'), ('organization', 'organization')),
+        },
+        {
+            'key': 'workflow_job_templates',
+            'singular': 'workflow job template',
+            'plural': 'workflow job templates',
+            'patterns': (r'\bworkflows?\b', r'\bworkflow job templates?\b'),
+            'model': models.WorkflowJobTemplate,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'terraform_job_templates',
+            'singular': 'Terraform job template',
+            'plural': 'Terraform job templates',
+            'patterns': (r'\bterraform (?:job )?templates?\b',),
+            'model': models.TerraformJobTemplate,
+            'select_related': ('organization', 'project', 'target_inventory'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('terraform_dir', 'terraform_dir'),
+                ('organization', 'organization'),
+                ('project', 'project'),
+                ('target_inventory', 'target_inventory'),
+            ),
+        },
+        {
+            'key': 'credentials',
+            'singular': 'credential',
+            'plural': 'credentials',
+            'patterns': (r'\bcredentials?\b(?!\s+types?\b)',),
+            'model': models.Credential,
+            'select_related': ('credential_type', 'organization'),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('credential_type', 'credential_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'credential_types',
+            'singular': 'credential type',
+            'plural': 'credential types',
+            'patterns': (r'\bcredential types?\b',),
+            'model': models.CredentialType,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('kind', 'kind'), ('managed', 'managed')),
+        },
+        {
+            'key': 'organizations',
+            'singular': 'organization',
+            'plural': 'organizations',
+            'patterns': (r'\borganizations?\b', r'\borgs?\b'),
+            'model': models.Organization,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name')),
+        },
+        {
+            'key': 'teams',
+            'singular': 'team',
+            'plural': 'teams',
+            'patterns': (r'\bteams?\b',),
+            'model': models.Team,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'users',
+            'singular': 'user',
+            'plural': 'users',
+            'patterns': (r'\busers?\b',),
+            'model': models.User,
+            'order_by': ('username', 'id'),
+            'fields': (('id', 'id'), ('username', 'username'), ('first_name', 'first_name'), ('last_name', 'last_name')),
+        },
+        {
+            'key': 'schedules',
+            'singular': 'schedule',
+            'plural': 'schedules',
+            'patterns': (r'\bschedules?\b',),
+            'model': models.Schedule,
+            'select_related': ('unified_job_template',),
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('enabled', 'enabled'), ('unified_job_template', 'unified_job_template')),
+        },
+        {
+            'key': 'notification_templates',
+            'singular': 'notification template',
+            'plural': 'notification templates',
+            'patterns': (r'\bnotification templates?\b',),
+            'model': models.NotificationTemplate,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('notification_type', 'notification_type'), ('organization', 'organization')),
+        },
+        {
+            'key': 'notifications',
+            'singular': 'notification',
+            'plural': 'notifications',
+            'patterns': (r'\bnotifications?\b(?!\s+templates?\b)',),
+            'model': models.Notification,
+            'select_related': ('notification_template', 'notification_template__organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('status', 'status'),
+                ('notification_type', 'notification_type'),
+                ('notification_template', 'notification_template'),
+                ('subject', 'subject'),
+            ),
+        },
+        {
+            'key': 'activity_stream',
+            'singular': 'activity stream event',
+            'plural': 'activity stream events',
+            'patterns': (r'\bactivity stream\b', r'\baudit events?\b', r'\baudit log\b', r'\bactivity events?\b'),
+            'model': models.ActivityStream,
+            'select_related': ('actor',),
+            'order_by': ('-timestamp', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('operation', 'operation'),
+                ('object1', 'object1'),
+                ('object2', 'object2'),
+                ('actor', 'actor'),
+                ('timestamp', 'timestamp'),
+            ),
+        },
+        {
+            'key': 'execution_environments',
+            'singular': 'execution environment',
+            'plural': 'execution environments',
+            'patterns': (r'\bexecution environments?\b',),
+            'model': models.ExecutionEnvironment,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('image', 'image'), ('organization', 'organization')),
+        },
+        {
+            'key': 'instance_groups',
+            'singular': 'instance group',
+            'plural': 'instance groups',
+            'patterns': (r'\binstance groups?\b',),
+            'model': models.InstanceGroup,
+            'order_by': ('name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('is_container_group', 'is_container_group')),
+        },
+        {
+            'key': 'instances',
+            'singular': 'instance',
+            'plural': 'instances',
+            'patterns': (r'\binstances?\b', r'\bnodes?\b'),
+            'model': models.Instance,
+            'order_by': ('hostname', 'id'),
+            'fields': (('id', 'id'), ('hostname', 'hostname'), ('node_type', 'node_type'), ('enabled', 'enabled')),
+        },
+        {
+            'key': 'jobs',
+            'singular': 'job',
+            'plural': 'jobs',
+            'patterns': (r'\bjobs?\b',),
+            'model': models.Job,
+            'select_related': ('job_template', 'inventory', 'project'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('job_template', 'job_template'),
+                ('inventory', 'inventory'),
+                ('project', 'project'),
+            ),
+        },
+        {
+            'key': 'workflow_jobs',
+            'singular': 'workflow job',
+            'plural': 'workflow jobs',
+            'patterns': (r'\bworkflow jobs?\b',),
+            'model': models.WorkflowJob,
+            'select_related': ('workflow_job_template', 'job_template', 'inventory', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('workflow_job_template', 'workflow_job_template'),
+                ('job_template', 'job_template'),
+                ('inventory', 'inventory'),
+                ('organization', 'organization'),
+            ),
+        },
+        {
+            'key': 'project_updates',
+            'singular': 'project update',
+            'plural': 'project updates',
+            'patterns': (r'\bproject updates?\b', r'\bscm updates?\b'),
+            'model': models.ProjectUpdate,
+            'select_related': ('project', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('status', 'status'), ('project', 'project'), ('job_type', 'job_type')),
+        },
+        {
+            'key': 'inventory_updates',
+            'singular': 'inventory update',
+            'plural': 'inventory updates',
+            'patterns': (r'\binventory updates?\b', r'\binventory syncs?\b'),
+            'model': models.InventoryUpdate,
+            'select_related': ('inventory', 'inventory_source', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('inventory', 'inventory'),
+                ('inventory_source', 'inventory_source'),
+            ),
+        },
+        {
+            'key': 'system_jobs',
+            'singular': 'system job',
+            'plural': 'system jobs',
+            'patterns': (r'\bsystem jobs?\b', r'\bmanagement jobs?\b'),
+            'model': models.SystemJob,
+            'select_related': ('system_job_template', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('status', 'status'), ('system_job_template', 'system_job_template')),
+        },
+        {
+            'key': 'terraform_jobs',
+            'singular': 'Terraform job',
+            'plural': 'Terraform jobs',
+            'patterns': (r'\bterraform jobs?\b',),
+            'model': models.TerraformJob,
+            'select_related': ('terraform_job_template', 'project', 'target_inventory', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('terraform_job_template', 'terraform_job_template'),
+                ('project', 'project'),
+                ('target_inventory', 'target_inventory'),
+                ('terraform_operation', 'terraform_operation'),
+            ),
+        },
+        {
+            'key': 'workflow_approvals',
+            'singular': 'workflow approval',
+            'plural': 'workflow approvals',
+            'patterns': (r'\bworkflow approvals?\b', r'\bapprovals?\b'),
+            'model': models.WorkflowApproval,
+            'select_related': ('workflow_approval_template', 'approved_or_denied_by', 'organization'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('workflow_approval_template', 'workflow_approval_template'),
+                ('approved_or_denied_by', 'approved_or_denied_by'),
+                ('timed_out', 'timed_out'),
+            ),
+        },
+        {
+            'key': 'catalog_items',
+            'singular': 'catalog item',
+            'plural': 'catalog items',
+            'patterns': (r'\bcatalog items?\b', r'\bmarketplace items?\b'),
+            'model': models.CatalogItem,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('organization', 'organization')),
+        },
+        {
+            'key': 'catalog_deployments',
+            'singular': 'catalog deployment',
+            'plural': 'catalog deployments',
+            'patterns': (r'\bcatalog deployments?\b', r'\bdeployments?\b'),
+            'model': models.CatalogDeployment,
+            'select_related': ('catalog_item', 'catalog_item__organization', 'owner'),
+            'order_by': ('-created', '-id'),
+            'fields': (
+                ('id', 'id'),
+                ('name', 'name'),
+                ('status', 'status'),
+                ('catalog_item', 'catalog_item'),
+                ('organization', 'catalog_item.organization'),
+                ('owner', 'owner'),
+            ),
+        },
+        {
+            'key': 'cloud_provider_connections',
+            'singular': 'cloud provider connection',
+            'plural': 'cloud provider connections',
+            'patterns': (r'\bcloud (?:provider )?connections?\b',),
+            'model': models.CloudProviderConnection,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'provider_id', 'name', 'id'),
+            'fields': (('id', 'id'), ('name', 'name'), ('provider', 'provider_id'), ('organization', 'organization')),
+        },
+        {
+            'key': 'cloud_provider_states',
+            'singular': 'cloud provider state',
+            'plural': 'cloud provider states',
+            'patterns': (r'\bcloud (?:provider )?states?\b', r'\bprovider states?\b', r'\bpulled cloud data\b'),
+            'model': models.CloudProviderState,
+            'select_related': ('organization',),
+            'order_by': ('organization__name', 'provider_id', 'id'),
+            'fields': (
+                ('id', 'id'),
+                ('provider', 'provider_id'),
+                ('organization', 'organization'),
+                ('pulled_at', 'pulled_at'),
+            ),
+        },
+    ]
+
+
+def _visible_resource_spec_by_key(key: str):
+    for spec in _visible_resource_specs():
+        if spec['key'] == key:
+            return spec
+    return None
+
+
+def _visible_resource_queryset(user, spec):
+    queryset_factory = spec.get('queryset')
+    if queryset_factory:
+        queryset = queryset_factory(user)
+    else:
+        queryset = get_user_queryset(user, spec['model']).distinct()
+        select_related = spec.get('select_related') or ()
+        if select_related:
+            queryset = queryset.select_related(*select_related)
+    order_by = spec.get('order_by') or ('id',)
+    return queryset.order_by(*order_by)
+
+
+def _message_mentions_name(message: str, name: str) -> bool:
+    name = re.sub(r'\s+', ' ', str(name or '').lower()).strip()
+    if not name or len(name) < 2:
+        return False
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    return name in normalized
+
+
+def _visible_named_rows(user, model, fields=('id', 'name'), limit=500, name_field='name'):
+    rows = []
+    for row in get_user_queryset(user, model).values(*fields).order_by(name_field, 'id')[:limit]:
+        if row.get(name_field):
+            rows.append(row)
+    return sorted(rows, key=lambda item: len(str(item.get(name_field) or '')), reverse=True)
+
+
+def _append_named_scope_filter(user, message: str, filters: dict, labels: list[str], scope: dict):
+    filter_key = scope['filter']
+    if filter_key in filters:
+        return
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    hints = scope.get('hints') or ()
+    if hints and not any(re.search(hint, normalized) for hint in hints):
+        return
+    name_field = scope.get('name_field', 'name')
+    fields = scope.get('fields', ('id', name_field))
+    for row in _visible_named_rows(user, scope['model'], fields=fields, name_field=name_field):
+        name = row.get(name_field)
+        if _message_mentions_name(message, name):
+            filters[filter_key] = row['id']
+            labels.append(_('%(scope)s "%(name)s"') % {'scope': scope['label'], 'name': name})
+            break
+
+
+def _resource_scope_for_message(user, spec: dict, message: str) -> tuple[dict, list[str]]:
+    filters = {}
+    labels = []
+    field_paths = {attr_path for _output_key, attr_path in spec.get('fields') or ()}
+    spec_key = spec.get('key')
+
+    if spec_key != 'inventories' and any('inventory' in path for path in field_paths):
+        for inventory in _visible_named_rows(user, models.Inventory):
+            if _message_mentions_name(message, inventory['name']):
+                inventory_filter = 'inventory_id'
+                if spec_key in {'hosts', 'groups', 'inventory_sources', 'job_templates', 'jobs'}:
+                    inventory_filter = 'inventory_id'
+                elif spec_key in {'terraform_job_templates', 'terraform_jobs'}:
+                    inventory_filter = 'target_inventory_id'
+                filters[inventory_filter] = inventory['id']
+                labels.append(_('inventory "%(name)s"') % {'name': inventory['name']})
+                break
+
+    organization_filter_by_key = {
+        'hosts': 'inventory__organization_id',
+        'groups': 'inventory__organization_id',
+        'inventory_sources': 'inventory__organization_id',
+        'inventories': 'organization_id',
+        'projects': 'organization_id',
+        'job_templates': 'organization_id',
+        'workflow_job_templates': 'organization_id',
+        'terraform_job_templates': 'organization_id',
+        'credentials': 'organization_id',
+        'teams': 'organization_id',
+        'execution_environments': 'organization_id',
+        'notification_templates': 'organization_id',
+        'notifications': 'notification_template__organization_id',
+        'activity_stream': 'organization__id',
+        'jobs': 'organization_id',
+        'workflow_jobs': 'organization_id',
+        'project_updates': 'organization_id',
+        'inventory_updates': 'organization_id',
+        'system_jobs': 'organization_id',
+        'terraform_jobs': 'organization_id',
+        'workflow_approvals': 'organization_id',
+        'catalog_items': 'organization_id',
+        'catalog_deployments': 'catalog_item__organization_id',
+        'cloud_provider_connections': 'organization_id',
+        'cloud_provider_states': 'organization_id',
+    }
+    organization_filter = organization_filter_by_key.get(spec_key)
+    if organization_filter:
+        for organization in _visible_named_rows(user, models.Organization):
+            if _message_mentions_name(message, organization['name']):
+                filters[organization_filter] = organization['id']
+                labels.append(_('organization "%(name)s"') % {'name': organization['name']})
+                break
+
+    related_scope_by_key = {
+        'credentials': ({'model': models.CredentialType, 'filter': 'credential_type_id', 'label': 'credential type', 'hints': (r'\bcredential types?\b',)},),
+        'inventory_sources': ({'model': models.Project, 'filter': 'source_project_id', 'label': 'source project', 'hints': (r'\bprojects?\b',)},),
+        'notifications': ({'model': models.NotificationTemplate, 'filter': 'notification_template_id', 'label': 'notification template'},),
+        'activity_stream': (
+            {'model': models.User, 'filter': 'actor_id', 'label': 'actor', 'fields': ('id', 'username'), 'name_field': 'username'},
+            {'model': models.NotificationTemplate, 'filter': 'notification_template__id', 'label': 'notification template'},
+        ),
+        'job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
+        'terraform_job_templates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},),
+        'jobs': (
+            {'model': models.JobTemplate, 'filter': 'job_template_id', 'label': 'job template'},
+            {'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},
+        ),
+        'workflow_jobs': (
+            {'model': models.WorkflowJobTemplate, 'filter': 'workflow_job_template_id', 'label': 'workflow job template'},
+            {'model': models.JobTemplate, 'filter': 'job_template_id', 'label': 'job template'},
+        ),
+        'project_updates': ({'model': models.Project, 'filter': 'project_id', 'label': 'project'},),
+        'inventory_updates': ({'model': models.InventorySource, 'filter': 'inventory_source_id', 'label': 'inventory source'},),
+        'system_jobs': ({'model': models.SystemJobTemplate, 'filter': 'system_job_template_id', 'label': 'system job template'},),
+        'terraform_jobs': (
+            {'model': models.TerraformJobTemplate, 'filter': 'terraform_job_template_id', 'label': 'Terraform job template'},
+            {'model': models.Project, 'filter': 'project_id', 'label': 'project', 'hints': (r'\bprojects?\b',)},
+        ),
+        'workflow_approvals': (
+            {'model': models.WorkflowApprovalTemplate, 'filter': 'workflow_approval_template_id', 'label': 'workflow approval template'},
+            {'model': models.User, 'filter': 'approved_or_denied_by_id', 'label': 'user', 'fields': ('id', 'username'), 'name_field': 'username'},
+        ),
+        'schedules': ({'model': models.UnifiedJobTemplate, 'filter': 'unified_job_template_id', 'label': 'template'},),
+        'catalog_deployments': ({'model': models.CatalogItem, 'filter': 'catalog_item_id', 'label': 'catalog item'},),
+    }
+    for scope in related_scope_by_key.get(spec_key, ()):
+        _append_named_scope_filter(user, message, filters, labels, scope)
+
+    if 'status' in field_paths:
+        status_terms = (
+            'active',
+            'canceled',
+            'created',
+            'destroyed',
+            'deprovisioning',
+            'error',
+            'failed',
+            'new',
+            'pending',
+            'provisioning',
+            'running',
+            'successful',
+            'waiting',
+        )
+        normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+        for status_term in status_terms:
+            if re.search(rf'\b{re.escape(status_term)}\b', normalized):
+                filters['status'] = status_term
+                labels.append(_('status "%(status)s"') % {'status': status_term})
+                break
+
+    if 'operation' in field_paths:
+        operation_terms = ('create', 'update', 'delete', 'associate', 'disassociate')
+        normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+        for operation_term in operation_terms:
+            if re.search(rf'\b{re.escape(operation_term)}(?:d|s)?\b', normalized):
+                filters['operation'] = operation_term
+                labels.append(_('operation "%(operation)s"') % {'operation': operation_term})
+                break
+
+    return filters, labels
+
+
+def _visible_resource_queryset_for_message(user, spec: dict, message: str):
+    queryset = _visible_resource_queryset(user, spec)
+    filters, labels = _resource_scope_for_message(user, spec, message)
+    if filters:
+        queryset = queryset.filter(**filters)
+    return queryset, labels
+
+
+def _resource_context_row(obj, spec) -> dict:
+    row = {}
+    for output_key, attr_path in spec.get('fields') or ():
+        row[output_key] = _related_context(_read_attr_path(obj, attr_path))
+    return row
+
+
+def _visible_resource_rows(user, spec, limit=_AI_CONTEXT_LIST_LIMIT) -> list[dict]:
+    return [_resource_context_row(obj, spec) for obj in _visible_resource_queryset(user, spec)[:limit]]
+
+
+def _visible_host_count(user) -> int:
+    host_spec = _visible_resource_spec_by_key('hosts')
+    return _visible_resource_queryset(user, host_spec).count()
+
+
+def _visible_awx_counts(user) -> dict:
+    counts = {}
+    for spec in _visible_resource_specs():
+        counts[spec['key']] = _visible_resource_queryset(user, spec).count()
+    return counts
+
+
+def _visible_awx_context_snapshot(user, limit=_AI_CONTEXT_LIST_LIMIT) -> dict:
+    resources = {}
+    for spec in _visible_resource_specs():
+        queryset = _visible_resource_queryset(user, spec)
+        count = queryset.count()
+        items = [_resource_context_row(obj, spec) for obj in queryset[:limit]]
+        resources[spec['key']] = {
+            'label': spec['plural'],
+            'count': count,
+            'shown': len(items),
+            'truncated': count > len(items),
+            'items': items,
+        }
+    return {
+        'notes': [
+            'All resources are filtered by the requesting user RBAC permissions.',
+            'Credential secrets, passwords, private keys, tokens, and variable values are intentionally excluded.',
+            'Host resources exclude constructed-inventory synthetic hosts so host facts match the dashboard host count.',
+        ],
+        'resources': resources,
+    }
+
+
+def _latest_user_message(messages: list) -> str:
+    for message in reversed(messages):
+        if message.get('role') == 'user':
+            return message.get('content', '')
+    return ''
+
+
+def _is_count_question(message: str, resource_pattern: str) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    if not re.search(resource_pattern, normalized):
+        return False
+    return bool(re.search(r'\bhow many\b', normalized) or re.search(r'\b(count|total|number of)\b', normalized) or re.search(r'\bdo we have\b', normalized))
+
+
+def _is_list_question(message: str, resource_pattern: str) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    if not re.search(resource_pattern, normalized):
+        return False
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup)\b', normalized):
+        return False
+    return bool(
+        re.search(r'\b(list|show|display)\b', normalized)
+        or re.search(r'\bwhat (?:are|is)\b', normalized)
+        or re.search(r'\bwhich\b', normalized)
+        or re.search(r'\bnames? of\b', normalized)
+        or re.search(r'\ball\b', normalized)
+    )
+
+
+def _resource_spec_matches_message(message: str, spec: dict) -> bool:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    return any(re.search(pattern, normalized) for pattern in spec.get('patterns') or ())
+
+
+def _resource_spec_match_score(message: str, spec: dict) -> int:
+    normalized = re.sub(r'\s+', ' ', message.lower()).strip()
+    score = 0
+    for pattern in spec.get('patterns') or ():
+        match = re.search(pattern, normalized)
+        if match:
+            score = max(score, len(match.group(0)))
+
+    primary_patterns = {
+        'hosts': r'\bhosts?\b',
+        'groups': r'\bgroups?\b',
+        'inventories': r'\binventories\b|\binventory\b(?!\s+sources?\b)',
+        'inventory_sources': r'\binventory sources?\b',
+        'projects': r'\bprojects?\b',
+        'job_templates': r'(?<!workflow )(?<!terraform )\bjob templates?\b',
+        'workflow_job_templates': r'\bworkflows?\b|\bworkflow job templates?\b',
+        'terraform_job_templates': r'\bterraform (?:job )?templates?\b',
+        'credentials': r'\bcredentials?\b(?!\s+types?\b)',
+        'credential_types': r'\bcredential types?\b',
+        'organizations': r'\borganizations?\b|\borgs?\b',
+        'teams': r'\bteams?\b',
+        'users': r'\busers?\b',
+        'schedules': r'\bschedules?\b',
+        'notification_templates': r'\bnotification templates?\b',
+        'notifications': r'\bnotifications?\b(?!\s+templates?\b)',
+        'activity_stream': r'\bactivity stream\b|\baudit events?\b|\baudit log\b|\bactivity events?\b',
+        'execution_environments': r'\bexecution environments?\b',
+        'instance_groups': r'\binstance groups?\b',
+        'instances': r'\binstances?\b|\bnodes?\b',
+        'jobs': r'\bjobs?\b',
+        'workflow_jobs': r'\bworkflow jobs?\b',
+        'project_updates': r'\bproject updates?\b|\bscm updates?\b',
+        'inventory_updates': r'\binventory updates?\b|\binventory syncs?\b',
+        'system_jobs': r'\bsystem jobs?\b|\bmanagement jobs?\b',
+        'terraform_jobs': r'\bterraform jobs?\b',
+        'workflow_approvals': r'\bworkflow approvals?\b|\bapprovals?\b',
+        'catalog_items': r'\bcatalog items?\b|\bmarketplace items?\b',
+        'catalog_deployments': r'\bcatalog deployments?\b|\bdeployments?\b',
+        'cloud_provider_connections': r'\bcloud (?:provider )?connections?\b',
+        'cloud_provider_states': r'\bcloud (?:provider )?states?\b|\bprovider states?\b|\bpulled cloud data\b',
+    }
+    primary_pattern = primary_patterns.get(spec.get('key'))
+    if primary_pattern:
+        matches = list(re.finditer(primary_pattern, normalized))
+        if matches:
+            scoped_matches = [match for match in matches if re.search(r'\b(?:in|from|for|under|within|on)\s+[\w .:/-]{0,80}$', normalized[: match.start()])]
+            score += 40 if len(scoped_matches) == len(matches) else 100
+    return score
+
+
+def _format_context_value(value):
+    if value is None or value == '':
+        return None
+    if isinstance(value, dict):
+        return value.get('name') or value.get('username') or value.get('id')
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    return value
+
+
+def _format_resource_list_item(row: dict) -> str:
+    label = row.get('name') or row.get('username') or row.get('hostname') or row.get('id')
+    detail_parts = []
+    if row.get('id') is not None:
+        detail_parts.append(f"id: {row['id']}")
+    for key, value in row.items():
+        if key in {'id', 'name', 'username', 'hostname'}:
+            continue
+        formatted_value = _format_context_value(value)
+        if formatted_value is not None:
+            detail_parts.append(f"{key.replace('_', ' ')}: {formatted_value}")
+    if detail_parts:
+        return f"- {label} ({', '.join(str(part) for part in detail_parts)})"
+    return f"- {label}"
+
+
+def _format_scope_suffix(labels: list[str]) -> str:
+    if not labels:
+        return ''
+    return ' matching ' + ', '.join(str(label) for label in labels)
+
+
+def _answer_resource_count(user, spec: dict, message: str) -> str:
+    queryset, labels = _visible_resource_queryset_for_message(user, spec, message)
+    count = queryset.count()
+    noun = spec['singular'] if count == 1 else spec['plural']
+    return f'There are {count} {noun} visible to you in AWX{_format_scope_suffix(labels)}.'
+
+
+def _answer_resource_list(user, spec: dict, message: str) -> str:
+    queryset, labels = _visible_resource_queryset_for_message(user, spec, message)
+    count = queryset.count()
+    scope_suffix = _format_scope_suffix(labels)
+    if count == 0:
+        return f'There are no {spec["plural"]} visible to you in AWX{scope_suffix}.'
+
+    rows = [_resource_context_row(obj, spec) for obj in queryset[:_AI_DIRECT_LIST_LIMIT]]
+    noun = spec['singular'] if count == 1 else spec['plural']
+    lines = [f'There are {count} {noun} visible to you in AWX{scope_suffix}:']
+    lines.extend(_format_resource_list_item(row) for row in rows)
+    if count > len(rows):
+        lines.append(f'- Showing the first {len(rows)} of {count}. Narrow the question to list a specific inventory, organization, or resource type.')
+    return '\n'.join(lines)
+
+
+_CLOUD_PROVIDER_LABELS = {
+    'digitalocean': 'DigitalOcean',
+    'proxmox': 'Proxmox VE',
+    'vmware': 'VMware vSphere',
+    'azure': 'Azure',
+}
+
+_CLOUD_PROVIDER_PATTERNS = {
+    'digitalocean': r'\bdigital\s*ocean\b|\bdigitalocean\b',
+    'proxmox': r'\bproxmox\b|\bpve\b',
+    'vmware': r'\bvmware\b|\bvsphere\b',
+    'azure': r'\bazure\b',
+}
+
+_CLOUD_RESOURCE_KIND_PATTERNS = (
+    ({'resource_group'}, 'resource group', 'resource groups', r'\bresource groups?\b'),
+    ({'storage_account'}, 'storage account', 'storage accounts', r'\bstorage accounts?\b'),
+    ({'datacenter'}, 'datacenter', 'datacenters', r'\bdatacenters?\b'),
+    ({'container'}, 'container', 'containers', r'\bcontainers?\b|\blxc\b'),
+    ({'template'}, 'template', 'templates', r'\btemplates?\b'),
+    ({'image'}, 'image', 'images', r'\bimages?\b'),
+    ({'size'}, 'size', 'sizes', r'\bsizes?\b|\bpricing\b|\bplans?\b'),
+    ({'region'}, 'region', 'regions', r'\bregions?\b|\blocations?\b'),
+    ({'vpc'}, 'VPC', 'VPCs', r'\bvpcs?\b'),
+    ({'vnet'}, 'virtual network', 'virtual networks', r'\bvnets?\b|\bvirtual networks?\b|\bnetworks?\b'),
+    ({'node'}, 'node', 'nodes', r'\bnodes?\b'),
+    ({'cluster'}, 'cluster', 'clusters', r'\bclusters?\b'),
+    ({'host'}, 'host', 'hosts', r'\bhosts?\b'),
+    ({'vm'}, 'VM', 'VMs', r'\bvms?\b|\bvirtual machines?\b|\binstances?\b'),
+)
+
+
+def _mentioned_cloud_providers(normalized: str) -> list[str]:
+    return [provider_id for provider_id, pattern in _CLOUD_PROVIDER_PATTERNS.items() if re.search(pattern, normalized)]
+
+
+def _cloud_resource_kind_match(normalized: str) -> tuple[set[str], str, str] | None:
+    for kinds, singular, plural, pattern in _CLOUD_RESOURCE_KIND_PATTERNS:
+        if re.search(pattern, normalized):
+            return set(kinds), singular, plural
+    return None
+
+
+def _visible_cloud_connection_scope(user, message: str):
+    for connection in get_user_queryset(user, models.CloudProviderConnection).select_related('organization').order_by('name', 'id')[:500]:
+        if _message_mentions_name(message, connection.name):
+            return connection
+    return None
+
+
+def _cloud_resource_scope_suffix(labels: list[str]) -> str:
+    return _format_scope_suffix(labels)
+
+
+def _cloud_resource_detail_value(value):
+    if value in (None, ''):
+        return None
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    if isinstance(value, (list, tuple, set)):
+        return ','.join(str(item) for item in list(value)[:6])
+    return value
+
+
+def _format_cloud_resource_item(resource: dict) -> str:
+    variables = resource.get('variables') if isinstance(resource.get('variables'), dict) else {}
+    label = resource.get('name') or variables.get('cloud_id') or 'cloud_resource'
+    detail_keys = (
+        'cloud_provider',
+        'cloud_connection_id',
+        'cloud_id',
+        'status',
+        'power_state',
+        'connection_state',
+        'proxmox_node',
+        'region',
+        'location',
+        'resource_group',
+        'image_name',
+        'size_slug',
+        'region_name',
+        'vm_size',
+    )
+    details = []
+    for key in detail_keys:
+        value = _cloud_resource_detail_value(variables.get(key))
+        if value is not None:
+            details.append(f"{key.replace('_', ' ')}: {value}")
+    if details:
+        return f"- {label} ({', '.join(str(detail) for detail in details)})"
+    return f"- {label}"
+
+
+def _visible_cloud_resources_for_message(user, message: str, provider_ids: list[str], kinds: set[str]) -> tuple[list[dict], list[str], bool]:
+    spec = _visible_resource_spec_by_key('cloud_provider_states')
+    queryset = _visible_resource_queryset(user, spec).exclude(provider_data__isnull=True)
+    filters, labels = _resource_scope_for_message(user, spec, message)
+    if filters:
+        queryset = queryset.filter(**filters)
+    if provider_ids:
+        queryset = queryset.filter(provider_id__in=provider_ids)
+
+    connection = _visible_cloud_connection_scope(user, message)
+    connection_id = None
+    if connection is not None:
+        queryset = queryset.filter(provider_id=connection.provider_id, organization_id=connection.organization_id)
+        connection_id = str(connection.pk)
+        labels.append(_('connection "%(name)s"') % {'name': connection.name})
+
+    resources = []
+    truncated = False
+    for state in queryset:
+        scoped_connection_id = connection_id if connection_id and state.provider_id == connection.provider_id else None
+        collected = collect_cloud_inventory_resources(
+            state.provider_id, state.provider_data, connection_id=scoped_connection_id, sample_limit=_AI_DIRECT_LIST_LIMIT
+        )
+        for resource in collected:
+            if resource.get('kind') in kinds:
+                resources.append(resource)
+                if len(resources) >= _AI_DIRECT_LIST_LIMIT:
+                    truncated = True
+                    return resources, labels, truncated
+    return resources, labels, truncated
+
+
+def _cloud_resource_provider_label(provider_ids: list[str]) -> str:
+    if len(provider_ids) == 1:
+        return _CLOUD_PROVIDER_LABELS.get(provider_ids[0], provider_ids[0])
+    return 'cloud'
+
+
+def _answer_cloud_resource_count(user, message: str, provider_ids: list[str], kinds: set[str], singular: str, plural: str) -> str:
+    resources, labels, truncated = _visible_cloud_resources_for_message(user, message, provider_ids, kinds)
+    count = len(resources)
+    noun = singular if count == 1 else plural
+    provider_label = _cloud_resource_provider_label(provider_ids)
+    prefix = 'at least ' if truncated else ''
+    suffix = _cloud_resource_scope_suffix(labels)
+    return f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}.'
+
+
+def _answer_cloud_resource_list(user, message: str, provider_ids: list[str], kinds: set[str], singular: str, plural: str) -> str:
+    resources, labels, truncated = _visible_cloud_resources_for_message(user, message, provider_ids, kinds)
+    count = len(resources)
+    provider_label = _cloud_resource_provider_label(provider_ids)
+    suffix = _cloud_resource_scope_suffix(labels)
+    if count == 0:
+        return f'There are no pulled {provider_label} {plural} visible to you in AWX{suffix}.'
+
+    noun = singular if count == 1 else plural
+    prefix = 'at least ' if truncated else ''
+    lines = [f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}:']
+    lines.extend(_format_cloud_resource_item(resource) for resource in resources[:_AI_DIRECT_LIST_LIMIT])
+    if truncated:
+        lines.append(f'- Showing the first {len(resources)} pulled resources. Narrow by provider, organization, connection, or resource type.')
+    return '\n'.join(lines)
+
+
+def _try_answer_cloud_provider_resource_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup|pull|sync|delete|remove)\b', normalized):
+        return None
+
+    kind_match = _cloud_resource_kind_match(normalized)
+    if kind_match is None:
+        return None
+    kinds, singular, plural = kind_match
+
+    provider_ids = _mentioned_cloud_providers(normalized)
+    if not provider_ids and not re.search(r'\bcloud\b|\bprovider\b|\bpulled\b', normalized):
+        return None
+
+    resource_pattern = '|'.join(pattern for _kinds, _singular, _plural, pattern in _CLOUD_RESOURCE_KIND_PATTERNS if kinds & _kinds)
+    if _is_count_question(latest_message, resource_pattern):
+        return _answer_cloud_resource_count(user, latest_message, provider_ids, kinds, singular, plural)
+    if _is_list_question(latest_message, resource_pattern):
+        return _answer_cloud_resource_list(user, latest_message, provider_ids, kinds, singular, plural)
+    return None
+
+
+def _try_answer_awx_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    candidates = []
+    for spec in _visible_resource_specs():
+        if not _resource_spec_matches_message(latest_message, spec):
+            continue
+        score = _resource_spec_match_score(latest_message, spec)
+        resource_pattern = '|'.join(f'(?:{pattern})' for pattern in spec.get('patterns') or ())
+        if _is_count_question(latest_message, resource_pattern):
+            candidates.append((score, 'count', spec))
+        if _is_list_question(latest_message, resource_pattern):
+            candidates.append((score, 'list', spec))
+    if candidates:
+        score, answer_type, spec = max(candidates, key=lambda candidate: candidate[0])
+        if score <= 0:
+            return None
+        if answer_type == 'count':
+            return _answer_resource_count(user, spec, latest_message)
+        return _answer_resource_list(user, spec, latest_message)
+    return None
+
+
+def _eda_message_pattern() -> str:
+    return r'\beda\b|\bevent[- ]driven\b|\brulebook activations?\b|\beda activations?\b'
+
+
+def _format_eda_activation_item(row: dict) -> str:
+    label = row.get('name') or row.get('rulebook') or row.get('id') or 'unnamed activation'
+    detail_parts = []
+    for key in ('id', 'status', 'rulebook', 'event_source', 'started', 'finished'):
+        value = row.get(key)
+        if value not in (None, ''):
+            detail_parts.append(f"{key.replace('_', ' ')}: {value}")
+    if detail_parts:
+        return f"- {label} ({', '.join(str(part) for part in detail_parts)})"
+    return f"- {label}"
+
+
+def _answer_eda_status() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status == 'configured':
+        return f'EDA Controller is configured in AWX. URL: {controller_url}.'
+    if controller_status == 'invalid':
+        return 'EDA Controller URL is invalid in AWX settings.'
+    return 'EDA Controller is not configured in AWX.'
+
+
+def _answer_eda_activation_count() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status != 'configured':
+        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+
+    try:
+        data = EDAControllerClient().list_activations(page=1, page_size=1)
+    except EDAControllerError as exc:
+        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+
+    try:
+        count = int(data.get('count') or 0)
+    except (TypeError, ValueError):
+        count = 0
+    noun = 'EDA activation' if count == 1 else 'EDA activations'
+    return f'There are {count} {noun} visible through AWX EDA Controller.'
+
+
+def _answer_eda_activation_list() -> str:
+    controller_url = eda_configured_url()
+    controller_status = eda_connection_status(controller_url)
+    if controller_status != 'configured':
+        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+
+    try:
+        data = EDAControllerClient().list_activations(page=1, page_size=_AI_DIRECT_LIST_LIMIT)
+    except EDAControllerError as exc:
+        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+
+    try:
+        count = int(data.get('count') or 0)
+    except (TypeError, ValueError):
+        count = 0
+    rows = data.get('results') if isinstance(data.get('results'), list) else []
+    if count == 0:
+        return 'There are no EDA activations visible through AWX EDA Controller.'
+
+    noun = 'EDA activation' if count == 1 else 'EDA activations'
+    lines = [f'There are {count} {noun} visible through AWX EDA Controller:']
+    lines.extend(_format_eda_activation_item(row) for row in rows[:_AI_DIRECT_LIST_LIMIT] if isinstance(row, dict))
+    if count > len(rows):
+        lines.append(f'- Showing the first {len(rows)} of {count}.')
+    return '\n'.join(lines)
+
+
+def _try_answer_eda_fact_question(messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    eda_pattern = _eda_message_pattern()
+    if not re.search(eda_pattern, normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|configure|set up|setup|start|stop|restart|delete|remove)\b', normalized):
+        return None
+
+    activation_pattern = r'\beda activations?\b|\brulebook activations?\b|\bactivations?\b'
+    if _is_count_question(latest_message, activation_pattern):
+        return _answer_eda_activation_count()
+    if _is_list_question(latest_message, activation_pattern):
+        return _answer_eda_activation_list()
+    if re.search(r'\b(status|configured|connected|connection|health|url)\b', normalized):
+        return _answer_eda_status()
+    return None
+
+
+def _opa_message_pattern() -> str:
+    return r'\bopa\b|\bopen policy agent\b|\bpolicy guardrails?\b|\bguardrails?\b'
+
+
+def _opa_policy_bundle_summary() -> dict:
+    policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
+    configured = bool(policy_bundle.strip())
+    return {
+        'configured': configured,
+        'size': len(policy_bundle),
+        'line_count': policy_bundle.count('\n') + 1 if configured else 0,
+    }
+
+
+def _answer_opa_status() -> str:
+    engine = OPAPolicyEngine()
+    bundle = _opa_policy_bundle_summary()
+    bundle_status = f"configured ({bundle['line_count']} lines, {bundle['size']} bytes)" if bundle['configured'] else 'not configured'
+    policy_ids = ', '.join(policy['id'] for policy in DEFAULT_POLICIES)
+    if engine.is_available():
+        return (
+            f'OPA guardrails are enabled in AWX. Server URL: {engine.base_url}. '
+            f'Managed policy bundle: {bundle_status}. Registered policy paths: {policy_ids}.'
+        )
+    return f'OPA guardrails are disabled in AWX because OPA_HOST is not configured. Managed policy bundle: {bundle_status}.'
+
+
+def _answer_opa_policy_count() -> str:
+    return f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX.'
+
+
+def _answer_opa_policy_list() -> str:
+    lines = [f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX:']
+    lines.extend(f"- {policy['id']} (path: {policy['path']}, purpose: {policy['description']})" for policy in DEFAULT_POLICIES)
+    return '\n'.join(lines)
+
+
+def _activity_stream_changes(entry) -> dict:
+    changes = entry.changes
+    if isinstance(changes, dict):
+        return changes
+    if isinstance(changes, str) and changes.strip():
+        try:
+            parsed = json.loads(changes)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _opa_guardrail_audit_queryset(user):
+    return get_user_queryset(user, models.ActivityStream).filter(object1='ai_resource_action').select_related('actor').order_by('-timestamp', '-id')
+
+
+def _opa_guardrail_audit_rows(user, *, denied_only=False, limit=_AI_RESOURCE_PREVIEW_LIMIT) -> tuple[list[dict], int]:
+    rows = []
+    scanned = 0
+    for entry in _opa_guardrail_audit_queryset(user)[:_AI_DIRECT_LIST_LIMIT]:
+        scanned += 1
+        changes = _activity_stream_changes(entry)
+        operations = changes.get('operations') if isinstance(changes.get('operations'), list) else []
+        denied_operations = []
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            errors = operation.get('errors') if isinstance(operation.get('errors'), dict) else {}
+            opa_errors = errors.get('opa') if isinstance(errors, dict) else None
+            if opa_errors:
+                denied_operations.append(
+                    {
+                        'operation': operation.get('operation'),
+                        'resource_type': operation.get('resource_type'),
+                        'errors': opa_errors,
+                    }
+                )
+        if denied_only and not denied_operations:
+            continue
+        rows.append(
+            {
+                'id': entry.pk,
+                'timestamp': entry.timestamp,
+                'actor': _related_context(getattr(entry, 'actor', None)),
+                'mode': changes.get('mode') or entry.object2,
+                'plan_name': changes.get('plan_name') or '',
+                'operation_count': changes.get('operation_count') or len(operations),
+                'status': 'denied' if denied_operations else 'allowed',
+                'denied_operations': denied_operations,
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows, scanned
+
+
+def _format_opa_error_messages(errors) -> str:
+    if isinstance(errors, (list, tuple, set)):
+        return ', '.join(str(error) for error in errors)
+    return str(errors)
+
+
+def _format_opa_guardrail_audit_item(row: dict) -> str:
+    detail_parts = [
+        f"id: {row['id']}",
+        f"status: {row['status']}",
+        f"mode: {row['mode']}",
+        f"operations: {row['operation_count']}",
+    ]
+    actor = _format_context_value(row.get('actor'))
+    if actor:
+        detail_parts.append(f'actor: {actor}')
+    if row.get('plan_name'):
+        detail_parts.append(f"plan: {row['plan_name']}")
+    if row.get('denied_operations'):
+        denials = []
+        for operation in row['denied_operations']:
+            operation_label = ' '.join(str(part) for part in (operation.get('operation'), operation.get('resource_type')) if part)
+            denials.append(f"{operation_label}: {_format_opa_error_messages(operation.get('errors'))}")
+        detail_parts.append(f"denials: {'; '.join(denials)}")
+    return f"- {row['timestamp']} ({', '.join(str(part) for part in detail_parts)})"
+
+
+def _answer_opa_guardrail_audit_count(user, *, denied_only=False) -> str:
+    rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only, limit=_AI_DIRECT_LIST_LIMIT)
+    qualifier = 'denied ' if denied_only else ''
+    if scanned >= _AI_DIRECT_LIST_LIMIT:
+        return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX among the last {scanned} AI resource-action audits.'
+    return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+
+
+def _answer_opa_guardrail_audit_list(user, *, denied_only=False) -> str:
+    rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only)
+    qualifier = 'denied ' if denied_only else ''
+    if not rows:
+        return f'There are no recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+
+    lines = [f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX:']
+    lines.extend(_format_opa_guardrail_audit_item(row) for row in rows)
+    if scanned >= _AI_DIRECT_LIST_LIMIT:
+        lines.append(f'- Scanned the last {scanned} AI resource-action audit events. Narrow the question for older history.')
+    return '\n'.join(lines)
+
+
+def _try_answer_opa_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if not re.search(_opa_message_pattern(), normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author)\b', normalized):
+        return None
+    if not user.is_superuser:
+        return 'OPA guardrail details require system administrator access in AWX.'
+
+    policy_pattern = r'\bpolic(?:y|ies)\b|\bpolicy paths?\b|\brules?\b'
+    audit_pattern = r'\bdecisions?\b|\bhistory\b|\baudit\b|\bdenials?\b|\bdenied\b|\bguardrail events?\b'
+    denied_only = bool(re.search(r'\bdenials?\b|\bdenied\b|\bblocked\b', normalized))
+    if _is_count_question(latest_message, audit_pattern):
+        return _answer_opa_guardrail_audit_count(user, denied_only=denied_only)
+    if _is_list_question(latest_message, audit_pattern):
+        return _answer_opa_guardrail_audit_list(user, denied_only=denied_only)
+    if _is_count_question(latest_message, policy_pattern):
+        return _answer_opa_policy_count()
+    if _is_list_question(latest_message, policy_pattern):
+        return _answer_opa_policy_list()
+    if re.search(r'\b(status|configured|enabled|disabled|connected|connection|server|url|bundle)\b', normalized):
+        return _answer_opa_status()
+    return None
+
+
+def _gatekeeper_message_pattern() -> str:
+    return r'\bgatekeeper\b|\bconstraint\s*templates?\b|\bconstrainttemplates?\b|\bgatekeeper policies?\b|\bgatekeeper policy manager\b'
+
+
+def _gatekeeper_context():
+    from awx.api.views.gatekeeper import GatekeeperKubernetesClient, _gatekeeper_context_for_ai
+
+    return _gatekeeper_context_for_ai(GatekeeperKubernetesClient())
+
+
+def _gatekeeper_error_text(context: dict) -> str:
+    errors = context.get('errors') if isinstance(context.get('errors'), list) else []
+    if not errors:
+        return ''
+    return '; '.join(str(error.get('detail') or error) if isinstance(error, dict) else str(error) for error in errors[:3])
+
+
+def _format_gatekeeper_json(value) -> str:
+    if value in (None, {}, [], ''):
+        return ''
+    rendered = json.dumps(_json_safe(value), sort_keys=True)
+    if len(rendered) > 220:
+        return f'{rendered[:217]}...'
+    return rendered
+
+
+def _gatekeeper_resource_label(violation: dict) -> str:
+    parts = [violation.get('resource_kind') or 'resource']
+    namespace = violation.get('resource_namespace') or ''
+    name = violation.get('resource_name') or ''
+    if namespace:
+        parts.append(f'{namespace}/{name}' if name else namespace)
+    elif name:
+        parts.append(name)
+    return '/'.join(part for part in parts if part)
+
+
+def _answer_gatekeeper_status() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    errors = _gatekeeper_error_text(context)
+    cluster = context.get('cluster') or {}
+    counts = context.get('counts') or {}
+    status_line = (
+        f"Gatekeeper is configured in AWX. Context: {cluster.get('context') or 'default'}. "
+        f"Server URL: {cluster.get('server_url') or 'not set'}. "
+        f"Templates: {counts.get('constraint_templates', 0)}. Constraints: {counts.get('constraints', 0)}. "
+        f"Violations: {counts.get('violations', 0)}. Configs: {counts.get('configs', 0)}."
+    )
+    if errors:
+        return f'{status_line} Latest read errors: {errors}'
+    return status_line
+
+
+def _answer_gatekeeper_count(resource_key: str, label: str) -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    errors = _gatekeeper_error_text(context)
+    count = int((context.get('counts') or {}).get(resource_key) or 0)
+    noun = label if count == 1 else f'{label}s'
+    answer = f'There are {count} Gatekeeper {noun} visible through AWX.'
+    if errors:
+        answer = f'{answer} Latest read errors: {errors}'
+    return answer
+
+
+def _answer_gatekeeper_templates() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('constraint_templates') if isinstance(context.get('constraint_templates'), list) else []
+    count = int((context.get('counts') or {}).get('constraint_templates') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper ConstraintTemplates visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper ConstraintTemplates visible through AWX:']
+    for row in rows:
+        targets = ', '.join(row.get('targets') or [])
+        detail = [f"kind: {row.get('kind') or 'unknown'}", f"constraints: {row.get('constraint_count', 0)}"]
+        if targets:
+            detail.append(f'targets: {targets}')
+        lines.append(f"- {row.get('name') or 'unnamed'} ({', '.join(detail)})")
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_constraints() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('constraints') if isinstance(context.get('constraints'), list) else []
+    count = int((context.get('counts') or {}).get('constraints') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper constraints visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper constraints visible through AWX:']
+    for row in rows:
+        detail = [
+            f"enforcement: {row.get('enforcement_action') or 'deny'}",
+            f"violations: {row.get('total_violations', 0)}",
+        ]
+        parameters = _format_gatekeeper_json(row.get('parameters'))
+        if parameters:
+            detail.append(f'parameters: {parameters}')
+        lines.append(f"- {row.get('kind') or 'Constraint'}/{row.get('name') or 'unnamed'} ({', '.join(detail)})")
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_violations() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('violations') if isinstance(context.get('violations'), list) else []
+    count = int((context.get('counts') or {}).get('violations') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper violations visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper violations visible through AWX:']
+    for row in rows:
+        constraint = f"{row.get('constraint_kind') or 'Constraint'}/{row.get('constraint_name') or 'unnamed'}"
+        lines.append(
+            f"- {constraint}: {row.get('message') or 'violation'} "
+            f"(resource: {_gatekeeper_resource_label(row)}, enforcement: {row.get('enforcement_action') or 'deny'})"
+        )
+    return '\n'.join(lines)
+
+
+def _answer_gatekeeper_configs() -> str:
+    context = _gatekeeper_context()
+    if not context.get('configured'):
+        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+    rows = context.get('configs') if isinstance(context.get('configs'), list) else []
+    count = int((context.get('counts') or {}).get('configs') or len(rows))
+    if not rows:
+        return f'There are no Gatekeeper configs visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper configs visible through AWX:']
+    for row in rows:
+        lines.append(
+            f"- {row.get('name') or 'config'} "
+            f"(syncOnly: {row.get('sync_only_count', 0)}, readiness stats: {'yes' if row.get('readiness_stats_enabled') else 'no'})"
+        )
+    return '\n'.join(lines)
+
+
+def _try_answer_gatekeeper_fact_question(user, messages: list) -> str | None:
+    latest_message = _latest_user_message(messages)
+    normalized = re.sub(r'\s+', ' ', latest_message.lower()).strip()
+    if not re.search(_gatekeeper_message_pattern(), normalized):
+        return None
+    if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author|install|apply|delete|remove)\b', normalized):
+        return None
+    if not user.is_superuser:
+        return 'Gatekeeper policy-manager details require system administrator access in AWX.'
+
+    violation_pattern = r'\bviolations?\b|\bdenials?\b|\bdenied\b|\baudit findings?\b'
+    template_pattern = r'\bconstraint\s*templates?\b|\bconstrainttemplates?\b|\btemplates?\b'
+    config_pattern = r'\bconfigs?\b|\bconfigurations?\b|\bsync\b|\breadiness\b'
+    constraint_pattern = r'\bconstraints?\b|\bgatekeeper policies?\b|\bpolicies\b'
+    if _is_count_question(latest_message, violation_pattern):
+        return _answer_gatekeeper_count('violations', 'violation')
+    if _is_list_question(latest_message, violation_pattern):
+        return _answer_gatekeeper_violations()
+    if _is_count_question(latest_message, template_pattern):
+        return _answer_gatekeeper_count('constraint_templates', 'ConstraintTemplate')
+    if _is_list_question(latest_message, template_pattern):
+        return _answer_gatekeeper_templates()
+    if _is_count_question(latest_message, config_pattern):
+        return _answer_gatekeeper_count('configs', 'config')
+    if _is_list_question(latest_message, config_pattern):
+        return _answer_gatekeeper_configs()
+    if _is_count_question(latest_message, constraint_pattern):
+        return _answer_gatekeeper_count('constraints', 'constraint')
+    if _is_list_question(latest_message, constraint_pattern):
+        return _answer_gatekeeper_constraints()
+    if re.search(r'\b(status|configured|enabled|disabled|connected|connection|server|url|health|counts?)\b', normalized):
+        return _answer_gatekeeper_status()
+    return None
+
+
+def _clip_ai_context_text(text: str, max_chars: int) -> tuple[str, bool]:
+    text = str(text or '')
+    if len(text) <= max_chars:
+        return text, False
+    head_chars = max_chars // 3
+    tail_chars = max_chars - head_chars
+    omitted = len(text) - max_chars
+    return f'{text[:head_chars]}\n...[truncated {omitted} characters]...\n{text[-tail_chars:]}', True
+
+
+def _redact_ai_context_text(text: str) -> str:
+    return UriCleaner.remove_sensitive(str(text or ''))
+
+
+def _coerce_ai_context_pk(value) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _job_context_model(raw_type: str | None):
+    job_type = str(raw_type or '').strip().lower()
+    return {
+        'job': models.Job,
+        'playbook': models.Job,
+        'jobs': models.Job,
+        'ad_hoc_command': models.AdHocCommand,
+        'ad_hoc': models.AdHocCommand,
+        'command': models.AdHocCommand,
+        'project_update': models.ProjectUpdate,
+        'project': models.ProjectUpdate,
+        'inventory_update': models.InventoryUpdate,
+        'inventory': models.InventoryUpdate,
+        'system_job': models.SystemJob,
+        'management': models.SystemJob,
+        'terraform_job': models.TerraformJob,
+        'terraform': models.TerraformJob,
+    }.get(job_type, models.Job)
+
+
+def _job_context_select_related(model):
+    return {
+        models.Job: ('job_template', 'project', 'inventory', 'organization'),
+        models.AdHocCommand: ('inventory', 'credential'),
+        models.ProjectUpdate: ('project', 'organization'),
+        models.InventoryUpdate: ('inventory', 'inventory_source', 'inventory_source__source_project', 'organization'),
+        models.SystemJob: ('system_job_template', 'organization'),
+        models.TerraformJob: ('terraform_job_template', 'project', 'target_inventory', 'organization'),
+    }.get(model, ())
+
+
+def _job_context_related_object(value):
+    if value is None:
+        return None
+    return _related_context(value)
+
+
+def _job_context_metadata(job) -> dict:
+    metadata = {
+        'id': job.pk,
+        'type': getattr(job, 'type', job._meta.model_name),
+        'name': getattr(job, 'name', ''),
+        'status': getattr(job, 'status', ''),
+        'created': getattr(job, 'created', None),
+        'started': getattr(job, 'started', None),
+        'finished': getattr(job, 'finished', None),
+        'elapsed': getattr(job, 'elapsed', None),
+        'failed': getattr(job, 'failed', None),
+        'job_explanation': getattr(job, 'job_explanation', ''),
+        'result_traceback': _redact_ai_context_text(getattr(job, 'result_traceback', '') or ''),
+        'inventory': _job_context_related_object(getattr(job, 'inventory', None) or getattr(job, 'target_inventory', None)),
+        'project': _job_context_related_object(getattr(job, 'project', None)),
+        'organization': _job_context_related_object(getattr(job, 'organization', None)),
+        'job_template': _job_context_related_object(getattr(job, 'job_template', None)),
+        'terraform_job_template': _job_context_related_object(getattr(job, 'terraform_job_template', None)),
+        'system_job_template': _job_context_related_object(getattr(job, 'system_job_template', None)),
+        'inventory_source': _job_context_related_object(getattr(job, 'inventory_source', None)),
+        'scm_revision': getattr(job, 'scm_revision', ''),
+    }
+    for field_name in (
+        'playbook',
+        'module_name',
+        'module_args',
+        'limit',
+        'job_type',
+        'terraform_operation',
+        'terraform_dir',
+    ):
+        value = getattr(job, field_name, None)
+        if value not in (None, ''):
+            metadata[field_name] = value
+    return {key: value for key, value in metadata.items() if value not in (None, '')}
+
+
+def _job_context_output(job) -> dict:
+    chunks = []
+    event_count = 0
+    try:
+        queryset = job.get_event_queryset().order_by('start_line', 'counter', 'id')
+    except Exception as exc:
+        return {'text': '', 'error': f'Could not read job events: {exc}'}
+
+    for stdout in queryset.exclude(stdout='').values_list('stdout', flat=True).iterator():
+        event_count += 1
+        chunks.append(stdout)
+        if sum(len(chunk) for chunk in chunks) >= (_AI_JOB_OUTPUT_CONTEXT_MAX_CHARS * 2):
+            break
+
+    text, truncated = _clip_ai_context_text(_redact_ai_context_text(''.join(chunks)), _AI_JOB_OUTPUT_CONTEXT_MAX_CHARS)
+    return {
+        'event_count_scanned': event_count,
+        'truncated': truncated,
+        'text': text,
+    }
+
+
+def _job_context_event_diagnostics(job) -> list[dict]:
+    diagnostic_events = {
+        'runner_on_failed',
+        'runner_on_unreachable',
+        'runner_on_error',
+        'runner_on_async_failed',
+        'error',
+        'system_warning',
+        'warning',
+        'deprecated',
+        'playbook_on_no_hosts_matched',
+        'playbook_on_no_hosts_remaining',
+        'runner_on_no_hosts',
+    }
+    rows = []
+    try:
+        queryset = job.get_event_queryset().filter(event__in=diagnostic_events).order_by('counter', 'id')
+    except Exception:
+        return rows
+
+    for event in queryset[:_AI_CONTEXT_LIST_LIMIT]:
+        event_data = getattr(event, 'event_data', None)
+        if event_data:
+            redacted_event_data = _redact_ai_context_text(json.dumps(_json_safe(event_data), sort_keys=True))
+            try:
+                event_data = json.loads(redacted_event_data)
+            except ValueError:
+                event_data = redacted_event_data
+        stdout, truncated = _clip_ai_context_text(_redact_ai_context_text(getattr(event, 'stdout', '') or ''), 2000)
+        rows.append(
+            {
+                'counter': getattr(event, 'counter', None),
+                'event': getattr(event, 'event', ''),
+                'created': getattr(event, 'created', None),
+                'stdout': stdout,
+                'stdout_truncated': truncated,
+                'event_data': event_data,
+            }
+        )
+    return rows
+
+
+def _job_context_project_for_user(user, job):
+    project = getattr(job, 'project', None)
+    if project is None and getattr(job, 'inventory_source', None) is not None:
+        project = getattr(job.inventory_source, 'source_project', None)
+    if project is None:
+        return None
+    return get_user_queryset(user, models.Project).filter(pk=project.pk).first()
+
+
+def _safe_project_relative_path(relative_path: str | None) -> PurePosixPath | None:
+    if not isinstance(relative_path, str) or not relative_path.strip():
+        return None
+    try:
+        path = PurePosixPath(relative_path)
+    except ValueError:
+        return None
+    if path.is_absolute() or any(part in {'', '.', '..'} for part in path.parts):
+        return None
+    return path
+
+
+def _read_job_context_project_file(project, relative_path: str, remaining_chars: int) -> dict | None:
+    safe_relative = _safe_project_relative_path(relative_path)
+    if safe_relative is None or safe_relative.suffix not in _AI_JOB_CONTEXT_FILE_ALLOWED_SUFFIXES:
+        return None
+
+    try:
+        project_path = project.get_project_path()
+        if not project_path:
+            return None
+        root = Path(project_path).resolve()
+        target = (root / Path(*safe_relative.parts)).resolve()
+        if root not in target.parents and target != root:
+            return None
+        if not target.is_file():
+            return None
+    except OSError:
+        return None
+
+    read_limit = max(0, min(remaining_chars, _AI_JOB_CODE_CONTEXT_MAX_CHARS))
+    if read_limit <= 0:
+        return None
+    try:
+        raw = target.read_bytes()[: read_limit + 1]
+    except OSError:
+        return None
+    text = raw[:read_limit].decode('utf-8', errors='replace')
+    text = _redact_ai_context_text(text)
+    return {
+        'path': str(safe_relative),
+        'truncated': len(raw) > read_limit,
+        'content': text,
+    }
+
+
+def _job_context_code_files(user, job) -> list[dict]:
+    project = _job_context_project_for_user(user, job)
+    if project is None:
+        return []
+
+    paths = []
+    playbook = getattr(job, 'playbook', None)
+    if isinstance(playbook, str) and playbook.strip():
+        paths.append(playbook)
+
+    terraform_dir = _safe_project_relative_path(getattr(job, 'terraform_dir', None) or '')
+    if terraform_dir is not None:
+        project_path = project.get_project_path()
+        if project_path:
+            try:
+                root = Path(project_path).resolve()
+                terraform_root = (root / Path(*terraform_dir.parts)).resolve()
+                if root in terraform_root.parents or terraform_root == root:
+                    for suffix in ('*.tf', '*.tfvars'):
+                        paths.extend(str(path.relative_to(root)) for path in sorted(terraform_root.glob(suffix)))
+            except OSError:
+                pass
+
+    source_path = getattr(job, 'source_path', None)
+    if not source_path and getattr(job, 'inventory_source', None) is not None:
+        source_path = getattr(job.inventory_source, 'source_path', None)
+    if isinstance(source_path, str) and source_path.strip():
+        paths.append(source_path)
+
+    files = []
+    seen = set()
+    remaining_chars = _AI_JOB_CODE_CONTEXT_MAX_CHARS
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        file_context = _read_job_context_project_file(project, path, remaining_chars)
+        if not file_context:
+            continue
+        files.append(file_context)
+        remaining_chars -= len(file_context['content'])
+        if len(files) >= _AI_JOB_CODE_CONTEXT_MAX_FILES or remaining_chars <= 0:
+            break
+    return files
+
+
+def _job_output_page_context(user, ui_context: dict | None) -> dict | None:
+    if not isinstance(ui_context, dict) or ui_context.get('source') != 'job_output':
+        return None
+
+    job_id = _coerce_ai_context_pk(ui_context.get('job_id') or ui_context.get('resource_id'))
+    if not job_id:
+        return {'error': 'The job output page did not provide a valid job id.'}
+
+    model = _job_context_model(str(ui_context.get('job_type') or ''))
+    queryset = get_user_queryset(user, model)
+    select_related = _job_context_select_related(model)
+    if select_related:
+        queryset = queryset.select_related(*select_related)
+    job = queryset.filter(pk=job_id).first()
+    if job is None:
+        return {'error': 'This job is not visible to the requesting user.'}
+
+    return {
+        'notes': [
+            'This context is from the currently viewed job output page.',
+            'The job and related project are filtered by the requesting user RBAC permissions.',
+            'Output URLs with embedded usernames or passwords are redacted before sending to the AI provider.',
+            'Code snippets are capped and read only from safe relative paths inside the related project.',
+        ],
+        'job': _json_safe(_job_context_metadata(job)),
+        'diagnostic_events': _json_safe(_job_context_event_diagnostics(job)),
+        'output': _json_safe(_job_context_output(job)),
+        'code_files': _json_safe(_job_context_code_files(user, job)),
+    }
+
+
+def _system_prompt_with_awx_context(system_prompt: str, user, ui_context: dict | None = None) -> str:
+    try:
+        snapshot = _visible_awx_context_snapshot(user)
+    except Exception as exc:
+        logger.warning('Could not build AI assistant AWX context: %s', exc)
+        return system_prompt
+
+    context = (
+        '\n\nLive AWX context for the requesting user:\n'
+        f'{json.dumps(_json_safe(snapshot), indent=2)}\n'
+        'Use this live context when answering direct questions about this AWX instance. '
+        'Do not say you cannot see the AWX instance when the answer is present in this context. '
+        'If a resource list is truncated, say so and ask the user to narrow by inventory, organization, or resource type.'
+    )
+    job_context = _job_output_page_context(user, ui_context)
+    if job_context is not None:
+        context = (
+            f'{context}\n\nCurrent job output page context:\n'
+            f'{json.dumps(_json_safe(job_context), indent=2)}\n'
+            'When answering questions from this page, use the job output, diagnostic events, and code files above. '
+            'For failures, identify the likely failing task or command, explain the error plainly, and give concrete remediation steps. '
+            'For improvement questions, review the supplied project code and suggest safer, more idempotent, maintainable automation.'
+        )
+    return f'{system_prompt}{context}'
+
+
+def _json_safe(value):
+    if hasattr(value, 'pk') and hasattr(value, '_meta'):
+        return value.pk
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    try:
+        json.dumps(value)
+    except TypeError:
+        return str(value)
+    return value
+
+
+def _summarize_ai_prompt(prompt: str | None) -> str:
+    if not isinstance(prompt, str):
+        return ''
+    summary = re.sub(r'\s+', ' ', prompt).strip()
+    return summary[:240]
+
+
+def _redact_sensitive(value):
+    if isinstance(value, dict):
+        redacted = {}
+        is_password_survey_question = str(value.get('type', '')).lower() == 'password'
+        for key, child in value.items():
+            if is_password_survey_question and key == 'default' and child not in ('', None):
+                redacted[key] = '$encrypted$'
+            elif _SENSITIVE_KEY_RE.search(str(key)):
+                redacted[key] = '$encrypted$'
+            else:
+                redacted[key] = _redact_sensitive(child)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive(child) for child in value]
+    return value
+
+
+def _ai_policy_context(context: dict | None) -> dict:
+    context = context if isinstance(context, dict) else {}
+    approval = context.get('approval') if isinstance(context.get('approval'), dict) else {}
+    return {
+        'source': str(context.get('source') or 'api'),
+        'mode': str(context.get('mode') or ''),
+        'human_approved': bool(context.get('human_approved')),
+        'approval_required': bool(context.get('approval_required')),
+        'approval': _redact_sensitive(_json_safe(approval)),
+    }
+
+
+def _ai_operation_is_destructive(operation: dict, resource_type: str | None, action: str | None, data: dict | None = None) -> bool:
+    data = data if isinstance(data, dict) else {}
+    if action in _AI_DESTRUCTIVE_OPERATIONS:
+        return True
+    if resource_type == 'project_file' and data.get('overwrite'):
+        return True
+    return False
+
+
+def _ai_action_opa_input(
+    request,
+    operation: dict,
+    context: dict | None = None,
+    *,
+    resource_type: str | None = None,
+    action: str | None = None,
+    object_id=None,
+    target_resource_type: str | None = None,
+    target_id=None,
+    data: dict | None = None,
+    extra: dict | None = None,
+) -> dict:
+    policy_context = _ai_policy_context(context)
+    resource_type = resource_type or operation.get('resource_type')
+    action = action or operation.get('operation')
+    data = _redact_sensitive(_json_safe(data if data is not None else operation.get('data') or {}))
+    opa_input = {
+        'triggered_by': 'ai_resource_action',
+        'source': policy_context['source'],
+        'mode': policy_context['mode'],
+        'human_approved': policy_context['human_approved'],
+        'approval_required': policy_context['approval_required'],
+        'approval': policy_context['approval'],
+        'user': {'id': request.user.id, 'username': request.user.username, 'is_superuser': request.user.is_superuser},
+        'operation': action,
+        'resource_type': resource_type,
+        'object_id': object_id,
+        'target_resource_type': target_resource_type,
+        'target_id': target_id,
+        'destructive': _ai_operation_is_destructive(operation, resource_type, action, data),
+        'privileged': resource_type in _AI_PRIVILEGED_RESOURCE_TYPES,
+        'data': data,
+    }
+    if extra:
+        opa_input.update(_redact_sensitive(_json_safe(extra)))
+    return opa_input
+
+
+def _normalize_resource_type(resource_type: str | None) -> str | None:
+    if not isinstance(resource_type, str):
+        return None
+    normalized = resource_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_RESOURCE_TYPE_ALIASES.get(normalized)
+
+
+def _normalize_credential_reference_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_CREDENTIAL_REFERENCE_TARGET_ALIASES.get(normalized)
+
+
+def _normalize_role_assignment_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_ROLE_ASSIGNMENT_TARGET_ALIASES.get(normalized)
+
+
+def _normalize_survey_spec_target(target_type: str | None) -> str | None:
+    if not isinstance(target_type, str):
+        return None
+    normalized = target_type.strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_SURVEY_SPEC_TARGET_ALIASES.get(normalized)
+
+
+def _normalize_role_field(role_field: str | None) -> str | None:
+    if not isinstance(role_field, str):
+        return None
+    normalized = role_field.strip().lower().replace('-', '_').replace(' ', '_')
+    if not normalized:
+        return None
+    normalized = _AI_ROLE_FIELD_ALIASES.get(normalized, normalized)
+    if not normalized.endswith('_role'):
+        normalized = f'{normalized}_role'
+    return normalized
+
+
+def _normalize_ai_plan(raw_plan) -> dict:
+    if isinstance(raw_plan, list):
+        plan = {'operations': raw_plan}
+    elif isinstance(raw_plan, dict):
+        plan = dict(raw_plan)
+    else:
+        raise ValueError(_('AI resource plan must be a JSON object or an array of operations.'))
+
+    operations = plan.get('operations', plan.get('actions'))
+    if not isinstance(operations, list) or not operations:
+        raise ValueError(_('AI resource plan must include a non-empty operations array.'))
+    if len(operations) > 20:
+        raise ValueError(_('AI resource plan can include at most 20 operations.'))
+
+    normalized_operations = []
+    for index, operation in enumerate(operations, start=1):
+        if not isinstance(operation, dict):
+            raise ValueError(_('Each AI resource plan operation must be an object.'))
+        normalized = dict(operation)
+        normalized['id'] = str(normalized.get('id') or f'op-{index}')
+        operation_name = str(normalized.get('operation') or normalized.get('action') or 'create').strip().lower()
+        normalized['operation'] = _AI_OPERATION_ALIASES.get(operation_name, operation_name)
+        normalized['resource_type'] = _normalize_resource_type(normalized.get('resource_type') or normalized.get('resource') or normalized.get('type'))
+        normalized['data'] = normalized.get('data') if isinstance(normalized.get('data'), dict) else {}
+        normalized_operations.append(normalized)
+
+    plan['operations'] = normalized_operations
+    plan.pop('actions', None)
+    return plan
+
+
+def _extract_json_plan(content: str) -> dict:
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError(_('The AI provider did not return a resource plan.'))
+
+    text = content.strip()
+    code_fence = re.search(r'```(?:json)?\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+    if code_fence:
+        text = code_fence.group(1).strip()
+
+    try:
+        return _normalize_ai_plan(json.loads(text))
+    except (json.JSONDecodeError, ValueError):
+        start_positions = [position for position in (text.find('{'), text.find('[')) if position >= 0]
+        if not start_positions:
+            raise ValueError(_('The AI provider response did not contain JSON.'))
+        start = min(start_positions)
+        end = max(text.rfind('}'), text.rfind(']'))
+        if end <= start:
+            raise ValueError(_('The AI provider response did not contain a complete JSON plan.'))
+        return _normalize_ai_plan(json.loads(text[start : end + 1]))
+
+
+def _limited_queryset_values(user, model, fields, limit=15):
+    rows = []
+    for obj in get_user_queryset(user, model).order_by('id')[:limit]:
+        row = {}
+        for field in fields:
+            row[field] = getattr(obj, field, None)
+        rows.append(row)
+    return rows
+
+
+def _ai_authoring_context(user) -> dict:
+    return {
+        'counts': _visible_awx_counts(user),
+        'hosts': _visible_resource_rows(user, _visible_resource_spec_by_key('hosts'), limit=20),
+        'groups': _visible_resource_rows(user, _visible_resource_spec_by_key('groups'), limit=20),
+        'credentials': _limited_queryset_values(user, models.Credential, ('id', 'name', 'credential_type_id', 'organization_id'), limit=20),
+        'organizations': _limited_queryset_values(user, models.Organization, ('id', 'name'), limit=20),
+        'users': _limited_queryset_values(user, models.User, ('id', 'username', 'first_name', 'last_name'), limit=20),
+        'teams': _limited_queryset_values(user, models.Team, ('id', 'name', 'organization_id'), limit=20),
+        'inventories': _limited_queryset_values(user, models.Inventory, ('id', 'name', 'kind', 'organization_id'), limit=20),
+        'inventory_sources': _limited_queryset_values(user, models.InventorySource, ('id', 'name', 'inventory_id', 'source', 'source_project_id'), limit=20),
+        'projects': _limited_queryset_values(user, models.Project, ('id', 'name', 'scm_type', 'local_path', 'organization_id'), limit=20),
+        'job_templates': _limited_queryset_values(user, models.JobTemplate, ('id', 'name', 'project_id', 'inventory_id', 'organization_id'), limit=20),
+        'terraform_job_templates': _limited_queryset_values(user, models.TerraformJobTemplate, ('id', 'name', 'project_id', 'target_inventory_id'), limit=20),
+        'workflow_job_templates': _limited_queryset_values(user, models.WorkflowJobTemplate, ('id', 'name', 'organization_id'), limit=20),
+        'workflow_job_template_nodes': _limited_queryset_values(
+            user,
+            models.WorkflowJobTemplateNode,
+            ('id', 'workflow_job_template_id', 'unified_job_template_id', 'identifier'),
+            limit=20,
+        ),
+        'schedules': _limited_queryset_values(user, models.Schedule, ('id', 'name', 'enabled', 'unified_job_template_id'), limit=20),
+        'catalog_items': _limited_queryset_values(user, models.CatalogItem, ('id', 'name', 'organization_id'), limit=20),
+        'cloud_provider_connections': _limited_queryset_values(
+            user, models.CloudProviderConnection, ('id', 'name', 'provider_id', 'status', 'organization_id'), limit=20
+        ),
+        'cloud_provider_states': _limited_queryset_values(user, models.CloudProviderState, ('id', 'provider_id', 'organization_id', 'pulled_at'), limit=20),
+    }
+
+
+def _ai_resource_plan_system_prompt(user, context: dict) -> str:
+    authoring_context = _ai_authoring_context(user)
+    return (
+        'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
+        'Return only JSON. Do not include markdown fences or prose.\n\n'
+        'Supported resource_type values: credential_reference, inventory, group, host, smart_inventory, constructed_inventory, project, '
+        'project_file, inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
+        'Supported operation values: create, update, attach, detach. '
+        'Use attach/detach only for credential_reference and role_assignment operations.\n'
+        'For smart_inventory, data must include organization and a valid AWX host_filter expression, for example '
+        '"name__icontains=web" or "groups__name=webservers". Smart inventory plans are previewed against visible hosts and groups before save.\n'
+        'For constructed_inventory, data must include organization and may include input_inventories as an array of existing inventory IDs plus '
+        'source_vars as a YAML or JSON object for the constructed inventory source. Constructed inventory plans are validated and previewed '
+        'against visible input inventories, source hosts, and source groups before save.\n'
+        'For group, data must include name and inventory or inventory_ref. For host, data must include name and inventory or inventory_ref, and '
+        'may include group_ids, group_ref, or group_refs to place the host into existing or same-plan groups. group_ref must reference a prior '
+        'group operation in the same plan. inventory_ref must reference a prior inventory operation in the same plan.\n'
+        'For credential_reference, data must include target_resource_type ("job_template", "inventory_source", "schedule", or '
+        '"workflow_job_template_node"), target_id, and credential. These operations only link or unlink existing credentials and must never '
+        'include credential secrets. Schedule and workflow-node credential references are saved launch prompts and require the related template '
+        'to ask for credentials on launch.\n'
+        'For role_assignment, data must include target_resource_type, target_id, role_field or role, and exactly one user/user_id or team/team_id. '
+        'Use existing users and teams from the supplied context. Common role values include admin, read, use, execute, update, member, and auditor.\n'
+        'For survey_spec, data must include target_resource_type ("job_template", "workflow_job_template", or "terraform_job_template"), target_id, '
+        'and either survey_spec or questions. Use update/create to replace the survey, or set merge=true to add/update questions by variable. '
+        'Survey question types must be text, textarea, password, multiplechoice, multiselect, integer, or float. '
+        'Never put secrets in survey defaults.\n'
+        'To create a new manual project workspace, use resource_type "project" with scm_type "", create_local_path true, organization, '
+        'name, and optionally local_path. Later operations in the same plan may reference it with project_ref set to the project operation id.\n'
+        'For project_file, data must include an existing manual project ID or project_ref, relative path, and UTF-8 text content. '
+        'Use it to author playbooks, roles, defaults, vars, handlers, templates, meta, README, and ansible.cfg files inside a project before '
+        'creating or updating job templates that reference those playbooks. Do not target SCM-backed projects or hidden/source-control paths.\n'
+        'Use existing numeric IDs from the supplied AWX context for related objects. '
+        'Do not invent organization, project, inventory, workflow, user, team, or catalog item IDs. '
+        'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
+        'Schema:\n'
+        '{"name": "short plan name", "description": "short summary", "operations": ['
+        '{"id": "stable id", "operation": "create|update|delete|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|group|host|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
+        '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id", "inventory_ref": "prior-inventory-op-id", "group_ref": "prior-group-op-id"}}]}\n\n'
+        f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
+        f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
+    )
+
+
+def _ai_provider_plan_from_prompt(request, prompt: str, context: dict) -> tuple[dict, str, str]:
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIProviderError(
+            _('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        raise AIProviderError(_('Rate limit exceeded. Please wait before sending another message.'), status.HTTP_429_TOO_MANY_REQUESTS)
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIProviderError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'), status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    content = _call_ai_provider(
+        provider,
+        model,
+        [{'role': 'user', 'content': prompt}],
+        min(getattr(settings, 'AI_MAX_TOKENS', 2048), 4096),
+        _ai_resource_plan_system_prompt(request.user, context),
+        api_key,
+        getattr(settings, 'AI_API_URL', ''),
+    )
+    return _extract_json_plan(content), provider, model
+
+
+def _serializer_context(request):
+    return {'request': request, 'view': SimpleNamespace(kwargs={}, request=request)}
+
+
+def _operation_payload(operation: dict, resource_config: dict) -> dict:
+    data = {}
+    data.update(resource_config.get('default_data') or {})
+    data.update(operation.get('data') or {})
+    data.update(resource_config.get('forced_data') or {})
+    return data
+
+
+def _coerce_positive_int_list(value) -> tuple[list[int] | None, list]:
+    if value is None:
+        return None, []
+    if isinstance(value, (str, int)):
+        raw_values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        return [], [value]
+
+    ids = []
+    invalid = []
+    seen = set()
+    for raw_value in raw_values:
+        value_for_parse = raw_value.get('id', raw_value.get('pk')) if isinstance(raw_value, dict) else raw_value
+        parsed = _positive_int(value_for_parse)
+        if not parsed:
+            invalid.append(raw_value)
+            continue
+        if parsed in seen:
+            continue
+        ids.append(parsed)
+        seen.add(parsed)
+    return ids, invalid
+
+
+def _pop_constructed_input_inventory_ids(data: dict) -> tuple[list[int] | None, list]:
+    for field in _CONSTRUCTED_INPUT_INVENTORY_FIELDS:
+        if field in data:
+            return _coerce_positive_int_list(data.pop(field))
+    return None, []
+
+
+def _pop_ai_host_group_ids(data: dict) -> tuple[list[int] | None, list]:
+    for field in _AI_HOST_GROUP_FIELDS:
+        if field in data:
+            return _coerce_positive_int_list(data.pop(field))
+    return None, []
+
+
+def _operation_organization_id(data: dict, validated_data: dict, instance=None) -> int | None:
+    organization = validated_data.get('organization') or data.get('organization')
+    if organization is None and instance is not None:
+        return instance.organization_id
+    if hasattr(organization, 'pk'):
+        return organization.pk
+    return _positive_int(organization)
+
+
+def _host_preview_row(host) -> dict:
+    return {'id': host.pk, 'name': host.name, 'inventory': _related_context(host.inventory), 'enabled': host.enabled}
+
+
+def _group_preview_row(group) -> dict:
+    return {'id': group.pk, 'name': group.name, 'inventory': _related_context(group.inventory)}
+
+
+def _inventory_preview_row(inventory) -> dict:
+    return {'id': inventory.pk, 'name': inventory.name, 'kind': inventory.kind, 'organization': _related_context(inventory.organization)}
+
+
+def _source_vars_preview(source_vars) -> tuple[dict, dict | None]:
+    try:
+        parsed = parse_yaml_or_json(source_vars or '', silent_failure=False)
+    except Exception as exc:
+        return {}, {'source_vars': [str(exc)]}
+    return parsed, None
+
+
+def _validate_constructed_input_inventories(request, input_inventory_ids: list[int] | None, organization_id: int | None, instance=None) -> tuple[list, dict]:
+    if input_inventory_ids is None:
+        if instance is None:
+            return [], {}
+        input_inventory_ids = list(instance.input_inventories.values_list('pk', flat=True))
+
+    if not input_inventory_ids:
+        return [], {}
+
+    visible = get_user_queryset(request.user, models.Inventory).filter(pk__in=input_inventory_ids).select_related('organization')
+    inventory_by_id = {inventory.pk: inventory for inventory in visible}
+    errors = {}
+    missing_ids = [inventory_id for inventory_id in input_inventory_ids if inventory_id not in inventory_by_id]
+    if missing_ids:
+        errors['input_inventories'] = [_('Input inventories were not found or are not accessible: {}.').format(', '.join(str(value) for value in missing_ids))]
+
+    constructed_ids = [inventory.pk for inventory in inventory_by_id.values() if inventory.kind == 'constructed']
+    if constructed_ids:
+        errors.setdefault('input_inventories', []).append(
+            _('Constructed inventories cannot be used as input inventories: {}.').format(', '.join(str(value) for value in constructed_ids))
+        )
+
+    if organization_id:
+        cross_org_ids = [inventory.pk for inventory in inventory_by_id.values() if inventory.organization_id and inventory.organization_id != organization_id]
+        if cross_org_ids:
+            errors.setdefault('input_inventories', []).append(
+                _('Input inventories must belong to the constructed inventory organization: {}.').format(', '.join(str(value) for value in cross_org_ids))
+            )
+
+    ordered = [inventory_by_id[inventory_id] for inventory_id in input_inventory_ids if inventory_id in inventory_by_id]
+    return ordered, errors
+
+
+def _validated_operation_inventory_id(serializer_data: dict, validated_data: dict, instance=None) -> int | None:
+    inventory = validated_data.get('inventory') or serializer_data.get('inventory')
+    if inventory is None and instance is not None:
+        return instance.inventory_id
+    if hasattr(inventory, 'pk'):
+        return inventory.pk
+    return _positive_int(inventory)
+
+
+def _validate_ai_host_groups(request, group_ids: list[int] | None, inventory_id: int | None, instance=None) -> tuple[list, dict]:
+    if group_ids is None:
+        if instance is None:
+            return [], {}
+        group_ids = list(instance.groups.values_list('pk', flat=True))
+
+    if not group_ids:
+        return [], {}
+
+    visible = get_user_queryset(request.user, models.Group).filter(pk__in=group_ids).select_related('inventory')
+    group_by_id = {group.pk: group for group in visible}
+    errors = {}
+    missing_ids = [group_id for group_id in group_ids if group_id not in group_by_id]
+    if missing_ids:
+        errors['group_ids'] = [_('Groups were not found or are not accessible: {}.').format(', '.join(str(value) for value in missing_ids))]
+
+    if inventory_id:
+        cross_inventory_ids = [group.pk for group in group_by_id.values() if group.inventory_id != inventory_id]
+        if cross_inventory_ids:
+            errors.setdefault('group_ids', []).append(
+                _('Host groups must belong to the host inventory: {}.').format(', '.join(str(value) for value in cross_inventory_ids))
+            )
+
+    ordered = [group_by_id[group_id] for group_id in group_ids if group_id in group_by_id]
+    return ordered, errors
+
+
+def _smart_inventory_preview(request, data: dict, validated_data: dict, instance=None) -> dict | None:
+    host_filter = validated_data.get('host_filter') or data.get('host_filter') or (instance.host_filter if instance is not None else None)
+    if not host_filter:
+        return None
+
+    organization_id = _operation_organization_id(data, validated_data, instance)
+    filter_qs = SmartFilter.query_from_string(host_filter)
+    host_qs = _visible_hosts_queryset(request.user).filter(pk__in=filter_qs.values('pk'))
+    if organization_id:
+        host_qs = host_qs.filter(inventory__organization_id=organization_id)
+    host_qs = host_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    host_count = host_qs.count()
+    hosts = [_host_preview_row(host) for host in host_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    group_qs = get_user_queryset(request.user, models.Group).filter(hosts__in=host_qs).exclude(inventory__kind='constructed')
+    if organization_id:
+        group_qs = group_qs.filter(inventory__organization_id=organization_id)
+    group_qs = group_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    group_count = group_qs.count()
+    groups = [_group_preview_row(group) for group in group_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    return {
+        'type': 'smart_inventory',
+        'host_filter': host_filter,
+        'organization': organization_id,
+        'matched_hosts_count': host_count,
+        'matched_hosts': hosts,
+        'matched_groups_count': group_count,
+        'matched_groups': groups,
+        'truncated': host_count > len(hosts) or group_count > len(groups),
+    }
+
+
+def _constructed_inventory_preview(request, data: dict, validated_data: dict, input_inventories: list, source_vars, instance=None) -> dict:
+    parsed_source_vars = _source_vars_preview(source_vars)[0]
+    input_inventory_ids = [inventory.pk for inventory in input_inventories]
+    organization_id = _operation_organization_id(data, validated_data, instance)
+
+    host_qs = _visible_hosts_queryset(request.user).filter(inventory_id__in=input_inventory_ids)
+    group_qs = get_user_queryset(request.user, models.Group).filter(inventory_id__in=input_inventory_ids).exclude(inventory__kind='constructed')
+    if organization_id:
+        host_qs = host_qs.filter(inventory__organization_id=organization_id)
+        group_qs = group_qs.filter(inventory__organization_id=organization_id)
+
+    host_qs = host_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    group_qs = group_qs.select_related('inventory').order_by('inventory__name', 'name', 'pk').distinct()
+    host_count = host_qs.count()
+    group_count = group_qs.count()
+    hosts = [_host_preview_row(host) for host in host_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+    groups = [_group_preview_row(group) for group in group_qs[:_AI_RESOURCE_PREVIEW_LIMIT]]
+
+    return {
+        'type': 'constructed_inventory',
+        'organization': organization_id,
+        'input_inventories_count': len(input_inventories),
+        'input_inventories': [_inventory_preview_row(inventory) for inventory in input_inventories],
+        'source_hosts_count': host_count,
+        'source_hosts': hosts,
+        'source_groups_count': group_count,
+        'source_groups': groups,
+        'source_vars_keys': [str(key) for key in parsed_source_vars.keys()],
+        'source_vars': _redact_sensitive(_json_safe(parsed_source_vars)),
+        'truncated': host_count > len(hosts) or group_count > len(groups),
+    }
+
+
+def _is_ai_project_workspace_requested(data: dict) -> bool:
+    return any(_coerce_ai_bool(data.get(flag), default=False) for flag in _AI_PROJECT_WORKSPACE_FLAGS)
+
+
+def _pop_ai_project_workspace_fields(data: dict):
+    for key in (*_AI_PROJECT_WORKSPACE_FLAGS, 'project_ref', 'project_operation_id'):
+        data.pop(key, None)
+
+
+def _normalize_ai_project_local_path(data: dict) -> tuple[str | None, str | None]:
+    raw_local_path = data.get('local_path') or data.get('workspace') or data.get('workspace_name')
+    if raw_local_path in (None, ''):
+        base = slugify(str(data.get('name') or 'project')).strip('-') or 'project'
+        raw_local_path = f'ai-{base}'
+    if not isinstance(raw_local_path, str):
+        return None, _('Project local_path must be a string.')
+
+    local_path = raw_local_path.strip()
+    local_path = local_path.replace('\\', '/')
+    path = PurePosixPath(local_path)
+    if path.is_absolute() or len(path.parts) != 1:
+        return None, _('Project local_path must be a single relative directory name.')
+    local_path = path.name
+    if not local_path or local_path.startswith(('.', '_')):
+        return None, _('Project local_path cannot be empty, hidden, or AWX-reserved.')
+    if len(local_path) > _AI_PROJECT_LOCAL_PATH_MAX_LENGTH:
+        return None, _('Project local_path exceeds the AI workspace length limit.')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', local_path):
+        return None, _('Project local_path can only contain letters, numbers, dots, underscores, or hyphens.')
+    return local_path, None
+
+
+def _unique_ai_project_local_path(local_path: str) -> str:
+    root = Path(settings.PROJECTS_ROOT).resolve(strict=False)
+    candidate = local_path
+    for index in range(2, 101):
+        if not models.Project.objects.filter(local_path=candidate).exists() and not (root / candidate).exists():
+            return candidate
+        suffix = f'-{index}'
+        candidate = f'{local_path[: _AI_PROJECT_LOCAL_PATH_MAX_LENGTH - len(suffix)]}{suffix}'
+    return local_path
+
+
+def _resolve_ai_project_workspace_path(local_path: str) -> tuple[Path | None, Path | None, str | None]:
+    root_path = Path(settings.PROJECTS_ROOT).resolve(strict=False)
+    workspace_path = (root_path / local_path).resolve(strict=False)
+    try:
+        workspace_path.relative_to(root_path)
+    except ValueError:
+        return None, None, _('Project local_path escapes PROJECTS_ROOT.')
+    return root_path, workspace_path, None
+
+
+def _prepare_ai_project_workspace(serializer_data: dict, result: dict, context: dict | None) -> bool:
+    should_create_workspace = _is_ai_project_workspace_requested(serializer_data)
+    if not should_create_workspace:
+        _pop_ai_project_workspace_fields(serializer_data)
+        return True
+
+    serializer_data['scm_type'] = ''
+    local_path, local_path_error = _normalize_ai_project_local_path(serializer_data)
+    if local_path_error:
+        result['errors'] = {'local_path': [local_path_error]}
+        return False
+    if not serializer_data.get('local_path'):
+        local_path = _unique_ai_project_local_path(local_path)
+    elif models.Project.objects.filter(local_path=local_path).exists():
+        result['errors'] = {'local_path': [_('This path is already being used by another manual project.')]}
+        return False
+
+    root_path, workspace_path, workspace_error = _resolve_ai_project_workspace_path(local_path)
+    if workspace_error:
+        result['errors'] = {'local_path': [workspace_error]}
+        return False
+    if workspace_path.exists():
+        result['errors'] = {'local_path': [_('AI project workspace path already exists.')]}
+        return False
+
+    serializer_data['local_path'] = local_path
+    _pop_ai_project_workspace_fields(serializer_data)
+
+    if context is not None:
+        try:
+            root_path.mkdir(parents=True, exist_ok=True)
+            workspace_path.mkdir()
+        except OSError as exc:
+            result['errors'] = {'local_path': [_('Could not create AI project workspace: {}').format(exc)]}
+            return False
+        context.setdefault('workspace_rollbacks', []).append({'path': workspace_path})
+        result.setdefault('preview', {})['created_workspace'] = local_path
+    return True
+
+
+def _rollback_ai_project_workspaces(context: dict | None):
+    if not context:
+        return
+    for rollback in reversed(context.get('workspace_rollbacks') or []):
+        workspace_path = rollback.get('path')
+        if not workspace_path:
+            continue
+        try:
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+        except OSError:
+            logger.warning('Could not roll back AI-created project workspace %s', workspace_path, exc_info=True)
+
+
+def _extract_ai_reference(value, allow_plain=False) -> str | None:
+    if isinstance(value, dict):
+        value = value.get('ref') or value.get('$ref') or value.get('operation_id')
+        allow_plain = True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('$'):
+            stripped = stripped[1:]
+            return stripped or None
+        if allow_plain:
+            return stripped or None
+    return None
+
+
+def _resolve_ai_operation_references(operation: dict, references: dict) -> tuple[dict, dict]:
+    resolved = dict(operation)
+    data = dict(resolved.get('data') or {})
+    errors = {}
+
+    project_ref = (
+        data.pop('project_ref', None)
+        or data.pop('project_operation_id', None)
+        or resolved.pop('project_ref', None)
+        or _extract_ai_reference(data.get('project'))
+    )
+    project_ref = _extract_ai_reference(project_ref, allow_plain=True)
+    if project_ref:
+        referenced_operation = references.get(project_ref)
+        if not referenced_operation:
+            errors['project_ref'] = [_('Referenced project operation was not found or has not been applied yet.')]
+        elif referenced_operation.get('resource_type') != 'project':
+            errors['project_ref'] = [_('project_ref must reference a project operation.')]
+        else:
+            data['project'] = referenced_operation.get('object_id')
+            resolved.setdefault('_resolved_refs', {})['project'] = project_ref
+
+    inventory_ref = (
+        data.pop('inventory_ref', None)
+        or data.pop('inventory_operation_id', None)
+        or resolved.pop('inventory_ref', None)
+        or _extract_ai_reference(data.get('inventory'))
+    )
+    inventory_ref = _extract_ai_reference(inventory_ref, allow_plain=True)
+    if inventory_ref:
+        referenced_operation = references.get(inventory_ref)
+        if not referenced_operation:
+            errors['inventory_ref'] = [_('Referenced inventory operation was not found or has not been applied yet.')]
+        elif referenced_operation.get('resource_type') not in {'inventory', 'smart_inventory', 'constructed_inventory'}:
+            errors['inventory_ref'] = [_('inventory_ref must reference an inventory operation.')]
+        else:
+            data['inventory'] = referenced_operation.get('object_id')
+            resolved.setdefault('_resolved_refs', {})['inventory'] = inventory_ref
+
+    if resolved.get('resource_type') == 'host':
+        group_values = []
+        group_refs = []
+
+        def collect_group_values(raw_value, allow_plain_refs=False):
+            values = raw_value if isinstance(raw_value, (list, tuple, set)) else [raw_value]
+            for value in values:
+                ref = _extract_ai_reference(value, allow_plain=allow_plain_refs or isinstance(value, dict))
+                if ref:
+                    group_refs.append(ref)
+                else:
+                    group_values.append(value)
+
+        for field in ('group_ref', 'group_refs', 'group_operation_id', 'group_operation_ids'):
+            if field in data:
+                collect_group_values(data.pop(field), allow_plain_refs=True)
+        if 'group_ref' in resolved:
+            collect_group_values(resolved.pop('group_ref'), allow_plain_refs=True)
+        for field in _AI_HOST_GROUP_FIELDS:
+            if field in data:
+                collect_group_values(data.pop(field))
+
+        for group_ref in group_refs:
+            referenced_operation = references.get(group_ref)
+            if not referenced_operation:
+                errors.setdefault('group_ref', []).append(_('Referenced group operation was not found or has not been applied yet: {}.').format(group_ref))
+            elif referenced_operation.get('resource_type') != 'group':
+                errors.setdefault('group_ref', []).append(_('group_ref must reference a group operation: {}.').format(group_ref))
+            else:
+                group_values.append(referenced_operation.get('object_id'))
+                resolved.setdefault('_resolved_refs', {}).setdefault('groups', []).append(group_ref)
+        if group_values:
+            data['group_ids'] = group_values
+
+    resolved['data'] = data
+    return resolved, errors
+
+
+def _reference_error_ai_operation(operation: dict, errors: dict) -> dict:
+    return {
+        'id': operation.get('id'),
+        'operation': operation.get('operation'),
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': errors,
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+    }
+
+
+def _record_ai_operation_reference(references: dict, source_operation: dict, saved_operation: dict):
+    reference_id = source_operation.get('id')
+    if reference_id and saved_operation.get('valid') and saved_operation.get('object_id'):
+        references[str(reference_id)] = saved_operation
+
+
+def _scrub_ai_rolled_back_apply_operations(operations: list):
+    for operation in operations:
+        if operation.get('operation') == 'create':
+            operation.pop('object', None)
+            operation.pop('object_id', None)
+        if operation.get('resource_type') == 'project_file':
+            operation.pop('project_id', None)
+            operation.pop('target', None)
+
+
+def _project_file_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    return {
+        'project_id': _positive_int(
+            data.get('project') or data.get('project_id') or data.get('target_id') or operation.get('object_id') or operation.get('target_id')
+        ),
+        'path': data.get('path') or data.get('file') or data.get('file_path') or data.get('relative_path'),
+        'content': data.get('content'),
+        'overwrite': data.get('overwrite'),
+    }
+
+
+def _coerce_ai_bool(value, default=False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'true', '1', 'yes', 'y', 'on'}:
+            return True
+        if normalized in {'false', '0', 'no', 'n', 'off', ''}:
+            return False
+    return bool(value)
+
+
+def _normalize_ai_project_file_path(raw_path) -> tuple[str | None, str | None]:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None, _('Project file path is required.')
+    normalized = raw_path.strip().replace('\\', '/')
+    relative_path = PurePosixPath(normalized)
+    if relative_path.is_absolute():
+        return None, _('Project file path must be relative.')
+    if not relative_path.name:
+        return None, _('Project file path must include a file name.')
+
+    parts = relative_path.parts
+    if any(part in {'', '.', '..'} for part in parts):
+        return None, _('Project file path cannot contain empty, current, or parent directory segments.')
+    if any(part in _AI_PROJECT_FILE_BLOCKED_PARTS or part.startswith('.') for part in parts):
+        return None, _('Project file path cannot write hidden or source-control paths.')
+    if relative_path.suffix.lower() not in _AI_PROJECT_FILE_ALLOWED_SUFFIXES:
+        return None, _('Project file extension is not allowed for AI authoring.')
+    return relative_path.as_posix(), None
+
+
+def _resolve_ai_project_file_path(project, relative_path: str) -> tuple[Path | None, Path | None, str | None]:
+    project_path = project.get_project_path(check_if_exists=False)
+    if not project_path:
+        return None, None, _('Project does not have a local path.')
+
+    base_path = Path(project_path).resolve(strict=False)
+    target_path = (base_path / relative_path).resolve(strict=False)
+    try:
+        target_path.relative_to(base_path)
+    except ValueError:
+        return None, None, _('Project file path escapes the project directory.')
+    return base_path, target_path, None
+
+
+def _validate_ai_project_file_operation(request, operation: dict, context: dict | None = None) -> dict:
+    action = operation.get('operation')
+    payload = _project_file_payload(operation)
+    overwrite = _coerce_ai_bool(payload['overwrite'], default=(action == 'update'))
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': 'project_file',
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': {
+            'project': payload['project_id'],
+            'path': payload['path'],
+            'overwrite': overwrite,
+        },
+    }
+
+    if action not in {'create', 'update', 'delete'}:
+        result['errors'] = {'operation': [_('Unsupported AI project file operation.')]}
+        return result
+    if not payload['project_id']:
+        result['errors'] = {'project': [_('Project is required for project_file operations.')]}
+        return result
+
+    try:
+        project = models.Project.objects.get(pk=payload['project_id'])
+    except models.Project.DoesNotExist:
+        result['errors'] = {'project': [_('Project not found.')]}
+        return result
+    if not request.user.can_access(models.Project, 'read', project):
+        result['errors'] = {'project': [_('Project not found or not accessible.')]}
+        return result
+    if not request.user.can_access(models.Project, 'change', project):
+        result['errors'] = {'permission': [_('You do not have permission to write project files.')]}
+        return result
+    if project.scm_type:
+        result['errors'] = {'project': [_('AI project file authoring only supports manual projects.')]}
+        return result
+
+    relative_path, path_error = _normalize_ai_project_file_path(payload['path'])
+    if path_error:
+        result['errors'] = {'path': [path_error]}
+        return result
+
+    content = payload['content']
+    content_bytes = 0
+    if action != 'delete':
+        if not isinstance(content, str):
+            result['errors'] = {'content': [_('Project file content must be a string.')]}
+            return result
+        if '\x00' in content:
+            result['errors'] = {'content': [_('Project file content cannot include null bytes.')]}
+            return result
+        content_bytes = len(content.encode('utf-8'))
+        if content_bytes > _AI_PROJECT_FILE_MAX_BYTES:
+            result['errors'] = {'content': [_('Project file content exceeds the 256 KiB AI authoring limit.')]}
+            return result
+
+    base_path, target_path, target_error = _resolve_ai_project_file_path(project, relative_path)
+    if target_error:
+        result['errors'] = {'path': [target_error]}
+        return result
+    if target_path.exists() and target_path.is_dir():
+        result['errors'] = {'path': [_('Project file path points to a directory.')]}
+        return result
+    if action == 'delete' and not target_path.exists():
+        result['errors'] = {'path': [_('Project file does not exist.')]}
+        return result
+    if target_path.exists() and action == 'create' and not overwrite:
+        result['errors'] = {'path': [_('Project file already exists; use update or set overwrite=true.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='project_file',
+        action=action,
+        object_id=project.pk,
+        data={'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result.update(
+        {
+            'valid': True,
+            'object_id': project.pk,
+            'project_id': project.pk,
+            'path': relative_path,
+            'content_bytes': content_bytes,
+            'validated_data': {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite},
+            'target': _target_summary('project', project),
+            'preview': {
+                'type': 'project_file',
+                'project': project.pk,
+                'path': relative_path,
+                'content_bytes': content_bytes,
+                'will_create': not target_path.exists(),
+                'will_overwrite': target_path.exists() and action != 'delete',
+                'will_delete': action == 'delete',
+            },
+            '_project_file': True,
+            '_project': project,
+            '_base_path': base_path,
+            '_target_path': target_path,
+            '_content': content,
+        }
+    )
+    result['data'] = {'project': project.pk, 'path': relative_path, 'content_bytes': content_bytes, 'overwrite': overwrite}
+    return result
+
+
+def _operation_object_id(operation: dict) -> int | None:
+    raw_id = operation.get('object_id', operation.get('id') if operation.get('operation') == 'update' else None)
+    if raw_id is None:
+        raw_id = operation.get('pk')
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _positive_int(value) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _credential_reference_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    return {
+        'target_resource_type': _normalize_credential_reference_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'credential_id': _positive_int(data.get('credential') or data.get('credential_id') or operation.get('credential_id')),
+    }
+
+
+def _role_assignment_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    raw_role = data.get('role')
+    raw_actor_type = data.get('actor_type') or operation.get('actor_type')
+    actor_type = str(raw_actor_type).strip().lower().replace('-', '_') if isinstance(raw_actor_type, str) else ''
+    actor_id = _positive_int(data.get('actor_id') or operation.get('actor_id'))
+    user_id = _positive_int(data.get('user') or data.get('user_id') or operation.get('user_id'))
+    team_id = _positive_int(data.get('team') or data.get('team_id') or operation.get('team_id'))
+
+    if actor_type == 'user' and actor_id and not user_id:
+        user_id = actor_id
+    if actor_type == 'team' and actor_id and not team_id:
+        team_id = actor_id
+
+    role_id = _positive_int(data.get('role_id') or operation.get('role_id') or raw_role)
+    return {
+        'target_resource_type': _normalize_role_assignment_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'role_id': role_id,
+        'role_field': _normalize_role_field(data.get('role_field') or data.get('role_name') or operation.get('role_field') or (None if role_id else raw_role)),
+        'user_id': user_id,
+        'team_id': team_id,
+    }
+
+
+def _coerce_ai_bool(value, default=False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'1', 'true', 'yes', 'on'}:
+            return True
+        if normalized in {'0', 'false', 'no', 'off'}:
+            return False
+    return bool(value)
+
+
+def _normalize_survey_question_type(value) -> str:
+    if value is None:
+        return 'text'
+    normalized = str(value).strip().lower().replace('-', '_').replace(' ', '_')
+    return _AI_SURVEY_TYPE_ALIASES.get(normalized, normalized)
+
+
+def _coerce_survey_int(value):
+    if value in ('', None):
+        return value
+    if isinstance(value, bool):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _normalize_survey_choices(value):
+    if isinstance(value, (list, tuple, set)):
+        return '\n'.join(str(choice).strip() for choice in value if str(choice).strip())
+    return value
+
+
+def _normalize_ai_survey_question(question, index: int) -> tuple[dict | None, dict | None]:
+    if not isinstance(question, dict):
+        return None, {'survey_spec': [_('Survey question {} must be an object.').format(index)]}
+
+    normalized = dict(question)
+    variable = normalized.get('variable') or normalized.get('name') or normalized.get('key')
+    if not isinstance(variable, str) or not variable.strip():
+        return None, {'variable': [_('Survey question {} must include variable.').format(index)]}
+
+    question_type = _normalize_survey_question_type(normalized.get('type') or normalized.get('question_type'))
+    normalized['index'] = _coerce_survey_int(normalized.get('index', index))
+    normalized['variable'] = variable.strip()
+    normalized['question_name'] = str(normalized.get('question_name') or normalized.get('label') or normalized.get('title') or variable).strip()
+    normalized['question_description'] = str(normalized.get('question_description') or normalized.get('description') or '').strip()
+    normalized['required'] = _coerce_ai_bool(normalized.get('required'), default=False)
+    normalized['type'] = question_type
+    normalized['choices'] = _normalize_survey_choices(normalized.get('choices', ''))
+    if 'min' in normalized:
+        normalized['min'] = _coerce_survey_int(normalized['min'])
+    if 'max' in normalized:
+        normalized['max'] = _coerce_survey_int(normalized['max'])
+    return normalized, None
+
+
+def _normalize_ai_survey_spec_input(data: dict) -> tuple[dict | None, dict | None]:
+    raw_spec = data.get('survey_spec') or data.get('survey') or {}
+    if raw_spec and not isinstance(raw_spec, dict):
+        return None, {'survey_spec': [_('survey_spec must be an object.')]}
+
+    questions = data.get('questions')
+    if questions is None and data.get('question') is not None:
+        questions = [data.get('question')]
+    if questions is None and isinstance(raw_spec, dict):
+        questions = raw_spec.get('questions', raw_spec.get('spec', []))
+    if not isinstance(questions, list):
+        return None, {'spec': [_('Survey spec questions must be a list.')]}
+
+    normalized_questions = []
+    for index, question in enumerate(questions):
+        normalized_question, error = _normalize_ai_survey_question(question, index)
+        if error:
+            return None, error
+        normalized_questions.append(normalized_question)
+
+    return (
+        {
+            'name': str(data.get('name') or raw_spec.get('name') or 'AI generated survey').strip(),
+            'description': str(data.get('description') or raw_spec.get('description') or '').strip(),
+            'spec': normalized_questions,
+        },
+        None,
+    )
+
+
+def _survey_spec_payload(operation: dict) -> dict:
+    data = operation.get('data') or {}
+    mode = data.get('mode') or data.get('strategy') or operation.get('mode') or ''
+    return {
+        'target_resource_type': _normalize_survey_spec_target(
+            data.get('target_resource_type') or data.get('target_type') or data.get('parent_resource_type') or operation.get('target_resource_type')
+        ),
+        'target_id': _positive_int(data.get('target_id') or data.get('object_id') or operation.get('target_id') or operation.get('object_id')),
+        'merge': _coerce_ai_bool(data.get('merge'), default=False) or str(mode).strip().lower() in {'add', 'append', 'merge', 'patch'},
+        'survey_enabled': _coerce_ai_bool(data.get('survey_enabled', data.get('enabled')), default=True),
+    }
+
+
+def _merge_survey_specs(existing_spec: dict, incoming_spec: dict) -> dict:
+    if not isinstance(existing_spec, dict) or not isinstance(existing_spec.get('spec'), list) or not existing_spec.get('spec'):
+        return incoming_spec
+
+    merged_questions = []
+    position_by_variable = {}
+    for question in existing_spec.get('spec', []):
+        if not isinstance(question, dict):
+            continue
+        merged_questions.append(dict(question))
+        variable = question.get('variable')
+        if variable:
+            position_by_variable[variable] = len(merged_questions) - 1
+
+    for question in incoming_spec.get('spec', []):
+        variable = question.get('variable')
+        if variable in position_by_variable:
+            merged_questions[position_by_variable[variable]] = question
+        else:
+            position_by_variable[variable] = len(merged_questions)
+            merged_questions.append(question)
+
+    for index, question in enumerate(merged_questions):
+        question['index'] = index
+
+    return {
+        'name': incoming_spec.get('name') or existing_spec.get('name') or 'AI generated survey',
+        'description': incoming_spec.get('description') if incoming_spec.get('description') != '' else existing_spec.get('description', ''),
+        'spec': merged_questions,
+    }
+
+
+def _validate_ai_survey_spec_schema(new_spec: dict, old_spec: dict) -> dict | None:
+    schema_errors = {}
+    for field, expect_type, type_label in [('name', str, 'string'), ('description', str, 'string'), ('spec', list, 'list of items')]:
+        if field not in new_spec:
+            schema_errors[field] = [_("Field '{}' is missing from survey spec.").format(field)]
+        elif not isinstance(new_spec[field], expect_type):
+            schema_errors[field] = [_("Expected {} for field '{}', received {} type.").format(type_label, field, type(new_spec[field]).__name__)]
+    if isinstance(new_spec.get('spec'), list) and len(new_spec['spec']) < 1:
+        schema_errors['spec'] = [_("'spec' doesn't contain any items.")]
+    if schema_errors:
+        return schema_errors
+
+    variable_set = set()
+    old_spec_dict = models.JobTemplate.pivot_spec(old_spec or {})
+    for index, survey_item in enumerate(new_spec['spec']):
+        if not isinstance(survey_item, dict):
+            return {'survey_spec': [_('Survey question {} is not a json object.').format(index)]}
+        for field_name in ['type', 'question_name', 'variable', 'required']:
+            if field_name not in survey_item:
+                return {field_name: [_("'{}' missing from survey question {}").format(field_name, index)]}
+            allow_types = bool if field_name == 'required' else str
+            type_label = 'boolean' if field_name == 'required' else 'string'
+            if not isinstance(survey_item[field_name], allow_types):
+                return {field_name: [_("'{}' in survey question {} expected to be {}.").format(field_name, index, type_label)]}
+        if survey_item['variable'] in variable_set:
+            return {'variable': [_("'variable' '{}' duplicated in survey question {}.").format(survey_item['variable'], index)]}
+        variable_set.add(survey_item['variable'])
+
+        qtype = survey_item['type']
+        if qtype not in SURVEY_TYPE_MAPPING:
+            return {
+                'type': [_("'{}' in survey question {} is not one of '{}' allowed question types.").format(qtype, index, ', '.join(SURVEY_TYPE_MAPPING.keys()))]
+            }
+        if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'] != '':
+            if qtype == 'integer':
+                try:
+                    survey_item['default'] = int(survey_item['default'])
+                except ValueError:
+                    pass
+            elif qtype == 'float':
+                try:
+                    survey_item['default'] = float(survey_item['default'])
+                except ValueError:
+                    pass
+        if 'default' in survey_item and survey_item['default'] != '' and not isinstance(survey_item['default'], SURVEY_TYPE_MAPPING[qtype]):
+            type_label = qtype if qtype in ['integer', 'float'] else 'string'
+            return {'default': [_('Default value in survey question {} expected to be {}.').format(index, type_label)]}
+        for key in ['min', 'max']:
+            if key in survey_item and survey_item[key] is not None and not isinstance(survey_item[key], int):
+                return {key: [_('The {} limit in survey question {} expected to be integer.').format(key, index)]}
+        if qtype in {'multiselect', 'multiplechoice'}:
+            if 'choices' not in survey_item:
+                return {'choices': [_('Survey question {} of type {} must specify choices.').format(index, qtype)]}
+            survey_item['choices'] = _normalize_survey_choices(survey_item['choices'])
+            if not survey_item['choices']:
+                return {'choices': [_('Survey question {} of type {} must specify at least one choice.').format(index, qtype)]}
+            if 'default' in survey_item:
+                if isinstance(survey_item['default'], str):
+                    survey_item['default'] = '\n'.join(choice for choice in survey_item['default'].splitlines() if choice.strip())
+                    list_of_defaults = survey_item['default'].splitlines()
+                else:
+                    list_of_defaults = survey_item['default']
+                if qtype == 'multiplechoice' and len(list_of_defaults) > 1:
+                    return {'default': [_('Multiple Choice (Single Select) can only have one default value.')]}
+                choices = survey_item['choices'].splitlines()
+                if any(item not in choices for item in list_of_defaults):
+                    return {'default': [_('Default choice must be answered from the choices listed.')]}
+
+        if 'default' in survey_item and isinstance(survey_item['default'], str) and survey_item['default'].startswith('$encrypted$'):
+            if qtype != 'password':
+                return {'default': [_('$encrypted$ is reserved for password question defaults.')]}
+            old_element = old_spec_dict.get(survey_item['variable'], {})
+            old_default = old_element.get('default')
+            if not (isinstance(old_default, str) and (old_default.startswith('$encrypted$') or old_default == '')):
+                return {'default': [_('$encrypted$ may not be used for a new survey password default.')]}
+            survey_item['default'] = old_default
+        elif qtype == 'password' and 'default' in survey_item and survey_item['default']:
+            survey_item['default'] = encrypt_value(survey_item['default'])
+    return None
+
+
+def _survey_spec_preview(target_type: str, target, survey_spec: dict, survey_enabled: bool) -> dict:
+    return {
+        'type': 'survey_spec',
+        'target': _target_summary(target_type, target),
+        'survey_enabled': survey_enabled,
+        'question_count': len(survey_spec.get('spec') or []),
+        'questions': [
+            {
+                'index': question.get('index'),
+                'variable': question.get('variable'),
+                'question_name': question.get('question_name'),
+                'type': question.get('type'),
+                'required': question.get('required'),
+            }
+            for question in survey_spec.get('spec') or []
+        ],
+    }
+
+
+def _validation_exception_detail(exc) -> dict:
+    if hasattr(exc, 'detail'):
+        detail = _json_safe(exc.detail)
+        return detail if isinstance(detail, dict) else {'detail': detail}
+    if hasattr(exc, 'message_dict'):
+        return _json_safe(exc.message_dict)
+    if hasattr(exc, 'messages'):
+        return {'detail': _json_safe(exc.messages)}
+    return {'detail': [str(exc)]}
+
+
+def _validate_credential_reference_relation(action: str, target_type: str, target, credential) -> dict | None:
+    if action != 'attach':
+        return None
+
+    if target_type in {'schedule', 'workflow_job_template_node'}:
+        if not target.unified_job_template:
+            return {'msg': _('Cannot assign credential when related template is null.')}
+
+        ask_mapping = target.unified_job_template.get_ask_mapping()
+        if 'credentials' not in ask_mapping:
+            return {'msg': _('Related template cannot accept credentials on launch.')}
+        if credential.passwords_needed:
+            return {'msg': _('Credential that requires user input on launch cannot be used in saved launch configuration.')}
+
+        ask_field_name = ask_mapping['credentials']
+        if not getattr(target.unified_job_template, ask_field_name):
+            return {'msg': _('Related template is not configured to accept credentials on launch.')}
+        if credential.unique_hash() in [cred.unique_hash() for cred in target.credentials.all()]:
+            return {
+                'msg': _('This launch configuration already provides a {credential_type} credential.').format(
+                    credential_type=credential.unique_hash(display=True)
+                )
+            }
+        if credential.pk in target.unified_job_template.credentials.values_list('pk', flat=True):
+            return {'msg': _('Related template already uses {credential_type} credential.').format(credential_type=credential.name)}
+        return None
+
+    if target_type == 'job_template':
+        if credential.unique_hash() in [cred.unique_hash() for cred in target.credentials.all()]:
+            return {'error': _('Cannot assign multiple {credential_type} credentials.').format(credential_type=credential.unique_hash(display=True))}
+        kind = credential.credential_type.kind
+        if kind not in ('ssh', 'vault', 'cloud', 'net', 'kubernetes'):
+            return {'error': _('Cannot assign a Credential of kind `{}`.').format(kind)}
+        return None
+
+    if target_type == 'inventory_source':
+        if target.credentials.exists():
+            return {'msg': _('Source already has credential assigned.')}
+        error = models.InventorySource.cloud_credential_validation(target.source, credential)
+        if error:
+            return {'msg': error}
+        return None
+
+    return {'target_resource_type': [_('Unsupported credential reference target.')]}
+
+
+def _role_summary(role) -> dict:
+    summary = {
+        'id': role.pk,
+        'name': role.name,
+        'description': role.description,
+        'role_field': role.role_field,
+    }
+    content_object = role.content_object
+    if content_object is not None:
+        summary['resource_id'] = role.object_id
+        summary['resource_name'] = getattr(content_object, 'name', getattr(content_object, 'username', ''))
+        summary['resource_type'] = content_object._meta.model_name
+    return summary
+
+
+def _target_summary(resource_type: str, target) -> dict:
+    return {
+        'id': target.pk,
+        'name': getattr(target, 'name', getattr(target, 'username', '')),
+        'resource_type': resource_type,
+    }
+
+
+def _actor_summary(actor_type: str, actor) -> dict:
+    if actor_type == 'user':
+        return {
+            'id': actor.pk,
+            'type': 'user',
+            'username': actor.username,
+            'name': actor.get_full_name(),
+        }
+    return {
+        'id': actor.pk,
+        'type': 'team',
+        'name': actor.name,
+        'organization': actor.organization_id,
+    }
+
+
+def _validate_ai_credential_reference_operation(request, operation: dict, context: dict | None = None) -> dict:
+    action = operation.get('operation')
+    payload = _credential_reference_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+        'credential_id': payload['credential_id'],
+    }
+
+    if action not in {'attach', 'detach'}:
+        result['errors'] = {'operation': [_('Credential references only support attach and detach operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing credential reference target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Credential reference operations must include target_id.')]}
+        return result
+    if not payload['credential_id']:
+        result['errors'] = {'credential': [_('Credential reference operations must include credential.')]}
+        return result
+
+    target_config = _AI_CREDENTIAL_REFERENCE_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    try:
+        credential = models.Credential.objects.get(pk=payload['credential_id'])
+    except models.Credential.DoesNotExist:
+        result['errors'] = {'credential': [_('Credential not found.')]}
+        return result
+
+    access_action = 'attach' if action == 'attach' else 'unattach'
+    permission_allowed = request.user.can_access(target_model, access_action, target, credential, 'credentials', operation.get('data') or {})
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this credential reference operation.')]}
+        return result
+
+    relation_errors = _validate_credential_reference_relation(action, payload['target_resource_type'], target, credential)
+    if relation_errors is not None:
+        result['errors'] = _json_safe(relation_errors)
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='credential_reference',
+        action=action,
+        object_id=payload['target_id'],
+        target_resource_type=payload['target_resource_type'],
+        target_id=payload['target_id'],
+        extra={'credential_id': payload['credential_id']},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['validated_data'] = _json_safe(payload)
+    result['_credential_reference'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_credential'] = credential
+    return result
+
+
+def _validate_ai_role_assignment_operation(request, operation: dict, context: dict | None = None) -> dict:
+    action = operation.get('operation')
+    payload = _role_assignment_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+        'role_id': payload['role_id'],
+        'role_field': payload['role_field'],
+        'user_id': payload['user_id'],
+        'team_id': payload['team_id'],
+    }
+
+    if action not in {'attach', 'detach'}:
+        result['errors'] = {'operation': [_('Role assignments only support attach and detach operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing role-assignment target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Role assignment operations must include target_id.')]}
+        return result
+    if not payload['role_id'] and not payload['role_field']:
+        result['errors'] = {'role_field': [_('Role assignment operations must include role_field or role_id.')]}
+        return result
+    if bool(payload['user_id']) == bool(payload['team_id']):
+        result['errors'] = {'actor': [_('Role assignment operations must include exactly one user or team.')]}
+        return result
+
+    target_config = _AI_ROLE_ASSIGNMENT_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    role = None
+    if payload['role_id']:
+        try:
+            role = models.Role.objects.get(pk=payload['role_id'])
+        except models.Role.DoesNotExist:
+            result['errors'] = {'role_id': [_('Role not found.')]}
+            return result
+        if role.content_object != target:
+            result['errors'] = {'role_id': [_('Role does not belong to the requested target object.')]}
+            return result
+        if payload['role_field'] and role.role_field != payload['role_field']:
+            result['errors'] = {'role_field': [_('role_field does not match the requested role_id.')]}
+            return result
+        payload['role_field'] = role.role_field
+        result['role_field'] = role.role_field
+    else:
+        role = getattr(target, payload['role_field'], None)
+        if not isinstance(role, models.Role):
+            result['errors'] = {'role_field': [_('Target object does not support this role field.')]}
+            return result
+
+    actor_type = 'user' if payload['user_id'] else 'team'
+    actor_model = models.User if actor_type == 'user' else models.Team
+    actor_id = payload['user_id'] or payload['team_id']
+    try:
+        actor = actor_model.objects.get(pk=actor_id)
+    except actor_model.DoesNotExist:
+        result['errors'] = {actor_type: [_('Role assignment actor not found.')]}
+        return result
+
+    if actor_type == 'team' and role.is_singleton():
+        result['errors'] = {'role': [_('You cannot grant system-level permissions to a team.')]}
+        return result
+    if actor_type == 'team' and isinstance(role.content_object, models.Organization) and role.role_field in {'member_role', 'admin_role'}:
+        result['errors'] = {'role': [_('You cannot assign an Organization participation role as a child role for a Team.')]}
+        return result
+
+    if action == 'attach':
+        content_object = role.content_object
+        if hasattr(content_object, 'validate_role_assignment'):
+            try:
+                content_object.validate_role_assignment(actor, role_definition=None, requesting_user=request.user)
+            except (DRFValidationError, DjangoValidationError) as exc:
+                result['errors'] = _validation_exception_detail(exc)
+                return result
+
+    relationship = 'members' if actor_type == 'user' else 'member_role.parents'
+    access_action = 'attach' if action == 'attach' else 'unattach'
+    permission_allowed = request.user.can_access(
+        models.Role,
+        access_action,
+        role,
+        actor,
+        relationship,
+        operation.get('data') or {},
+        skip_sub_obj_read_check=False,
+    )
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this role assignment operation.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='role_assignment',
+        action=action,
+        object_id=payload['target_id'],
+        target_resource_type=payload['target_resource_type'],
+        target_id=payload['target_id'],
+        extra={'role_id': role.pk, 'role_field': role.role_field, 'actor_type': actor_type, 'actor_id': actor.pk},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['role_id'] = role.pk
+    result['actor_type'] = actor_type
+    result['actor_id'] = actor.pk
+    result['target'] = _target_summary(payload['target_resource_type'], target)
+    result['role'] = _role_summary(role)
+    result['actor'] = _actor_summary(actor_type, actor)
+    result['validated_data'] = _json_safe({**payload, 'role_id': role.pk, 'role_field': role.role_field, 'actor_type': actor_type, 'actor_id': actor.pk})
+    result['_role_assignment'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_role'] = role
+    result['_actor'] = actor
+    result['_actor_type'] = actor_type
+    return result
+
+
+def _validate_ai_survey_spec_operation(request, operation: dict, context: dict | None = None) -> dict:
+    action = operation.get('operation')
+    payload = _survey_spec_payload(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': operation.get('resource_type'),
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+        'target_resource_type': payload['target_resource_type'],
+        'target_id': payload['target_id'],
+    }
+
+    if action not in {'create', 'update'}:
+        result['errors'] = {'operation': [_('Survey spec operations only support create and update operations.')]}
+        return result
+    if not payload['target_resource_type']:
+        result['errors'] = {'target_resource_type': [_('Unsupported or missing survey target resource type.')]}
+        return result
+    if not payload['target_id']:
+        result['errors'] = {'target_id': [_('Survey spec operations must include target_id.')]}
+        return result
+
+    target_config = _AI_SURVEY_SPEC_TARGETS[payload['target_resource_type']]
+    target_model = target_config['model']
+    try:
+        target = target_model.objects.get(pk=payload['target_id'])
+    except target_model.DoesNotExist:
+        result['errors'] = {'target_id': [_('Target object not found.')]}
+        return result
+    if not request.user.can_access(target_model, 'read', target):
+        result['errors'] = {'target_id': [_('Target object not found or not accessible.')]}
+        return result
+
+    incoming_spec, spec_error = _normalize_ai_survey_spec_input(operation.get('data') or {})
+    if spec_error:
+        result['errors'] = spec_error
+        return result
+
+    survey_spec = _merge_survey_specs(target.survey_spec or {}, incoming_spec) if payload['merge'] else incoming_spec
+    schema_error = _validate_ai_survey_spec_schema(survey_spec, target.survey_spec or {})
+    if schema_error:
+        result['errors'] = schema_error
+        return result
+
+    if not request.user.can_access(target_model, 'change', target, None):
+        result['errors'] = {'permission': [_('You do not have permission to apply this survey spec operation.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type='survey_spec',
+        action=action,
+        object_id=target.pk,
+        target_resource_type=payload['target_resource_type'],
+        target_id=target.pk,
+        data=operation.get('data') or {},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['object_id'] = target.pk
+    result['survey_enabled'] = payload['survey_enabled']
+    result['question_count'] = len(survey_spec.get('spec') or [])
+    result['target'] = _target_summary(payload['target_resource_type'], target)
+    result['validated_data'] = _redact_sensitive(
+        _json_safe(
+            {
+                **payload,
+                'survey_spec': survey_spec,
+                'question_count': len(survey_spec.get('spec') or []),
+            }
+        )
+    )
+    result['preview'] = _survey_spec_preview(payload['target_resource_type'], target, survey_spec, payload['survey_enabled'])
+    result['_survey_spec'] = True
+    result['_target'] = target
+    result['_target_config'] = target_config
+    result['_survey_spec_to_save'] = survey_spec
+    result['_survey_enabled_to_save'] = payload['survey_enabled']
+    result['_previous_survey_spec'] = target.survey_spec
+    result['_previous_survey_enabled'] = target.survey_enabled
+    return result
+
+
+def _rollback_data_for_update(instance, data: dict) -> dict:
+    rollback_data = {}
+    for field_name in data:
+        if not isinstance(field_name, str) or field_name.startswith('_'):
+            continue
+        if hasattr(instance, field_name):
+            value = getattr(instance, field_name)
+        elif hasattr(instance, f'{field_name}_id'):
+            value = getattr(instance, f'{field_name}_id')
+        else:
+            continue
+        if hasattr(value, 'all') and callable(value.all):
+            continue
+        rollback_data[field_name] = _json_safe(value.pk if hasattr(value, 'pk') else value)
+    return rollback_data
+
+
+def _validate_ai_delete_operation(request, operation: dict, context: dict | None = None) -> dict:
+    resource_type = operation.get('resource_type')
+    object_id = _operation_object_id(operation)
+    result = {
+        'id': operation.get('id'),
+        'operation': 'delete',
+        'resource_type': resource_type,
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': {},
+        'object_id': object_id,
+    }
+
+    if resource_type not in _AI_RESOURCE_TYPES:
+        result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
+        return result
+    if object_id is None:
+        result['errors'] = {'object_id': [_('Delete operations must include object_id.')]}
+        return result
+
+    resource_config = _AI_RESOURCE_TYPES[resource_type]
+    model = resource_config['model']
+    try:
+        instance = model.objects.get(pk=object_id)
+    except model.DoesNotExist:
+        result['errors'] = {'object_id': [_('Object not found.')]}
+        return result
+    if not request.user.can_access(model, 'read', instance):
+        result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
+        return result
+    if not request.user.can_access(model, 'delete', instance):
+        result['errors'] = {'permission': [_('You do not have permission to delete this resource.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type=resource_type,
+        action='delete',
+        object_id=object_id,
+        data={},
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result.update(
+        {
+            'valid': True,
+            'object': _serialize_ai_resource(request, resource_config['serializer'], instance),
+            '_delete': True,
+            '_instance': instance,
+            '_model': model,
+            '_resource_config': resource_config,
+        }
+    )
+    return result
+
+
+def _validate_ai_operation(request, operation: dict, context: dict | None = None) -> dict:
+    resource_type = operation.get('resource_type')
+    action = operation.get('operation')
+    result = {
+        'id': operation.get('id'),
+        'operation': action,
+        'resource_type': resource_type,
+        'valid': False,
+        'errors': {},
+        'warnings': [],
+        'data': _redact_sensitive(_json_safe(operation.get('data') or {})),
+    }
+
+    if resource_type == 'credential_reference':
+        return _validate_ai_credential_reference_operation(request, operation, context=context)
+    if resource_type == 'role_assignment':
+        return _validate_ai_role_assignment_operation(request, operation, context=context)
+    if resource_type == 'survey_spec':
+        return _validate_ai_survey_spec_operation(request, operation, context=context)
+    if resource_type == 'project_file':
+        return _validate_ai_project_file_operation(request, operation, context=context)
+
+    if resource_type not in _AI_RESOURCE_TYPES:
+        result['errors'] = {'resource_type': [_('Unsupported AI resource type.')]}
+        return result
+    if action == 'delete':
+        return _validate_ai_delete_operation(request, operation, context=context)
+    if action not in {'create', 'update'}:
+        result['errors'] = {'operation': [_('Unsupported AI resource operation.')]}
+        return result
+
+    resource_config = _AI_RESOURCE_TYPES[resource_type]
+    model = resource_config['model']
+    serializer_class = resource_config['serializer']
+    data = _operation_payload(operation, resource_config)
+    serializer_data = dict(data)
+    constructed_input_inventory_ids = None
+    constructed_input_inventories = None
+    constructed_source_vars = None
+    host_group_ids = None
+    host_groups = None
+
+    instance = None
+    object_id = _operation_object_id(operation)
+    if action == 'update':
+        if object_id is None:
+            result['errors'] = {'object_id': [_('Update operations must include object_id.')]}
+            return result
+        try:
+            instance = model.objects.get(pk=object_id)
+        except model.DoesNotExist:
+            result['errors'] = {'object_id': [_('Object not found.')]}
+            return result
+        if not request.user.can_access(model, 'read', instance):
+            result['errors'] = {'object_id': [_('Object not found or not accessible.')]}
+            return result
+
+    if resource_type == 'project' and action == 'create':
+        if not _prepare_ai_project_workspace(serializer_data, result, context):
+            result['data'] = _redact_sensitive(_json_safe(serializer_data))
+            return result
+    else:
+        _pop_ai_project_workspace_fields(serializer_data)
+    result['data'] = _redact_sensitive(_json_safe(serializer_data))
+    if instance is not None:
+        rollback_data = _rollback_data_for_update(instance, serializer_data)
+        if rollback_data:
+            result['_rollback_operation'] = {
+                'id': f"rollback-{operation.get('id') or resource_type}",
+                'operation': 'update',
+                'resource_type': resource_type,
+                'object_id': instance.pk,
+                'data': _redact_sensitive(rollback_data),
+            }
+
+    if resource_type == 'constructed_inventory':
+        constructed_input_inventory_ids, invalid_input_inventory_values = _pop_constructed_input_inventory_ids(serializer_data)
+        if invalid_input_inventory_values:
+            result['errors'] = {'input_inventories': [_('Input inventories must be a list of positive integer IDs.')]}
+            return result
+
+        constructed_source_vars = serializer_data.get('source_vars')
+        if constructed_source_vars is None and instance is not None:
+            inv_src = instance.inventory_sources.first()
+            constructed_source_vars = inv_src.source_vars if inv_src is not None else ''
+        source_vars_error = _source_vars_preview(constructed_source_vars)[1]
+        if source_vars_error:
+            result['errors'] = source_vars_error
+            return result
+    if resource_type == 'host':
+        host_group_ids, invalid_group_values = _pop_ai_host_group_ids(serializer_data)
+        if invalid_group_values:
+            result['errors'] = {'group_ids': [_('Host groups must be a list of positive integer IDs or group operation references.')]}
+            return result
+
+    serializer = serializer_class(instance=instance, data=serializer_data, partial=(action == 'update'), context=_serializer_context(request))
+    if not serializer.is_valid():
+        result['errors'] = _json_safe(serializer.errors)
+        return result
+
+    if resource_type == 'constructed_inventory':
+        organization_id = _operation_organization_id(serializer_data, serializer.validated_data, instance)
+        constructed_input_inventories, input_inventory_errors = _validate_constructed_input_inventories(
+            request, constructed_input_inventory_ids, organization_id, instance=instance
+        )
+        if input_inventory_errors:
+            result['errors'] = input_inventory_errors
+            return result
+    if resource_type == 'host':
+        inventory_id = _validated_operation_inventory_id(serializer_data, serializer.validated_data, instance)
+        host_groups, host_group_errors = _validate_ai_host_groups(request, host_group_ids, inventory_id, instance=instance)
+        if host_group_errors:
+            result['errors'] = host_group_errors
+            return result
+
+    permission_allowed = (
+        request.user.can_access(model, 'add', serializer.validated_data)
+        if action == 'create'
+        else request.user.can_access(model, 'change', instance, serializer.validated_data)
+    )
+    if not permission_allowed:
+        result['errors'] = {'permission': [_('You do not have permission to apply this operation.')]}
+        return result
+
+    opa_input = _ai_action_opa_input(
+        request,
+        operation,
+        context,
+        resource_type=resource_type,
+        action=action,
+        object_id=object_id,
+        data=serializer_data,
+    )
+    if not check_opa_policy('awx/ai_action/allow', opa_input):
+        result['errors'] = {'opa': [_('This AI operation was denied by an OPA policy guardrail.')]}
+        return result
+
+    result['valid'] = True
+    result['_serializer'] = serializer
+    result['_model'] = model
+    result['_resource_config'] = resource_config
+    result['validated_data'] = _redact_sensitive(_json_safe(serializer.validated_data))
+    if resource_type == 'smart_inventory':
+        result['preview'] = _smart_inventory_preview(request, serializer_data, serializer.validated_data, instance=instance)
+    if resource_type == 'constructed_inventory':
+        if constructed_input_inventory_ids is not None:
+            result['_constructed_input_inventories'] = constructed_input_inventories
+            result['input_inventory_ids'] = [inventory.pk for inventory in constructed_input_inventories]
+            result['validated_data']['input_inventories'] = [inventory.pk for inventory in constructed_input_inventories]
+        result['preview'] = _constructed_inventory_preview(
+            request,
+            serializer_data,
+            serializer.validated_data,
+            constructed_input_inventories or [],
+            constructed_source_vars,
+            instance=instance,
+        )
+    if resource_type == 'host' and host_group_ids is not None:
+        result['_host_groups'] = host_groups
+        result['group_ids'] = [group.pk for group in host_groups]
+        result['validated_data']['group_ids'] = [group.pk for group in host_groups]
+        result['preview'] = {
+            'type': 'host',
+            'groups': [_group_preview_row(group) for group in host_groups],
+        }
+        if instance is not None:
+            rollback_data = dict(result.get('_rollback_operation', {}).get('data') or {})
+            rollback_data['group_ids'] = list(instance.groups.values_list('pk', flat=True).order_by('pk'))
+            result['_rollback_operation'] = {
+                'id': f"rollback-{operation.get('id') or resource_type}",
+                'operation': 'update',
+                'resource_type': resource_type,
+                'object_id': instance.pk,
+                'data': _redact_sensitive(_json_safe(rollback_data)),
+            }
+    return result
+
+
+def _serialize_ai_resource(request, serializer_class, obj) -> dict:
+    return _json_safe(serializer_class(instance=obj, context=_serializer_context(request)).data)
+
+
+def _credential_summary(credential) -> dict:
+    return {
+        'id': credential.pk,
+        'name': credential.name,
+        'credential_type': credential.credential_type_id,
+        'kind': credential.credential_type.kind,
+    }
+
+
+def _save_ai_credential_reference_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    credential = validation['_credential']
+    if validation.get('operation') == 'attach':
+        target.credentials.add(credential)
+        rollback_operation = 'detach'
+    else:
+        target.credentials.remove(credential)
+        rollback_operation = 'attach'
+
+    validation['object'] = _serialize_ai_resource(request, validation['_target_config']['serializer'], target)
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['credential_id'] = credential.pk
+    validation['credential'] = _credential_summary(credential)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'credential-reference'}",
+        'operation': rollback_operation,
+        'resource_type': 'credential_reference',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'credential_id': credential.pk,
+        },
+    }
+    validation.pop('_credential_reference', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_credential', None)
+    return validation
+
+
+def _save_ai_role_assignment_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    role = validation['_role']
+    actor = validation['_actor']
+    actor_type = validation['_actor_type']
+
+    if actor_type == 'user':
+        if validation.get('operation') == 'attach':
+            role.members.add(actor)
+            rollback_operation = 'detach'
+        else:
+            role.members.remove(actor)
+            rollback_operation = 'attach'
+    elif validation.get('operation') == 'attach':
+        actor.member_role.children.add(role)
+        rollback_operation = 'detach'
+    else:
+        actor.member_role.children.remove(role)
+        rollback_operation = 'attach'
+
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['target'] = _target_summary(validation['target_resource_type'], target)
+    validation['role_id'] = role.pk
+    validation['role_field'] = role.role_field
+    validation['role'] = _role_summary(role)
+    validation['actor_type'] = actor_type
+    validation['actor_id'] = actor.pk
+    validation['actor'] = _actor_summary(actor_type, actor)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'role-assignment'}",
+        'operation': rollback_operation,
+        'resource_type': 'role_assignment',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'role_id': role.pk,
+            'actor_type': actor_type,
+            'actor_id': actor.pk,
+        },
+    }
+    validation.pop('_role_assignment', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_role', None)
+    validation.pop('_actor', None)
+    validation.pop('_actor_type', None)
+    return validation
+
+
+def _save_ai_survey_spec_operation(request, validation: dict) -> dict:
+    target = validation['_target']
+    target.survey_spec = validation['_survey_spec_to_save']
+    target.survey_enabled = validation['_survey_enabled_to_save']
+    target.save(update_fields=['survey_spec', 'survey_enabled'])
+
+    validation['object'] = _serialize_ai_resource(request, validation['_target_config']['serializer'], target)
+    validation['object_id'] = target.pk
+    validation['target_id'] = target.pk
+    validation['target'] = _target_summary(validation['target_resource_type'], target)
+    validation['rollback'] = {
+        'id': f"rollback-{validation.get('id') or 'survey-spec'}",
+        'operation': 'update',
+        'resource_type': 'survey_spec',
+        'data': {
+            'target_resource_type': validation['target_resource_type'],
+            'target_id': target.pk,
+            'survey_spec': validation.pop('_previous_survey_spec', {}),
+            'survey_enabled': validation.pop('_previous_survey_enabled', False),
+        },
+    }
+    validation.pop('_survey_spec', None)
+    validation.pop('_target', None)
+    validation.pop('_target_config', None)
+    validation.pop('_survey_spec_to_save', None)
+    validation.pop('_survey_enabled_to_save', None)
+    return validation
+
+
+def _apply_ai_project_file_operation(validation: dict):
+    target_path = validation['_target_path']
+    base_path = validation['_base_path']
+    content = validation['_content']
+    existed = target_path.exists()
+    backup = target_path.read_bytes() if existed else None
+    try:
+        if validation.get('operation') == 'delete':
+            target_path.unlink()
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content, encoding='utf-8')
+    except OSError as exc:
+        validation['valid'] = False
+        validation['errors'] = {'path': [_('Could not change project file: {}').format(exc)]}
+        return
+    validation['_project_file_applied'] = True
+    validation['_project_file_rollback'] = {
+        'base_path': base_path,
+        'target_path': target_path,
+        'existed': existed,
+        'backup': backup,
+    }
+
+
+def _rollback_ai_project_file_operation(validation: dict):
+    rollback = validation.get('_project_file_rollback')
+    if not rollback:
+        return
+    target_path = rollback['target_path']
+    try:
+        if rollback['existed']:
+            target_path.write_bytes(rollback['backup'])
+        elif target_path.exists():
+            target_path.unlink()
+            parent = target_path.parent
+            base_path = rollback['base_path']
+            while parent != base_path and parent.is_relative_to(base_path):
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
+    except OSError:
+        logger.warning('Could not roll back AI-authored project file %s', target_path, exc_info=True)
+
+
+def _rollback_ai_project_file_operations(operations: list):
+    for operation in reversed(operations):
+        if operation.get('_project_file_applied'):
+            _rollback_ai_project_file_operation(operation)
+
+
+def _ai_project_file_restore_rollback(validation: dict, rollback: dict) -> dict | None:
+    backup = rollback.get('backup')
+    if not isinstance(backup, bytes):
+        return None
+    if len(backup) > _AI_PROJECT_FILE_MAX_BYTES:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content exceeds the AI rollback plan limit.'))
+        return None
+    try:
+        content = backup.decode('utf-8')
+    except UnicodeDecodeError:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content is not valid UTF-8 and cannot be copied into rollback plans.'))
+        return None
+    if '\x00' in content:
+        validation['rollback_unsupported_reason'] = str(_('Existing project file content contains null bytes and cannot be copied into rollback plans.'))
+        return None
+    return {
+        'id': f"rollback-{validation.get('id') or 'project-file'}",
+        'operation': 'update',
+        'resource_type': 'project_file',
+        'data': {
+            'project': validation['project_id'],
+            'path': validation['path'],
+            'content': content,
+            'overwrite': True,
+        },
+    }
+
+
+def _save_ai_project_file_operation(request, validation: dict) -> dict:
+    if not validation.get('_project_file_applied'):
+        _apply_ai_project_file_operation(validation)
+    rollback = validation.get('_project_file_rollback') or {}
+    project = validation['_project']
+    validation['object'] = {
+        'project': project.pk,
+        'project_name': project.name,
+        'path': validation['path'],
+        'content_bytes': validation['content_bytes'],
+    }
+    validation['object_id'] = project.pk
+    validation['project_id'] = project.pk
+    if rollback.get('existed'):
+        validation['rollback'] = _ai_project_file_restore_rollback(validation, rollback)
+    elif validation.get('operation') != 'delete':
+        validation['rollback'] = {
+            'id': f"rollback-{validation.get('id') or 'project-file'}",
+            'operation': 'delete',
+            'resource_type': 'project_file',
+            'data': {'project': project.pk, 'path': validation['path']},
+        }
+    validation.pop('_project_file', None)
+    validation.pop('_project', None)
+    validation.pop('_base_path', None)
+    validation.pop('_target_path', None)
+    validation.pop('_content', None)
+    return validation
+
+
+def _clear_ai_activity_stream_relation_for_delete(validation: dict, object_id: int) -> None:
+    resource_config = validation.get('_resource_config') or {}
+    relation = resource_config.get('audit_relation')
+    model = resource_config.get('model')
+    if not relation or not model or not object_id or not hasattr(models.ActivityStream, relation):
+        return
+
+    through_model = getattr(models.ActivityStream, relation).through
+    for field in through_model._meta.fields:
+        remote_model = getattr(getattr(field, 'remote_field', None), 'model', None)
+        if remote_model == model:
+            through_model.objects.filter(**{f'{field.name}_id': object_id}).delete()
+            return
+
+
+def _save_ai_operation(request, validation: dict) -> dict:
+    if validation.get('_delete'):
+        obj = validation['_instance']
+        object_id = obj.pk
+        _clear_ai_activity_stream_relation_for_delete(validation, object_id)
+        obj.delete()
+        validation['object_id'] = object_id
+        validation.pop('_delete', None)
+        validation.pop('_instance', None)
+        validation.pop('_model', None)
+        validation.pop('_resource_config', None)
+        return validation
+    if validation.get('_credential_reference'):
+        return _save_ai_credential_reference_operation(request, validation)
+    if validation.get('_role_assignment'):
+        return _save_ai_role_assignment_operation(request, validation)
+    if validation.get('_survey_spec'):
+        return _save_ai_survey_spec_operation(request, validation)
+    if validation.get('_project_file'):
+        return _save_ai_project_file_operation(request, validation)
+
+    serializer = validation['_serializer']
+    obj = serializer.save()
+    constructed_input_inventories = validation.get('_constructed_input_inventories')
+    if constructed_input_inventories is not None:
+        obj.input_inventories.clear()
+        if constructed_input_inventories:
+            obj.input_inventories.add(*constructed_input_inventories)
+    host_groups = validation.get('_host_groups')
+    if host_groups is not None:
+        obj.groups.set(host_groups)
+
+    model = validation['_model']
+    if validation.get('operation') == 'create' and model in permission_registry.all_registered_models and request.user:
+        give_creator_permissions(request.user, obj)
+
+    validation['object'] = _serialize_ai_resource(request, validation['_resource_config']['serializer'], obj)
+    validation['object_id'] = obj.pk
+    if validation.get('operation') == 'create':
+        validation['rollback'] = {
+            'id': f"rollback-{validation.get('id') or validation.get('resource_type')}",
+            'operation': 'delete',
+            'resource_type': validation.get('resource_type'),
+            'object_id': obj.pk,
+            'data': {},
+        }
+    elif validation.get('_rollback_operation'):
+        validation['rollback'] = validation['_rollback_operation']
+    validation.pop('_serializer', None)
+    validation.pop('_model', None)
+    validation.pop('_resource_config', None)
+    validation.pop('_constructed_input_inventories', None)
+    validation.pop('_host_groups', None)
+    validation.pop('_rollback_operation', None)
+    return validation
+
+
+def _build_ai_rollback_plan(plan: dict, operations: list) -> dict | None:
+    rollback_operations = []
+    for operation in reversed(operations):
+        rollback = operation.get('rollback') if isinstance(operation, dict) else None
+        if isinstance(rollback, dict):
+            rollback_operations.append(_redact_sensitive(_json_safe(rollback)))
+    if not rollback_operations:
+        return None
+    plan_name = plan.get('name') if isinstance(plan, dict) else ''
+    return {
+        'name': str(_('Rollback AI resource action: %(name)s') % {'name': plan_name or str(_('untitled plan'))}),
+        'description': str(_('Inverse operations generated from the Activity Stream audited AI apply result.')),
+        'operations': rollback_operations,
+    }
+
+
+def _audit_ai_resource_action(
+    request,
+    mode: str,
+    plan: dict,
+    operations: list,
+    provider: str = '',
+    model: str = '',
+    prompt_summary: str = '',
+    rollback_plan: dict | None = None,
+):
+    rollback_plan = rollback_plan if isinstance(rollback_plan, dict) else (_build_ai_rollback_plan(plan, operations) if mode == 'apply' else None)
+    safe_operations = []
+    is_error = False
+    for operation in operations:
+        is_error = is_error or not operation.get('valid')
+        safe_operations.append(
+            {
+                'id': operation.get('id'),
+                'operation': operation.get('operation'),
+                'resource_type': operation.get('resource_type'),
+                'valid': operation.get('valid'),
+                'object_id': operation.get('object_id'),
+                'target_resource_type': operation.get('target_resource_type'),
+                'target_id': operation.get('target_id'),
+                'project_id': operation.get('project_id'),
+                'group_ids': operation.get('group_ids'),
+                'path': operation.get('path'),
+                'content_bytes': operation.get('content_bytes'),
+                'credential_id': operation.get('credential_id'),
+                'role_id': operation.get('role_id'),
+                'role_field': operation.get('role_field'),
+                'actor_type': operation.get('actor_type'),
+                'actor_id': operation.get('actor_id'),
+                'user_id': operation.get('user_id'),
+                'team_id': operation.get('team_id'),
+                'question_count': operation.get('question_count'),
+                'rollback': _redact_sensitive(_json_safe(operation.get('rollback') or {})),
+                'rollback_unsupported_reason': str(operation.get('rollback_unsupported_reason') or ''),
+                'errors': _json_safe(operation.get('errors') or {}),
+            }
+        )
+
+    changes = {
+        'triggered_by': 'ai_assistant',
+        'source': 'ai_resource_action',
+        'mode': mode,
+        'provider': provider,
+        'model': model,
+        'prompt_summary': _summarize_ai_prompt(prompt_summary),
+        'plan_name': plan.get('name', ''),
+        'operation_count': len(operations),
+        'is_error': is_error,
+        'rollback_available': bool(rollback_plan),
+        'operations': safe_operations,
+    }
+    if rollback_plan:
+        changes['rollback_plan'] = _redact_sensitive(_json_safe(rollback_plan))
+    entry = models.ActivityStream.objects.create(
+        operation='create',
+        object1='ai_resource_action',
+        object2=mode,
+        changes=json.dumps(_redact_sensitive(_json_safe(changes))),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+
+    for operation in operations:
+        resource_type = operation.get('resource_type')
+        if resource_type == 'credential_reference':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_CREDENTIAL_REFERENCE_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            credential_id = operation.get('credential_id')
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
+            if credential_id:
+                entry.credential.add(credential_id)
+            continue
+        if resource_type == 'role_assignment':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_ROLE_ASSIGNMENT_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            role_id = operation.get('role_id')
+            user_id = operation.get('user_id') if operation.get('actor_type') != 'team' else None
+            team_id = operation.get('team_id') if operation.get('actor_type') == 'team' else None
+            actor_id = operation.get('actor_id')
+            if operation.get('actor_type') == 'user' and not user_id:
+                user_id = actor_id
+            if operation.get('actor_type') == 'team' and not team_id:
+                team_id = actor_id
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
+            if role_id:
+                entry.role.add(role_id)
+            if user_id:
+                entry.user.add(user_id)
+            if team_id:
+                entry.team.add(team_id)
+            continue
+        if resource_type == 'survey_spec':
+            if not operation.get('valid'):
+                continue
+            target_config = _AI_SURVEY_SPEC_TARGETS.get(operation.get('target_resource_type'))
+            target_relation = target_config and target_config.get('audit_relation')
+            target_id = operation.get('target_id') or operation.get('object_id')
+            if target_relation and target_id and hasattr(entry, target_relation):
+                getattr(entry, target_relation).add(target_id)
+            continue
+        if resource_type == 'project_file':
+            if not operation.get('valid'):
+                continue
+            project_id = operation.get('project_id') or operation.get('object_id')
+            if project_id and models.Project.objects.filter(pk=project_id).exists():
+                entry.project.add(project_id)
+            continue
+        if operation.get('operation') == 'delete':
+            continue
+
+        object_id = operation.get('object_id')
+        resource_config = _AI_RESOURCE_TYPES.get(resource_type)
+        relation = resource_config and resource_config.get('audit_relation')
+        if relation and object_id and hasattr(entry, relation):
+            getattr(entry, relation).add(object_id)
+        if mode == 'apply' and resource_type == 'host' and operation.get('group_ids'):
+            entry.group.add(*operation['group_ids'])
+
+    return entry
+
+
+def _public_ai_operation_result(operation: dict) -> dict:
+    return {key: value for key, value in operation.items() if not key.startswith('_')}
+
+
+def _ai_plan_uses_operation_references(operations: list) -> bool:
+    for operation in operations:
+        data = operation.get('data') if isinstance(operation.get('data'), dict) else {}
+        if (
+            data.get('project_ref')
+            or data.get('project_operation_id')
+            or operation.get('project_ref')
+            or _extract_ai_reference(data.get('project'))
+            or data.get('inventory_ref')
+            or data.get('inventory_operation_id')
+            or operation.get('inventory_ref')
+            or _extract_ai_reference(data.get('inventory'))
+            or data.get('group_ref')
+            or data.get('group_refs')
+            or data.get('group_operation_id')
+            or data.get('group_operation_ids')
+            or operation.get('group_ref')
+        ):
+            return True
+    return False
+
+
+def _validate_ai_operations_for_preview(request, operations: list, policy_context: dict | None = None) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': [], **(policy_context or {})}
+    try:
+        return [_validate_ai_operation(request, operation, context=context) for operation in operations]
+    finally:
+        _rollback_ai_project_workspaces(context)
+
+
+def _simulate_ai_operations_for_preview(request, operations: list, policy_context: dict | None = None) -> list:
+    context = {'mode': 'preview', 'workspace_rollbacks': [], **(policy_context or {})}
+    references = {}
+    validated_operations = []
+    try:
+        with transaction.atomic():
+            for source_operation in operations:
+                resolved_operation, reference_errors = _resolve_ai_operation_references(source_operation, references)
+                if reference_errors:
+                    validated_operations.append(_reference_error_ai_operation(source_operation, reference_errors))
+                    break
+
+                validation = _validate_ai_operation(request, resolved_operation, context=context)
+                validated_operations.append(validation)
+                if not validation.get('valid'):
+                    break
+                if validation.get('_project_file'):
+                    _apply_ai_project_file_operation(validation)
+                    if not validation.get('valid'):
+                        break
+                saved_operation = _save_ai_operation(request, validation)
+                validated_operations[-1] = saved_operation
+                _record_ai_operation_reference(references, source_operation, saved_operation)
+
+            transaction.set_rollback(True)
+    finally:
+        _rollback_ai_project_file_operations(validated_operations)
+        _rollback_ai_project_workspaces(context)
+
+    for operation in validated_operations:
+        if operation.get('operation') == 'create':
+            operation.pop('object', None)
+            operation.pop('object_id', None)
+        if operation.get('resource_type') == 'project_file':
+            operation.pop('project_id', None)
+            operation.pop('target', None)
+    return validated_operations
+
+
+def _apply_ai_operations_sequentially(request, operations: list, policy_context: dict | None = None) -> tuple[list, bool]:
+    context = {'mode': 'apply', 'workspace_rollbacks': [], **(policy_context or {})}
+    references = {}
+    applied_operations = []
+    try:
+        with transaction.atomic():
+            for source_operation in operations:
+                resolved_operation, reference_errors = _resolve_ai_operation_references(source_operation, references)
+                if reference_errors:
+                    applied_operations.append(_reference_error_ai_operation(source_operation, reference_errors))
+                    raise AIResourceActionApplyError(applied_operations)
+
+                validation = _validate_ai_operation(request, resolved_operation, context=context)
+                applied_operations.append(validation)
+                if not validation.get('valid'):
+                    raise AIResourceActionApplyError(applied_operations)
+                if validation.get('_project_file'):
+                    _apply_ai_project_file_operation(validation)
+                    if not validation.get('valid'):
+                        raise AIResourceActionApplyError(applied_operations)
+
+                saved_operation = _save_ai_operation(request, validation)
+                applied_operations[-1] = saved_operation
+                _record_ai_operation_reference(references, source_operation, saved_operation)
+    except AIResourceActionApplyError as exc:
+        _rollback_ai_project_file_operations(exc.operations)
+        _rollback_ai_project_workspaces(context)
+        _scrub_ai_rolled_back_apply_operations(exc.operations)
+        return exc.operations, False
+    except Exception:
+        _rollback_ai_project_file_operations(applied_operations)
+        _rollback_ai_project_workspaces(context)
+        raise
+
+    return applied_operations, True
+
+
+class AIResourceActionView(APIView):
+    """
+    POST /api/v2/ai/resource_actions/
+
+    Turns a natural-language request or supplied JSON plan into validated AWX
+    resource operations. Preview validates without saving. Apply requires
+    explicit mode="apply" or apply=true and reuses existing serializers, RBAC,
+    Activity Stream, and OPA guardrails.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        if not isinstance(request.data, dict):
+            return Response({'detail': _('Request body must be a JSON object.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        mode = str(request.data.get('mode') or ('apply' if request.data.get('apply') else 'preview')).strip().lower()
+        if mode not in {'preview', 'apply'}:
+            return Response({'detail': _('mode must be "preview" or "apply".')}, status=status.HTTP_400_BAD_REQUEST)
+
+        context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
+        provider = ''
+        model = ''
+        generated = False
+        prompt_summary = ''
+
+        try:
+            if request.data.get('plan') is not None:
+                plan = _normalize_ai_plan(request.data.get('plan'))
+            else:
+                prompt = request.data.get('prompt')
+                if not isinstance(prompt, str) or not prompt.strip():
+                    return Response({'detail': _('Provide either a plan object or a non-empty prompt.')}, status=status.HTTP_400_BAD_REQUEST)
+                prompt = prompt.strip()
+                prompt_summary = _summarize_ai_prompt(prompt)
+                plan, provider, model = _ai_provider_plan_from_prompt(request, prompt, context)
+                generated = True
+        except AIProviderError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+        except (ValueError, json.JSONDecodeError) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        policy_context = {
+            'source': 'api',
+            'approval_required': mode == 'apply',
+            'human_approved': _coerce_ai_bool(request.data.get('human_approved'), default=(mode == 'apply')),
+            'approval': {'method': 'api_resource_action_apply'} if mode == 'apply' else {},
+        }
+        if mode == 'preview':
+            if _ai_plan_uses_operation_references(plan['operations']):
+                operations = _simulate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
+            else:
+                operations = _validate_ai_operations_for_preview(request, plan['operations'], policy_context=policy_context)
+            can_apply = all(operation.get('valid') for operation in operations)
+        else:
+            operations, can_apply = _apply_ai_operations_sequentially(request, plan['operations'], policy_context=policy_context)
+
+        if mode == 'apply' and not can_apply:
+            audit_entry = _audit_ai_resource_action(request, mode, plan, operations, provider=provider, model=model, prompt_summary=prompt_summary)
+            return Response(
+                {
+                    'mode': mode,
+                    'generated': generated,
+                    'plan': _redact_sensitive(_json_safe(plan)),
+                    'operations': [_public_ai_operation_result(operation) for operation in operations],
+                    'can_apply': False,
+                    'audit': {'activity_stream_id': audit_entry.pk},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        public_operations = [_public_ai_operation_result(operation) for operation in operations]
+        rollback_plan = _build_ai_rollback_plan(plan, public_operations) if mode == 'apply' else None
+        audit_entry = _audit_ai_resource_action(
+            request, mode, plan, public_operations, provider=provider, model=model, prompt_summary=prompt_summary, rollback_plan=rollback_plan
+        )
+        response_data = {
+            'mode': mode,
+            'generated': generated,
+            'plan': _redact_sensitive(_json_safe(plan)),
+            'operations': public_operations,
+            'can_apply': can_apply,
+            'audit': {'activity_stream_id': audit_entry.pk},
+        }
+        if rollback_plan:
+            response_data['rollback_plan'] = rollback_plan
+
+        return Response(response_data, status=status.HTTP_200_OK if mode == 'preview' else status.HTTP_201_CREATED)
+
+
+class AIChatView(APIView):
+    """
+    POST /api/v2/ai/chat/
+
+    Body:
+        {
+            "messages": [
+                {"role": "user", "content": "How do I create a job template?"}
+            ]
+        }
+
+    Returns:
+        {
+            "message": {"role": "assistant", "content": "..."},
+            "model": "gpt-4o",
+            "provider": "openai"
+        }
+
+    Requires authentication. Respects AI_ENABLED, AI_RATE_LIMIT_PER_MINUTE, and
+    per-request RBAC (any authenticated user may call this endpoint).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        # Feature flag check
+        if not getattr(settings, 'AI_ENABLED', False):
+            return Response(
+                {'detail': _('The AI assistant is not enabled. Enable it in Settings → AI Assistant.')},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # Rate limiting
+        rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+        if not _check_rate_limit(request.user.pk, rate_limit):
+            return Response(
+                {'detail': _('Rate limit exceeded. Please wait before sending another message.')},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        # Validate request body
+        messages = request.data.get('messages')
+        if not messages or not isinstance(messages, list):
+            return Response(
+                {'detail': _('Request body must include a non-empty "messages" array.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        for msg in messages:
+            if not isinstance(msg, dict) or msg.get('role') not in ('user', 'assistant', 'system') or not isinstance(msg.get('content'), str):
+                return Response(
+                    {'detail': _('Each message must have a "role" (user/assistant/system) and a string "content".')},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if len(messages) > 100:
+            return Response(
+                {'detail': _('Message history too long. Maximum 100 messages per request.')},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
+        provider = getattr(settings, 'AI_PROVIDER', 'openai')
+        api_key = getattr(settings, 'AI_API_KEY', '')
+        system_prompt = getattr(settings, 'AI_SYSTEM_PROMPT', '')
+        # Allow callers to override the system prompt for specialised tasks (e.g. code generation).
+        # The override must be a non-empty string and is validated to be under 4 KB.
+        system_override = request.data.get('system_override')
+        if system_override is not None:
+            if not isinstance(system_override, str) or len(system_override) > 4096:
+                return Response(
+                    {'detail': _('system_override must be a string of at most 4096 characters.')},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            system_prompt = system_override
+        else:
+            builtin_answer = (
+                _try_answer_gatekeeper_fact_question(request.user, messages)
+                or _try_answer_opa_fact_question(request.user, messages)
+                or _try_answer_eda_fact_question(messages)
+                or _try_answer_cloud_provider_resource_question(request.user, messages)
+                or _try_answer_awx_fact_question(request.user, messages)
+            )
+            if builtin_answer is not None:
+                return Response(
+                    {
+                        'message': {'role': 'assistant', 'content': builtin_answer},
+                        'model': 'awx-live-context',
+                        'provider': 'awx',
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            system_prompt = _system_prompt_with_awx_context(system_prompt, request.user, context)
+        if provider != 'openai_codex' and not api_key:
+            return Response(
+                {'detail': _('AI_API_KEY is not configured. Set it in Settings → AI Assistant.')},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        base_url = getattr(settings, 'AI_API_URL', '')
+        max_tokens = getattr(settings, 'AI_MAX_TOKENS', 2048)
+        defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+        if provider == 'openai_codex':
+            model = _openai_codex_effective_default_model()
+        else:
+            model = getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+
+        try:
+            content = _call_ai_provider(provider, model, messages, max_tokens, system_prompt, api_key, base_url)
+        except AIProviderError as exc:
+            return Response(
+                {'detail': exc.detail},
+                status=exc.status_code,
+            )
+
+        return Response(
+            {
+                'message': {'role': 'assistant', 'content': content},
+                'model': model,
+                'provider': provider,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AISettingsView(APIView):
+    """
+    GET /api/v2/ai/settings/
+
+    Returns the public (non-secret) AI configuration so the UI knows whether
+    the assistant is enabled and which provider is active.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        provider = getattr(settings, 'AI_PROVIDER', 'openai')
+        model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '')
+        return Response(
+            {
+                'enabled': getattr(settings, 'AI_ENABLED', False),
+                'provider': provider,
+                'model': model,
+                'configured': _provider_configured(provider),
+                'openai_codex_connected': _openai_codex_configured(),
+                'openai_codex_account_id': getattr(settings, 'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID', ''),
+                'openai_codex_plan_type': getattr(settings, 'AI_OPENAI_CODEX_PLAN_TYPE', ''),
+                'openai_codex_expires_at': getattr(settings, 'AI_OPENAI_CODEX_TOKEN_EXPIRES_AT', ''),
+                'openai_codex_available_models': _openai_codex_available_models(),
+                'openai_codex_default_model': _openai_codex_effective_default_model(),
+            }
+        )
+
+
+class OpenAICodexDeviceCodeStartView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, *args, **kwargs):
+        scope = request.data.get('scope')
+        if scope is not None and not isinstance(scope, str):
+            return Response({'detail': _('scope must be a string.')}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(_start_openai_codex_device_code(scope=scope), status=status.HTTP_200_OK)
+        except DeviceAuthError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.exceptions.RequestException as exc:
+            logger.warning('OpenAI Codex device login start failed: %s', exc)
+            return Response(
+                {'detail': _('Could not start OpenAI Codex device login. Check network connectivity and settings.')},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
+class OpenAICodexDeviceCodePollView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, *args, **kwargs):
+        device_code = request.data.get('device_code')
+        user_code = request.data.get('user_code')
+        if not isinstance(device_code, str) or not device_code:
+            return Response({'detail': _('device_code is required.')}, status=status.HTTP_400_BAD_REQUEST)
+        if user_code is not None and not isinstance(user_code, str):
+            return Response({'detail': _('user_code must be a string.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            values = _poll_openai_codex_device_code_once(device_code, user_code)
+        except DeviceAuthPending:
+            return Response({'status': 'pending'}, status=status.HTTP_200_OK)
+        except DeviceAuthExpired:
+            return Response({'status': 'expired'}, status=status.HTTP_200_OK)
+        except DeviceAuthError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.exceptions.RequestException as exc:
+            logger.warning('OpenAI Codex device login polling failed: %s', exc)
+            return Response(
+                {'detail': _('Could not poll OpenAI Codex device login. Check network connectivity and settings.')},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                'status': 'approved',
+                'provider': 'openai_codex',
+                'expires_at': values.get('AI_OPENAI_CODEX_TOKEN_EXPIRES_AT', ''),
+                'account_id': values.get('AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID', ''),
+                'plan_type': values.get('AI_OPENAI_CODEX_PLAN_TYPE', ''),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class OpenAICodexModelsView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    def get(self, request, *args, **kwargs):
+        return Response(_openai_codex_model_payload(), status=status.HTTP_200_OK)
+
+
+class OpenAICodexModelsRefreshView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            models, source, model_fetch_error = _fetch_openai_codex_models()
+        except AIProviderError as exc:
+            return Response({'detail': exc.detail}, status=exc.status_code)
+        except requests.exceptions.RequestException as exc:
+            logger.warning('OpenAI Codex model refresh failed: %s', exc)
+            return Response(
+                {'detail': _('Could not refresh OpenAI Codex models. Check network connectivity and settings.')},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        _save_ai_settings({'AI_OPENAI_CODEX_AVAILABLE_MODELS': models})
+        return Response(_openai_codex_model_payload(models=models, source=source, model_fetch_error=model_fetch_error), status=status.HTTP_200_OK)
+
+
+class OpenAICodexDefaultModelView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    def post(self, request, *args, **kwargs):
+        model = request.data.get('model')
+        if not isinstance(model, str) or not model.strip():
+            return Response({'detail': _('model is required.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        model = model.strip()
+        models = _openai_codex_available_models()
+        if model not in models:
+            return Response({'detail': _('Select an available OpenAI Codex model.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        _save_ai_settings({'AI_MODEL_NAME': model})
+        return Response(_openai_codex_model_payload(models=models, source='cached', default_model=model), status=status.HTTP_200_OK)

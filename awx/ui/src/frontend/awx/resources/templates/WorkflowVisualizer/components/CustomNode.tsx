@@ -5,6 +5,7 @@ import {
   CogIcon,
   HomeIcon,
   InfrastructureIcon,
+  MagicIcon,
   ProcessAutomationIcon,
   ShareAltIcon,
   SyncAltIcon,
@@ -32,6 +33,8 @@ const NodeIcon: { [key: string]: ElementType<SVGIconProps> } = {
   terraform_job: InfrastructureIcon,
   workflow_approval: ClockIcon,
   workflow_job: ShareAltIcon,
+  eda_rulebook: ProcessAutomationIcon,
+  ai_task: MagicIcon,
   deleted_resource: TrashIcon,
 };
 
@@ -40,19 +43,21 @@ export const CustomNode: FC<
 > = observer(({ element, onSelect, ...rest }) => {
   const { setSidebarMode } = useViewOptions();
   const jobType =
-    element.getData()?.resource?.summary_fields?.unified_job_template?.unified_job_type;
+    element.getData()?.resource?.summary_fields?.unified_job_template?.unified_job_type ||
+    element.getData()?.resource?.node_type;
 
   const id = element.getId();
   const data = element.getData();
   if (!data && isNode(element)) return null;
 
   const Icon = NodeIcon[jobType ?? 'deleted_resource'];
+  const opacity = data?.modeDimmed ? 0.35 : 1;
 
   return id !== START_NODE_ID ? (
     <DefaultNode
       showLabel
       element={element}
-      labelClassName={`${id}-node-label`}
+      labelClassName={`${id}-node-label${data?.modeDimmed ? ' workflow-node-label-dimmed' : ''}`}
       onSelect={(e) => {
         if (!jobType) return;
         setSidebarMode('view');
@@ -65,7 +70,7 @@ export const CustomNode: FC<
       badgeTextColor={data?.badgeTextColor}
       badgeBorderColor={data?.badgeBorderColor}
     >
-      <g transform={`translate(13, 13)`}>
+      <g transform={`translate(13, 13)`} opacity={opacity}>
         <Icon style={{ color: '#393F44' }} width={25} height={25} />
       </g>
     </DefaultNode>
@@ -81,7 +86,7 @@ export const CustomNode: FC<
       badgeTextColor={data?.badgeTextColor}
       badgeBorderColor={data?.badgeBorderColor}
     >
-      <g transform={`translate(13, 13)`}>
+      <g transform={`translate(13, 13)`} opacity={opacity}>
         <HomeIcon style={{ color: '#393F44' }} width={25} height={25} />
       </g>
     </DefaultNode>

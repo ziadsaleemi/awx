@@ -16,7 +16,7 @@ from ansible_base.resource_registry.fields import AnsibleResourceField
 # AWX
 from awx.api.versioning import reverse
 from awx.main.fields import ImplicitRoleField, OrderedManyToManyField
-from awx.main.models.base import BaseModel, CommonModel, CommonModelNameNotUnique, NotificationFieldsModel
+from awx.main.models.base import BaseModel, CommonModel, CommonModelNameNotUnique, CreatedModifiedModel, NotificationFieldsModel
 from awx.main.models.rbac import (
     ROLE_SINGLETON_SYSTEM_ADMINISTRATOR,
     ROLE_SINGLETON_SYSTEM_AUDITOR,
@@ -24,7 +24,7 @@ from awx.main.models.rbac import (
 from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.models.mixins import ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin
 
-__all__ = ['Organization', 'Team', 'UserSessionMembership']
+__all__ = ['Organization', 'Team', 'UserUISettings', 'UserSessionMembership']
 
 
 class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin):
@@ -165,6 +165,14 @@ class Team(CommonModelNameNotUnique, ResourceMixin):
 
     def get_absolute_url(self, request=None):
         return reverse('api:team_detail', kwargs={'pk': self.pk}, request=request)
+
+
+class UserUISettings(CreatedModifiedModel):
+    class Meta:
+        app_label = 'main'
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='ui_settings', editable=False, on_delete=models.CASCADE)
+    ui_preferences = models.JSONField(default=dict, blank=True)
 
 
 class UserSessionMembership(BaseModel):

@@ -4,6 +4,7 @@ import {
   ChartBarIcon,
   CogIcon,
   HomeIcon,
+  ProcessAutomationIcon,
   ServerIcon,
   UsersIcon,
 } from '@patternfly/react-icons';
@@ -40,10 +41,12 @@ import { useAwxManagementJobsRoutes } from './routes/useAwxManagementJobsRoutes'
 import { useAwxNotificationsRoutes } from './routes/useAwxNotificationsRoutes';
 import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
+import { useAwxPolicyRoutes } from './routes/useAwxPolicyRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
 import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
 import { useAwxCloudRoutes } from './routes/useAwxCloudRoutes';
+import { useAwxEdaRoutes } from './routes/useAwxEdaRoutes';
 import { useAwxTeamsRoutes } from './routes/useAwxTeamsRoutes';
 import { useAwxTemplateRoutes } from './routes/useAwxTemplateRoutes';
 import { useAwxUsersRoutes } from './routes/useAwxUsersRoutes';
@@ -57,6 +60,8 @@ export function useAwxNavigation() {
   const awxTerraformRoutes = useAwxTerraformRoutes();
   const awxCatalogRoutes = useAwxCatalogRoutes();
   const awxCloudRoutes = useAwxCloudRoutes();
+  const awxPolicyRoutes = useAwxPolicyRoutes();
+  const awxEdaRoutes = useAwxEdaRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
   const awxWorkflowApprovalRoutes = useAwxWorkflowApprovalRoutes();
@@ -327,15 +332,62 @@ export function useAwxNavigation() {
           ],
         },
         {
+          id: AwxRoute.SettingsPolicyAsCode,
+          label: t('Policy Connections'),
+          path: 'policy-as-code',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="policyascode" key="policyascode" />,
+            },
+            {
+              path: '',
+              element: (
+                <AwxSettingsCategoryDetailsPage categoryId="policyascode" key="policyascode" />
+              ),
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsAiAssistant,
+          label: t('AI Assistant'),
+          path: 'ai-assistant',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="ai-assistant" key="ai-assistant" />,
+            },
+            {
+              path: '',
+              element: (
+                <AwxSettingsCategoryDetailsPage categoryId="ai-assistant" key="ai-assistant" />
+              ),
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsEda,
+          label: t('Event-Driven Ansible'),
+          path: 'eda',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="eda" key="eda" />,
+            },
+            {
+              path: '',
+              element: <AwxSettingsCategoryDetailsPage categoryId="eda" key="eda" />,
+            },
+          ],
+        },
+        {
           id: AwxRoute.SettingsOther,
           label: t('Other'),
           path: 'other',
           children: [
             {
               path: '',
-              element: (
-                <AwxSettings filterGroups={(g) => g.id === 'other'} title={t('Other')} />
-              ),
+              element: <AwxSettings filterGroups={(g) => g.id === 'other'} title={t('Other')} />,
             },
           ],
         },
@@ -355,8 +407,10 @@ export function useAwxNavigation() {
     awxProjectRoutes,
     awxTerraformRoutes,
     awxCatalogRoutes,
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxCloudRoutes] : []),
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxPolicyRoutes] : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
-      ? [awxCloudRoutes]
+      ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }]
       : []),
     ...infrastructureItems,
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? analyticsItems : []),

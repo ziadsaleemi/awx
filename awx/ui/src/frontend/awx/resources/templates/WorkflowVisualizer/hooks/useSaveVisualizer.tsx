@@ -37,9 +37,17 @@ interface CreateWorkflowNodePayload {
   forks?: number;
   job_slice_count?: number;
   timeout?: number;
-  unified_job_template: number;
+  unified_job_template?: number | null;
   all_parents_must_converge: boolean;
   identifier?: string;
+  node_type?: string;
+  eda_rulebook_name?: string;
+  eda_activation_id?: string;
+  eda_event_source?: string;
+  eda_event_source_status?: string;
+  ai_task_prompt?: string;
+  ai_task_model?: string;
+  ai_task_approval_required?: boolean;
 }
 type CreatePayloadProperty = keyof CreateWorkflowNodePayload;
 
@@ -214,29 +222,46 @@ export function useSaveVisualizer(templateId: string) {
         const nodeData = node.getData() as GraphNodeData;
         const { launch_data, resource, survey_data } = nodeData;
         const { unified_job_template } = resource.summary_fields;
-
-        if (!unified_job_template) return;
+        const isEdaNode = resource.node_type === RESOURCE_TYPE.eda_rulebook;
+        const isAiNode = resource.node_type === RESOURCE_TYPE.ai_task;
 
         setValue('all_parents_must_converge', resource.all_parents_must_converge);
         setValue('identifier', resource?.identifier);
-        setValue('unified_job_template', unified_job_template.id);
+        if (isEdaNode) {
+          setValue('node_type', RESOURCE_TYPE.eda_rulebook);
+          setValue('eda_rulebook_name', resource.eda_rulebook_name);
+          setValue('eda_activation_id', resource.eda_activation_id);
+          setValue('eda_event_source', resource.eda_event_source);
+          setValue('eda_event_source_status', resource.eda_event_source_status);
+        } else if (isAiNode) {
+          setValue('node_type', RESOURCE_TYPE.ai_task);
+          setValue('ai_task_prompt', resource.ai_task_prompt);
+          setValue('ai_task_model', resource.ai_task_model);
+          setValue('ai_task_approval_required', resource.ai_task_approval_required);
+        } else {
+          if (!unified_job_template) return;
+          setValue('unified_job_template', unified_job_template.id);
+        }
 
         // Prompt values
-        setValue('diff_mode', launch_data?.diff_mode, true);
-        setValue('execution_environment', launch_data?.execution_environment, true);
-        setValue('forks', launch_data?.forks, true);
-        setValue('inventory', launch_data?.inventory?.id, true);
-        setValue('job_slice_count', launch_data?.job_slice_count, true);
-        setValue('job_tags', launch_data?.job_tags?.map((tag) => tag.name).join(','), true);
-        setValue('job_type', launch_data?.job_type, true);
-        setValue('limit', launch_data?.limit, true);
-        setValue('scm_branch', launch_data?.scm_branch, true);
-        setValue('skip_tags', launch_data?.job_tags?.map((tag) => tag.name).join(','), true);
-        setValue('timeout', launch_data?.timeout, true);
-        setValue('verbosity', launch_data?.verbosity, true);
+        if (!isEdaNode && !isAiNode) {
+          setValue('diff_mode', launch_data?.diff_mode, true);
+          setValue('execution_environment', launch_data?.execution_environment, true);
+          setValue('forks', launch_data?.forks, true);
+          setValue('inventory', launch_data?.inventory?.id, true);
+          setValue('job_slice_count', launch_data?.job_slice_count, true);
+          setValue('job_tags', launch_data?.job_tags?.map((tag) => tag.name).join(','), true);
+          setValue('job_type', launch_data?.job_type, true);
+          setValue('limit', launch_data?.limit, true);
+          setValue('scm_branch', launch_data?.scm_branch, true);
+          setValue('skip_tags', launch_data?.skip_tags?.map((tag) => tag.name).join(','), true);
+          setValue('timeout', launch_data?.timeout, true);
+          setValue('verbosity', launch_data?.verbosity, true);
+        }
 
         if (
-          unified_job_template.unified_job_type === RESOURCE_TYPE.system_job &&
+          !isEdaNode &&
+          unified_job_template?.unified_job_type === RESOURCE_TYPE.system_job &&
           resource.extra_data?.days
         ) {
           setValue('extra_data', { days: resource.extra_data.days });
@@ -274,8 +299,8 @@ export function useSaveVisualizer(templateId: string) {
           const nodeId = node.getId();
           const { launch_data, survey_data, resource } = nodeData;
           const { unified_job_template } = resource.summary_fields;
-
-          if (!unified_job_template) return;
+          const isEdaNode = resource.node_type === RESOURCE_TYPE.eda_rulebook;
+          const isAiNode = resource.node_type === RESOURCE_TYPE.ai_task;
 
           const setValue = <K extends CreatePayloadProperty>(
             key: K,
@@ -313,24 +338,56 @@ export function useSaveVisualizer(templateId: string) {
 
           setValue('all_parents_must_converge', resource.all_parents_must_converge);
           setValue('identifier', resource.identifier);
-          setValue('unified_job_template', unified_job_template.id);
+          if (isEdaNode) {
+            setValue('node_type', RESOURCE_TYPE.eda_rulebook);
+            setValue('unified_job_template', null);
+            setValue('eda_rulebook_name', resource.eda_rulebook_name);
+            setValue('eda_activation_id', resource.eda_activation_id);
+            setValue('eda_event_source', resource.eda_event_source);
+            setValue('eda_event_source_status', resource.eda_event_source_status);
+            setValue('ai_task_prompt', '');
+            setValue('ai_task_model', '');
+          } else if (isAiNode) {
+            setValue('node_type', RESOURCE_TYPE.ai_task);
+            setValue('unified_job_template', null);
+            setValue('ai_task_prompt', resource.ai_task_prompt);
+            setValue('ai_task_model', resource.ai_task_model);
+            setValue('ai_task_approval_required', resource.ai_task_approval_required);
+            setValue('eda_rulebook_name', '');
+            setValue('eda_activation_id', '');
+            setValue('eda_event_source', '');
+            setValue('eda_event_source_status', '');
+          } else {
+            if (!unified_job_template) return;
+            setValue('node_type', 'template');
+            setValue('unified_job_template', unified_job_template.id);
+            setValue('eda_rulebook_name', '');
+            setValue('eda_activation_id', '');
+            setValue('eda_event_source', '');
+            setValue('eda_event_source_status', '');
+            setValue('ai_task_prompt', '');
+            setValue('ai_task_model', '');
+          }
 
           // Prompt values
-          setValue('diff_mode', launch_data?.diff_mode, true);
-          setValue('execution_environment', launch_data?.execution_environment, true);
-          setValue('forks', launch_data?.forks, true);
-          setValue('inventory', launch_data?.inventory?.id, true);
-          setValue('job_slice_count', launch_data?.job_slice_count, true);
-          setValue('job_tags', launch_data?.job_tags?.map((tag) => tag).join(','), true);
-          setValue('job_type', launch_data?.job_type, true);
-          setValue('limit', launch_data?.limit, true);
-          setValue('scm_branch', launch_data?.scm_branch, true);
-          setValue('skip_tags', launch_data?.job_tags?.map((tag) => tag).join(','), true);
-          setValue('timeout', launch_data?.timeout, true);
-          setValue('verbosity', launch_data?.verbosity, true);
+          if (!isEdaNode && !isAiNode) {
+            setValue('diff_mode', launch_data?.diff_mode, true);
+            setValue('execution_environment', launch_data?.execution_environment, true);
+            setValue('forks', launch_data?.forks, true);
+            setValue('inventory', launch_data?.inventory?.id, true);
+            setValue('job_slice_count', launch_data?.job_slice_count, true);
+            setValue('job_tags', launch_data?.job_tags?.map((tag) => tag.name).join(','), true);
+            setValue('job_type', launch_data?.job_type, true);
+            setValue('limit', launch_data?.limit, true);
+            setValue('scm_branch', launch_data?.scm_branch, true);
+            setValue('skip_tags', launch_data?.skip_tags?.map((tag) => tag.name).join(','), true);
+            setValue('timeout', launch_data?.timeout, true);
+            setValue('verbosity', launch_data?.verbosity, true);
+          }
 
           if (
-            unified_job_template.unified_job_type === RESOURCE_TYPE.system_job &&
+            !isEdaNode &&
+            unified_job_template?.unified_job_type === RESOURCE_TYPE.system_job &&
             resource.extra_data?.days
           ) {
             setValue('extra_data', { days: resource.extra_data.days });

@@ -16,11 +16,7 @@ const LOGO_SIZES = [
  * Accepts PNG, JPEG, or GIF files and converts them to a base64
  * data URL, which is the format expected by the AWX API.
  */
-export function AwxLogoUpload(props: {
-  name: string;
-  label: string;
-  helpText?: string;
-}) {
+export function AwxLogoUpload(props: { name: string; label: string; helpText?: string }) {
   const { control } = useFormContext();
   const { field } = useController({ name: props.name, control });
 
@@ -52,11 +48,7 @@ export function AwxLogoUpload(props: {
   };
 
   return (
-    <FormGroup
-      label={props.label}
-      labelInfo={props.helpText}
-      fieldId={props.name}
-    >
+    <FormGroup label={props.label} labelInfo={props.helpText} fieldId={props.name}>
       <LogoContainer>
         {hasImage && (
           <LogoPreview>
@@ -161,9 +153,7 @@ const SizeBtn = styled.button<{ $active: boolean }>`
   cursor: pointer;
   border: 1px solid
     ${({ $active }) =>
-      $active
-        ? 'var(--pf-v5-global--active-color--100)'
-        : 'var(--pf-v5-global--BorderColor--100)'};
+      $active ? 'var(--pf-v5-global--active-color--100)' : 'var(--pf-v5-global--BorderColor--100)'};
   background: ${({ $active }) =>
     $active ? 'var(--pf-v5-global--active-color--100)' : 'transparent'};
   color: ${({ $active }) => ($active ? '#fff' : 'var(--pf-v5-global--Color--100)')};

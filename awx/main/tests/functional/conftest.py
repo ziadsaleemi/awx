@@ -47,6 +47,8 @@ from awx.main.models.events import (
 from awx.main.models.workflow import WorkflowJobTemplate
 from awx.main.models.ad_hoc_commands import AdHocCommand
 from awx.main.models.execution_environments import ExecutionEnvironment
+from awx.main.models.catalog import CatalogItem
+from awx.main.models.terraform import TerraformJobTemplate
 from awx.main.utils import is_testing
 
 logger = logging.getLogger(__name__)
@@ -258,6 +260,16 @@ def instance(settings):
 @pytest.fixture
 def organization():
     return Organization.objects.create(name="test-org", description="test-org-desc")
+
+
+@pytest.fixture
+def catalog_item(organization):
+    return CatalogItem.objects.create(name="test-catalog-item", organization=organization)
+
+
+@pytest.fixture
+def terraform_job_template(organization):
+    return TerraformJobTemplate.objects.create(name="test-terraform-job-template", organization=organization)
 
 
 @pytest.fixture
