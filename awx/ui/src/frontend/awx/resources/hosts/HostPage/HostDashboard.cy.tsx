@@ -5,6 +5,19 @@ describe('HostDashboard', () => {
   beforeEach(() => {
     cy.intercept({ method: 'GET', url: '/api/v2/hosts/435/' }, mockAwxHost);
     cy.intercept(
+      { method: 'GET', url: '/api/v2/credentials/*' },
+      {
+        count: 1,
+        results: [
+          {
+            id: 7,
+            name: 'Demo Machine Credential',
+            credential_type__namespace: 'ssh',
+          },
+        ],
+      }
+    );
+    cy.intercept(
       { method: 'GET', url: '/api/v2/hosts/435/ansible_facts/' },
       {
         ansible_distribution: 'RedHat',
@@ -49,5 +62,27 @@ describe('HostDashboard', () => {
     cy.contains('RedHat').should('exist');
     cy.contains('10.0.0.10').should('exist');
     cy.contains('8').should('exist');
+  });
+
+  it('launches host fact collection', () => {
+    cy.intercept({ method: 'POST', url: '/api/v2/hosts/435/ad_hoc_commands/' }, { id: 225 }).as(
+      'launchFacts'
+    );
+    cy.mount(<HostDashboard page="host" />, {
+      path: '/hosts/:id/dashboard',
+      initialEntries: ['/hosts/435/dashboard'],
+    });
+
+    cy.getByDataCy('pull-host-facts').click();
+    cy.wait('@launchFacts').its('request.body').should('include', {
+      credential: 7,
+      module_name: 'setup',
+      module_args: '',
+      forks: 0,
+      verbosity: 0,
+      become_enabled: false,
+      diff_mode: false,
+      extra_vars: '',
+    });
   });
 });

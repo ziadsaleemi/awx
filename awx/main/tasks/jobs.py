@@ -2083,6 +2083,38 @@ class RunAdHocCommand(BaseTask):
 
         return env
 
+    def should_update_host_facts(self, ad_hoc_command):
+        return ad_hoc_command.module_name == 'setup'
+
+    def should_use_fact_cache(self):
+        return bool(self.instance and self.should_update_host_facts(self.instance))
+
+    def pre_run_hook(self, ad_hoc_command, private_data_dir):
+        super(RunAdHocCommand, self).pre_run_hook(ad_hoc_command, private_data_dir)
+        if self.should_update_host_facts(ad_hoc_command):
+            ad_hoc_command.log_lifecycle("start_ad_hoc_fact_cache")
+            self.hosts_with_facts_cached = start_fact_cache(
+                ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS),
+                artifacts_dir=os.path.join(private_data_dir, 'artifacts', str(ad_hoc_command.id)),
+                inventory_id=ad_hoc_command.inventory_id,
+            )
+
+    def post_run_hook(self, ad_hoc_command, status):
+        super(RunAdHocCommand, self).post_run_hook(ad_hoc_command, status)
+        ad_hoc_command.refresh_from_db(fields=['job_env'])
+        private_data_dir = ad_hoc_command.job_env.get('AWX_PRIVATE_DATA_DIR')
+        if not private_data_dir:
+            return
+        if self.should_update_host_facts(ad_hoc_command) and self.runner_callback.artifacts_processed:
+            ad_hoc_command.log_lifecycle("finish_ad_hoc_fact_cache")
+            finish_fact_cache(
+                ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS),
+                artifacts_dir=os.path.join(private_data_dir, 'artifacts', str(ad_hoc_command.id)),
+                job_id=ad_hoc_command.id,
+                inventory_id=ad_hoc_command.inventory_id,
+                job_created=ad_hoc_command.created,
+            )
+
     def build_args(self, ad_hoc_command, private_data_dir, passwords):
         """
         Build command line argument list for running ansible, optionally using

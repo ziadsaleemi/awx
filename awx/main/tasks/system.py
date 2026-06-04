@@ -60,6 +60,7 @@ from awx.main.models import (
     Instance,
     InstanceGroup,
     Inventory,
+    AdHocCommand,
     Job,
     Notification,
     Schedule,
@@ -68,6 +69,7 @@ from awx.main.models import (
     UnifiedJob,
     convert_jsonfields,
 )
+from awx.main.tasks.facts import persist_ad_hoc_setup_facts_from_events
 from awx.main.tasks.helpers import is_run_threshold_reached
 from awx.main.tasks.host_indirect import save_indirect_host_entries
 from awx.main.tasks.receptor import administrative_workunit_reaper, get_receptor_ctl, worker_cleanup, worker_info, write_receptor_config
@@ -407,6 +409,8 @@ def events_processed_hook(unified_job):
     """This method is intended to be called for every unified job
     after the playbook_on_stats/EOF event is processed and final status is saved
     Either one of these events could happen before the other, or there may be no events"""
+    if isinstance(unified_job, AdHocCommand) and unified_job.module_name == 'setup':
+        persist_ad_hoc_setup_facts_from_events(unified_job)
     unified_job.send_notification_templates('succeeded' if unified_job.status == 'successful' else 'failed')
     if isinstance(unified_job, Job) and flag_enabled("FEATURE_INDIRECT_NODE_COUNTING_ENABLED"):
         if unified_job.event_queries_processed is True:

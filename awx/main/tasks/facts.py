@@ -13,6 +13,7 @@ from django.utils.timezone import now
 from ansible_base.lib.logging.runtime import log_excess_runtime
 
 # AWX
+from awx.main.constants import HOST_FACTS_FIELDS
 from awx.main.utils.common import parse_yaml_or_json
 from awx.main.utils.db import bulk_update_sorted_by_id
 from awx.main.models import Host
@@ -42,6 +43,39 @@ def sync_ansible_facts_to_host_variables(host, facts):
 
     host.variables = new_variables
     return True
+
+
+def persist_ad_hoc_setup_facts_from_events(ad_hoc_command):
+    facts_by_host = {}
+    event_qs = ad_hoc_command.ad_hoc_command_events.filter(event='runner_on_ok').only('event_data')
+    for event in event_qs.iterator():
+        event_data = event.event_data or {}
+        facts = (event_data.get('res') or {}).get('ansible_facts')
+        host_name = event_data.get('host') or event_data.get('remote_addr')
+        if isinstance(facts, dict) and host_name:
+            facts_by_host[host_name] = facts
+
+    if not facts_by_host:
+        return
+
+    hosts_to_save = []
+    host_qs = ad_hoc_command.inventory.hosts.only(*HOST_FACTS_FIELDS, 'variables').filter(name__in=list(facts_by_host))
+    for host in host_qs.iterator():
+        new_facts = facts_by_host.get(host.name)
+        if new_facts is None:
+            continue
+        changed = False
+        if new_facts != host.ansible_facts:
+            host.ansible_facts = new_facts
+            host.ansible_facts_modified = now()
+            changed = True
+        if sync_ansible_facts_to_host_variables(host, new_facts):
+            changed = True
+        if changed:
+            hosts_to_save.append(host)
+
+    if hosts_to_save:
+        bulk_update_sorted_by_id(Host, hosts_to_save, fields=['ansible_facts', 'ansible_facts_modified', 'variables'])
 
 
 @log_excess_runtime(logger, debug_cutoff=0.01, msg='Inventory {inventory_id} host facts prepared for {written_ct} hosts, took {delta:.3f} s', add_log_data=True)

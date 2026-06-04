@@ -1,6 +1,8 @@
 import { ChartPie } from '@patternfly/react-charts';
 import {
+  Alert,
   Bullseye,
+  Button,
   CardBody,
   DescriptionList,
   DescriptionListDescription,
@@ -23,18 +25,38 @@ import {
   TextContent,
   TextVariants,
 } from '@patternfly/react-core';
-import { ServerIcon } from '@patternfly/react-icons';
-import { useMemo } from 'react';
+import { ServerIcon, SyncAltIcon } from '@patternfly/react-icons';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import { usePageNavigate } from '../../../../../framework';
 import { PageDashboard } from '../../../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../../../framework/PageDashboard/PageDashboardCard';
+import { postRequest } from '../../../../common/crud/Data';
 import { useGet } from '../../../../common/crud/useGet';
 import { awxAPI } from '../../../common/api/awx-utils';
+import { AwxRoute } from '../../../main/AwxRoutes';
+import { Credential } from '../../../interfaces/Credential';
 import { useGetHost } from '../hooks/useGetHost';
 import { Sparkline } from '../../templates/components/Sparkline';
 
 type HostFacts = Record<string, unknown>;
+
+type CredentialsResponse = {
+  count: number;
+  results: Credential[];
+};
+
+type FactPullPayload = {
+  credential: number;
+  module_name: 'setup';
+  module_args: string;
+  forks: number;
+  verbosity: number;
+  become_enabled: boolean;
+  diff_mode: boolean;
+  extra_vars: string;
+};
 
 type MountFact = {
   mount?: string;
@@ -213,14 +235,67 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
   const { t } = useTranslation();
   const params = useParams<{ id: string; host_id: string }>();
   const hostId = props.page === 'host' ? params.id ?? '' : params.host_id ?? '';
+  const pageNavigate = usePageNavigate();
+  const [factPullError, setFactPullError] = useState<string>();
+  const [factPullLoading, setFactPullLoading] = useState(false);
   const { host } = useGetHost(hostId);
   const { data: facts, isLoading } = useGet<HostFacts>(awxAPI`/hosts/${hostId}/ansible_facts/`);
+  const { data: credentials } = useGet<CredentialsResponse>(
+    awxAPI`/credentials/?credential_type__namespace=ssh&order_by=name&page_size=1`
+  );
+  const credentialId = credentials?.results?.[0]?.id;
   const safeFacts = facts ?? {};
   const summary = useHostFactSummary(safeFacts);
   const recentPlaybookJobs = host?.summary_fields?.recent_jobs?.map((job) => ({
     ...job,
     canceled_on: null,
   }));
+  const pullFacts = useCallback(async () => {
+    setFactPullError(undefined);
+    if (!credentialId) {
+      setFactPullError(t('No usable SSH credential is available for fact collection.'));
+      return;
+    }
+    setFactPullLoading(true);
+    try {
+      const result = await postRequest<{ id: number }, FactPullPayload>(
+        awxAPI`/hosts/${hostId}/ad_hoc_commands/`,
+        {
+          credential: credentialId,
+          module_name: 'setup',
+          module_args: '',
+          forks: 0,
+          verbosity: 0,
+          become_enabled: false,
+          diff_mode: false,
+          extra_vars: '',
+        }
+      );
+      pageNavigate(AwxRoute.JobOutput, {
+        params: { id: String(result.id), job_type: 'command' },
+      });
+    } catch (error) {
+      setFactPullError(
+        error instanceof Error ? error.message : t('Unable to launch fact collection.')
+      );
+    } finally {
+      setFactPullLoading(false);
+    }
+  }, [credentialId, hostId, pageNavigate, t]);
+  const pullFactsButton = (
+    <Button
+      icon={<SyncAltIcon />}
+      isDisabled={factPullLoading || !hostId}
+      isLoading={factPullLoading}
+      onClick={() => void pullFacts()}
+      data-cy="pull-host-facts"
+    >
+      {factPullLoading ? t('Pulling facts') : t('Pull facts')}
+    </Button>
+  );
+  const factPullAlert = factPullError ? (
+    <Alert variant="danger" isInline title={factPullError} style={{ marginBottom: 16 }} />
+  ) : null;
 
   if (isLoading) {
     return (
@@ -235,6 +310,7 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
       <PageDashboard>
         <PageDashboardCard title={t('Host dashboard')} width="full" height="md">
           <CardBody>
+            {factPullAlert}
             <Bullseye>
               <EmptyState variant={EmptyStateVariant.lg}>
                 <EmptyStateHeader
@@ -245,6 +321,7 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
                 <EmptyStateBody>
                   {t('Run a job with gather facts enabled to populate this host dashboard.')}
                 </EmptyStateBody>
+                <div style={{ marginTop: 16 }}>{pullFactsButton}</div>
               </EmptyState>
             </Bullseye>
           </CardBody>
@@ -257,6 +334,7 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
     <PageDashboard>
       <PageDashboardCard title={t('System summary')} subtitle={host?.name} width="full" height="sm">
         <CardBody>
+          {factPullAlert}
           <Flex
             spaceItems={{ default: 'spaceItems2xl' }}
             alignItems={{ default: 'alignItemsFlexStart' }}
@@ -293,6 +371,7 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
                 </Label>
               </FlexItem>
             )}
+            <FlexItem>{pullFactsButton}</FlexItem>
           </Flex>
         </CardBody>
       </PageDashboardCard>
