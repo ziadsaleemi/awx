@@ -47,6 +47,7 @@ const FACT_PULL_MAX_ATTEMPTS = 90;
 const FACT_PULL_MIN_LOADING_MS = 750;
 const FACT_PULL_SUCCESS_MS = 1400;
 const FINISHED_JOB_STATUSES = new Set(['successful', 'failed', 'error', 'canceled']);
+const PSEUDO_BLOCK_DEVICE_PATTERN = /^(ram|loop|nbd)\d+$/;
 
 type CredentialsResponse = {
   count: number;
@@ -77,6 +78,7 @@ type MountFact = {
   device?: string;
   size_total?: number;
   size_available?: number;
+  fstype?: string;
 };
 
 function getRecord(value: unknown): Record<string, unknown> {
@@ -135,6 +137,40 @@ function formatDuration(seconds?: number) {
   return `${hours}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
+function formatBoolean(value: unknown) {
+  if (typeof value !== 'boolean') return undefined;
+  return value ? 'Yes' : 'No';
+}
+
+function formatList(values: unknown, limit = 4) {
+  if (!Array.isArray(values)) return undefined;
+  const displayValues = values.map(getString).filter((value): value is string => !!value);
+  if (!displayValues.length) return undefined;
+  const visibleValues = displayValues.slice(0, limit).join(', ');
+  return displayValues.length > limit
+    ? `${visibleValues} +${displayValues.length - limit} more`
+    : visibleValues;
+}
+
+function formatFactTimestamp(facts: HostFacts) {
+  const dateTime = getRecord(facts.ansible_date_time);
+  const iso =
+    getString(dateTime.iso8601) ??
+    getString(dateTime.iso8601_micro) ??
+    getString(dateTime.iso8601_basic);
+  if (iso?.includes('T')) {
+    return iso
+      .replace('T', ' ')
+      .replace(/\.\d+Z$/, ' UTC')
+      .replace(/Z$/, ' UTC');
+  }
+  const date = getString(dateTime.date);
+  const time = getString(dateTime.time);
+  const timezone = getString(dateTime.tz) ?? getString(dateTime.tz_offset);
+  if (date && time) return `${date} ${time}${timezone ? ` ${timezone}` : ''}`;
+  return undefined;
+}
+
 function usedPercent(total?: number, available?: number) {
   if (!total || available === undefined || total <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round(((total - available) / total) * 100)));
@@ -150,6 +186,62 @@ function getMounts(facts: HostFacts) {
         .filter((mount) => mount.size_total && mount.size_total > 0)
         .sort((a, b) => (b.size_total ?? 0) - (a.size_total ?? 0))
     : [];
+}
+
+function getDeviceSummaries(facts: HostFacts) {
+  return Object.entries(getRecord(facts.ansible_devices))
+    .map(([name, value]) => {
+      const device = getRecord(value);
+      const partitions = Object.keys(getRecord(device.partitions)).length;
+      return {
+        name,
+        size: getString(device.size),
+        model: getString(device.model),
+        vendor: getString(device.vendor),
+        rotational: getString(device.rotational),
+        virtual: getString(device.virtual),
+        scheduler: getString(device.scheduler_mode),
+        partitions,
+      };
+    })
+    .filter(
+      (device) =>
+        device.size &&
+        device.size !== '0.00 Bytes' &&
+        !PSEUDO_BLOCK_DEVICE_PATTERN.test(device.name)
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getInterfaceSummaries(facts: HostFacts, interfaceNames: unknown[]) {
+  return interfaceNames
+    .map(getString)
+    .filter((name): name is string => !!name)
+    .map((name) => {
+      const network = getRecord(facts[`ansible_${name}`]);
+      const ipv4 = getRecord(network.ipv4);
+      const ipv6 = Array.isArray(network.ipv6)
+        ? network.ipv6
+            .map((address) => getString(getRecord(address).address))
+            .filter((address): address is string => !!address)
+        : [];
+      return {
+        name,
+        active: network.active === true,
+        address: getString(ipv4.address),
+        mac: getString(network.macaddress),
+        mtu: getNumber(network.mtu),
+        speed: getNumber(network.speed),
+        type: getString(network.type),
+        ipv6,
+      };
+    })
+    .sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      if (a.name === 'lo') return 1;
+      if (b.name === 'lo') return -1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function useHostFactSummary(facts: HostFacts) {
@@ -180,9 +272,18 @@ function useHostFactSummary(facts: HostFacts) {
     const interfaces = Array.isArray(facts.ansible_interfaces)
       ? (facts.ansible_interfaces as unknown[])
       : [];
+    const loadAverage = getRecord(facts.ansible_loadavg);
+    const dns = getRecord(facts.ansible_dns);
+    const selinux = getRecord(facts.ansible_selinux);
+    const appArmor = getRecord(facts.ansible_apparmor);
+    const devices = getDeviceSummaries(facts);
+    const interfaceDetails = getInterfaceSummaries(facts, interfaces);
 
     return {
       cpuCount,
+      cpuCores: getNumber(facts.ansible_processor_cores),
+      cpuSockets: getNumber(facts.ansible_processor_count),
+      cpuThreadsPerCore: getNumber(facts.ansible_processor_threads_per_core),
       memoryTotal,
       memoryFree,
       memoryUsedPct: usedPercent(memoryTotal, memoryFree),
@@ -196,7 +297,54 @@ function useHostFactSummary(facts: HostFacts) {
       defaultAddress: getString(defaultIpv4.address),
       defaultInterface: getString(defaultIpv4.interface),
       defaultGateway: getString(defaultIpv4.gateway),
+      defaultMac: getString(defaultIpv4.macaddress),
       interfaces,
+      interfaceDetails,
+      allIpv4: formatList(facts.ansible_all_ipv4_addresses, 8),
+      allIpv6: formatList(facts.ansible_all_ipv6_addresses, 4),
+      dnsNameservers: formatList(dns.nameservers, 4),
+      dnsSearch: formatList(dns.search, 4),
+      loadAverage:
+        getNumber(loadAverage['1m']) !== undefined
+          ? `${getNumber(loadAverage['1m'])} / ${getNumber(loadAverage['5m']) ?? 0} / ${
+              getNumber(loadAverage['15m']) ?? 0
+            }`
+          : undefined,
+      lastFactPull: formatFactTimestamp(facts),
+      hostname: getFactString(facts, 'ansible_hostname'),
+      fqdn: getFactString(facts, 'ansible_fqdn'),
+      domain: getFactString(facts, 'ansible_domain'),
+      nodename: getFactString(facts, 'ansible_nodename'),
+      userId: getFactString(facts, 'ansible_user_id'),
+      userDir: getFactString(facts, 'ansible_user_dir'),
+      userShell: getFactString(facts, 'ansible_user_shell'),
+      userUid: getNumber(facts.ansible_user_uid),
+      userGid: getNumber(facts.ansible_user_gid),
+      machineId: getFactString(facts, 'ansible_machine_id'),
+      osFamily: getFactString(facts, 'ansible_os_family'),
+      distributionRelease: getFactString(facts, 'ansible_distribution_release'),
+      distributionMajorVersion: getFactString(facts, 'ansible_distribution_major_version'),
+      machine: getFactString(facts, 'ansible_machine'),
+      userspaceBits: getFactString(facts, 'ansible_userspace_bits'),
+      kernelVersion: getFactString(facts, 'ansible_kernel_version'),
+      system: getFactString(facts, 'ansible_system'),
+      productName: getFactString(facts, 'ansible_product_name'),
+      productVersion: getFactString(facts, 'ansible_product_version'),
+      productSerial: getFactString(facts, 'ansible_product_serial'),
+      systemVendor: getFactString(facts, 'ansible_system_vendor'),
+      formFactor: getFactString(facts, 'ansible_form_factor'),
+      biosVendor: getFactString(facts, 'ansible_bios_vendor'),
+      biosVersion: getFactString(facts, 'ansible_bios_version'),
+      biosDate: getFactString(facts, 'ansible_bios_date'),
+      boardName: getFactString(facts, 'ansible_board_name'),
+      virtualizationRole: getFactString(facts, 'ansible_virtualization_role'),
+      selinuxStatus: getString(selinux.status),
+      appArmorStatus: getString(appArmor.status),
+      fips: formatBoolean(facts.ansible_fips),
+      isChroot: formatBoolean(facts.ansible_is_chroot),
+      capabilitiesEnforced: getFactString(facts, 'ansible_system_capabilities_enforced'),
+      locallyReachableIpv4: formatList(getRecord(facts.ansible_locally_reachable_ips).ipv4, 6),
+      devices,
       factCount: Object.keys(facts).length,
     };
   }, [facts]);
@@ -226,7 +374,9 @@ function Detail(props: { label: string; value?: string | number }) {
   return (
     <DescriptionListGroup>
       <DescriptionListTerm>{props.label}</DescriptionListTerm>
-      <DescriptionListDescription>{props.value || t('Not available')}</DescriptionListDescription>
+      <DescriptionListDescription style={{ overflowWrap: 'anywhere' }}>
+        {props.value || t('Not available')}
+      </DescriptionListDescription>
     </DescriptionListGroup>
   );
 }
@@ -246,6 +396,30 @@ function UsageRow(props: { label: string; value: number; description?: string })
       </Flex>
       <Progress value={props.value} size={ProgressSize.sm} title={`${props.value}%`} />
     </StackItem>
+  );
+}
+
+function InlineRows(props: { rows: { label: string; value?: string | number }[] }) {
+  const { t } = useTranslation();
+  return (
+    <Stack hasGutter>
+      {props.rows.map((row) => (
+        <StackItem key={row.label}>
+          <Flex spaceItems={{ default: 'spaceItemsMd' }}>
+            <FlexItem style={{ minWidth: 120 }}>
+              <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
+                {row.label}
+              </Text>
+            </FlexItem>
+            <FlexItem grow={{ default: 'grow' }}>
+              <Text component={TextVariants.small} style={{ overflowWrap: 'anywhere' }}>
+                {row.value || t('Not available')}
+              </Text>
+            </FlexItem>
+          </Flex>
+        </StackItem>
+      ))}
+    </Stack>
   );
 }
 
@@ -419,6 +593,9 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
                   label={t('Operating system')}
                   value={getFactString(safeFacts, 'ansible_distribution')}
                 />
+                <Detail label={t('Last facts pull')} value={summary.lastFactPull} />
+                <Detail label={t('Hostname')} value={summary.hostname} />
+                <Detail label={t('FQDN')} value={summary.fqdn} />
                 <Detail
                   label={t('Version')}
                   value={getFactString(safeFacts, 'ansible_distribution_version')}
@@ -477,6 +654,24 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
                 description={`${formatMb(summary.swapTotal - (summary.swapFree ?? 0))} / ${formatMb(summary.swapTotal)}`}
               />
             )}
+            <InlineRows
+              rows={[
+                { label: t('Load avg'), value: summary.loadAverage },
+                {
+                  label: t('CPU topology'),
+                  value:
+                    summary.cpuSockets || summary.cpuCores || summary.cpuThreadsPerCore
+                      ? t('{{sockets}} sockets / {{cores}} cores / {{threads}} threads', {
+                          sockets: summary.cpuSockets ?? 0,
+                          cores: summary.cpuCores ?? 0,
+                          threads: summary.cpuThreadsPerCore ?? 0,
+                        })
+                      : undefined,
+                },
+                { label: t('Machine'), value: summary.machine },
+                { label: t('Userspace'), value: summary.userspaceBits },
+              ]}
+            />
           </Stack>
         </CardBody>
       </PageDashboardCard>
@@ -547,7 +742,12 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
             <Detail label={t('Primary address')} value={summary.defaultAddress} />
             <Detail label={t('Primary interface')} value={summary.defaultInterface} />
             <Detail label={t('Gateway')} value={summary.defaultGateway} />
+            <Detail label={t('Primary MAC')} value={summary.defaultMac} />
             <Detail label={t('Interfaces')} value={summary.interfaces.length} />
+            <Detail label={t('IPv4 addresses')} value={summary.allIpv4} />
+            <Detail label={t('IPv6 addresses')} value={summary.allIpv6} />
+            <Detail label={t('DNS servers')} value={summary.dnsNameservers} />
+            <Detail label={t('DNS search')} value={summary.dnsSearch} />
           </DescriptionList>
         </CardBody>
       </PageDashboardCard>
@@ -567,8 +767,118 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
               label={t('Service manager')}
               value={getFactString(safeFacts, 'ansible_service_mgr')}
             />
+            <Detail label={t('OS family')} value={summary.osFamily} />
+            <Detail label={t('Release')} value={summary.distributionRelease} />
+            <Detail label={t('Major version')} value={summary.distributionMajorVersion} />
             <Detail label={t('Fact keys')} value={summary.factCount} />
           </DescriptionList>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard title={t('Identity')} width="half" height="sm">
+        <CardBody>
+          <DescriptionList isHorizontal isCompact>
+            <Detail label={t('Node name')} value={summary.nodename} />
+            <Detail label={t('Domain')} value={summary.domain} />
+            <Detail label={t('User')} value={summary.userId} />
+            <Detail
+              label={t('UID / GID')}
+              value={
+                summary.userUid !== undefined || summary.userGid !== undefined
+                  ? `${summary.userUid ?? t('Not available')} / ${summary.userGid ?? t('Not available')}`
+                  : undefined
+              }
+            />
+            <Detail label={t('User home')} value={summary.userDir} />
+            <Detail label={t('User shell')} value={summary.userShell} />
+            <Detail label={t('Machine ID')} value={summary.machineId} />
+          </DescriptionList>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard title={t('Security')} width="half" height="sm">
+        <CardBody>
+          <DescriptionList isHorizontal isCompact>
+            <Detail label={t('SELinux')} value={summary.selinuxStatus} />
+            <Detail label={t('AppArmor')} value={summary.appArmorStatus} />
+            <Detail label={t('FIPS')} value={summary.fips} />
+            <Detail label={t('Chroot')} value={summary.isChroot} />
+            <Detail label={t('Capabilities enforced')} value={summary.capabilitiesEnforced} />
+            <Detail label={t('Reachable IPv4')} value={summary.locallyReachableIpv4} />
+          </DescriptionList>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard title={t('Hardware')} width="half" height="sm">
+        <CardBody>
+          <DescriptionList isHorizontal isCompact>
+            <Detail label={t('System')} value={summary.system} />
+            <Detail label={t('Vendor')} value={summary.systemVendor} />
+            <Detail label={t('Product')} value={summary.productName} />
+            <Detail label={t('Product version')} value={summary.productVersion} />
+            <Detail label={t('Serial')} value={summary.productSerial} />
+            <Detail label={t('Form factor')} value={summary.formFactor} />
+            <Detail label={t('Board')} value={summary.boardName} />
+            <Detail label={t('BIOS')} value={summary.biosVersion} />
+            <Detail label={t('BIOS vendor')} value={summary.biosVendor} />
+            <Detail label={t('BIOS date')} value={summary.biosDate} />
+            <Detail label={t('Kernel build')} value={summary.kernelVersion} />
+            <Detail label={t('Virtualization role')} value={summary.virtualizationRole} />
+          </DescriptionList>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard title={t('Network interfaces')} width="half" height="sm">
+        <CardBody>
+          {summary.interfaceDetails.length ? (
+            <InlineRows
+              rows={summary.interfaceDetails.slice(0, 6).map((networkInterface) => ({
+                label: networkInterface.name,
+                value: [
+                  networkInterface.active ? t('up') : t('down'),
+                  networkInterface.address,
+                  networkInterface.mac,
+                  networkInterface.mtu ? `mtu ${networkInterface.mtu}` : undefined,
+                  networkInterface.speed ? `${networkInterface.speed} Mbps` : undefined,
+                  networkInterface.ipv6.length
+                    ? t('{{count}} IPv6', { count: networkInterface.ipv6.length })
+                    : undefined,
+                  networkInterface.type,
+                ]
+                  .filter(Boolean)
+                  .join(' | '),
+              }))}
+            />
+          ) : (
+            <Text>{t('No interface details available')}</Text>
+          )}
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard title={t('Block devices')} width="full" height="sm">
+        <CardBody>
+          {summary.devices.length ? (
+            <InlineRows
+              rows={summary.devices.slice(0, 8).map((device) => ({
+                label: device.name,
+                value: [
+                  device.size,
+                  device.partitions
+                    ? t('{{count}} partition(s)', { count: device.partitions })
+                    : t('no partitions'),
+                  device.model,
+                  device.vendor,
+                  device.rotational === '1' ? t('rotational') : t('solid state / virtual'),
+                  device.virtual === '1' ? t('virtual') : undefined,
+                  device.scheduler,
+                ]
+                  .filter(Boolean)
+                  .join(' | '),
+              }))}
+            />
+          ) : (
+            <Text>{t('No block device details available')}</Text>
+          )}
         </CardBody>
       </PageDashboardCard>
 

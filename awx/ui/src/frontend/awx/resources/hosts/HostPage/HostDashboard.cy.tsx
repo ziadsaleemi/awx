@@ -23,17 +23,95 @@ describe('HostDashboard', () => {
         ansible_distribution: 'RedHat',
         ansible_distribution_version: '9.4',
         ansible_kernel: '5.14.0',
+        ansible_kernel_version: '#1 SMP Tue May 14 14:00:00 UTC 2024',
         ansible_architecture: 'x86_64',
+        ansible_machine: 'x86_64',
+        ansible_system: 'Linux',
         ansible_virtualization_type: 'kvm',
+        ansible_virtualization_role: 'guest',
         ansible_processor_vcpus: 8,
+        ansible_processor_count: 2,
+        ansible_processor_cores: 4,
+        ansible_processor_threads_per_core: 1,
         ansible_memtotal_mb: 32768,
         ansible_memfree_mb: 16384,
+        ansible_loadavg: {
+          '1m': 1.25,
+          '5m': 0.9,
+          '15m': 0.5,
+        },
+        ansible_date_time: {
+          date: '2026-06-04',
+          time: '05:14:34',
+          tz: 'UTC',
+          iso8601: '2026-06-04T05:14:34Z',
+        },
+        ansible_hostname: 'demo-host',
+        ansible_fqdn: 'demo-host.example.com',
+        ansible_nodename: 'demo-host',
+        ansible_domain: 'example.com',
+        ansible_user_id: 'ansible',
+        ansible_user_dir: '/home/ansible',
+        ansible_user_shell: '/bin/bash',
+        ansible_user_uid: 1000,
+        ansible_user_gid: 1000,
+        ansible_machine_id: 'machine-123',
+        ansible_os_family: 'RedHat',
+        ansible_distribution_release: 'Plow',
+        ansible_distribution_major_version: '9',
+        ansible_userspace_bits: '64',
+        ansible_system_vendor: 'R92',
+        ansible_product_name: 'Proxmox VM',
+        ansible_product_version: 'pc-q35-8.1',
+        ansible_product_serial: 'vm-435',
+        ansible_form_factor: 'Virtual Machine',
+        ansible_board_name: 'QEMU',
+        ansible_bios_vendor: 'SeaBIOS',
+        ansible_bios_version: 'rel-1.16.2',
+        ansible_bios_date: '04/01/2024',
+        ansible_selinux: { status: 'disabled' },
+        ansible_apparmor: { status: 'enabled' },
+        ansible_fips: false,
+        ansible_is_chroot: false,
+        ansible_system_capabilities_enforced: 'True',
         ansible_default_ipv4: {
           address: '10.0.0.10',
           interface: 'ens18',
           gateway: '10.0.0.1',
+          macaddress: '00:11:22:33:44:55',
+        },
+        ansible_dns: {
+          nameservers: ['10.0.0.53', '1.1.1.1'],
+          search: ['example.com'],
+        },
+        ansible_all_ipv4_addresses: ['10.0.0.10', '192.168.122.10'],
+        ansible_all_ipv6_addresses: ['fe80::1'],
+        ansible_locally_reachable_ips: {
+          ipv4: ['127.0.0.1', '10.0.0.10'],
         },
         ansible_interfaces: ['ens18', 'lo'],
+        ansible_ens18: {
+          active: true,
+          device: 'ens18',
+          ipv4: { address: '10.0.0.10' },
+          macaddress: '00:11:22:33:44:55',
+          mtu: 1500,
+          speed: 10000,
+          type: 'ether',
+        },
+        ansible_devices: {
+          sda: {
+            size: '100.00 GB',
+            model: 'QEMU HARDDISK',
+            vendor: 'QEMU',
+            rotational: '0',
+            virtual: '1',
+            scheduler_mode: 'none',
+            partitions: {
+              sda1: { size: '100.00 GB' },
+            },
+          },
+        },
         ansible_python_version: '3.12.1',
         ansible_pkg_mgr: 'dnf',
         ansible_service_mgr: 'systemd',
@@ -59,8 +137,19 @@ describe('HostDashboard', () => {
     cy.contains(/^System summary$/).should('exist');
     cy.contains(/^Compute$/).should('exist');
     cy.contains(/^Storage$/).should('exist');
+    cy.contains(/^Identity$/).should('exist');
+    cy.contains(/^Security$/).should('exist');
+    cy.contains(/^Hardware$/).should('exist');
+    cy.contains(/^Network interfaces$/).should('exist');
+    cy.contains(/^Block devices$/).should('exist');
+    cy.contains('Last facts pull').should('exist');
+    cy.contains('2026-06-04 05:14:34 UTC').should('exist');
     cy.contains('RedHat').should('exist');
+    cy.contains('demo-host.example.com').should('exist');
     cy.contains('10.0.0.10').should('exist');
+    cy.contains('00:11:22:33:44:55').should('exist');
+    cy.contains('SeaBIOS').should('exist');
+    cy.contains('QEMU HARDDISK').should('exist');
     cy.contains('8').should('exist');
   });
 
