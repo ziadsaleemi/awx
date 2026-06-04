@@ -78,6 +78,15 @@ const providerAliases: Record<string, string[]> = {
   vmware: ['vmware', 'vsphere', 'vmwarevsphere'],
 };
 
+const providerCredentialNamespaces: Record<string, string> = {
+  digitalocean: 'digitalocean_terraform',
+  aws: 'aws_terraform',
+  azure: 'azure_rm_terraform',
+  gcp: 'gcp_terraform',
+  proxmox: 'proxmox_ve',
+  vmware: 'vmware_vsphere_terraform',
+};
+
 const StyledConnectionCard = styled(Card)`
   background-color: #222428 !important;
   border: 1px solid var(--pf-v5-global--BorderColor--100) !important;
@@ -246,9 +255,14 @@ export function ConnectionModal(props: {
     refreshModalConnections();
   }, [refreshModalConnections]);
 
-  const { data } = useGet<CredentialListResponse>(
-    awxAPI`/credentials/?order_by=name&page_size=200`
-  );
+  const credentialListUrl = useMemo(() => {
+    const params = new URLSearchParams({ order_by: 'name', page_size: '200' });
+    const namespace = providerCredentialNamespaces[providerId];
+    if (namespace) params.set('credential_type__namespace', namespace);
+    return `${awxAPI`/credentials/`}?${params.toString()}`;
+  }, [providerId]);
+
+  const { data } = useGet<CredentialListResponse>(credentialListUrl);
   const credentials = useMemo(() => data?.results ?? [], [data?.results]);
 
   const cloudCredentials = useMemo(() => {
@@ -501,10 +515,26 @@ export function ConnectionModal(props: {
         )}
 
         {entries.length === 0 && !showAddForm && (
-          <div style={{ color: '#888', textAlign: 'center', padding: '0.5rem 0' }}>
-            {canManageCloud
-              ? t('No connections yet. Click "Add connection" below.')
-              : t('No connections yet.')}
+          <div
+            style={{
+              color: '#888',
+              textAlign: 'center',
+              padding: '0.75rem 0',
+              display: 'grid',
+              justifyItems: 'center',
+              gap: 12,
+            }}
+          >
+            <div>{t('No connections yet.')}</div>
+            {canManageCloud && (
+              <Button
+                variant="primary"
+                icon={<PlusCircleIcon />}
+                onClick={() => setShowAddForm(true)}
+              >
+                {t('Add connection')}
+              </Button>
+            )}
           </div>
         )}
 
@@ -545,6 +575,17 @@ export function ConnectionModal(props: {
                 ))}
               </FormSelect>
             </FormGroup>
+            {providerCredentials.length === 0 && (
+              <Alert
+                isInline
+                variant="warning"
+                title={t('No {{provider}} credentials found.', { provider: providerLabel })}
+              >
+                {t('Create a {{provider}} credential, then return here to add a connection.', {
+                  provider: providerLabel,
+                })}
+              </Alert>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Button
                 variant="primary"
@@ -569,7 +610,7 @@ export function ConnectionModal(props: {
               </Button>
             </div>
           </div>
-        ) : canManageCloud ? (
+        ) : canManageCloud && entries.length > 0 ? (
           <div>
             <Button variant="link" icon={<PlusCircleIcon />} onClick={() => setShowAddForm(true)}>
               {t('Add connection')}
