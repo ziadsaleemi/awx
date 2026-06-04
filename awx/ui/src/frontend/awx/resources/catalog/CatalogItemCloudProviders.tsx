@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import { useState } from 'react';
 import { Alert, Label, Switch, Title } from '@patternfly/react-core';
+import styled from 'styled-components';
 import { LoadingPage } from '../../../../framework';
 import { useGetItem, useGet } from '../../../common/crud/useGet';
 import { requestPatch } from '../../../common/crud/Data';
@@ -26,6 +27,20 @@ const PROVIDER_COLORS: Record<string, { bg: string; fg: string; abbr: string }> 
 };
 
 const DEFAULT_PROVIDER_COLOR = { bg: '#888', fg: '#fff' };
+
+const ProviderWorkflowDetails = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--pf-v5-global--BorderColor--100);
+  font-size: 0.85rem;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+`;
 
 interface CloudConnectionApiResult {
   count: number;
@@ -231,17 +246,7 @@ export function CatalogItemCloudProviders() {
               </div>
 
               {/* Workflow details */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '8px 16px',
-                  marginTop: 12,
-                  paddingTop: 10,
-                  borderTop: '1px solid var(--pf-v5-global--BorderColor--100)',
-                  fontSize: '0.85rem',
-                }}
-              >
+              <ProviderWorkflowDetails data-cy={`catalog-provider-workflows-${pid}`}>
                 <div>
                   <span style={{ color: 'var(--pf-v5-global--Color--200)', marginRight: 6 }}>
                     {t('Provision workflow')}
@@ -266,7 +271,7 @@ export function CatalogItemCloudProviders() {
                     <span style={{ color: 'var(--pf-v5-global--Color--200)' }}>-</span>
                   )}
                 </div>
-              </div>
+              </ProviderWorkflowDetails>
             </div>
           );
         })}

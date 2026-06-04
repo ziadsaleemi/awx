@@ -50,6 +50,7 @@ import DigitalOceanLogo from '../../../assets/digitalocean.svg';
 import { getCloudProviderLabel } from './cloudProviders';
 import { ConnectionModal } from './CloudConnections';
 import { CloudInventoryMapping } from './CloudInventoryMapping';
+import { CloudProviderOverviewGrid, CloudProviderOverviewSection } from './CloudProviderLayout';
 import { AzureProviderSettings } from './AzureProviderSettings';
 import { ProxmoxProviderSettings } from './ProxmoxProviderSettings';
 import { VmwareProviderSettings } from './VmwareProviderSettings';
@@ -86,8 +87,8 @@ function DigitalOceanOverviewTab(props: {
   ];
 
   return (
-    <PageSection style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
-      <Grid hasGutter style={{ maxWidth: 1400, margin: '0 auto' }}>
+    <CloudProviderOverviewSection>
+      <CloudProviderOverviewGrid hasGutter data-cy="digitalocean-provider-overview-grid">
         {/* ── left: connection + stats ── */}
         <GridItem sm={12} lg={8} xl={9}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -301,8 +302,8 @@ function DigitalOceanOverviewTab(props: {
             </CardBody>
           </Card>
         </GridItem>
-      </Grid>
-    </PageSection>
+      </CloudProviderOverviewGrid>
+    </CloudProviderOverviewSection>
   );
 }
 

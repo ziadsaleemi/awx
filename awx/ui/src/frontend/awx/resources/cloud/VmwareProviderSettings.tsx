@@ -62,6 +62,7 @@ import {
 import VmwareLogo from '../../../assets/vmware.svg';
 import { ConnectionModal } from './CloudConnections';
 import { CloudInventoryMapping } from './CloudInventoryMapping';
+import { CloudProviderOverviewGrid, CloudProviderOverviewSection } from './CloudProviderLayout';
 import { useCloudOrganization } from './useCloudOrganization';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -714,8 +715,8 @@ function OverviewTab(props: {
   const { connectionEntries, connectionDataMap } = props;
 
   return (
-    <PageSection style={{ overflowY: 'auto', flex: 1, padding: '1.5rem' }}>
-      <Grid hasGutter style={{ maxWidth: 1400, margin: '0 auto' }}>
+    <CloudProviderOverviewSection>
+      <CloudProviderOverviewGrid hasGutter data-cy="vmware-provider-overview-grid">
         {/* Connections */}
         <GridItem sm={12} lg={8} xl={9}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -807,8 +808,8 @@ function OverviewTab(props: {
             </CardBody>
           </DarkCard>
         </GridItem>
-      </Grid>
-    </PageSection>
+      </CloudProviderOverviewGrid>
+    </CloudProviderOverviewSection>
   );
 }
 
