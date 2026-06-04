@@ -40,6 +40,25 @@ def test_org_child_add_permission(setup_managed_roles):
 
 
 @pytest.mark.django_db
+def test_catalog_persona_roles(setup_managed_roles):
+    user_rd = RoleDefinition.objects.get(name='Organization Catalog User')
+    user_codenames = set(user_rd.permissions.values_list('codename', flat=True))
+    assert {'view_catalogitem', 'use_catalogitem'}.issubset(user_codenames)
+    assert {'view_organization', 'add_catalogitem', 'change_catalogitem', 'delete_catalogitem'}.isdisjoint(user_codenames)
+
+    admin_rd = RoleDefinition.objects.get(name='Organization Catalog Admin')
+    admin_codenames = set(admin_rd.permissions.values_list('codename', flat=True))
+    assert {
+        'add_catalogitem',
+        'change_catalogitem',
+        'delete_catalogitem',
+        'view_catalogitem',
+        'use_catalogitem',
+    }.issubset(admin_codenames)
+    assert 'view_organization' not in admin_codenames
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('resource_name', ['Team', 'Organization'])
 @pytest.mark.parametrize('action', ['Member', 'Admin'])
 def test_legacy_RBAC_uses_platform_roles(setup_managed_roles, resource_name, action, team, bob, organization):

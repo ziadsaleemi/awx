@@ -86,6 +86,12 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
     job_template_admin_role = ImplicitRoleField(
         parent_role='admin_role',
     )
+    catalog_admin_role = ImplicitRoleField(
+        parent_role='admin_role',
+    )
+    catalog_user_role = ImplicitRoleField(
+        parent_role='catalog_admin_role',
+    )
     execution_environment_admin_role = ImplicitRoleField(
         parent_role='admin_role',
     )

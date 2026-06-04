@@ -28,7 +28,7 @@ class CatalogItem(CommonModelNameNotUnique):
     class Meta:
         app_label = 'main'
         ordering = ('name',)
-        default_permissions = ('change', 'delete', 'view')
+        default_permissions = ('add', 'change', 'delete', 'view')
         permissions = [
             ('use_catalogitem', 'Can deploy this catalog item'),
         ]
@@ -56,33 +56,25 @@ class CatalogItem(CommonModelNameNotUnique):
         max_length=256,
         blank=True,
         default='',
-        help_text=_(
-            'Optional deploy variable name to auto-populate as a dynamic field (for example, vmnam).'
-        ),
+        help_text=_('Optional deploy variable name to auto-populate as a dynamic field (for example, vmnam).'),
     )
     dynamic_field_templates = models.JSONField(
         blank=True,
         null=True,
         default=None,
-        help_text=_(
-            'Optional per-field dynamic values keyed by deploy variable name. These values are independent from name_template.'
-        ),
+        help_text=_('Optional per-field dynamic values keyed by deploy variable name. These values are independent from name_template.'),
     )
     deploy_disabled_fields = models.JSONField(
         blank=True,
         null=True,
         default=None,
-        help_text=_(
-            'Optional list of deploy field names that should be read-only in the deploy form for this catalog item.'
-        ),
+        help_text=_('Optional list of deploy field names that should be read-only in the deploy form for this catalog item.'),
     )
     deploy_hidden_fields = models.JSONField(
         blank=True,
         null=True,
         default=None,
-        help_text=_(
-            'Optional list of deploy field names that should be hidden from the deploy form for this catalog item.'
-        ),
+        help_text=_('Optional list of deploy field names that should be hidden from the deploy form for this catalog item.'),
     )
     organization = models.ForeignKey(
         'Organization',
@@ -131,10 +123,7 @@ class CatalogItem(CommonModelNameNotUnique):
         blank=True,
         null=True,
         default=None,
-        help_text=_(
-            'JSON Schema describing the parameters presented to the user at deploy time. '
-            'If null, no extra-var form is shown.'
-        ),
+        help_text=_('JSON Schema describing the parameters presented to the user at deploy time. ' 'If null, no extra-var form is shown.'),
     )
     cloud_backends = models.JSONField(
         blank=True,
@@ -195,36 +184,27 @@ class CatalogItem(CommonModelNameNotUnique):
         blank=True,
         null=True,
         default=None,
-        help_text=_(
-            'Per-provider deploy-form field configuration. '
-            'Maps provider slug to {disabled_fields: [], hidden_fields: [], field_templates: {}}.'
-        ),
+        help_text=_('Per-provider deploy-form field configuration. ' 'Maps provider slug to {disabled_fields: [], hidden_fields: [], field_templates: {}}.'),
     )
     default_lease_minutes = models.PositiveIntegerField(
         null=True,
         blank=True,
         default=None,
-        help_text=_(
-            'Default lease duration in minutes applied to every new deployment of this item. '
-            'Leave blank for no default lease.'
-        ),
+        help_text=_('Default lease duration in minutes applied to every new deployment of this item. ' 'Leave blank for no default lease.'),
     )
     require_lease = models.BooleanField(
         default=False,
-        help_text=_(
-            'When enabled, deployers must supply a TTL before the deployment is created. '
-            'Deployments will not be created without an expiry time.'
-        ),
+        help_text=_('When enabled, deployers must supply a TTL before the deployment is created. ' 'Deployments will not be created without an expiry time.'),
     )
 
     # ------------------------------------------------------------------ #
     # RBAC roles                                                           #
     # ------------------------------------------------------------------ #
     admin_role = ImplicitRoleField(
-        parent_role=['organization.admin_role'],
+        parent_role=['organization.admin_role', 'organization.catalog_admin_role'],
     )
     use_role = ImplicitRoleField(
-        parent_role=['admin_role', 'organization.member_role'],
+        parent_role=['admin_role', 'organization.member_role', 'organization.catalog_user_role'],
     )
     read_role = ImplicitRoleField(
         parent_role=['admin_role', 'use_role', 'organization.auditor_role'],
@@ -356,10 +336,7 @@ class CatalogDeployment(CommonModelNameNotUnique):
     )
     auto_deprovision = models.BooleanField(
         default=False,
-        help_text=_(
-            'When True and expires_at is set, the deprovision workflow is launched automatically '
-            'once the lease expires.'
-        ),
+        help_text=_('When True and expires_at is set, the deprovision workflow is launched automatically ' 'once the lease expires.'),
     )
     provisioning_history = models.JSONField(
         blank=True,

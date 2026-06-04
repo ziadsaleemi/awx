@@ -374,11 +374,15 @@ def _entries_from_provider_state(state):
 
 
 def _marketplace_admin_orgs(user):
-    return Organization.objects.all() if user.is_superuser else Organization.accessible_objects(user, 'admin_role')
+    return Organization.objects.all() if user.is_superuser else Organization.accessible_objects(user, 'catalog_admin_role')
+
+
+def _marketplace_read_orgs(user):
+    return Organization.objects.all() if user.is_superuser or user.is_system_auditor else Organization.accessible_objects(user, 'catalog_user_role')
 
 
 def _user_can_read_marketplace(user):
-    return bool(user.is_superuser or user.is_system_auditor or _marketplace_admin_orgs(user).exists())
+    return bool(user.is_superuser or user.is_system_auditor or _marketplace_read_orgs(user).exists())
 
 
 def _resolve_marketplace_organization(request, require_admin=False):
@@ -388,7 +392,7 @@ def _resolve_marketplace_organization(request, require_admin=False):
         or request.query_params.get('organization')
         or request.query_params.get('organization_id')
     )
-    admin_orgs = _marketplace_admin_orgs(request.user)
+    accessible_orgs = _marketplace_admin_orgs(request.user) if require_admin else _marketplace_read_orgs(request.user)
 
     if raw_org_pk not in (None, ''):
         try:
@@ -400,7 +404,7 @@ def _resolve_marketplace_organization(request, require_admin=False):
             )
         if request.user.is_superuser or (request.user.is_system_auditor and not require_admin):
             return organization, None
-        if admin_orgs.filter(pk=organization.pk).exists():
+        if accessible_orgs.filter(pk=organization.pk).exists():
             return organization, None
         return None, Response(
             {'organization': ['You do not have permission to use this organization.']},
@@ -410,12 +414,17 @@ def _resolve_marketplace_organization(request, require_admin=False):
     if request.user.is_superuser or (request.user.is_system_auditor and not require_admin):
         return None, None
 
-    count = admin_orgs.count()
+    count = accessible_orgs.count()
     if count == 1:
-        return admin_orgs.first(), None
+        return accessible_orgs.first(), None
     if count == 0:
+        message = (
+            'You must be an organization catalog administrator to import marketplace templates.'
+            if require_admin
+            else 'You do not have catalog access to any organization.'
+        )
         return None, Response(
-            {'organization': ['You must be an organization administrator to import marketplace templates.']},
+            {'organization': [message]},
             status=status.HTTP_403_FORBIDDEN,
         )
     return None, Response(

@@ -62,6 +62,8 @@ role_names = {
     'execution_environment_admin_role': _('Execution Environment Admin'),
     'workflow_admin_role': _('Workflow Admin'),
     'notification_admin_role': _('Notification Admin'),
+    'catalog_admin_role': _('Catalog Admin'),
+    'catalog_user_role': _('Catalog User'),
     'auditor_role': _('Auditor'),
     'execute_role': _('Execute'),
     'member_role': _('Member'),
@@ -83,6 +85,8 @@ role_descriptions = {
     'execution_environment_admin_role': _('Can manage all execution environments of the %s'),
     'workflow_admin_role': _('Can manage all workflows of the %s'),
     'notification_admin_role': _('Can manage all notifications of the %s'),
+    'catalog_admin_role': _('Can manage all catalog items of the %s'),
+    'catalog_user_role': _('Can browse and deploy catalog items of the %s'),
     'auditor_role': _('Can view all aspects of the %s'),
     'execute_role': {
         'organization': _('May run any executable resources in the organization'),
@@ -553,6 +557,27 @@ def get_role_definition(role):
     obj = role.content_object
     if obj is None:
         return
+
+    preferred_catalog_item_role = {
+        'admin_role': 'CatalogItem Admin',
+        'use_role': 'CatalogItem Use',
+    }.get(role.role_field)
+    if obj._meta.model_name == 'catalogitem' and preferred_catalog_item_role:
+        try:
+            return RoleDefinition.objects.get(name=preferred_catalog_item_role)
+        except RoleDefinition.DoesNotExist:
+            pass
+
+    preferred_managed_role = {
+        'catalog_admin_role': 'Organization Catalog Admin',
+        'catalog_user_role': 'Organization Catalog User',
+    }.get(role.role_field)
+    if obj._meta.model_name == 'organization' and preferred_managed_role:
+        try:
+            return RoleDefinition.objects.get(name=preferred_managed_role)
+        except RoleDefinition.DoesNotExist:
+            pass
+
     f = obj._meta.get_field(role.role_field)
     action_name = f.name.rsplit("_", 1)[0]
     model_print = type(obj).__name__
@@ -590,6 +615,8 @@ def get_role_from_object_role(object_role):
         model_name, role_name, _ = rd.name.split()
         role_name = role_name.lower()
         role_name += '_role'
+    elif rd.name in ROLE_DEFINITION_TO_ROLE_FIELD:
+        role_name = ROLE_DEFINITION_TO_ROLE_FIELD[rd.name]
     elif rd.name.endswith(' Admin') and rd.name.count(' ') == 2:
         # cases like "Organization Project Admin"
         model_name, target_model_name, role_name = rd.name.split()
@@ -768,6 +795,9 @@ ROLE_DEFINITION_TO_ROLE_FIELD = {
     'Organization Audit': 'auditor_role',
     'Organization Execute': 'execute_role',
     'Organization Approval': 'approval_role',
+    'Organization Catalog Admin': 'catalog_admin_role',
+    'Organization Catalog User': 'catalog_user_role',
+    'Organization CatalogItem Admin': 'catalog_admin_role',
     'CatalogItem Admin': 'admin_role',
     'CatalogItem Use': 'use_role',
 }

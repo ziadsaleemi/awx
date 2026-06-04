@@ -1880,8 +1880,8 @@ class TerraformJobAccess(BaseAccess):
 class CatalogItemAccess(BaseAccess):
     """
     I can see CatalogItems I have read_role on.
-    catalog_admin users (org.admin_role) have full CRUD.
-    catalog_user (org.member_role) can read and deploy items they have use_role on.
+    catalog_admin users (org.catalog_admin_role) have full CRUD.
+    catalog_user users (org.catalog_user_role) can read and deploy items they have use_role on.
     """
 
     model = CatalogItem
@@ -1895,37 +1895,54 @@ class CatalogItemAccess(BaseAccess):
             | Q(use_role__members=self.user)
             | Q(read_role__members=self.user)
             | Q(organization__admin_role__members=self.user)
+            | Q(organization__catalog_admin_role__members=self.user)
+            | Q(organization__catalog_user_role__members=self.user)
             | Q(organization__auditor_role__members=self.user)
+            | Q(organization_id__in=Organization.accessible_pk_qs(self.user, 'admin_role'))
+            | Q(organization_id__in=Organization.accessible_pk_qs(self.user, 'catalog_admin_role'))
+            | Q(organization_id__in=Organization.accessible_pk_qs(self.user, 'catalog_user_role'))
+            | Q(organization_id__in=Organization.accessible_pk_qs(self.user, 'auditor_role'))
         ).distinct()
 
     def _has_direct_item_role(self, obj, role_name):
         role = getattr(obj, role_name, None)
-        return bool(role and role.members.filter(pk=self.user.pk).exists())
+        return bool(role and self.user in role)
 
     def _has_org_role(self, obj, role_name):
         if obj.organization_id is None:
             return False
         role = getattr(obj.organization, role_name, None)
-        return bool(role and role.members.filter(pk=self.user.pk).exists())
+        return bool(role and self.user in role)
 
     def _can_admin_item(self, obj):
-        return self.user.is_superuser or self._has_direct_item_role(obj, 'admin_role') or self._has_org_role(obj, 'admin_role')
+        return (
+            self.user.is_superuser
+            or self._has_direct_item_role(obj, 'admin_role')
+            or self._has_org_role(obj, 'admin_role')
+            or self._has_org_role(obj, 'catalog_admin_role')
+        )
 
     def _can_use_item(self, obj):
-        return self.user.is_superuser or self._has_direct_item_role(obj, 'use_role') or self._has_org_role(obj, 'admin_role')
+        return (
+            self.user.is_superuser
+            or self._has_direct_item_role(obj, 'use_role')
+            or self._has_org_role(obj, 'admin_role')
+            or self._has_org_role(obj, 'catalog_admin_role')
+            or self._has_org_role(obj, 'catalog_user_role')
+        )
 
     @check_superuser
     def can_add(self, data):
         if data is None:
-            return Organization.accessible_objects(self.user, 'admin_role').exists()
-        return self.check_related('organization', Organization, data, role_field='admin_role')
+            return Organization.accessible_objects(self.user, 'catalog_admin_role').exists()
+        return self.check_related('organization', Organization, data, role_field='catalog_admin_role')
 
     def can_change(self, obj, data):
         if not self._can_admin_item(obj):
             return False
         if data is None:
             return True
-        return self.check_related('organization', Organization, data, obj=obj, role_field='admin_role', mandatory=False)
+        return self.check_related('organization', Organization, data, obj=obj, role_field='catalog_admin_role', mandatory=False)
 
     def can_delete(self, obj):
         return self._can_admin_item(obj)
@@ -2043,7 +2060,9 @@ class CatalogDeploymentAccess(BaseAccess):
     def filtered_queryset(self):
         if self.user.is_superuser:
             return CatalogDeployment.objects.all()
-        admin_items = CatalogItem.objects.filter(Q(admin_role__members=self.user) | Q(organization__admin_role__members=self.user)).values_list('pk', flat=True)
+        admin_items = CatalogItem.objects.filter(
+            Q(admin_role__members=self.user) | Q(organization__admin_role__members=self.user) | Q(organization__catalog_admin_role__members=self.user)
+        ).values_list('pk', flat=True)
         visible_items = CatalogItemAccess(self.user).filtered_queryset().values_list('pk', flat=True)
         return CatalogDeployment.objects.filter(Q(catalog_item__in=admin_items) | Q(owner=self.user, catalog_item__in=visible_items)).distinct()
 

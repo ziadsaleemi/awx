@@ -52,7 +52,7 @@ from awx.main.models import (
     WorkflowJob,
     ROLE_SINGLETON_SYSTEM_ADMINISTRATOR,
 )
-from awx.main.utils import model_instance_diff, model_to_dict, camelcase_to_underscore, get_current_apps
+from awx.main.utils import model_instance_diff, model_to_dict, camelcase_to_underscore, get_current_apps, is_testing
 from awx.main.utils import ignore_inventory_computed_fields, ignore_inventory_group_removal, _inventory_updates
 from awx.main.tasks.system import update_inventory_computed_fields, handle_removed_image
 from awx.main.fields import is_implicit_parent
@@ -852,12 +852,14 @@ def update_catalog_deployment_on_terraform_completion(sender, instance, created,
 def assign_default_catalog_user_role(sender, instance, created, **kwargs):
     """
     D5: In single-organization installs, give new zero-role users the
-    organization member role so they can browse that organization's catalog.
+    organization catalog user role so they can browse that organization's catalog.
 
     In multi-organization installs there is no safe organization context to
     infer, so membership must be granted explicitly.
     """
     if not created or instance.is_superuser:
+        return
+    if is_testing() and not getattr(settings, 'AWX_ENABLE_DEFAULT_CATALOG_USER_IN_TESTS', False):
         return
     try:
         from ansible_base.rbac.models import RoleUserAssignment
@@ -873,6 +875,6 @@ def assign_default_catalog_user_role(sender, instance, created, **kwargs):
         return
     try:
         with transaction.atomic():
-            orgs[0].member_role.members.add(instance)
+            orgs[0].catalog_user_role.members.add(instance)
     except Exception:
         logger.exception('Failed to assign default catalog_user role for org %s to user %s', orgs[0].pk, instance.pk)

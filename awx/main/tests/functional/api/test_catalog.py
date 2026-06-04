@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 
 from ansible_base.rbac.models import RoleDefinition, RoleUserAssignment
+from django.test import override_settings
 from django.utils.timezone import now
 
 from awx.api.versioning import reverse
@@ -164,6 +165,131 @@ def test_catalog_item_direct_use_role_grants_endpoint_access_and_syncs_rbac(get,
 
 
 @pytest.mark.django_db
+def test_catalog_user_persona_grants_browse_and_deploy_only(get, post, workflow_job_template, organization, rando, setup_managed_roles):
+    other_org = Organization.objects.create(name='other-catalog-user-org')
+    own_item = CatalogItem.objects.create(name='Catalog User VM', organization=organization, provision_workflow=workflow_job_template)
+    CatalogItem.objects.create(name='Other Catalog User VM', organization=other_org, provision_workflow=workflow_job_template)
+
+    role_definition = RoleDefinition.objects.get(name='Organization Catalog User')
+    role_definition.give_permission(rando, organization)
+
+    response = get(reverse('api:catalog_item_list'), rando, expect=200)
+    item_ids = {item['id'] for item in response.data['results']}
+    assert own_item.pk in item_ids
+    assert not CatalogItem.objects.filter(pk__in=item_ids, organization=other_org).exists()
+
+    get(reverse('api:catalog_item_deploy_survey', kwargs={'pk': own_item.pk}), rando, expect=200)
+    post(
+        reverse('api:catalog_item_deploy', kwargs={'pk': own_item.pk}),
+        {'name': 'catalog-user-deploy', 'extra_vars': {}},
+        rando,
+        expect=201,
+    )
+    post(reverse('api:catalog_item_list'), {'name': 'Blocked Catalog Item', 'organization': organization.pk}, rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_catalog_user_team_persona_grants_browse(get, workflow_job_template, organization, team, rando, setup_managed_roles):
+    item = CatalogItem.objects.create(name='Team Catalog User VM', organization=organization, provision_workflow=workflow_job_template)
+    team.member_role.members.add(rando)
+    RoleDefinition.objects.get(name='Organization Catalog User').give_permission(team, organization)
+
+    response = get(reverse('api:catalog_item_list'), rando, expect=200)
+
+    assert item.pk in {catalog_item['id'] for catalog_item in response.data['results']}
+
+
+@pytest.mark.django_db
+def test_catalog_user_persona_cannot_import_marketplace(post, organization, rando, setup_managed_roles):
+    RoleDefinition.objects.get(name='Organization Catalog User').give_permission(rando, organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+        },
+        rando,
+        expect=403,
+    )
+
+    assert 'organization' in response.data
+    assert not CatalogItem.objects.filter(organization=organization, name='Ubuntu 22.04 LTS (x64)').exists()
+
+
+@pytest.mark.django_db
+def test_catalog_user_persona_can_read_marketplace_templates(get, organization, rando, setup_managed_roles):
+    RoleDefinition.objects.get(name='Organization Catalog User').give_permission(rando, organization)
+
+    response = get(f"{reverse('api:marketplace_template_list')}?organization={organization.pk}", rando, expect=200)
+
+    assert response.data['count'] > 0
+    assert {provider['id'] for provider in response.data['providers']}
+
+
+@pytest.mark.django_db
+def test_catalog_admin_persona_grants_org_catalog_management(get, post, patch, admin_user, organization, rando, setup_managed_roles):
+    other_org = Organization.objects.create(name='other-catalog-admin-org')
+    own_item = CatalogItem.objects.create(name='Catalog Admin VM', organization=organization)
+    other_item = CatalogItem.objects.create(name='Other Catalog Admin VM', organization=other_org)
+    own_deployment = CatalogDeployment.objects.create(name='admin-visible', catalog_item=own_item, owner=admin_user, status='active')
+    CatalogDeployment.objects.create(name='admin-hidden', catalog_item=other_item, owner=admin_user, status='active')
+
+    role_definition = RoleDefinition.objects.get(name='Organization Catalog Admin')
+    role_definition.give_permission(rando, organization)
+
+    response = get(reverse('api:catalog_item_list'), rando, expect=200)
+    item_ids = {item['id'] for item in response.data['results']}
+    assert own_item.pk in item_ids
+    assert other_item.pk not in item_ids
+
+    create_response = post(
+        reverse('api:catalog_item_list'),
+        {'name': 'Catalog Admin Created VM', 'organization': organization.pk},
+        rando,
+        expect=201,
+    )
+    created_item = CatalogItem.objects.get(pk=create_response.data['id'])
+    assert created_item.organization_id == organization.pk
+
+    patch(
+        reverse('api:catalog_item_detail', kwargs={'pk': created_item.pk}),
+        {'description': 'managed by catalog admin'},
+        rando,
+        expect=200,
+    )
+    created_item.refresh_from_db()
+    assert created_item.description == 'managed by catalog admin'
+
+    deployment_response = get(reverse('api:catalog_deployment_list'), rando, expect=200)
+    deployment_ids = {deployment['id'] for deployment in deployment_response.data['results']}
+    assert own_deployment.pk in deployment_ids
+    assert not CatalogDeployment.objects.filter(pk__in=deployment_ids, catalog_item__organization=other_org).exists()
+
+
+@pytest.mark.django_db
+def test_catalog_admin_persona_can_import_marketplace(post, organization, rando, setup_managed_roles):
+    RoleDefinition.objects.get(name='Organization Catalog Admin').give_permission(rando, organization)
+
+    response = post(
+        reverse('api:marketplace_template_ingest'),
+        {
+            'provider': 'digitalocean',
+            'template_id': 'do-ubuntu-22-04-x64',
+            'organization': organization.pk,
+            'name': 'Catalog Admin Imported VM',
+        },
+        rando,
+        expect=201,
+    )
+
+    item = CatalogItem.objects.get(pk=response.data['id'])
+    assert item.name == 'Catalog Admin Imported VM'
+    assert item.organization_id == organization.pk
+
+
+@pytest.mark.django_db
 def test_catalog_item_list_is_scoped_to_org_admin(get, org_admin, organization):
     other_org = Organization.objects.create(name='other-org')
     own_item = CatalogItem.objects.create(name='Own Org VM', organization=organization)
@@ -184,6 +310,17 @@ def test_default_catalog_user_signal_does_not_cross_org_boundaries(organization)
 
     assert user not in organization.member_role
     assert user not in other_org.member_role
+    assert user not in organization.catalog_user_role
+    assert user not in other_org.catalog_user_role
+
+
+@pytest.mark.django_db
+@override_settings(AWX_ENABLE_DEFAULT_CATALOG_USER_IN_TESTS=True)
+def test_default_catalog_user_signal_assigns_catalog_only(organization):
+    user = User.objects.create(username='new-single-org-user')
+
+    assert user in organization.catalog_user_role
+    assert user not in organization.member_role
 
 
 @pytest.mark.django_db

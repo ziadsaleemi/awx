@@ -56,6 +56,21 @@ class TestNewToOld:
         delete(url, user=admin, expect=204)
         assert bob not in team.member_role.members.all()
 
+    @pytest.mark.parametrize(
+        ('role_definition_name', 'role_field'),
+        [
+            ('Organization Catalog User', 'catalog_user_role'),
+            ('Organization Catalog Admin', 'catalog_admin_role'),
+        ],
+    )
+    def test_new_to_old_catalog_persona_addition(self, admin, post, organization, bob, setup_managed_roles, role_definition_name, role_field):
+        rd = RoleDefinition.objects.get(name=role_definition_name)
+
+        url = get_relative_url('roleuserassignment-list')
+        post(url, user=admin, data={'role_definition': rd.id, 'user': bob.id, 'object_id': organization.id}, expect=201)
+
+        assert bob in getattr(organization, role_field).members.all()
+
     def test_new_to_old_rbac_team_addition(self, admin, post, team, inventory, setup_managed_roles):
         '''
         Assign team to Inventory Admin role definition, should be added to inventory.admin_role.parents

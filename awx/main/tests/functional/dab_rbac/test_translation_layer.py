@@ -27,6 +27,8 @@ from ansible_base.rbac import permission_registry
         'execute_role',
         'approval_role',
         'notification_admin_role',
+        'catalog_admin_role',
+        'catalog_user_role',
     ],
 )
 def test_round_trip_roles(organization, rando, role_name, setup_managed_roles):
@@ -192,7 +194,7 @@ def test_user_auditor_rel(organization, rando, setup_managed_roles):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('resource_name', ['Organization', 'Team'])
-@pytest.mark.parametrize('role_name', ['Member', 'Admin'])
+@pytest.mark.parametrize('role_name', ['Member', 'Admin', 'Catalog User', 'Catalog Admin'])
 def test_mapping_from_role_definitions_to_roles(organization, team, rando, role_name, resource_name, setup_managed_roles):
     """
     ensure mappings for platform roles are correct
@@ -202,8 +204,10 @@ def test_mapping_from_role_definitions_to_roles(organization, team, rando, role_
     Team Member > team.member_role
     Team Admin > team.admin_role
     """
+    if resource_name == 'Team' and role_name.startswith('Catalog'):
+        pytest.skip('Catalog persona roles are organization scoped')
     resource = organization if resource_name == 'Organization' else team
-    old_role_name = f"{role_name.lower()}_role"
+    old_role_name = f"{role_name.lower().replace(' ', '_')}_role"
     if resource_name == 'Organization':
         resource.member_role.members.remove(rando)
     getattr(resource, old_role_name).members.add(rando)

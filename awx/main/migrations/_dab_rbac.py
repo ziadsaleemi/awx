@@ -396,9 +396,7 @@ def setup_managed_role_definitions(apps, schema_editor):
                     except LookupError:
                         catalog_ct = None
                     if catalog_ct is not None:
-                        for other_perm in Permission.objects.filter(
-                            content_type=catalog_ct, codename__in=('use_catalogitem', 'view_catalogitem')
-                        ):
+                        for other_perm in Permission.objects.filter(content_type=catalog_ct, codename__in=('use_catalogitem', 'view_catalogitem')):
                             if other_perm not in perm_list:
                                 perm_list.append(other_perm)
                 managed_role_definitions.append(
@@ -461,6 +459,34 @@ def setup_managed_role_definitions(apps, schema_editor):
             'Has permission to approve any workflow steps within a single organization',
             org_ct,
             [perm for perm in org_perms if perm.codename in org_approval_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_catalog_user_permissions = {'view_catalogitem', 'use_catalogitem'}
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Catalog User',
+            'Has permission to browse and deploy catalog items within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_catalog_user_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_catalog_admin_permissions = {
+        'add_catalogitem',
+        'change_catalogitem',
+        'delete_catalogitem',
+        'view_catalogitem',
+        'use_catalogitem',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Catalog Admin',
+            'Has permission to manage catalog items within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_catalog_admin_permissions],
             RoleDefinition,
         )
     )
