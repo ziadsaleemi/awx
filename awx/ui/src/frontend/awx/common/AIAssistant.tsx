@@ -63,6 +63,9 @@ interface AIResourceOperation {
   preview?: Record<string, unknown>;
   object_id?: number;
   object?: Record<string, unknown>;
+  project_id?: number;
+  path?: string;
+  content_bytes?: number;
 }
 
 interface AIResourceDetailLink {
@@ -298,9 +301,77 @@ function getAIResourceLaunchLink(operation: AIResourceOperation): AIResourceDeta
   return null;
 }
 
+function getAIProjectFileLink(operation: AIResourceOperation): AIResourceDetailLink | null {
+  if (operation.resource_type !== 'project_file') return null;
+
+  const object = operation.object ?? {};
+  const projectId =
+    operation.project_id ??
+    valueAsNumber(object.project) ??
+    valueAsNumber(operation.validated_data?.project) ??
+    valueAsNumber(operation.data?.project) ??
+    operation.object_id;
+  if (!projectId) return null;
+
+  const path =
+    valueAsString(operation.path) ??
+    valueAsString(object.path) ??
+    valueAsString(operation.validated_data?.path) ??
+    valueAsString(operation.data?.path);
+  const label = path
+    ? operation.operation === 'delete'
+      ? `View project for deleted file: ${path}`
+      : `View project file: ${path}`
+    : 'View project file';
+
+  return { route: AwxRoute.ProjectDetails, params: { id: projectId }, label };
+}
+
+function getAIProjectFileSummary(operation: AIResourceOperation): AIResourcePreviewSummary[] {
+  if (operation.resource_type !== 'project_file') return [];
+
+  const object = operation.object ?? {};
+  const path =
+    valueAsString(operation.path) ??
+    valueAsString(object.path) ??
+    valueAsString(operation.validated_data?.path) ??
+    valueAsString(operation.data?.path);
+  const contentBytes =
+    operation.content_bytes ??
+    valueAsNumber(object.content_bytes) ??
+    valueAsNumber(operation.validated_data?.content_bytes) ??
+    valueAsNumber(operation.data?.content_bytes);
+
+  return [
+    ...(path ? [{ label: 'Project file', value: path }] : []),
+    ...(typeof contentBytes === 'number'
+      ? [{ label: 'Content bytes', value: String(contentBytes) }]
+      : []),
+  ];
+}
+
 function getAIResourcePreviewSummary(operation: AIResourceOperation): AIResourcePreviewSummary[] {
   const preview = operation.preview;
   if (!preview) return [];
+
+  if (preview.type === 'project_file') {
+    const path = valueAsString(preview.path);
+    const contentBytes = valueAsNumber(preview.content_bytes);
+    const change = preview.will_delete
+      ? 'delete'
+      : preview.will_overwrite
+        ? 'overwrite'
+        : preview.will_create
+          ? 'create'
+          : undefined;
+    return [
+      ...(path ? [{ label: 'Project file', value: path }] : []),
+      ...(typeof contentBytes === 'number'
+        ? [{ label: 'Content bytes', value: String(contentBytes) }]
+        : []),
+      ...(change ? [{ label: 'Change', value: change }] : []),
+    ];
+  }
 
   if (preview.type === 'smart_inventory') {
     return [
@@ -753,6 +824,41 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                               </Text>
                             );
                           })()}
+                          {(() => {
+                            const projectFileLink = getAIProjectFileLink(operation);
+                            if (!projectFileLink) return null;
+                            return (
+                              <Text
+                                component={TextVariants.small}
+                                style={{ display: 'block', marginBottom: 6 }}
+                              >
+                                <Link
+                                  to={getPageUrl(projectFileLink.route, {
+                                    params: projectFileLink.params,
+                                  })}
+                                  data-cy={`ai-resource-project-file-link-${operation.id}`}
+                                >
+                                  {projectFileLink.label}
+                                </Link>
+                              </Text>
+                            );
+                          })()}
+                          {getAIProjectFileSummary(operation).length ? (
+                            <div
+                              data-cy={`ai-resource-project-file-summary-${operation.id}`}
+                              style={{ margin: '0 0 8px' }}
+                            >
+                              {getAIProjectFileSummary(operation).map((summary) => (
+                                <Text
+                                  key={summary.label}
+                                  component={TextVariants.small}
+                                  style={{ display: 'block' }}
+                                >
+                                  {t(summary.label)}: {summary.value}
+                                </Text>
+                              ))}
+                            </div>
+                          ) : null}
                           <pre
                             style={{
                               margin: 0,

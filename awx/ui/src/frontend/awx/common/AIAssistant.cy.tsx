@@ -208,6 +208,38 @@ describe('AIAssistantPanel', () => {
               object: { id: 51, name: 'AI Content Project' },
             },
             {
+              id: 'write-playbook',
+              operation: 'create',
+              resource_type: 'project_file',
+              valid: true,
+              errors: {},
+              object_id: 51,
+              project_id: 51,
+              path: 'playbooks/site.yml',
+              content_bytes: 86,
+              object: {
+                project: 51,
+                project_name: 'AI Content Project',
+                path: 'playbooks/site.yml',
+                content_bytes: 86,
+              },
+              validated_data: {
+                project: 51,
+                path: 'playbooks/site.yml',
+                content_bytes: 86,
+                overwrite: false,
+              },
+              preview: {
+                type: 'project_file',
+                project: 51,
+                path: 'playbooks/site.yml',
+                content_bytes: 86,
+                will_create: true,
+                will_overwrite: false,
+                will_delete: false,
+              },
+            },
+            {
               id: 'create-job-template',
               operation: 'create',
               resource_type: 'job_template',
@@ -313,6 +345,16 @@ describe('AIAssistantPanel', () => {
     cy.getByDataCy('ai-resource-object-link-create-project')
       .should('contain.text', 'View AI Content Project')
       .and('have.attr', 'href', '/projects/51/details');
+    cy.getByDataCy('ai-resource-project-file-link-write-playbook')
+      .should('contain.text', 'View project file: playbooks/site.yml')
+      .and('have.attr', 'href', '/projects/51/details');
+    cy.getByDataCy('ai-resource-project-file-summary-write-playbook')
+      .should('contain.text', 'Project file: playbooks/site.yml')
+      .and('contain.text', 'Content bytes: 86');
+    cy.getByDataCy('ai-resource-preview-summary-write-playbook')
+      .should('contain.text', 'Project file: playbooks/site.yml')
+      .and('contain.text', 'Content bytes: 86')
+      .and('contain.text', 'Change: create');
     cy.getByDataCy('ai-resource-object-link-create-job-template')
       .should('contain.text', 'View AI Generated Template')
       .and('have.attr', 'href', '/templates/job-template/61/details');
