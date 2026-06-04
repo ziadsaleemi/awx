@@ -56,7 +56,10 @@ describe('JobOutput.cy.tsx', () => {
     });
 
     cy.mount(<JobOutput job={job as unknown as Job} reloadJob={() => null} />);
-    cy.getByDataCy('job-output-ai-assistant').click();
+    cy.getByDataCy('job-output-ai-assistant')
+      .should('have.attr', 'aria-label', 'Ask assistant about this output')
+      .and('not.contain.text', 'AI')
+      .click();
 
     cy.wrap(contextEvents).should('have.length', 1);
     cy.wrap(contextEvents).then(([event]) => {

@@ -2,7 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { PageNavigationItem } from '../../../framework';
 import { usePageNavigationRoutesContext } from '../../../framework/PageNavigation/PageNavigationRoutesProvider';
 import { AwxRoute } from '../main/AwxRoutes';
-import { AIAssistantPanel } from './AIAssistant';
+import { AIAssistantButton, AIAssistantPanel } from './AIAssistant';
 
 function SeedNavigation(props: { children: ReactNode }) {
   const [, setNavigation] = usePageNavigationRoutesContext();
@@ -57,6 +57,14 @@ function mountAssistant() {
 }
 
 describe('AIAssistantPanel', () => {
+  it('uses an icon-only masthead assistant button', () => {
+    cy.mount(<AIAssistantButton isActive={false} onClick={() => undefined} />);
+
+    cy.getByDataCy('masthead-ai-assistant')
+      .should('have.attr', 'aria-label', 'AI Assistant')
+      .and('not.contain.text', 'AI');
+  });
+
   it('uses a wider desktop panel without exceeding the viewport', () => {
     cy.viewport(1440, 900);
     mountAssistant();

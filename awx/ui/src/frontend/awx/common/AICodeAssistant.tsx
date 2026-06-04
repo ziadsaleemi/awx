@@ -28,7 +28,7 @@ import {
   Spinner,
   TextArea,
 } from '@patternfly/react-core';
-import { MagicIcon } from '@patternfly/react-icons';
+import { OutlinedCommentDotsIcon } from '@patternfly/react-icons';
 import { useCallback, useState } from 'react';
 import { FieldPath, FieldValues, useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -126,14 +126,13 @@ Just the ${formatLabel} code itself.`;
     <>
       <Button
         variant="plain"
-        aria-label={t('Generate with AI')}
-        title={t('Generate with AI')}
+        aria-label={t('Generate with assistant')}
+        title={t('Generate with assistant')}
         onClick={() => setIsOpen(true)}
-        style={{ padding: '0 4px', color: 'var(--pf-v5-global--primary-color--100)' }}
+        style={{ padding: '0 4px', color: 'var(--pf-v5-global--Color--200)' }}
         data-cy="ai-code-assistant-trigger"
       >
-        <MagicIcon />
-        <span style={{ marginLeft: 4, fontSize: 12, fontWeight: 500 }}>{t('AI')}</span>
+        <OutlinedCommentDotsIcon />
       </Button>
 
       <Modal

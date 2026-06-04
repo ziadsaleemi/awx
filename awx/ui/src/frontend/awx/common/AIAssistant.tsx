@@ -10,7 +10,7 @@ import {
   TextContent,
   TextVariants,
 } from '@patternfly/react-core';
-import { RobotIcon, TimesIcon } from '@patternfly/react-icons';
+import { OutlinedCommentDotsIcon, TimesIcon } from '@patternfly/react-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
@@ -752,7 +752,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           <TextContent>
             <Text component={TextVariants.h3} style={{ margin: 0 }}>
               <Icon style={{ marginRight: 8 }}>
-                <RobotIcon />
+                <OutlinedCommentDotsIcon />
               </Icon>
               {t('AI Assistant')}
             </Text>
@@ -1175,7 +1175,7 @@ export function AIAssistantButton({ onClick, isActive }: AIAssistantButtonProps)
       style={{ color: isActive ? 'var(--pf-v5-global--primary-color--100)' : undefined }}
       data-cy="masthead-ai-assistant"
     >
-      <RobotIcon />
+      <OutlinedCommentDotsIcon />
     </Button>
   );
 }

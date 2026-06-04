@@ -1,6 +1,10 @@
 import { Dispatch, SetStateAction } from 'react';
-import { Toolbar, ToolbarContent, Button } from '@patternfly/react-core';
-import { CompressArrowsAltIcon, ExpandArrowsAltIcon, RobotIcon } from '@patternfly/react-icons';
+import { Toolbar, ToolbarContent, Button, Tooltip } from '@patternfly/react-core';
+import {
+  CompressArrowsAltIcon,
+  ExpandArrowsAltIcon,
+  OutlinedCommentDotsIcon,
+} from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import {
   IFilterState,
@@ -75,15 +79,18 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
           </Button>
         ) : null}
         {aiEnabled ? (
-          <Button
-            variant="secondary"
-            icon={<RobotIcon />}
-            onClick={openOutputAssistant}
-            data-cy="job-output-ai-assistant"
-            style={{ marginLeft: 'auto' }}
-          >
-            {t('AI')}
-          </Button>
+          <Tooltip content={t('Ask assistant about this output')}>
+            <Button
+              variant="plain"
+              aria-label={t('Ask assistant about this output')}
+              title={t('Ask assistant about this output')}
+              onClick={openOutputAssistant}
+              data-cy="job-output-ai-assistant"
+              style={{ marginLeft: 'auto' }}
+            >
+              <OutlinedCommentDotsIcon />
+            </Button>
+          </Tooltip>
         ) : null}
         {onToggleFullScreen ? (
           <Button

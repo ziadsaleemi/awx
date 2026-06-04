@@ -1,8 +1,9 @@
 import { Button, Tooltip } from '@patternfly/react-core';
-import { RobotIcon } from '@patternfly/react-icons';
+import { OutlinedCommentDotsIcon } from '@patternfly/react-icons';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
+import styled from 'styled-components';
 import { openAIAssistantWithContext } from './AIAssistant';
 
 type ContextualPageKind = 'create' | 'edit' | 'detail';
@@ -44,6 +45,29 @@ function getPageLabel(pathname: string) {
   return segments.map(formatSegment).join(' ');
 }
 
+const ContextualAssistantButton = styled(Button)`
+  position: fixed;
+  bottom: 24px;
+  right: 16px;
+  z-index: 500;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--pf-v5-global--Color--200);
+  background: var(--pf-v5-global--BackgroundColor--200);
+  border: 1px solid var(--pf-v5-global--BorderColor--100);
+  border-radius: 8px;
+  box-shadow: var(--pf-v5-global--BoxShadow--sm);
+
+  &:hover,
+  &:focus {
+    color: var(--pf-v5-global--primary-color--100);
+    background: var(--pf-v5-global--BackgroundColor--300);
+  }
+`;
+
 export function ContextualAIAssistantButton(props: { isEnabled: boolean }) {
   const { isEnabled } = props;
   const { t } = useTranslation();
@@ -81,9 +105,10 @@ export function ContextualAIAssistantButton(props: { isEnabled: boolean }) {
 
   return (
     <Tooltip content={t('Open AI assistant for this page')} position="left">
-      <Button
-        variant="secondary"
+      <ContextualAssistantButton
+        variant="plain"
         aria-label={t('Open AI assistant for this page')}
+        title={t('Open AI assistant for this page')}
         onClick={() =>
           openAIAssistantWithContext({
             prompt,
@@ -96,18 +121,10 @@ export function ContextualAIAssistantButton(props: { isEnabled: boolean }) {
             title: typeof document !== 'undefined' ? document.title : undefined,
           })
         }
-        icon={<RobotIcon />}
         data-cy="contextual-ai-assistant"
-        style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 16,
-          zIndex: 500,
-          boxShadow: 'var(--pf-v5-global--BoxShadow--md)',
-        }}
       >
-        {t('AI')}
-      </Button>
+        <OutlinedCommentDotsIcon />
+      </ContextualAssistantButton>
     </Tooltip>
   );
 }
