@@ -28,6 +28,21 @@ function SeedNavigation(props: { children: ReactNode }) {
         path: 'templates/job-template/:id/details',
         element: <div />,
       } as PageNavigationItem,
+      {
+        id: AwxRoute.TemplateLaunchWizard,
+        path: 'templates/job-template/:id/launch',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.WorkflowJobTemplateDetails,
+        path: 'templates/workflow-job-template/:id/details',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.WorkflowJobTemplateLaunchWizard,
+        path: 'templates/workflow-job-template/:id/launch',
+        element: <div />,
+      } as PageNavigationItem,
     ]);
   }, [setNavigation]);
   return <>{props.children}</>;
@@ -163,6 +178,15 @@ describe('AIAssistantPanel', () => {
               object_id: 61,
               object: { id: 61, name: 'AI Generated Template' },
             },
+            {
+              id: 'create-workflow-template',
+              operation: 'create',
+              resource_type: 'workflow_job_template',
+              valid: true,
+              errors: {},
+              object_id: 71,
+              object: { id: 71, name: 'AI Generated Workflow' },
+            },
           ],
           rollback_plan: {
             name: 'Rollback Create AI inventory',
@@ -240,6 +264,15 @@ describe('AIAssistantPanel', () => {
     cy.getByDataCy('ai-resource-object-link-create-job-template')
       .should('contain.text', 'View AI Generated Template')
       .and('have.attr', 'href', '/templates/job-template/61/details');
+    cy.getByDataCy('ai-resource-launch-link-create-job-template')
+      .should('contain.text', 'Launch job template')
+      .and('have.attr', 'href', '/templates/job-template/61/launch');
+    cy.getByDataCy('ai-resource-object-link-create-workflow-template')
+      .should('contain.text', 'View AI Generated Workflow')
+      .and('have.attr', 'href', '/templates/workflow-job-template/71/details');
+    cy.getByDataCy('ai-resource-launch-link-create-workflow-template')
+      .should('contain.text', 'Launch workflow template')
+      .and('have.attr', 'href', '/templates/workflow-job-template/71/launch');
     cy.getByDataCy('ai-resource-rollback-plan').should('contain.text', 'delete-inventory');
     cy.contains('button', 'Apply rollback').click();
     cy.wait('@applyResourceAction');

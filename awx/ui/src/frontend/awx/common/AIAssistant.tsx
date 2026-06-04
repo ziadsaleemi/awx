@@ -238,6 +238,30 @@ function getAIResourceDetailLink(operation: AIResourceOperation): AIResourceDeta
   return null;
 }
 
+function getAIResourceLaunchLink(operation: AIResourceOperation): AIResourceDetailLink | null {
+  const object = operation.object ?? {};
+  const id = operation.object_id ?? valueAsNumber(object.id);
+  if (!id || operation.operation === 'delete') return null;
+
+  if (operation.resource_type === 'job_template') {
+    return {
+      route: AwxRoute.TemplateLaunchWizard,
+      params: { id },
+      label: 'Launch job template',
+    };
+  }
+
+  if (operation.resource_type === 'workflow_job_template') {
+    return {
+      route: AwxRoute.WorkflowJobTemplateLaunchWizard,
+      params: { id },
+      label: 'Launch workflow template',
+    };
+  }
+
+  return null;
+}
+
 function errorSummary(errors: Record<string, unknown>) {
   return Object.entries(errors)
     .map(([key, value]) => {
@@ -624,6 +648,25 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                                   data-cy={`ai-resource-object-link-${operation.id}`}
                                 >
                                   {detailLink.label}
+                                </Link>
+                              </Text>
+                            );
+                          })()}
+                          {(() => {
+                            const launchLink = getAIResourceLaunchLink(operation);
+                            if (!launchLink) return null;
+                            return (
+                              <Text
+                                component={TextVariants.small}
+                                style={{ display: 'block', marginBottom: 6 }}
+                              >
+                                <Link
+                                  to={getPageUrl(launchLink.route, {
+                                    params: launchLink.params,
+                                  })}
+                                  data-cy={`ai-resource-launch-link-${operation.id}`}
+                                >
+                                  {t(launchLink.label)}
                                 </Link>
                               </Text>
                             );
