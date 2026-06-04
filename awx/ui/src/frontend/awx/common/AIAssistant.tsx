@@ -175,6 +175,25 @@ function buildRouteContext(context?: Record<string, unknown> | null) {
   };
 }
 
+function parseResourcePlanInput(value: string): AIResourceActionResponse['plan'] | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !Array.isArray((parsed as { operations?: unknown }).operations)
+    ) {
+      return null;
+    }
+    return parsed as AIResourceActionResponse['plan'];
+  } catch {
+    return null;
+  }
+}
+
 function formatLabel(value: string) {
   return value.replaceAll('_', ' ');
 }
@@ -512,6 +531,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
   const planResourceChanges = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || busy) return;
+    const pastedPlan = parseResourcePlanInput(trimmed);
 
     setInput('');
     setBusy('plan');
@@ -519,14 +539,19 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     setResourcePlan(null);
 
     try {
+      const routeContext = buildRouteContext(context);
+      const requestBody = pastedPlan
+        ? { mode: 'preview' as const, plan: pastedPlan, context: routeContext }
+        : { mode: 'preview' as const, prompt: trimmed, context: routeContext };
       const resp = await postRequest<
         AIResourceActionResponse,
-        { mode: 'preview'; prompt: string; context: Record<string, unknown> }
-      >(awxAPI`/ai/resource_actions/`, {
-        mode: 'preview',
-        prompt: trimmed,
-        context: buildRouteContext(context),
-      });
+        | { mode: 'preview'; prompt: string; context: Record<string, unknown> }
+        | {
+            mode: 'preview';
+            plan: AIResourceActionResponse['plan'];
+            context: Record<string, unknown>;
+          }
+      >(awxAPI`/ai/resource_actions/`, requestBody);
       setResourcePlan(resp);
     } catch (err: unknown) {
       setError(messageFromError(err, t('Failed to plan resource changes.')));

@@ -84,6 +84,57 @@ describe('AIAssistantPanel', () => {
     });
   });
 
+  it('uses pasted JSON plans directly for preview', () => {
+    const plan = {
+      name: 'Pasted AI plan',
+      operations: [
+        {
+          id: 'create-inventory',
+          operation: 'create',
+          resource_type: 'inventory',
+          data: { name: 'AI Pasted Inventory', organization: 1 },
+        },
+      ],
+    };
+
+    cy.intercept('POST', '/api/v2/ai/resource_actions/', (req) => {
+      expect(req.body.mode).to.equal('preview');
+      expect(req.body.prompt).to.equal(undefined);
+      expect(req.body.plan).to.deep.equal(plan);
+      req.alias = 'previewPastedPlan';
+      req.reply({
+        mode: 'preview',
+        generated: false,
+        plan,
+        operations: [
+          {
+            id: 'create-inventory',
+            operation: 'create',
+            resource_type: 'inventory',
+            valid: true,
+            errors: {},
+            data: { name: 'AI Pasted Inventory', organization: 1 },
+            validated_data: { name: 'AI Pasted Inventory', organization: 1 },
+            preview: { type: 'inventory', name: 'AI Pasted Inventory' },
+          },
+        ],
+        can_apply: true,
+      });
+    });
+
+    mountAssistant();
+
+    cy.get('textarea[aria-label="Message"]').type(JSON.stringify(plan), {
+      parseSpecialCharSequences: false,
+    });
+    cy.getByDataCy('ai-resource-plan-button').click();
+    cy.wait('@previewPastedPlan');
+
+    cy.getByDataCy('ai-resource-plan')
+      .should('contain.text', 'Pasted AI plan')
+      .and('contain.text', 'create inventory');
+  });
+
   it('links applied resource plans to their Activity Stream audit event', () => {
     let calls = 0;
 
