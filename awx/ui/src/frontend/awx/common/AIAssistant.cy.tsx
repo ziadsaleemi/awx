@@ -57,6 +57,35 @@ function mountAssistant() {
 }
 
 describe('AIAssistantPanel', () => {
+  it('uses a wider desktop panel without exceeding the viewport', () => {
+    cy.viewport(1440, 900);
+    mountAssistant();
+
+    cy.window().then((win) => {
+      cy.getByDataCy('ai-assistant-panel').then(($panel) => {
+        const rect = $panel[0].getBoundingClientRect();
+        expect(rect.width).to.be.closeTo(720, 1);
+        expect(rect.right).to.be.closeTo(win.innerWidth, 1);
+        expect(rect.bottom).to.be.closeTo(win.innerHeight, 1);
+      });
+    });
+  });
+
+  it('keeps the assistant panel inside a mobile viewport', () => {
+    cy.viewport(390, 760);
+    mountAssistant();
+
+    cy.window().then((win) => {
+      cy.getByDataCy('ai-assistant-panel').then(($panel) => {
+        const rect = $panel[0].getBoundingClientRect();
+        expect(rect.left).to.be.gte(8);
+        expect(rect.right).to.be.lte(win.innerWidth - 8);
+        expect(rect.top).to.be.closeTo(64, 1);
+        expect(rect.bottom).to.be.lte(win.innerHeight - 8);
+      });
+    });
+  });
+
   it('renders assistant markdown answers as formatted content', () => {
     cy.intercept('POST', '/api/v2/ai/chat/', {
       message: {

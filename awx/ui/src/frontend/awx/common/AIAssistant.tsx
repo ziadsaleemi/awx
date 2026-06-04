@@ -148,6 +148,105 @@ const AssistantMarkdown = styled.div`
   }
 `;
 
+const AssistantPanel = styled.div`
+  position: fixed;
+  inset-block-start: 72px;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  width: min(720px, calc(100vw - 24px));
+  z-index: 600;
+  display: flex;
+  min-width: 0;
+  background-color: var(--pf-v5-global--BackgroundColor--100);
+  border-inline-start: 1px solid var(--pf-v5-global--BorderColor--100);
+  box-shadow: var(--pf-v5-global--BoxShadow--lg);
+
+  @media (max-width: 767px) {
+    inset-block-start: 64px;
+    inset-inline-start: 8px;
+    inset-inline-end: 8px;
+    inset-block-end: 8px;
+    width: auto;
+    border: 1px solid var(--pf-v5-global--BorderColor--100);
+  }
+`;
+
+const AssistantPanelBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 16px;
+
+  @media (max-width: 480px) {
+    padding: 12px;
+  }
+`;
+
+const AssistantMessages = styled.div`
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const AssistantMessageBubble = styled.div<{ $role: ChatMessage['role'] }>`
+  align-self: ${(props) => (props.$role === 'user' ? 'flex-end' : 'flex-start')};
+  max-width: min(85%, 100%);
+  min-width: 0;
+  background: ${(props) =>
+    props.$role === 'user'
+      ? 'var(--pf-v5-global--primary-color--100)'
+      : 'var(--pf-v5-global--BackgroundColor--200)'};
+  color: ${(props) => (props.$role === 'user' ? '#fff' : 'inherit')};
+  border-radius: 8px;
+  padding: 8px 12px;
+  white-space: ${(props) => (props.$role === 'user' ? 'pre-wrap' : 'normal')};
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 14px;
+`;
+
+const AssistantInputArea = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+`;
+
+const AssistantButtonGroup = styled(ActionGroup)`
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  .pf-v5-c-button {
+    max-width: 100%;
+    white-space: normal;
+  }
+`;
+
+const AssistantErrorBubble = styled.div`
+  align-self: flex-start;
+  max-width: min(85%, 100%);
+  min-width: 0;
+  background: var(--pf-v5-global--danger-color--100);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 14px;
+`;
+
 function messageFromError(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   return fallback;
@@ -636,31 +735,13 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
   }
 
   return (
-    <div
+    <AssistantPanel
       role="dialog"
       aria-label={t('AI Assistant')}
       aria-modal="false"
-      style={{
-        position: 'fixed',
-        top: 72,
-        right: 0,
-        bottom: 0,
-        width: 'min(640px, calc(100vw - 24px))',
-        zIndex: 600,
-        backgroundColor: 'var(--pf-v5-global--BackgroundColor--100)',
-        borderLeft: '1px solid var(--pf-v5-global--BorderColor--100)',
-        boxShadow: 'var(--pf-v5-global--BoxShadow--lg)',
-      }}
+      data-cy="ai-assistant-panel"
     >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          padding: '16px',
-          gap: '12px',
-        }}
-      >
+      <AssistantPanelBody>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <TextContent>
@@ -677,15 +758,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
         </div>
 
         {/* Message history */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-          }}
-        >
+        <AssistantMessages data-cy="ai-assistant-messages">
           {messages.length === 0 && !busy && !resourcePlan && (
             <TextContent style={{ color: 'var(--pf-v5-global--Color--200)', marginTop: 16 }}>
               <Text component={TextVariants.small}>
@@ -697,23 +770,10 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           )}
 
           {messages.map((msg, idx) => (
-            <div
+            <AssistantMessageBubble
               key={idx}
               data-cy={`ai-assistant-message-${msg.role}`}
-              style={{
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '85%',
-                background:
-                  msg.role === 'user'
-                    ? 'var(--pf-v5-global--primary-color--100)'
-                    : 'var(--pf-v5-global--BackgroundColor--200)',
-                color: msg.role === 'user' ? '#fff' : 'inherit',
-                borderRadius: 8,
-                padding: '8px 12px',
-                whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
-                wordBreak: 'break-word',
-                fontSize: 14,
-              }}
+              $role={msg.role}
             >
               {msg.role === 'assistant' ? (
                 <AssistantMarkdown className="pf-v5-c-content" data-cy="ai-assistant-markdown">
@@ -722,7 +782,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
               ) : (
                 msg.content
               )}
-            </div>
+            </AssistantMessageBubble>
           ))}
 
           {resourcePlan && (
@@ -998,7 +1058,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 </div>
               ) : null}
 
-              <ActionGroup style={{ marginTop: 12, marginBottom: 0 }}>
+              <AssistantButtonGroup style={{ marginTop: 12, marginBottom: 0 }}>
                 {resourcePlan.mode === 'preview' ? (
                   <Button
                     variant="primary"
@@ -1028,7 +1088,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 >
                   {t('Dismiss')}
                 </Button>
-              </ActionGroup>
+              </AssistantButtonGroup>
             </div>
           )}
 
@@ -1038,27 +1098,13 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             </div>
           )}
 
-          {error && (
-            <div
-              style={{
-                alignSelf: 'flex-start',
-                maxWidth: '85%',
-                background: 'var(--pf-v5-global--danger-color--100)',
-                color: '#fff',
-                borderRadius: 8,
-                padding: '8px 12px',
-                fontSize: 14,
-              }}
-            >
-              {error}
-            </div>
-          )}
+          {error && <AssistantErrorBubble>{error}</AssistantErrorBubble>}
 
           <div ref={bottomRef} />
-        </div>
+        </AssistantMessages>
 
         {/* Input area */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <AssistantInputArea>
           <TextArea
             aria-label={t('Message')}
             placeholder={t('Type a message… (Enter to send, Shift+Enter for new line)')}
@@ -1070,7 +1116,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             isDisabled={busy !== null}
             style={{ fontSize: 14 }}
           />
-          <ActionGroup style={{ margin: 0 }}>
+          <AssistantButtonGroup>
             <Button
               variant="primary"
               isDisabled={!input.trim() || busy !== null}
@@ -1101,10 +1147,10 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 {t('Clear chat')}
               </Button>
             )}
-          </ActionGroup>
-        </div>
-      </div>
-    </div>
+          </AssistantButtonGroup>
+        </AssistantInputArea>
+      </AssistantPanelBody>
+    </AssistantPanel>
   );
 }
 
