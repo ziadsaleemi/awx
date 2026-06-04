@@ -4533,10 +4533,26 @@ def _save_ai_project_file_operation(request, validation: dict) -> dict:
     return validation
 
 
+def _clear_ai_activity_stream_relation_for_delete(validation: dict, object_id: int) -> None:
+    resource_config = validation.get('_resource_config') or {}
+    relation = resource_config.get('audit_relation')
+    model = resource_config.get('model')
+    if not relation or not model or not object_id or not hasattr(models.ActivityStream, relation):
+        return
+
+    through_model = getattr(models.ActivityStream, relation).through
+    for field in through_model._meta.fields:
+        remote_model = getattr(getattr(field, 'remote_field', None), 'model', None)
+        if remote_model == model:
+            through_model.objects.filter(**{f'{field.name}_id': object_id}).delete()
+            return
+
+
 def _save_ai_operation(request, validation: dict) -> dict:
     if validation.get('_delete'):
         obj = validation['_instance']
         object_id = obj.pk
+        _clear_ai_activity_stream_relation_for_delete(validation, object_id)
         obj.delete()
         validation['object_id'] = object_id
         validation.pop('_delete', None)
@@ -4721,7 +4737,7 @@ def _audit_ai_resource_action(
             if not operation.get('valid'):
                 continue
             project_id = operation.get('project_id') or operation.get('object_id')
-            if project_id:
+            if project_id and models.Project.objects.filter(pk=project_id).exists():
                 entry.project.add(project_id)
             continue
         if operation.get('operation') == 'delete':

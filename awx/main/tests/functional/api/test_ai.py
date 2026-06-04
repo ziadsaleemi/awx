@@ -1708,6 +1708,178 @@ def test_ai_resource_action_apply_creates_project_workspace_file_and_template_wi
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_apply_full_authoring_bundle_and_rolls_back(post, admin_user, organization, tmp_path):
+    playbook_content = '\n'.join(
+        [
+            '---',
+            '- name: AI generated site',
+            '  hosts: all',
+            '  gather_facts: false',
+            '  roles:',
+            '    - web',
+            '',
+        ]
+    )
+    role_tasks = '\n'.join(['---', '- name: Render managed marker', '  debug:', '    msg: "{{ web_message }}"', ''])
+    role_defaults = '---\nweb_message: created by AI\n'
+    plan = {
+        'name': 'AI full authoring bundle',
+        'operations': [
+            {
+                'id': 'create-inventory',
+                'operation': 'create',
+                'resource_type': 'inventory',
+                'data': {'name': 'AI Bundle Inventory', 'organization': organization.pk},
+            },
+            {
+                'id': 'create-group',
+                'operation': 'create',
+                'resource_type': 'group',
+                'data': {'name': 'web', 'inventory_ref': 'create-inventory'},
+            },
+            {
+                'id': 'create-host',
+                'operation': 'create',
+                'resource_type': 'host',
+                'data': {
+                    'name': 'web-ap67',
+                    'inventory_ref': 'create-inventory',
+                    'group_ref': 'create-group',
+                    'variables': '{"ansible_host": "10.0.67.10"}',
+                },
+            },
+            {
+                'id': 'create-smart-inventory',
+                'operation': 'create',
+                'resource_type': 'smart_inventory',
+                'data': {
+                    'name': 'AI Bundle Smart Inventory',
+                    'organization': organization.pk,
+                    'host_filter': 'name__icontains=web-ap67',
+                },
+            },
+            {
+                'id': 'create-project',
+                'operation': 'create',
+                'resource_type': 'project',
+                'data': {
+                    'name': 'AI Bundle Project',
+                    'organization': organization.pk,
+                    'scm_type': '',
+                    'create_local_path': True,
+                    'local_path': 'ai-ap67-bundle',
+                },
+            },
+            {
+                'id': 'write-playbook',
+                'operation': 'create',
+                'resource_type': 'project_file',
+                'data': {'project_ref': 'create-project', 'path': 'playbooks/site.yml', 'content': playbook_content},
+            },
+            {
+                'id': 'write-role-tasks',
+                'operation': 'create',
+                'resource_type': 'project_file',
+                'data': {'project_ref': 'create-project', 'path': 'roles/web/tasks/main.yml', 'content': role_tasks},
+            },
+            {
+                'id': 'write-role-defaults',
+                'operation': 'create',
+                'resource_type': 'project_file',
+                'data': {'project_ref': 'create-project', 'path': 'roles/web/defaults/main.yml', 'content': role_defaults},
+            },
+            {
+                'id': 'create-job-template',
+                'operation': 'create',
+                'resource_type': 'job_template',
+                'data': {
+                    'name': 'AI Bundle Job Template',
+                    'project_ref': 'create-project',
+                    'playbook': 'playbooks/site.yml',
+                    'inventory_ref': 'create-inventory',
+                },
+            },
+        ],
+    }
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = post(reverse('api:ai_resource_actions'), data={'mode': 'apply', 'plan': plan}, user=admin_user, expect=201)
+
+        inventory = Inventory.objects.get(name='AI Bundle Inventory')
+        smart_inventory = Inventory.objects.get(name='AI Bundle Smart Inventory')
+        group = Group.objects.get(name='web', inventory=inventory)
+        host = Host.objects.get(name='web-ap67', inventory=inventory)
+        project = Project.objects.get(name='AI Bundle Project')
+        job_template = JobTemplate.objects.get(name='AI Bundle Job Template')
+        workspace = tmp_path / 'ai-ap67-bundle'
+
+        assert response.data['can_apply'] is True
+        assert [operation['valid'] for operation in response.data['operations']] == [True] * len(plan['operations'])
+        assert host.groups.filter(pk=group.pk).exists()
+        assert host.variables_dict['ansible_host'] == '10.0.67.10'
+        assert smart_inventory.kind == 'smart'
+        assert response.data['operations'][3]['preview']['matched_hosts_count'] == 1
+        assert response.data['operations'][3]['preview']['matched_hosts'][0]['name'] == 'web-ap67'
+        assert project.local_path == 'ai-ap67-bundle'
+        assert (workspace / 'playbooks' / 'site.yml').read_text() == playbook_content
+        assert (workspace / 'roles' / 'web' / 'tasks' / 'main.yml').read_text() == role_tasks
+        assert (workspace / 'roles' / 'web' / 'defaults' / 'main.yml').read_text() == role_defaults
+        assert job_template.project == project
+        assert job_template.inventory == inventory
+        assert job_template.playbook == 'playbooks/site.yml'
+        assert response.data['operations'][8]['object_id'] == job_template.pk
+
+        audit_entry = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+        changes = _activity_changes(audit_entry)
+        assert changes['rollback_available'] is True
+        assert inventory in audit_entry.inventory.all()
+        assert smart_inventory in audit_entry.inventory.all()
+        assert group in audit_entry.group.all()
+        assert host in audit_entry.host.all()
+        assert project in audit_entry.project.all()
+        assert job_template in audit_entry.job_template.all()
+
+        rollback_plan = response.data['rollback_plan']
+        rollback_resources = [operation['resource_type'] for operation in rollback_plan['operations']]
+        assert rollback_resources == [
+            'job_template',
+            'project_file',
+            'project_file',
+            'project_file',
+            'project',
+            'smart_inventory',
+            'host',
+            'group',
+            'inventory',
+        ]
+
+        rollback_response = post(
+            reverse('api:ai_resource_actions'),
+            data={
+                'mode': 'apply',
+                'plan': rollback_plan,
+                'context': {
+                    'source': 'ai_assistant_rollback',
+                    'rollback_for_activity_stream_id': response.data['audit']['activity_stream_id'],
+                },
+            },
+            user=admin_user,
+            expect=201,
+        )
+
+        assert rollback_response.data['can_apply'] is True
+        assert not JobTemplate.objects.filter(pk=job_template.pk).exists()
+        assert not Project.objects.filter(pk=project.pk).exists()
+        assert not Inventory.objects.filter(pk=smart_inventory.pk).exists()
+        assert not Host.objects.filter(pk=host.pk).exists()
+        assert not Group.objects.filter(pk=group.pk).exists()
+        assert not Inventory.objects.filter(pk=inventory.pk).exists()
+        assert not (workspace / 'playbooks' / 'site.yml').exists()
+        assert not (workspace / 'roles' / 'web' / 'tasks' / 'main.yml').exists()
+        assert not (workspace / 'roles' / 'web' / 'defaults' / 'main.yml').exists()
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_apply_rolls_back_new_project_workspace_refs_on_later_failure(post, admin_user, organization, tmp_path):
     with override_settings(PROJECTS_ROOT=str(tmp_path)):
         response = post(
