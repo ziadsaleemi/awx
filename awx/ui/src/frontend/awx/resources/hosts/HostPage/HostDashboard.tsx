@@ -25,22 +25,28 @@ import {
   TextContent,
   TextVariants,
 } from '@patternfly/react-core';
-import { ServerIcon, SyncAltIcon } from '@patternfly/react-icons';
-import { useCallback, useMemo, useState } from 'react';
+import { CheckIcon, ServerIcon, SyncAltIcon } from '@patternfly/react-icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { usePageNavigate } from '../../../../../framework';
 import { PageDashboard } from '../../../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../../../framework/PageDashboard/PageDashboardCard';
-import { postRequest } from '../../../../common/crud/Data';
+import { postRequest, requestGet } from '../../../../common/crud/Data';
 import { useGet } from '../../../../common/crud/useGet';
 import { awxAPI } from '../../../common/api/awx-utils';
-import { AwxRoute } from '../../../main/AwxRoutes';
 import { Credential } from '../../../interfaces/Credential';
 import { useGetHost } from '../hooks/useGetHost';
 import { Sparkline } from '../../templates/components/Sparkline';
 
 type HostFacts = Record<string, unknown>;
+type FactPullState = 'idle' | 'loading' | 'success';
+
+const FACT_PULL_POLL_INTERVAL_MS = 1000;
+const FACT_PULL_MAX_ATTEMPTS = 90;
+const FACT_PULL_MIN_LOADING_MS = 750;
+const FACT_PULL_SUCCESS_MS = 1400;
+const FINISHED_JOB_STATUSES = new Set(['successful', 'failed', 'error', 'canceled']);
 
 type CredentialsResponse = {
   count: number;
@@ -56,6 +62,14 @@ type FactPullPayload = {
   become_enabled: boolean;
   diff_mode: boolean;
   extra_vars: string;
+};
+
+type AdHocCommandStatus = {
+  id: number;
+  status: string;
+  host_status_counts?: Record<string, number> | null;
+  job_explanation?: string;
+  result_traceback?: string;
 };
 
 type MountFact = {
@@ -124,6 +138,10 @@ function formatDuration(seconds?: number) {
 function usedPercent(total?: number, available?: number) {
   if (!total || available === undefined || total <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round(((total - available) / total) * 100)));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getMounts(facts: HostFacts) {
@@ -235,12 +253,16 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
   const { t } = useTranslation();
   const params = useParams<{ id: string; host_id: string }>();
   const hostId = props.page === 'host' ? params.id ?? '' : params.host_id ?? '';
-  const pageNavigate = usePageNavigate();
+  const factPullResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [factPullError, setFactPullError] = useState<string>();
-  const [factPullLoading, setFactPullLoading] = useState(false);
+  const [factPullState, setFactPullState] = useState<FactPullState>('idle');
   const { host } = useGetHost(hostId);
-  const { data: facts, isLoading } = useGet<HostFacts>(awxAPI`/hosts/${hostId}/ansible_facts/`);
-  const { data: credentials } = useGet<CredentialsResponse>(
+  const {
+    data: facts,
+    isLoading,
+    refresh: refreshFacts,
+  } = useGet<HostFacts>(awxAPI`/hosts/${hostId}/ansible_facts/`);
+  const { data: credentials, isLoading: credentialsLoading } = useGet<CredentialsResponse>(
     awxAPI`/credentials/?credential_type__namespace=ssh&order_by=name&page_size=1`
   );
   const credentialId = credentials?.results?.[0]?.id;
@@ -250,13 +272,50 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
     ...job,
     canceled_on: null,
   }));
+  useEffect(
+    () => () => {
+      if (factPullResetTimer.current) clearTimeout(factPullResetTimer.current);
+    },
+    []
+  );
+  const waitForFactPull = useCallback(
+    async (jobId: number) => {
+      for (let attempt = 0; attempt < FACT_PULL_MAX_ATTEMPTS; attempt++) {
+        const job = await requestGet<AdHocCommandStatus>(
+          awxAPI`/ad_hoc_commands/${String(jobId)}/`
+        );
+        if (FINISHED_JOB_STATUSES.has(job.status)) {
+          if (job.status === 'successful') {
+            if (job.host_status_counts !== undefined && job.host_status_counts !== null) return;
+            await delay(FACT_PULL_POLL_INTERVAL_MS);
+            continue;
+          }
+          throw new Error(
+            job.job_explanation ||
+              job.result_traceback ||
+              t('Fact collection finished with status {{status}}.', { status: job.status })
+          );
+        }
+        await delay(FACT_PULL_POLL_INTERVAL_MS);
+      }
+      throw new Error(t('Timed out waiting for fact collection to finish.'));
+    },
+    [t]
+  );
   const pullFacts = useCallback(async () => {
-    setFactPullError(undefined);
+    if (factPullResetTimer.current) {
+      clearTimeout(factPullResetTimer.current);
+      factPullResetTimer.current = null;
+    }
     if (!credentialId) {
       setFactPullError(t('No usable SSH credential is available for fact collection.'));
       return;
     }
-    setFactPullLoading(true);
+    flushSync(() => {
+      setFactPullError(undefined);
+      setFactPullState('loading');
+    });
+    const loadingStartedAt = Date.now();
     try {
       const result = await postRequest<{ id: number }, FactPullPayload>(
         awxAPI`/hosts/${hostId}/ad_hoc_commands/`,
@@ -271,26 +330,41 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
           extra_vars: '',
         }
       );
-      pageNavigate(AwxRoute.JobOutput, {
-        params: { id: String(result.id), job_type: 'command' },
-      });
+      await waitForFactPull(result.id);
+      const loadingElapsed = Date.now() - loadingStartedAt;
+      if (loadingElapsed < FACT_PULL_MIN_LOADING_MS) {
+        await delay(FACT_PULL_MIN_LOADING_MS - loadingElapsed);
+      }
+      refreshFacts();
+      setFactPullState('success');
+      factPullResetTimer.current = setTimeout(() => {
+        setFactPullState('idle');
+      }, FACT_PULL_SUCCESS_MS);
     } catch (error) {
+      setFactPullState('idle');
       setFactPullError(
         error instanceof Error ? error.message : t('Unable to launch fact collection.')
       );
-    } finally {
-      setFactPullLoading(false);
     }
-  }, [credentialId, hostId, pageNavigate, t]);
+  }, [credentialId, hostId, refreshFacts, t, waitForFactPull]);
+  const isPullingFacts = factPullState === 'loading';
+  const didPullFacts = factPullState === 'success';
+  const factPullButtonLabel = isPullingFacts
+    ? t('Pulling facts')
+    : didPullFacts
+      ? t('Facts updated')
+      : t('Pull facts');
   const pullFactsButton = (
     <Button
-      icon={<SyncAltIcon />}
-      isDisabled={factPullLoading || !hostId}
-      isLoading={factPullLoading}
+      icon={isPullingFacts ? <Spinner size="sm" /> : didPullFacts ? <CheckIcon /> : <SyncAltIcon />}
+      isDisabled={isPullingFacts || didPullFacts || !hostId || credentialsLoading || !credentialId}
+      aria-label={factPullButtonLabel}
+      title={factPullButtonLabel}
+      data-fact-pull-state={factPullState}
       onClick={() => void pullFacts()}
       data-cy="pull-host-facts"
     >
-      {factPullLoading ? t('Pulling facts') : t('Pull facts')}
+      {factPullButtonLabel}
     </Button>
   );
   const factPullAlert = factPullError ? (

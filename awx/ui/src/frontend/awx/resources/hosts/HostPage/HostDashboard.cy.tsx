@@ -16,7 +16,7 @@ describe('HostDashboard', () => {
           },
         ],
       }
-    );
+    ).as('getCredentials');
     cy.intercept(
       { method: 'GET', url: '/api/v2/hosts/435/ansible_facts/' },
       {
@@ -65,15 +65,25 @@ describe('HostDashboard', () => {
   });
 
   it('launches host fact collection', () => {
-    cy.intercept({ method: 'POST', url: '/api/v2/hosts/435/ad_hoc_commands/' }, { id: 225 }).as(
-      'launchFacts'
-    );
+    cy.intercept(
+      { method: 'POST', url: '/api/v2/hosts/435/ad_hoc_commands/' },
+      { statusCode: 201, delayMs: 2500, body: { id: 225 } }
+    ).as('launchFacts');
+    cy.intercept(
+      { method: 'GET', url: '/api/v2/ad_hoc_commands/225/' },
+      { delayMs: 150, body: { id: 225, status: 'successful', host_status_counts: { ok: 1 } } }
+    ).as('getFactJob');
     cy.mount(<HostDashboard page="host" />, {
       path: '/hosts/:id/dashboard',
       initialEntries: ['/hosts/435/dashboard'],
     });
 
+    cy.wait('@getCredentials');
+    cy.getByDataCy('pull-host-facts').should('not.be.disabled');
     cy.getByDataCy('pull-host-facts').click();
+    cy.get('[data-cy="pull-host-facts"]')
+      .should('have.attr', 'data-fact-pull-state', 'loading')
+      .and('have.attr', 'aria-label', 'Pulling facts');
     cy.wait('@launchFacts').its('request.body').should('include', {
       credential: 7,
       module_name: 'setup',
@@ -84,5 +94,14 @@ describe('HostDashboard', () => {
       diff_mode: false,
       extra_vars: '',
     });
+    cy.wait('@getFactJob');
+    cy.get('[data-cy="pull-host-facts"]')
+      .should('have.attr', 'data-fact-pull-state', 'success')
+      .and('have.attr', 'aria-label', 'Facts updated');
+    cy.get('[data-cy="pull-host-facts"]').should('be.disabled');
+    cy.get('[data-cy="pull-host-facts"]', { timeout: 3000 })
+      .should('have.attr', 'data-fact-pull-state', 'idle')
+      .and('have.attr', 'aria-label', 'Pull facts');
+    cy.getByDataCy('pull-host-facts').should('not.be.disabled');
   });
 });
