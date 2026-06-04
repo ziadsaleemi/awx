@@ -106,14 +106,11 @@ _CONSTRUCTED_INPUT_INVENTORY_FIELDS = (
 _AI_HOST_GROUP_FIELDS = ('groups', 'group_ids', 'group', 'group_id')
 
 # ChatGPT device-login OAuth tokens do not reliably expose /v1/models.
-# Keep this aligned with the ChatGPT Codex backend models used by the reference app.
+# Keep this aligned with the ChatGPT Codex responses backend; older generic GPT/Codex
+# names are accepted by settings history but rejected by ChatGPT-backed Codex calls.
 _OPENAI_CODEX_MODEL_CATALOG = [
-    'gpt-5.2',
-    'gpt-5.2-codex',
-    'gpt-5.3-codex',
-    'gpt-5.1-codex-max',
-    'gpt-5.1-codex',
-    'gpt-5.1-codex-mini',
+    'gpt-5.5',
+    'gpt-5.4',
 ]
 
 # Provider → default base URL and chat completions path
@@ -146,7 +143,7 @@ _PROVIDER_DEFAULTS = {
     'openai_codex': {
         'base_url': _OPENAI_CODEX_RESPONSES_URL,
         'path': '',
-        'model': 'gpt-5.2',
+        'model': 'gpt-5.5',
     },
 }
 
@@ -539,13 +536,9 @@ _CODEX_UNSUPPORTED_MODELS = frozenset(
 
 
 def _codex_model_name(model: str) -> str:
-    if model == 'gpt-5.1':
-        return 'gpt-5.1-codex'
-    if model.startswith('gpt-5'):
+    if _openai_codex_model_supported(model):
         return model
-    if model.startswith('gpt-4') and model not in _CODEX_UNSUPPORTED_MODELS:
-        return model
-    return 'gpt-5.2'
+    return _PROVIDER_DEFAULTS['openai_codex']['model']
 
 
 def _codex_input_messages(messages: list, system_prompt: str) -> tuple:
@@ -663,8 +656,16 @@ def _openai_model_allowed(model_id: str) -> bool:
     return lowered.startswith(('gpt', 'o1', 'o3', 'o4', 'chatgpt'))
 
 
+def _openai_codex_model_supported(model_id: str) -> bool:
+    return model_id in _OPENAI_CODEX_MODEL_CATALOG
+
+
+def _openai_codex_model_options(values) -> list:
+    return [model for model in _normalize_model_list(values) if _openai_codex_model_supported(model)]
+
+
 def _openai_codex_cached_models() -> list:
-    return _normalize_model_list(getattr(settings, 'AI_OPENAI_CODEX_AVAILABLE_MODELS', []))
+    return _openai_codex_model_options(getattr(settings, 'AI_OPENAI_CODEX_AVAILABLE_MODELS', []))
 
 
 def _openai_codex_available_models() -> list:
@@ -672,7 +673,7 @@ def _openai_codex_available_models() -> list:
 
 
 def _openai_codex_effective_default_model(models: list | None = None) -> str:
-    model_options = _normalize_model_list(models) or _openai_codex_available_models()
+    model_options = _openai_codex_model_options(models) or _openai_codex_available_models()
     configured_model = str(getattr(settings, 'AI_MODEL_NAME', '') or '').strip()
     if configured_model and configured_model in model_options:
         return configured_model
@@ -685,7 +686,7 @@ def _openai_codex_effective_default_model(models: list | None = None) -> str:
 
 def _openai_codex_model_payload(models: list | None = None, source: str | None = None, model_fetch_error: str = '', default_model: str | None = None) -> dict:
     cached_models = _openai_codex_cached_models()
-    model_options = _normalize_model_list(models) or cached_models or list(_OPENAI_CODEX_MODEL_CATALOG)
+    model_options = _openai_codex_model_options(models) or cached_models or list(_OPENAI_CODEX_MODEL_CATALOG)
     return {
         'configured': _openai_codex_configured(),
         'models': model_options,
@@ -711,7 +712,7 @@ def _fetch_openai_codex_models(access_token: str | None = None) -> tuple:
         )
         if response.status_code == 200:
             payload = response.json()
-            models = _normalize_model_list(
+            models = _openai_codex_model_options(
                 [
                     str(item['id'])
                     for item in payload.get('data', [])
@@ -5073,11 +5074,12 @@ class AISettingsView(APIView):
 
     def get(self, request, *args, **kwargs):
         provider = getattr(settings, 'AI_PROVIDER', 'openai')
+        model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '')
         return Response(
             {
                 'enabled': getattr(settings, 'AI_ENABLED', False),
                 'provider': provider,
-                'model': getattr(settings, 'AI_MODEL_NAME', ''),
+                'model': model,
                 'configured': _provider_configured(provider),
                 'openai_codex_connected': _openai_codex_configured(),
                 'openai_codex_account_id': getattr(settings, 'AI_OPENAI_CODEX_CHATGPT_ACCOUNT_ID', ''),

@@ -126,6 +126,7 @@ def test_ai_chat_openai_codex_provider_uses_device_token_without_api_key(post, g
     assert requests_post.call_args.args[0] == 'https://chatgpt.com/backend-api/codex/responses'
     assert requests_post.call_args.kwargs['headers']['chatgpt-account-id'] == 'acct_123'
     assert requests_post.call_args.kwargs['headers']['OpenAI-Beta'] == 'responses=experimental'
+    assert requests_post.call_args.kwargs['json']['model'] == 'gpt-5.5'
 
 
 @pytest.mark.django_db
@@ -2606,43 +2607,53 @@ def test_openai_codex_device_code_start_requires_system_admin(post, admin_user, 
 @override_settings(AI_OPENAI_CODEX_ACCESS_TOKEN='oauth-token', AI_OPENAI_CODEX_AVAILABLE_MODELS=[])
 def test_openai_codex_model_refresh_falls_back_to_curated_catalog(get, post, admin_user):
     settings_response = get(reverse('api:ai_openai_codex_models'), user=admin_user, expect=200)
-    assert settings_response.data['models'][0] == 'gpt-5.2'
+    assert settings_response.data['models'][0] == 'gpt-5.5'
     assert settings_response.data['source'] == 'curated'
 
     with mock.patch('awx.api.views.ai.requests.get', return_value=FakeJSONResponse({'error': 'Unauthorized'}, status_code=401)) as requests_get:
         response = post(reverse('api:ai_openai_codex_models_refresh'), data={}, user=admin_user, expect=200)
 
     assert response.data['source'] == 'curated'
-    assert response.data['models'] == [
-        'gpt-5.2',
-        'gpt-5.2-codex',
-        'gpt-5.3-codex',
-        'gpt-5.1-codex-max',
-        'gpt-5.1-codex',
-        'gpt-5.1-codex-mini',
-    ]
+    assert response.data['models'] == ['gpt-5.5', 'gpt-5.4']
     assert requests_get.call_args.args[0] == 'https://api.openai.com/v1/models'
 
 
 @pytest.mark.django_db
 @override_settings(AI_OPENAI_CODEX_ACCESS_TOKEN='oauth-token', AI_OPENAI_CODEX_AVAILABLE_MODELS=[])
 def test_openai_codex_model_refresh_saves_live_chat_models(post, admin_user):
-    payload = {'data': [{'id': 'gpt-5.2'}, {'id': 'o3-mini'}, {'id': 'text-embedding-3-large'}, {'id': 'whisper-1'}]}
+    payload = {'data': [{'id': 'gpt-5.5'}, {'id': 'gpt-5.4'}, {'id': 'gpt-5.2'}, {'id': 'o3-mini'}, {'id': 'whisper-1'}]}
     with mock.patch('awx.api.views.ai.requests.get', return_value=FakeJSONResponse(payload)) as requests_get:
         response = post(reverse('api:ai_openai_codex_models_refresh'), data={}, user=admin_user, expect=200)
 
     assert response.data['source'] == 'live'
-    assert response.data['models'] == ['gpt-5.2', 'o3-mini']
+    assert response.data['models'] == ['gpt-5.5', 'gpt-5.4']
     assert requests_get.call_args.kwargs['headers']['Authorization'] == 'Bearer oauth-token'
-    assert Setting.objects.get(key='AI_OPENAI_CODEX_AVAILABLE_MODELS').value == ['gpt-5.2', 'o3-mini']
+    assert Setting.objects.get(key='AI_OPENAI_CODEX_AVAILABLE_MODELS').value == ['gpt-5.5', 'gpt-5.4']
 
 
 @pytest.mark.django_db
-@override_settings(AI_OPENAI_CODEX_AVAILABLE_MODELS=['gpt-5.2', 'gpt-5.3-codex'])
+@override_settings(AI_OPENAI_CODEX_AVAILABLE_MODELS=['gpt-5.5', 'gpt-5.4'])
 def test_openai_codex_default_model_requires_system_admin_and_saves_setting(post, admin_user, rando):
-    post(reverse('api:ai_openai_codex_models_default'), data={'model': 'gpt-5.3-codex'}, user=rando, expect=403)
+    post(reverse('api:ai_openai_codex_models_default'), data={'model': 'gpt-5.4'}, user=rando, expect=403)
 
-    response = post(reverse('api:ai_openai_codex_models_default'), data={'model': 'gpt-5.3-codex'}, user=admin_user, expect=200)
+    post(reverse('api:ai_openai_codex_models_default'), data={'model': 'gpt-5.2'}, user=admin_user, expect=400)
 
-    assert response.data['default_model'] == 'gpt-5.3-codex'
-    assert Setting.objects.get(key='AI_MODEL_NAME').value == 'gpt-5.3-codex'
+    response = post(reverse('api:ai_openai_codex_models_default'), data={'model': 'gpt-5.4'}, user=admin_user, expect=200)
+
+    assert response.data['default_model'] == 'gpt-5.4'
+    assert Setting.objects.get(key='AI_MODEL_NAME').value == 'gpt-5.4'
+
+
+@pytest.mark.django_db
+@override_settings(
+    AI_PROVIDER='openai_codex',
+    AI_MODEL_NAME='gpt-5.2',
+    AI_OPENAI_CODEX_ACCESS_TOKEN='oauth-token',
+    AI_OPENAI_CODEX_AVAILABLE_MODELS=['gpt-5.2', 'gpt-5.5'],
+)
+def test_openai_codex_settings_filters_stale_cached_models(get, admin_user):
+    response = get(reverse('api:ai_settings'), user=admin_user, expect=200)
+
+    assert response.data['model'] == 'gpt-5.5'
+    assert response.data['openai_codex_default_model'] == 'gpt-5.5'
+    assert response.data['openai_codex_available_models'] == ['gpt-5.5']
