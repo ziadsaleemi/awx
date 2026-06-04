@@ -1287,6 +1287,36 @@ class WorkflowJob(UnifiedJob, WorkflowJobOptions, SurveyJobMixin, JobNotificatio
     def get_ui_url(self):
         return urljoin(settings.TOWER_URL_BASE, WORKFLOW_BASE_URL.format(settings.OPTIONAL_UI_URL_PREFIX, self.pk))
 
+    def cancel(self, job_explanation=None, is_chain=False):
+        has_already_canceled = bool(self.status == 'canceled')
+        result = super().cancel(job_explanation=job_explanation, is_chain=is_chain)
+        if has_already_canceled or self.status == 'canceled':
+            return result
+
+        self.workflow_nodes.filter(do_not_run=False, job__isnull=True).update(do_not_run=True)
+        has_active_children = False
+        for node in self.workflow_nodes.select_related('job'):
+            job = node.job
+            if job is None:
+                continue
+            if job.can_cancel:
+                job.cancel(job_explanation=self._build_job_explanation(), is_chain=True)
+                job.refresh_from_db()
+            if job.status not in ('successful', 'failed', 'error', 'canceled'):
+                has_active_children = True
+
+        if not has_active_children:
+            update_fields = ['status', 'start_args']
+            self.status = 'canceled'
+            self.start_args = ''
+            if job_explanation is not None and self.job_explanation != job_explanation:
+                self.job_explanation = job_explanation
+                update_fields.append('job_explanation')
+            self.save(update_fields=update_fields)
+            self.websocket_emit_status('canceled')
+
+        return result
+
     def notification_data(self):
         result = super(WorkflowJob, self).notification_data()
         str_arr = ['Workflow job summary:', '']
