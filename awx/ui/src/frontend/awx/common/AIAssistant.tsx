@@ -614,19 +614,20 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
     setError(null);
 
     try {
-      const resp = await postRequest<AIChatResponse, { messages: ChatMessage[] }>(
-        awxAPI`/ai/chat/`,
-        {
-          messages: nextMessages,
-        }
-      );
+      const resp = await postRequest<
+        AIChatResponse,
+        { messages: ChatMessage[]; context: Record<string, unknown> }
+      >(awxAPI`/ai/chat/`, {
+        messages: nextMessages,
+        context: buildRouteContext(context),
+      });
       setMessages((prev) => [...prev, resp.message]);
     } catch (err: unknown) {
       setError(messageFromError(err, t('An unexpected error occurred.')));
     } finally {
       setBusy(null);
     }
-  }, [busy, input, messages, t]);
+  }, [busy, context, input, messages, t]);
 
   const planResourceChanges = useCallback(async () => {
     const trimmed = input.trim();

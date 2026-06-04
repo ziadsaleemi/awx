@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction } from 'react';
 import { Toolbar, ToolbarContent, Button } from '@patternfly/react-core';
-import { CompressArrowsAltIcon, ExpandArrowsAltIcon } from '@patternfly/react-icons';
+import { CompressArrowsAltIcon, ExpandArrowsAltIcon, RobotIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import {
   IFilterState,
@@ -8,8 +8,11 @@ import {
 } from '../../../../../framework/PageToolbar/PageToolbarFilter';
 import { IToolbarFilter } from '../../../../../framework';
 import { JobStatus, isJobRunning } from './util';
+import { Job } from '../../../interfaces/Job';
+import { openAIAssistantWithContext, useAIAssistantEnabled } from '../../../common/AIAssistant';
 
 interface IJobOutputToolbarProps {
+  job: Job;
   toolbarFilters: IToolbarFilter[];
   filterState: IFilterState;
   setFilterState: Dispatch<SetStateAction<IFilterState>>;
@@ -32,6 +35,7 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
     onToggleFullScreen,
   } = props;
   const { t } = useTranslation();
+  const { enabled: aiEnabled } = useAIAssistantEnabled();
 
   const handleFollowToggle = () => {
     if (isFollowModeEnabled) {
@@ -39,6 +43,19 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
     } else {
       setIsFollowModeEnabled(true);
     }
+  };
+
+  const openOutputAssistant = () => {
+    openAIAssistantWithContext({
+      prompt: t(
+        'Use this job output, diagnostic events, and related project code to help me debug failures and improve the automation. Explain likely causes, concrete fixes, and safer code changes.'
+      ),
+      source: 'job_output',
+      job_id: props.job.id,
+      job_type: props.job.type,
+      job_status: props.job.status,
+      job_name: props.job.name,
+    });
   };
 
   return (
@@ -57,13 +74,24 @@ export function JobOutputToolbar(props: IJobOutputToolbarProps) {
             {isFollowModeEnabled ? t('Unfollow') : t('Follow')}
           </Button>
         ) : null}
+        {aiEnabled ? (
+          <Button
+            variant="secondary"
+            icon={<RobotIcon />}
+            onClick={openOutputAssistant}
+            data-cy="job-output-ai-assistant"
+            style={{ marginLeft: 'auto' }}
+          >
+            {t('AI')}
+          </Button>
+        ) : null}
         {onToggleFullScreen ? (
           <Button
             variant="plain"
             aria-label={isFullScreen ? t('Exit full screen') : t('Full screen')}
             title={isFullScreen ? t('Exit full screen') : t('Full screen')}
             onClick={onToggleFullScreen}
-            style={{ marginLeft: 'auto' }}
+            style={{ marginLeft: aiEnabled ? undefined : 'auto' }}
           >
             {isFullScreen ? <CompressArrowsAltIcon /> : <ExpandArrowsAltIcon />}
           </Button>

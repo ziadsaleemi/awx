@@ -17,6 +17,7 @@ from awx.main.models import (
     Host,
     Inventory,
     InventorySource,
+    JobEvent,
     JobTemplate,
     Notification,
     NotificationTemplate,
@@ -917,6 +918,67 @@ def test_ai_chat_provider_prompt_includes_visible_awx_resource_rows(post, admin_
     assert 'web01' in system_prompt
     assert 'source-inv' in system_prompt
     assert 'Credential secrets, passwords, private keys, tokens, and variable values are intentionally excluded.' in system_prompt
+
+
+@pytest.mark.django_db
+@override_settings(AI_ENABLED=True, AI_PROVIDER='openai', AI_API_KEY='api-key', AI_MODEL_NAME='gpt-4o')
+def test_ai_chat_job_output_context_includes_output_and_project_code(post, admin_user, organization, inventory, tmp_path):
+    project_root = tmp_path / 'job-output-ai'
+    project_root.mkdir()
+    (project_root / 'site.yml').write_text(
+        '- hosts: all\n' '  tasks:\n' '    - name: Install package\n' '      ansible.builtin.package:\n' '        name: httpd\n' '        state: present\n',
+        encoding='utf-8',
+    )
+    project = Project.objects.create(
+        name='Job Output Project',
+        organization=organization,
+        scm_type='',
+        local_path='job-output-ai',
+        playbook_files=['site.yml'],
+    )
+    template = JobTemplate.objects.create(
+        name='Broken install',
+        organization=organization,
+        inventory=inventory,
+        project=project,
+        playbook='site.yml',
+    )
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        job = template.create_unified_job()
+        job.status = 'failed'
+        job.save(update_fields=['status'])
+        JobEvent.create_from_data(
+            job_id=job.pk,
+            uuid='failed-task',
+            event='runner_on_failed',
+            counter=1,
+            stdout='fatal: [web01]: FAILED! => could not fetch https://user:password@example.test/repo.git',
+            event_data={'host': 'web01', 'res': {'msg': 'Package httpd was not found'}},
+            job_created=job.created,
+        ).save()
+
+        with mock.patch('awx.api.views.ai._call_ai_provider', return_value='Review complete') as call_provider:
+            response = post(
+                reverse('api:ai_chat'),
+                data={
+                    'messages': [{'role': 'user', 'content': 'Why did this fail and how can I improve the code?'}],
+                    'context': {'source': 'job_output', 'job_id': job.pk, 'job_type': 'job'},
+                },
+                user=admin_user,
+                expect=200,
+            )
+
+    assert response.data['message']['content'] == 'Review complete'
+    system_prompt = call_provider.call_args.args[4]
+    assert 'Current job output page context:' in system_prompt
+    assert '"name": "Broken install"' in system_prompt
+    assert 'runner_on_failed' in system_prompt
+    assert 'Package httpd was not found' in system_prompt
+    assert 'https://$encrypted$:$encrypted$@example.test/repo.git' in system_prompt
+    assert 'ansible.builtin.package' in system_prompt
+    assert 'state: present' in system_prompt
+    assert 'password@example' not in system_prompt
 
 
 @pytest.mark.django_db

@@ -51,6 +51,7 @@ from awx.main import models
 from awx.main.access import get_user_queryset
 from awx.main.constants import SURVEY_TYPE_MAPPING
 from awx.main.models.rbac import give_creator_permissions
+from awx.main.redact import UriCleaner
 from awx.main.tasks.system import clear_setting_cache
 from awx.main.utils import parse_yaml_or_json
 from awx.main.utils.encryption import encrypt_value
@@ -92,6 +93,10 @@ _AI_RESOURCE_PREVIEW_LIMIT = 10
 _AI_PROJECT_FILE_MAX_BYTES = 256 * 1024
 _AI_PROJECT_FILE_ALLOWED_SUFFIXES = {'.cfg', '.ini', '.j2', '.json', '.md', '.toml', '.txt', '.yaml', '.yml'}
 _AI_PROJECT_FILE_BLOCKED_PARTS = {'.git', '.hg', '.svn', '__pycache__'}
+_AI_JOB_OUTPUT_CONTEXT_MAX_CHARS = 24000
+_AI_JOB_CODE_CONTEXT_MAX_CHARS = 32000
+_AI_JOB_CODE_CONTEXT_MAX_FILES = 8
+_AI_JOB_CONTEXT_FILE_ALLOWED_SUFFIXES = _AI_PROJECT_FILE_ALLOWED_SUFFIXES | {'.tf', '.tfvars'}
 _AI_PROJECT_LOCAL_PATH_MAX_LENGTH = 128
 _AI_PROJECT_WORKSPACE_FLAGS = ('create_local_path', 'create_workspace', 'create_project_workspace')
 _AI_DESTRUCTIVE_OPERATIONS = {'delete', 'detach', 'update'}
@@ -2403,7 +2408,299 @@ def _try_answer_gatekeeper_fact_question(user, messages: list) -> str | None:
     return None
 
 
-def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
+def _clip_ai_context_text(text: str, max_chars: int) -> tuple[str, bool]:
+    text = str(text or '')
+    if len(text) <= max_chars:
+        return text, False
+    head_chars = max_chars // 3
+    tail_chars = max_chars - head_chars
+    omitted = len(text) - max_chars
+    return f'{text[:head_chars]}\n...[truncated {omitted} characters]...\n{text[-tail_chars:]}', True
+
+
+def _redact_ai_context_text(text: str) -> str:
+    return UriCleaner.remove_sensitive(str(text or ''))
+
+
+def _coerce_ai_context_pk(value) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _job_context_model(raw_type: str | None):
+    job_type = str(raw_type or '').strip().lower()
+    return {
+        'job': models.Job,
+        'playbook': models.Job,
+        'jobs': models.Job,
+        'ad_hoc_command': models.AdHocCommand,
+        'ad_hoc': models.AdHocCommand,
+        'command': models.AdHocCommand,
+        'project_update': models.ProjectUpdate,
+        'project': models.ProjectUpdate,
+        'inventory_update': models.InventoryUpdate,
+        'inventory': models.InventoryUpdate,
+        'system_job': models.SystemJob,
+        'management': models.SystemJob,
+        'terraform_job': models.TerraformJob,
+        'terraform': models.TerraformJob,
+    }.get(job_type, models.Job)
+
+
+def _job_context_select_related(model):
+    return {
+        models.Job: ('job_template', 'project', 'inventory', 'organization'),
+        models.AdHocCommand: ('inventory', 'credential'),
+        models.ProjectUpdate: ('project', 'organization'),
+        models.InventoryUpdate: ('inventory', 'inventory_source', 'inventory_source__source_project', 'organization'),
+        models.SystemJob: ('system_job_template', 'organization'),
+        models.TerraformJob: ('terraform_job_template', 'project', 'target_inventory', 'organization'),
+    }.get(model, ())
+
+
+def _job_context_related_object(value):
+    if value is None:
+        return None
+    return _related_context(value)
+
+
+def _job_context_metadata(job) -> dict:
+    metadata = {
+        'id': job.pk,
+        'type': getattr(job, 'type', job._meta.model_name),
+        'name': getattr(job, 'name', ''),
+        'status': getattr(job, 'status', ''),
+        'created': getattr(job, 'created', None),
+        'started': getattr(job, 'started', None),
+        'finished': getattr(job, 'finished', None),
+        'elapsed': getattr(job, 'elapsed', None),
+        'failed': getattr(job, 'failed', None),
+        'job_explanation': getattr(job, 'job_explanation', ''),
+        'result_traceback': _redact_ai_context_text(getattr(job, 'result_traceback', '') or ''),
+        'inventory': _job_context_related_object(getattr(job, 'inventory', None) or getattr(job, 'target_inventory', None)),
+        'project': _job_context_related_object(getattr(job, 'project', None)),
+        'organization': _job_context_related_object(getattr(job, 'organization', None)),
+        'job_template': _job_context_related_object(getattr(job, 'job_template', None)),
+        'terraform_job_template': _job_context_related_object(getattr(job, 'terraform_job_template', None)),
+        'system_job_template': _job_context_related_object(getattr(job, 'system_job_template', None)),
+        'inventory_source': _job_context_related_object(getattr(job, 'inventory_source', None)),
+        'scm_revision': getattr(job, 'scm_revision', ''),
+    }
+    for field_name in (
+        'playbook',
+        'module_name',
+        'module_args',
+        'limit',
+        'job_type',
+        'terraform_operation',
+        'terraform_dir',
+    ):
+        value = getattr(job, field_name, None)
+        if value not in (None, ''):
+            metadata[field_name] = value
+    return {key: value for key, value in metadata.items() if value not in (None, '')}
+
+
+def _job_context_output(job) -> dict:
+    chunks = []
+    event_count = 0
+    try:
+        queryset = job.get_event_queryset().order_by('start_line', 'counter', 'id')
+    except Exception as exc:
+        return {'text': '', 'error': f'Could not read job events: {exc}'}
+
+    for stdout in queryset.exclude(stdout='').values_list('stdout', flat=True).iterator():
+        event_count += 1
+        chunks.append(stdout)
+        if sum(len(chunk) for chunk in chunks) >= (_AI_JOB_OUTPUT_CONTEXT_MAX_CHARS * 2):
+            break
+
+    text, truncated = _clip_ai_context_text(_redact_ai_context_text(''.join(chunks)), _AI_JOB_OUTPUT_CONTEXT_MAX_CHARS)
+    return {
+        'event_count_scanned': event_count,
+        'truncated': truncated,
+        'text': text,
+    }
+
+
+def _job_context_event_diagnostics(job) -> list[dict]:
+    diagnostic_events = {
+        'runner_on_failed',
+        'runner_on_unreachable',
+        'runner_on_error',
+        'runner_on_async_failed',
+        'error',
+        'system_warning',
+        'warning',
+        'deprecated',
+        'playbook_on_no_hosts_matched',
+        'playbook_on_no_hosts_remaining',
+        'runner_on_no_hosts',
+    }
+    rows = []
+    try:
+        queryset = job.get_event_queryset().filter(event__in=diagnostic_events).order_by('counter', 'id')
+    except Exception:
+        return rows
+
+    for event in queryset[:_AI_CONTEXT_LIST_LIMIT]:
+        event_data = getattr(event, 'event_data', None)
+        if event_data:
+            redacted_event_data = _redact_ai_context_text(json.dumps(_json_safe(event_data), sort_keys=True))
+            try:
+                event_data = json.loads(redacted_event_data)
+            except ValueError:
+                event_data = redacted_event_data
+        stdout, truncated = _clip_ai_context_text(_redact_ai_context_text(getattr(event, 'stdout', '') or ''), 2000)
+        rows.append(
+            {
+                'counter': getattr(event, 'counter', None),
+                'event': getattr(event, 'event', ''),
+                'created': getattr(event, 'created', None),
+                'stdout': stdout,
+                'stdout_truncated': truncated,
+                'event_data': event_data,
+            }
+        )
+    return rows
+
+
+def _job_context_project_for_user(user, job):
+    project = getattr(job, 'project', None)
+    if project is None and getattr(job, 'inventory_source', None) is not None:
+        project = getattr(job.inventory_source, 'source_project', None)
+    if project is None:
+        return None
+    return get_user_queryset(user, models.Project).filter(pk=project.pk).first()
+
+
+def _safe_project_relative_path(relative_path: str | None) -> PurePosixPath | None:
+    if not isinstance(relative_path, str) or not relative_path.strip():
+        return None
+    try:
+        path = PurePosixPath(relative_path)
+    except ValueError:
+        return None
+    if path.is_absolute() or any(part in {'', '.', '..'} for part in path.parts):
+        return None
+    return path
+
+
+def _read_job_context_project_file(project, relative_path: str, remaining_chars: int) -> dict | None:
+    safe_relative = _safe_project_relative_path(relative_path)
+    if safe_relative is None or safe_relative.suffix not in _AI_JOB_CONTEXT_FILE_ALLOWED_SUFFIXES:
+        return None
+
+    try:
+        project_path = project.get_project_path()
+        if not project_path:
+            return None
+        root = Path(project_path).resolve()
+        target = (root / Path(*safe_relative.parts)).resolve()
+        if root not in target.parents and target != root:
+            return None
+        if not target.is_file():
+            return None
+    except OSError:
+        return None
+
+    read_limit = max(0, min(remaining_chars, _AI_JOB_CODE_CONTEXT_MAX_CHARS))
+    if read_limit <= 0:
+        return None
+    try:
+        raw = target.read_bytes()[: read_limit + 1]
+    except OSError:
+        return None
+    text = raw[:read_limit].decode('utf-8', errors='replace')
+    text = _redact_ai_context_text(text)
+    return {
+        'path': str(safe_relative),
+        'truncated': len(raw) > read_limit,
+        'content': text,
+    }
+
+
+def _job_context_code_files(user, job) -> list[dict]:
+    project = _job_context_project_for_user(user, job)
+    if project is None:
+        return []
+
+    paths = []
+    playbook = getattr(job, 'playbook', None)
+    if isinstance(playbook, str) and playbook.strip():
+        paths.append(playbook)
+
+    terraform_dir = _safe_project_relative_path(getattr(job, 'terraform_dir', None) or '')
+    if terraform_dir is not None:
+        project_path = project.get_project_path()
+        if project_path:
+            try:
+                root = Path(project_path).resolve()
+                terraform_root = (root / Path(*terraform_dir.parts)).resolve()
+                if root in terraform_root.parents or terraform_root == root:
+                    for suffix in ('*.tf', '*.tfvars'):
+                        paths.extend(str(path.relative_to(root)) for path in sorted(terraform_root.glob(suffix)))
+            except OSError:
+                pass
+
+    source_path = getattr(job, 'source_path', None)
+    if not source_path and getattr(job, 'inventory_source', None) is not None:
+        source_path = getattr(job.inventory_source, 'source_path', None)
+    if isinstance(source_path, str) and source_path.strip():
+        paths.append(source_path)
+
+    files = []
+    seen = set()
+    remaining_chars = _AI_JOB_CODE_CONTEXT_MAX_CHARS
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        file_context = _read_job_context_project_file(project, path, remaining_chars)
+        if not file_context:
+            continue
+        files.append(file_context)
+        remaining_chars -= len(file_context['content'])
+        if len(files) >= _AI_JOB_CODE_CONTEXT_MAX_FILES or remaining_chars <= 0:
+            break
+    return files
+
+
+def _job_output_page_context(user, ui_context: dict | None) -> dict | None:
+    if not isinstance(ui_context, dict) or ui_context.get('source') != 'job_output':
+        return None
+
+    job_id = _coerce_ai_context_pk(ui_context.get('job_id') or ui_context.get('resource_id'))
+    if not job_id:
+        return {'error': 'The job output page did not provide a valid job id.'}
+
+    model = _job_context_model(str(ui_context.get('job_type') or ''))
+    queryset = get_user_queryset(user, model)
+    select_related = _job_context_select_related(model)
+    if select_related:
+        queryset = queryset.select_related(*select_related)
+    job = queryset.filter(pk=job_id).first()
+    if job is None:
+        return {'error': 'This job is not visible to the requesting user.'}
+
+    return {
+        'notes': [
+            'This context is from the currently viewed job output page.',
+            'The job and related project are filtered by the requesting user RBAC permissions.',
+            'Output URLs with embedded usernames or passwords are redacted before sending to the AI provider.',
+            'Code snippets are capped and read only from safe relative paths inside the related project.',
+        ],
+        'job': _json_safe(_job_context_metadata(job)),
+        'diagnostic_events': _json_safe(_job_context_event_diagnostics(job)),
+        'output': _json_safe(_job_context_output(job)),
+        'code_files': _json_safe(_job_context_code_files(user, job)),
+    }
+
+
+def _system_prompt_with_awx_context(system_prompt: str, user, ui_context: dict | None = None) -> str:
     try:
         snapshot = _visible_awx_context_snapshot(user)
     except Exception as exc:
@@ -2417,6 +2714,15 @@ def _system_prompt_with_awx_context(system_prompt: str, user) -> str:
         'Do not say you cannot see the AWX instance when the answer is present in this context. '
         'If a resource list is truncated, say so and ask the user to narrow by inventory, organization, or resource type.'
     )
+    job_context = _job_output_page_context(user, ui_context)
+    if job_context is not None:
+        context = (
+            f'{context}\n\nCurrent job output page context:\n'
+            f'{json.dumps(_json_safe(job_context), indent=2)}\n'
+            'When answering questions from this page, use the job output, diagnostic events, and code files above. '
+            'For failures, identify the likely failing task or command, explain the error plainly, and give concrete remediation steps. '
+            'For improvement questions, review the supplied project code and suggest safer, more idempotent, maintainable automation.'
+        )
     return f'{system_prompt}{context}'
 
 
@@ -5015,6 +5321,7 @@ class AIChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        context = request.data.get('context') if isinstance(request.data.get('context'), dict) else {}
         provider = getattr(settings, 'AI_PROVIDER', 'openai')
         api_key = getattr(settings, 'AI_API_KEY', '')
         system_prompt = getattr(settings, 'AI_SYSTEM_PROMPT', '')
@@ -5045,7 +5352,7 @@ class AIChatView(APIView):
                     },
                     status=status.HTTP_200_OK,
                 )
-            system_prompt = _system_prompt_with_awx_context(system_prompt, request.user)
+            system_prompt = _system_prompt_with_awx_context(system_prompt, request.user, context)
         if provider != 'openai_codex' and not api_key:
             return Response(
                 {'detail': _('AI_API_KEY is not configured. Set it in Settings → AI Assistant.')},

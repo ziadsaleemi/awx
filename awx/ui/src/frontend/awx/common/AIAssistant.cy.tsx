@@ -113,6 +113,46 @@ describe('AIAssistantPanel', () => {
     });
   });
 
+  it('sends opened page context with chat messages', () => {
+    cy.intercept('POST', '/api/v2/ai/chat/', (req) => {
+      const body = req.body as {
+        messages?: { role: string; content: string }[];
+        context?: { source?: string; job_id?: number; path?: string };
+      };
+      expect(body.messages?.[0]).to.deep.include({
+        role: 'user',
+        content: 'Explain this job output',
+      });
+      expect(body.context).to.include({
+        source: 'job_output',
+        job_id: 26,
+      });
+      expect(body.context?.path).to.be.a('string');
+      req.reply({
+        message: { role: 'assistant', content: 'Use the failed task output.' },
+        model: 'awx',
+        provider: 'awx',
+      });
+    }).as('chatWithContext');
+
+    mountAssistant();
+
+    cy.window().then((win) => {
+      win.dispatchEvent(
+        new CustomEvent('awx-ai-assistant-context', {
+          detail: {
+            source: 'job_output',
+            job_id: 26,
+            prompt: 'Explain this job output',
+          },
+        })
+      );
+    });
+
+    cy.contains('button', 'Send').click();
+    cy.wait('@chatWithContext');
+  });
+
   it('uses pasted JSON plans directly for preview', () => {
     const plan = {
       name: 'Pasted AI plan',
