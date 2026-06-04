@@ -20,7 +20,6 @@ from awx.main.models import CatalogDeployment, CatalogItem, Credential, Credenti
 from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
 from awx.main.models.terraform import TerraformJobTemplate
 
-
 # ---------------------------------------------------------------------------
 # Shared provider_data / admin_settings helpers
 # ---------------------------------------------------------------------------
@@ -701,6 +700,75 @@ def test_cloud_provider_connection_list_is_scoped_to_org_admin(get, rando, organ
     response = get(url, rando, expect=200)
     names = [c['name'] for c in response.data['results']]
     assert names == ['Own Org Connection']
+
+
+@pytest.mark.django_db
+def test_system_auditor_credential_admin_can_create_global_cloud_connection(post, system_auditor):
+    """A platform cloud user can create a global connection for a credential they administer."""
+    credential = _cloud_credential('proxmox_ve', {}, None, system_auditor)
+    credential.admin_role.members.add(system_auditor)
+
+    response = post(
+        reverse('api:catalog_cloud_connection_list'),
+        {
+            'provider_id': 'proxmox',
+            'name': 'Global Proxmox',
+            'status': 'connected',
+            'credential': credential.pk,
+            'credential_name': credential.name,
+            'organization': None,
+        },
+        system_auditor,
+        expect=201,
+    )
+
+    assert response.data['name'] == 'Global Proxmox'
+    assert response.data['credential'] == credential.pk
+    assert response.data['organization'] is None
+
+
+@pytest.mark.django_db
+def test_system_auditor_credential_admin_can_update_global_cloud_connection(patch, system_auditor):
+    """A credential admin can reconnect a global cloud connection that uses their credential."""
+    credential = _cloud_credential('proxmox_ve', {}, None, system_auditor)
+    credential.admin_role.members.add(system_auditor)
+    connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Global Proxmox',
+        status='disconnected',
+        credential=credential,
+        credential_name=credential.name,
+    )
+
+    response = patch(
+        reverse('api:catalog_cloud_connection_detail', kwargs={'pk': connection.pk}),
+        {'status': 'connected', 'credential': credential.pk, 'credential_name': credential.name, 'error': ''},
+        system_auditor,
+        expect=200,
+    )
+
+    assert response.data['status'] == 'connected'
+    assert response.data['credential'] == credential.pk
+
+
+@pytest.mark.django_db
+def test_system_auditor_without_credential_admin_cannot_update_global_cloud_connection(patch, system_auditor):
+    """A platform auditor cannot mutate unrelated global cloud connections."""
+    credential = _cloud_credential('proxmox_ve', {}, None, system_auditor)
+    connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Global Proxmox',
+        status='disconnected',
+        credential=credential,
+        credential_name=credential.name,
+    )
+
+    patch(
+        reverse('api:catalog_cloud_connection_detail', kwargs={'pk': connection.pk}),
+        {'status': 'connected', 'credential': credential.pk, 'credential_name': credential.name, 'error': ''},
+        system_auditor,
+        expect=403,
+    )
 
 
 @pytest.mark.django_db

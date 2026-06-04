@@ -294,6 +294,24 @@ export function ConnectionModal(props: {
       return aliases.some((alias) => haystack.includes(normalizeProviderToken(alias)));
     });
   }, [cloudCredentials, providerId]);
+  const editableProviderCredentialIds = useMemo(
+    () =>
+      new Set(
+        providerCredentials
+          .filter((credential) => Boolean(credential.summary_fields?.user_capabilities?.edit))
+          .map((credential) => credential.id)
+      ),
+    [providerCredentials]
+  );
+  const canAddProviderConnection = canManageCloud || editableProviderCredentialIds.size > 0;
+  const canManageEntry = useCallback(
+    (entry: CloudConnectionEntry) =>
+      canManageCloud ||
+      (entry.credentialId !== null &&
+        entry.credentialId !== undefined &&
+        editableProviderCredentialIds.has(entry.credentialId)),
+    [canManageCloud, editableProviderCredentialIds]
+  );
 
   const provider = cloudProviders.find((p) => p.id === providerId);
   const providerLabel = provider?.label ?? providerId;
@@ -477,7 +495,7 @@ export function ConnectionModal(props: {
                       <Button
                         variant="secondary"
                         size="sm"
-                        isDisabled={!canManageCloud}
+                        isDisabled={!canManageEntry(entry)}
                         onClick={() => void onDisconnect(entry.id)}
                         style={{ marginRight: '0.4rem' }}
                       >
@@ -490,7 +508,7 @@ export function ConnectionModal(props: {
                           variant="primary"
                           size="sm"
                           isLoading={connectingId === entry.id}
-                          isDisabled={!canManageCloud || connectingId !== null}
+                          isDisabled={!canManageEntry(entry) || connectingId !== null}
                           onClick={() => void onConnect(entry.id, entry.credentialId!)}
                           style={{ marginRight: '0.4rem' }}
                         >
@@ -501,7 +519,7 @@ export function ConnectionModal(props: {
                     <Button
                       variant="plain"
                       size="sm"
-                      isDisabled={!canManageCloud || !!connectingId}
+                      isDisabled={!canManageEntry(entry) || !!connectingId}
                       onClick={() => void onRemove(entry.id)}
                       aria-label={t('Remove connection')}
                     >
@@ -526,7 +544,7 @@ export function ConnectionModal(props: {
             }}
           >
             <div>{t('No connections yet.')}</div>
-            {canManageCloud && (
+            {canAddProviderConnection && (
               <Button
                 variant="primary"
                 icon={<PlusCircleIcon />}
@@ -539,7 +557,7 @@ export function ConnectionModal(props: {
         )}
 
         {/* Add connection form */}
-        {canManageCloud && showAddForm ? (
+        {canAddProviderConnection && showAddForm ? (
           <div
             style={{
               border: '1px solid var(--pf-v5-global--BorderColor--100)',
@@ -610,7 +628,7 @@ export function ConnectionModal(props: {
               </Button>
             </div>
           </div>
-        ) : canManageCloud && entries.length > 0 ? (
+        ) : canAddProviderConnection && entries.length > 0 ? (
           <div>
             <Button variant="link" icon={<PlusCircleIcon />} onClick={() => setShowAddForm(true)}>
               {t('Add connection')}

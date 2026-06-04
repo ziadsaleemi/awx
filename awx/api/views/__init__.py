@@ -6140,8 +6140,6 @@ class CloudProviderConnectionList(ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
-        if not _user_can_manage_cloud(request.user):
-            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
         return super().post(request, *args, **kwargs)
 
     def get_queryset(self):
@@ -6176,18 +6174,12 @@ class CloudProviderConnectionDetail(RetrieveUpdateDestroyAPIView):
         return super().get(request, *args, **kwargs)
 
     def patch(self, request, *args, **kwargs):
-        if not _user_can_manage_cloud(request.user):
-            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
         return super().patch(request, *args, **kwargs)
 
     def put(self, request, *args, **kwargs):
-        if not _user_can_manage_cloud(request.user):
-            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
         return super().put(request, *args, **kwargs)
 
     def delete(self, request, *args, **kwargs):
-        if not _user_can_manage_cloud(request.user):
-            raise PermissionDenied(_('You do not have permission to manage cloud provider connections.'))
         return super().delete(request, *args, **kwargs)
 
 

@@ -115,4 +115,23 @@ describe('CloudConnections', () => {
     cy.contains('button', /^Add connection$/).should('be.visible');
     cy.wait('@userDetail');
   });
+
+  it('allows platform auditors to add connections for editable provider credentials', () => {
+    interceptCloudConnectionRequests();
+
+    cy.mount(
+      <CloudConnections />,
+      {
+        path: '/cloud/connections',
+        initialEntries: ['/cloud/connections'],
+      },
+      'activeUserSysAuditor.json'
+    );
+
+    cy.contains('Proxmox VE').click();
+    cy.wait('@proxmoxCredentials');
+    cy.contains('button', /^Add connection$/)
+      .should('be.visible')
+      .and('not.be.disabled');
+  });
 });
