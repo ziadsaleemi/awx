@@ -14,6 +14,7 @@ import {
 import { ExternalLinkAltIcon } from '@patternfly/react-icons';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import styled from 'styled-components';
 import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSection';
 import { postRequest, requestGet } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
@@ -56,6 +57,43 @@ function messageFromError(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   return fallback;
 }
+
+const CodexDeviceLoginContent = styled.div`
+  min-width: 0;
+
+  .pf-v5-c-form__group-control,
+  .pf-v5-c-form-control,
+  .pf-v5-c-clipboard-copy,
+  .pf-v5-c-clipboard-copy__group,
+  .pf-v5-c-clipboard-copy__text {
+    max-width: 100%;
+    min-width: 0;
+  }
+`;
+
+const CodexDescriptionList = styled(DescriptionList)`
+  min-width: 0;
+
+  .pf-v5-c-description-list__description,
+  .pf-v5-c-description-list__text,
+  a {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+`;
+
+const CodexActionRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+
+  .pf-v5-c-button {
+    max-width: 100%;
+    white-space: normal;
+  }
+`;
 
 export function OpenAICodexDeviceLogin() {
   const { t } = useTranslation();
@@ -186,160 +224,163 @@ export function OpenAICodexDeviceLogin() {
 
   return (
     <PageFormSection title={t('OpenAI Codex Device Login')} singleColumn>
-      <Alert
-        isInline
-        variant="info"
-        title={t('Use OpenAI Codex device login without replacing OpenAI API-key support')}
-      >
-        {t(
-          'This connects a ChatGPT/Codex account token. Standard OpenAI API-key support remains available by selecting OpenAI as the AI Provider.'
+      <CodexDeviceLoginContent data-cy="openai-codex-device-login">
+        <Alert
+          isInline
+          variant="info"
+          title={t('Use OpenAI Codex device login without replacing OpenAI API-key support')}
+        >
+          {t(
+            'This connects a ChatGPT/Codex account token. Standard OpenAI API-key support remains available by selecting OpenAI as the AI Provider.'
+          )}
+        </Alert>
+
+        {error && <Alert isInline variant="danger" title={error} />}
+        {notice && <Alert isInline variant="success" title={notice} />}
+
+        {busy === 'load' ? (
+          <Spinner size="sm" />
+        ) : (
+          <CodexDescriptionList isCompact isHorizontal>
+            <DescriptionListGroup>
+              <DescriptionListTerm>{t('Connection')}</DescriptionListTerm>
+              <DescriptionListDescription>
+                {settings?.openai_codex_connected ? t('Connected') : t('Not connected')}
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            {settings?.openai_codex_account_id ? (
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Account')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {settings.openai_codex_account_id}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            ) : null}
+            {settings?.openai_codex_plan_type ? (
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Plan')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {settings.openai_codex_plan_type}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            ) : null}
+            {settings?.provider === 'openai_codex' ? (
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Active provider')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {t('OpenAI Codex device login')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            ) : null}
+            {modelCatalog ? (
+              <>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Default model')}</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {modelCatalog.default_model || t('Not set')}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Model catalog')}</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {t('{{count}} models, {{source}} source', {
+                      count: modelCatalog.models.length,
+                      source: modelCatalog.source,
+                    })}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              </>
+            ) : null}
+          </CodexDescriptionList>
         )}
-      </Alert>
 
-      {error && <Alert isInline variant="danger" title={error} />}
-      {notice && <Alert isInline variant="success" title={notice} />}
+        <FormGroup label={t('Codex default model')} fieldId="openai-codex-default-model">
+          <FormSelect
+            id="openai-codex-default-model"
+            value={selectedModel}
+            onChange={(_event, value) => setSelectedModel(String(value))}
+            isDisabled={busy !== null || !modelCatalog?.models.length}
+          >
+            {(modelCatalog?.models ?? []).map((model) => (
+              <FormSelectOption key={model} value={model} label={model} />
+            ))}
+          </FormSelect>
+        </FormGroup>
 
-      {busy === 'load' ? (
-        <Spinner size="sm" />
-      ) : (
-        <DescriptionList isCompact isHorizontal>
-          <DescriptionListGroup>
-            <DescriptionListTerm>{t('Connection')}</DescriptionListTerm>
-            <DescriptionListDescription>
-              {settings?.openai_codex_connected ? t('Connected') : t('Not connected')}
-            </DescriptionListDescription>
-          </DescriptionListGroup>
-          {settings?.openai_codex_account_id ? (
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Account')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {settings.openai_codex_account_id}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          ) : null}
-          {settings?.openai_codex_plan_type ? (
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Plan')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {settings.openai_codex_plan_type}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          ) : null}
-          {settings?.provider === 'openai_codex' ? (
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Active provider')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {t('OpenAI Codex device login')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          ) : null}
-          {modelCatalog ? (
-            <>
+        <CodexActionRow data-cy="openai-codex-model-actions">
+          <Button
+            variant="secondary"
+            onClick={() => void refreshModels()}
+            isLoading={busy === 'models'}
+            isDisabled={busy !== null || !settings?.openai_codex_connected}
+          >
+            {t('Refresh Codex models')}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void setDefaultModel()}
+            isLoading={busy === 'setModel'}
+            isDisabled={busy !== null || !selectedModel}
+          >
+            {t('Set default model')}
+          </Button>
+        </CodexActionRow>
+
+        {deviceAuth ? (
+          <>
+            <CodexDescriptionList isCompact isHorizontal>
               <DescriptionListGroup>
-                <DescriptionListTerm>{t('Default model')}</DescriptionListTerm>
+                <DescriptionListTerm>{t('User code')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {modelCatalog.default_model || t('Not set')}
+                  <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                    {deviceAuth.user_code}
+                  </ClipboardCopy>
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
-                <DescriptionListTerm>{t('Model catalog')}</DescriptionListTerm>
+                <DescriptionListTerm>{t('Verification URL')}</DescriptionListTerm>
                 <DescriptionListDescription>
-                  {t('{{count}} models, {{source}} source', {
-                    count: modelCatalog.models.length,
-                    source: modelCatalog.source,
-                  })}
+                  <a
+                    href={deviceAuth.verification_uri_complete || deviceAuth.verification_uri}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-cy="openai-codex-verification-link"
+                  >
+                    {deviceAuth.verification_uri}
+                    <ExternalLinkAltIcon style={{ marginLeft: 6 }} />
+                  </a>
                 </DescriptionListDescription>
               </DescriptionListGroup>
-            </>
-          ) : null}
-        </DescriptionList>
-      )}
-
-      <FormGroup label={t('Codex default model')} fieldId="openai-codex-default-model">
-        <FormSelect
-          id="openai-codex-default-model"
-          value={selectedModel}
-          onChange={(_event, value) => setSelectedModel(String(value))}
-          isDisabled={busy !== null || !modelCatalog?.models.length}
-        >
-          {(modelCatalog?.models ?? []).map((model) => (
-            <FormSelectOption key={model} value={model} label={model} />
-          ))}
-        </FormSelect>
-      </FormGroup>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Button
-          variant="secondary"
-          onClick={() => void refreshModels()}
-          isLoading={busy === 'models'}
-          isDisabled={busy !== null || !settings?.openai_codex_connected}
-        >
-          {t('Refresh Codex models')}
-        </Button>
-        <Button
-          variant="primary"
-          onClick={() => void setDefaultModel()}
-          isLoading={busy === 'setModel'}
-          isDisabled={busy !== null || !selectedModel}
-        >
-          {t('Set default model')}
-        </Button>
-      </div>
-
-      {deviceAuth ? (
-        <>
-          <DescriptionList isCompact isHorizontal>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('User code')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                  {deviceAuth.user_code}
-                </ClipboardCopy>
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Verification URL')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                <a
-                  href={deviceAuth.verification_uri_complete || deviceAuth.verification_uri}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {deviceAuth.verification_uri}
-                  <ExternalLinkAltIcon style={{ marginLeft: 6 }} />
-                </a>
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          </DescriptionList>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button
-              variant="primary"
-              onClick={() => void pollDeviceLogin()}
-              isLoading={busy === 'poll'}
-              isDisabled={busy !== null}
-            >
-              {t('Check approval')}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setDeviceAuth(null)}
-              isDisabled={busy !== null}
-            >
-              {t('Cancel')}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <Button
-          variant="secondary"
-          onClick={() => void startDeviceLogin()}
-          isLoading={busy === 'start'}
-          isDisabled={busy !== null}
-        >
-          {t('Start OpenAI Codex device login')}
-        </Button>
-      )}
+            </CodexDescriptionList>
+            <CodexActionRow data-cy="openai-codex-device-actions">
+              <Button
+                variant="primary"
+                onClick={() => void pollDeviceLogin()}
+                isLoading={busy === 'poll'}
+                isDisabled={busy !== null}
+              >
+                {t('Check approval')}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setDeviceAuth(null)}
+                isDisabled={busy !== null}
+              >
+                {t('Cancel')}
+              </Button>
+            </CodexActionRow>
+          </>
+        ) : (
+          <Button
+            variant="secondary"
+            onClick={() => void startDeviceLogin()}
+            isLoading={busy === 'start'}
+            isDisabled={busy !== null}
+          >
+            {t('Start OpenAI Codex device login')}
+          </Button>
+        )}
+      </CodexDeviceLoginContent>
     </PageFormSection>
   );
 }
