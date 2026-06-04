@@ -86,6 +86,18 @@ describe('AIAssistantPanel', () => {
     });
   });
 
+  it('spaces assistant action buttons', () => {
+    mountAssistant();
+
+    cy.contains('button', 'Send').then(($send) => {
+      cy.contains('button', 'Plan changes').then(($plan) => {
+        const sendRect = $send[0].getBoundingClientRect();
+        const planRect = $plan[0].getBoundingClientRect();
+        expect(planRect.left - sendRect.right).to.be.gte(8);
+      });
+    });
+  });
+
   it('renders assistant markdown answers as formatted content', () => {
     cy.intercept('POST', '/api/v2/ai/chat/', {
       message: {

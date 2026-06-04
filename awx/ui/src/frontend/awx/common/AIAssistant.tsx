@@ -224,9 +224,13 @@ const AssistantInputArea = styled.div`
 
 const AssistantButtonGroup = styled(ActionGroup)`
   margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+
+  .pf-v5-c-form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+  }
 
   .pf-v5-c-button {
     max-width: 100%;
