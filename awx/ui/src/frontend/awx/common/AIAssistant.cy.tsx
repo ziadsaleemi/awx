@@ -351,6 +351,22 @@ describe('AIAssistantPanel', () => {
         },
         operations: [
           {
+            id: 'delete-playbook',
+            operation: 'delete',
+            resource_type: 'project_file',
+            valid: true,
+            errors: {},
+            object_id: 51,
+            project_id: 51,
+            path: 'playbooks/site.yml',
+            object: {
+              project: 51,
+              project_name: 'AI Content Project',
+              path: 'playbooks/site.yml',
+              deleted: true,
+            },
+          },
+          {
             id: 'delete-inventory',
             operation: 'delete',
             resource_type: 'inventory',
@@ -373,58 +389,63 @@ describe('AIAssistantPanel', () => {
     cy.getByDataCy('ai-resource-plan-apply').click();
     cy.wait('@applyResourceAction');
 
-    cy.getByDataCy('ai-resource-audit-link')
+    cy.get('[data-cy="ai-resource-audit-link"]')
       .should('contain.text', 'View Activity Stream #701')
       .and('have.attr', 'href', '/activity-stream?id=701');
-    cy.getByDataCy('ai-resource-object-link-create-inventory')
+    cy.get('[data-cy="ai-resource-object-link-create-inventory"]')
       .should('contain.text', 'View AI Managed Inventory')
       .and('have.attr', 'href', '/inventories/inventory/42/details');
-    cy.getByDataCy('ai-resource-object-link-create-smart-inventory')
+    cy.get('[data-cy="ai-resource-object-link-create-smart-inventory"]')
       .should('contain.text', 'View AI Smart Web Inventory')
       .and('have.attr', 'href', '/inventories/smart_inventory/43/details');
-    cy.getByDataCy('ai-resource-preview-summary-create-smart-inventory')
+    cy.get('[data-cy="ai-resource-preview-summary-create-smart-inventory"]')
       .should('contain.text', 'Matched hosts: 1 (web01)')
       .and('contain.text', 'Matched groups: 1 (webservers)');
-    cy.getByDataCy('ai-resource-object-link-create-constructed-inventory')
+    cy.get('[data-cy="ai-resource-object-link-create-constructed-inventory"]')
       .should('contain.text', 'View AI Constructed Inventory')
       .and('have.attr', 'href', '/inventories/constructed_inventory/44/details');
-    cy.getByDataCy('ai-resource-preview-summary-create-constructed-inventory')
+    cy.get('[data-cy="ai-resource-preview-summary-create-constructed-inventory"]')
       .should('contain.text', 'Input inventories: 1 (AI Managed Inventory)')
       .and('contain.text', 'Source hosts: 2 (web01, db01)')
       .and('contain.text', 'Source groups: 1 (webservers)')
       .and('contain.text', 'Source vars keys: compose, groups');
-    cy.getByDataCy('ai-resource-object-link-create-project')
+    cy.get('[data-cy="ai-resource-object-link-create-project"]')
       .should('contain.text', 'View AI Content Project')
       .and('have.attr', 'href', '/projects/51/details');
-    cy.getByDataCy('ai-resource-project-file-link-write-playbook')
+    cy.get('[data-cy="ai-resource-project-file-link-write-playbook"]')
       .should('contain.text', 'View project file: playbooks/site.yml')
       .and('have.attr', 'href', '/projects/51/details');
-    cy.getByDataCy('ai-resource-project-file-summary-write-playbook')
+    cy.get('[data-cy="ai-resource-project-file-summary-write-playbook"]')
       .should('contain.text', 'Project file: playbooks/site.yml')
       .and('contain.text', 'Content bytes: 86');
-    cy.getByDataCy('ai-resource-preview-summary-write-playbook')
+    cy.get('[data-cy="ai-resource-preview-summary-write-playbook"]')
       .should('contain.text', 'Project file: playbooks/site.yml')
       .and('contain.text', 'Content bytes: 86')
       .and('contain.text', 'Change: create');
-    cy.getByDataCy('ai-resource-object-link-create-job-template')
+    cy.get('[data-cy="ai-resource-object-link-create-job-template"]')
       .should('contain.text', 'View AI Generated Template')
       .and('have.attr', 'href', '/templates/job-template/61/details');
-    cy.getByDataCy('ai-resource-launch-link-create-job-template')
+    cy.get('[data-cy="ai-resource-launch-link-create-job-template"]')
       .should('contain.text', 'Launch job template')
       .and('have.attr', 'href', '/templates/job-template/61/launch');
-    cy.getByDataCy('ai-resource-object-link-create-workflow-template')
+    cy.get('[data-cy="ai-resource-object-link-create-workflow-template"]')
       .should('contain.text', 'View AI Generated Workflow')
       .and('have.attr', 'href', '/templates/workflow-job-template/71/details');
-    cy.getByDataCy('ai-resource-launch-link-create-workflow-template')
+    cy.get('[data-cy="ai-resource-launch-link-create-workflow-template"]')
       .should('contain.text', 'Launch workflow template')
       .and('have.attr', 'href', '/templates/workflow-job-template/71/launch');
-    cy.getByDataCy('ai-resource-rollback-plan').should('contain.text', 'delete-inventory');
+    cy.get('[data-cy="ai-resource-rollback-plan"]').should('contain.text', 'delete-inventory');
     cy.contains('button', 'Apply rollback').click();
     cy.wait('@applyResourceAction');
-    cy.getByDataCy('ai-resource-audit-link')
+    cy.get('[data-cy="ai-resource-audit-link"]')
       .should('contain.text', 'View Activity Stream #702')
       .and('have.attr', 'href', '/activity-stream?id=702');
-    cy.getByDataCy('ai-resource-plan').should('contain.text', 'delete inventory #42');
+    cy.get('[data-cy="ai-resource-plan"]:visible').should(
+      'contain.text',
+      'delete project file #51'
+    );
+    cy.get('[data-cy="ai-resource-project-file-link-delete-playbook"]').should('not.exist');
+    cy.get('[data-cy="ai-resource-plan"]:visible').should('contain.text', 'delete inventory #42');
     cy.contains('button', 'Apply rollback').should('not.exist');
   });
 });

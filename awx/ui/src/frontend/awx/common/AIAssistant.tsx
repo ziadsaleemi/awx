@@ -322,6 +322,7 @@ function getAIResourceLaunchLink(operation: AIResourceOperation): AIResourceDeta
 
 function getAIProjectFileLink(operation: AIResourceOperation): AIResourceDetailLink | null {
   if (operation.resource_type !== 'project_file') return null;
+  if (operation.operation === 'delete') return null;
 
   const object = operation.object ?? {};
   const projectId =
