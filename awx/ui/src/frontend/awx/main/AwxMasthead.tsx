@@ -37,6 +37,7 @@ import { WorkflowApproval } from '../interfaces/WorkflowApproval';
 import { AwxRoute } from './AwxRoutes';
 import { AwxGlobalSearch } from './AwxGlobalSearch';
 import { AwxSystemUsageBar } from './AwxSystemUsageBar';
+import { useAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotification';
 
 const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
@@ -47,6 +48,12 @@ export function AwxMasthead() {
   const config = useAwxConfig();
   const pageNavigate = usePageNavigate();
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canViewActivityStream = Boolean(
+    activeAwxUser?.is_superuser ||
+      activeAwxUser?.is_system_auditor ||
+      capabilities.canViewActivityStream
+  );
   useAwxNotifications();
   const { enabled: aiEnabled } = useAIAssistantEnabled();
   const [aiOpen, setAiOpen] = useState(false);
@@ -113,17 +120,19 @@ export function AwxMasthead() {
           <ToolbarItem>
             <PageNotificationsIcon />
           </ToolbarItem>
-          <ToolbarItem>
-            <Button
-              variant="plain"
-              aria-label={t('Activity Stream')}
-              title={t('Activity Stream')}
-              onClick={() => pageNavigate(AwxRoute.ActivityStream)}
-              data-cy="masthead-activity-stream"
-            >
-              <HistoryIcon />
-            </Button>
-          </ToolbarItem>
+          {canViewActivityStream && (
+            <ToolbarItem>
+              <Button
+                variant="plain"
+                aria-label={t('Activity Stream')}
+                title={t('Activity Stream')}
+                onClick={() => pageNavigate(AwxRoute.ActivityStream)}
+                data-cy="masthead-activity-stream"
+              >
+                <HistoryIcon />
+              </Button>
+            </ToolbarItem>
+          )}
           <ToolbarItem>
             <AwxSystemUsageBar />
           </ToolbarItem>

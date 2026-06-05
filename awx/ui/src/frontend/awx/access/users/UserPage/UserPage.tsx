@@ -22,6 +22,7 @@ import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxActiveUser } from '../../../common/useAwxActiveUser';
 import { AwxUser } from '../../../interfaces/User';
 import { AwxRoute } from '../../../main/AwxRoutes';
+import { useAwxNavigationCapabilities } from '../../../main/awxNavigationCapabilities';
 import { useViewActivityStream } from '../../common/useViewActivityStream';
 import { useDeleteUsers } from '../hooks/useDeleteUsers';
 
@@ -31,6 +32,15 @@ export function UserPage() {
   const { error, data: user, refresh } = useGetItem<AwxUser>(awxAPI`/users`, params.id);
   const pageNavigate = usePageNavigate();
   const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canAccessUsers = Boolean(
+    activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor || capabilities.canViewUsers
+  );
+  const canViewActivityStream = Boolean(
+    activeAwxUser?.is_superuser ||
+      activeAwxUser?.is_system_auditor ||
+      capabilities.canViewActivityStream
+  );
 
   const deleteUsers = useDeleteUsers((deleted: AwxUser[]) => {
     if (deleted.length > 0) {
@@ -40,7 +50,7 @@ export function UserPage() {
   const activityStream = useViewActivityStream('user');
   const itemActions: IPageAction<AwxUser>[] = useMemo(() => {
     const itemActions: IPageAction<AwxUser>[] = [
-      ...activityStream,
+      ...(canViewActivityStream ? activityStream : []),
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
@@ -48,6 +58,7 @@ export function UserPage() {
         isPinned: true,
         icon: PencilAltIcon,
         label: t('Edit user'),
+        isHidden: (user) => !user.summary_fields.user_capabilities.edit,
         onClick: (user) => pageNavigate(AwxRoute.EditUser, { params: { id: user.id } }),
       },
       { type: PageActionType.Seperator },
@@ -56,12 +67,13 @@ export function UserPage() {
         selection: PageActionSelection.Single,
         icon: TrashIcon,
         label: t('Delete user'),
+        isHidden: (user) => !user.summary_fields.user_capabilities.delete,
         onClick: (user) => deleteUsers([user]),
         isDanger: true,
       },
     ];
     return itemActions;
-  }, [t, pageNavigate, deleteUsers, activityStream]);
+  }, [t, pageNavigate, deleteUsers, activityStream, canViewActivityStream]);
 
   const getPageUrl = useGetPageUrl();
 
@@ -84,10 +96,11 @@ export function UserPage() {
     <PageLayout>
       <PageHeader
         title={user.username}
-        breadcrumbs={[
-          { label: t('Users'), to: getPageUrl(AwxRoute.Users) },
-          { label: user.username },
-        ]}
+        breadcrumbs={
+          canAccessUsers
+            ? [{ label: t('Users'), to: getPageUrl(AwxRoute.Users) }, { label: user.username }]
+            : [{ label: user.username }]
+        }
         headerActions={
           <PageActions<AwxUser>
             actions={itemActions}
@@ -97,11 +110,15 @@ export function UserPage() {
         }
       />
       <PageRoutedTabs
-        backTab={{
-          label: t('Back to Users'),
-          page: AwxRoute.Users,
-          persistentFilterKey: 'users',
-        }}
+        backTab={
+          canAccessUsers
+            ? {
+                label: t('Back to Users'),
+                page: AwxRoute.Users,
+                persistentFilterKey: 'users',
+              }
+            : undefined
+        }
         tabs={pageTabs}
         params={{ id: user.id }}
       />

@@ -53,6 +53,59 @@ import { useAwxTeamsRoutes } from './routes/useAwxTeamsRoutes';
 import { useAwxTemplateRoutes } from './routes/useAwxTemplateRoutes';
 import { useAwxUsersRoutes } from './routes/useAwxUsersRoutes';
 import { useAwxWorkflowApprovalRoutes } from './routes/useAwxWorkflowApprovalRoutes';
+import { useAwxNavigationCapabilities } from './awxNavigationCapabilities';
+
+function hasChildren(
+  item: PageNavigationItem
+): item is PageNavigationItem & { children: PageNavigationItem[] } {
+  return 'children' in item;
+}
+
+function filterRouteChildrenById(
+  route: PageNavigationItem,
+  allowedIds: Set<string>,
+  options: { keepChildrenWithoutId?: boolean } = {}
+) {
+  if (!hasChildren(route)) {
+    return route;
+  }
+  const keepChildrenWithoutId = options.keepChildrenWithoutId ?? true;
+  return {
+    ...route,
+    children: route.children.filter((child) =>
+      child.id ? allowedIds.has(child.id) : keepChildrenWithoutId
+    ),
+  };
+}
+
+export function filterCatalogRoutesByPermissions(
+  catalogRoutes: PageNavigationItem,
+  canManageCatalog: boolean
+) {
+  if (canManageCatalog) {
+    return catalogRoutes;
+  }
+  return filterRouteChildrenById(
+    catalogRoutes,
+    new Set([AwxRoute.CatalogItems, AwxRoute.CatalogDeploy, AwxRoute.CatalogDeployments])
+  );
+}
+
+export function profileRoutesOnly(userRoutes: PageNavigationItem) {
+  return {
+    ...filterRouteChildrenById(
+      userRoutes,
+      new Set([
+        AwxRoute.EditUser,
+        AwxRoute.UserPage,
+        AwxRoute.CreateUserToken,
+        AwxRoute.UserTokenPage,
+      ]),
+      { keepChildrenWithoutId: false }
+    ),
+    hidden: true,
+  };
+}
 
 export function useAwxNavigation() {
   const { t } = useTranslation();
@@ -80,6 +133,7 @@ export function useAwxNavigation() {
   const awxExecutionEnvironmentsRoutes = useAwxExecutionEnvironmentRoutes();
   const awxCredentialTypesRoutes = useAwxCredentialTypesRoutes();
   const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
 
   const overview: PageNavigationItem[] = [
     {
@@ -426,6 +480,84 @@ export function useAwxNavigation() {
       ],
     },
   ];
+
+  const profileItems = [profileRoutesOnly(awxUsersRoutes)];
+  const isSystemUser = Boolean(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor);
+
+  if (activeAwxUser && !isSystemUser) {
+    const permissionInfrastructureChildren = [
+      ...(capabilities.canViewInventory ? [awxInventoryRoutes, awxHostRoutes] : []),
+      ...(capabilities.canViewInstanceGroups ? [awxInstanceGroupsRoutes] : []),
+      ...(capabilities.canViewExecutionEnvironments ? [awxExecutionEnvironmentsRoutes] : []),
+    ];
+    const permissionInfrastructureItems: PageNavigationItem[] =
+      permissionInfrastructureChildren.length > 0
+        ? [
+            {
+              id: AwxRoute.Infrastructure,
+              label: t('Infrastructure'),
+              path: 'infrastructure',
+              icon: <ServerIcon />,
+              children: permissionInfrastructureChildren,
+            },
+          ]
+        : [];
+
+    const permissionAdministrationChildren = [
+      ...(capabilities.canViewActivityStream ? [awxActivityStreamRoutes] : []),
+      ...(capabilities.canApproveWorkflows ? [awxWorkflowApprovalRoutes] : []),
+    ];
+    const permissionAdministrationItems: PageNavigationItem[] =
+      permissionAdministrationChildren.length > 0
+        ? [
+            {
+              id: AwxRoute.Administration,
+              label: t('Administration'),
+              path: 'administration',
+              icon: <CogIcon />,
+              children: permissionAdministrationChildren,
+            },
+          ]
+        : [];
+
+    const permissionAccessChildren = [
+      ...(capabilities.canViewOrganizations ? [awxOrganizationRoutes] : []),
+      ...(capabilities.canViewTeams ? [awxTeamsRoutes] : []),
+      ...(capabilities.canViewUsers ? [awxUsersRoutes] : []),
+      ...(capabilities.canViewCredentials ? [awxCredentialRoutes] : []),
+    ];
+    const permissionAccessItems: PageNavigationItem[] =
+      permissionAccessChildren.length > 0
+        ? [
+            {
+              id: AwxRoute.Access,
+              label: t('Access Management'),
+              path: 'access',
+              icon: <UsersIcon />,
+              children: permissionAccessChildren,
+            },
+          ]
+        : [];
+
+    return [
+      ...overview,
+      awxJobsRoutes,
+      ...(capabilities.canViewTemplates ? [awxTemplateRoutes, awxTerraformRoutes] : []),
+      ...(capabilities.canViewSchedules ? [awxSchedulesRoutes] : []),
+      ...(capabilities.canViewProjects ? [awxProjectRoutes] : []),
+      ...(capabilities.canViewCatalog
+        ? [filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog)]
+        : []),
+      ...permissionInfrastructureItems,
+      ...permissionAdministrationItems,
+      ...permissionAccessItems,
+      ...(capabilities.canViewUsers ? [] : profileItems),
+      {
+        path: '',
+        element: <Navigate to="./overview" replace />,
+      },
+    ];
+  }
 
   const navigationItems = [
     ...overview,
