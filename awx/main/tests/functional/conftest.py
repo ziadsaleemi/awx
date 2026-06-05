@@ -47,7 +47,7 @@ from awx.main.models.events import (
 from awx.main.models.workflow import WorkflowJobTemplate
 from awx.main.models.ad_hoc_commands import AdHocCommand
 from awx.main.models.execution_environments import ExecutionEnvironment
-from awx.main.models.catalog import CatalogItem
+from awx.main.models.catalog import CatalogItem, CloudProviderConnection, CloudProviderState
 from awx.main.models.terraform import TerraformJobTemplate
 from awx.main.utils import is_testing
 
@@ -265,6 +265,16 @@ def organization():
 @pytest.fixture
 def catalog_item(organization):
     return CatalogItem.objects.create(name="test-catalog-item", organization=organization)
+
+
+@pytest.fixture
+def cloud_provider_connection(organization):
+    return CloudProviderConnection.objects.create(provider_id="digitalocean", name="test-cloud-connection", organization=organization)
+
+
+@pytest.fixture
+def cloud_provider_state(organization):
+    return CloudProviderState.objects.create(provider_id="digitalocean", organization=organization)
 
 
 @pytest.fixture

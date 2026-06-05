@@ -268,6 +268,8 @@ permission_registry.register(
     JobTemplate,
     TerraformJobTemplate,
     CatalogItem,
+    CloudProviderConnection,
+    CloudProviderState,
     Inventory,
     Organization,
     Credential,

@@ -59,6 +59,35 @@ def test_catalog_persona_roles(setup_managed_roles):
 
 
 @pytest.mark.django_db
+def test_cloud_persona_roles(setup_managed_roles):
+    user_rd = RoleDefinition.objects.get(name='Organization Cloud User')
+    user_codenames = set(user_rd.permissions.values_list('codename', flat=True))
+    assert {'view_organization', 'view_cloudproviderconnection', 'view_cloudproviderstate'}.issubset(user_codenames)
+    assert {
+        'add_cloudproviderconnection',
+        'change_cloudproviderconnection',
+        'delete_cloudproviderconnection',
+        'add_cloudproviderstate',
+        'change_cloudproviderstate',
+        'delete_cloudproviderstate',
+    }.isdisjoint(user_codenames)
+
+    admin_rd = RoleDefinition.objects.get(name='Organization Cloud Admin')
+    admin_codenames = set(admin_rd.permissions.values_list('codename', flat=True))
+    assert {
+        'view_organization',
+        'add_cloudproviderconnection',
+        'change_cloudproviderconnection',
+        'delete_cloudproviderconnection',
+        'view_cloudproviderconnection',
+        'add_cloudproviderstate',
+        'change_cloudproviderstate',
+        'delete_cloudproviderstate',
+        'view_cloudproviderstate',
+    }.issubset(admin_codenames)
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('resource_name', ['Team', 'Organization'])
 @pytest.mark.parametrize('action', ['Member', 'Admin'])
 def test_legacy_RBAC_uses_platform_roles(setup_managed_roles, resource_name, action, team, bob, organization):

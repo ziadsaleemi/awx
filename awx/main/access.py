@@ -2002,31 +2002,47 @@ class CloudProviderConnectionAccess(BaseAccess):
             return False
         return self.check_related('credential', Credential, data or {}, role_field='admin_role', obj=obj, mandatory=True)
 
+    def _readable_org_ids(self):
+        return Organization.objects.filter(
+            Q(pk__in=Organization.accessible_objects(self.user, 'admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_user_role').values('pk'))
+        ).values('pk')
+
+    def _manageable_org_ids(self):
+        return Organization.objects.filter(
+            Q(pk__in=Organization.accessible_objects(self.user, 'admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_admin_role').values('pk'))
+        ).values('pk')
+
     def filtered_queryset(self):
         if self.user.is_superuser:
             return CloudProviderConnection.objects.all()
         if self.user.is_system_auditor:
             return CloudProviderConnection.objects.all()
-        admin_orgs = Organization.accessible_objects(self.user, 'admin_role')
-        return CloudProviderConnection.objects.filter(organization__in=admin_orgs).distinct()
+        return CloudProviderConnection.objects.filter(
+            Q(organization_id__in=self._readable_org_ids()) | Q(read_role__members=self.user) | Q(admin_role__members=self.user)
+        ).distinct()
 
     @check_superuser
     def can_add(self, data):
         if data is None:
-            return Organization.accessible_objects(self.user, 'admin_role').exists()
+            return Organization.objects.filter(pk__in=self._manageable_org_ids()).exists()
         org_id = data.get('organization')
         if not org_id:
             return self._can_manage_global_connection_credential(data=data)
-        return Organization.accessible_objects(self.user, 'admin_role').filter(pk=org_id).exists() and self.check_related(
+        return Organization.objects.filter(pk__in=self._manageable_org_ids(), pk=org_id).exists() and self.check_related(
             'credential', Credential, data, role_field='use_role', mandatory=False
         )
 
     def can_change(self, obj, data):
         if self.user.is_superuser:
             return True
+        if self.user in obj.admin_role:
+            return True
         if obj.organization_id is None:
             return self._can_manage_global_connection_credential(data=data, obj=obj)
-        if not Organization.accessible_objects(self.user, 'admin_role').filter(pk=obj.organization_id).exists():
+        if not Organization.objects.filter(pk__in=self._manageable_org_ids(), pk=obj.organization_id).exists():
             return False
         if data is None:
             return True
@@ -2056,24 +2072,38 @@ class CloudProviderStateAccess(BaseAccess):
     def filtered_queryset(self):
         if self.user.is_superuser or self.user.is_system_auditor:
             return CloudProviderState.objects.all()
-        admin_orgs = Organization.accessible_objects(self.user, 'admin_role')
-        return CloudProviderState.objects.filter(organization__in=admin_orgs).distinct()
+        readable_org_ids = Organization.objects.filter(
+            Q(pk__in=Organization.accessible_objects(self.user, 'admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_user_role').values('pk'))
+        ).values('pk')
+        return CloudProviderState.objects.filter(
+            Q(organization_id__in=readable_org_ids) | Q(read_role__members=self.user) | Q(admin_role__members=self.user)
+        ).distinct()
+
+    def _manageable_org_ids(self):
+        return Organization.objects.filter(
+            Q(pk__in=Organization.accessible_objects(self.user, 'admin_role').values('pk'))
+            | Q(pk__in=Organization.accessible_objects(self.user, 'cloud_admin_role').values('pk'))
+        ).values('pk')
 
     @check_superuser
     def can_add(self, data):
         if data is None:
-            return Organization.accessible_objects(self.user, 'admin_role').exists()
+            return Organization.objects.filter(pk__in=self._manageable_org_ids()).exists()
         org_id = data.get('organization')
         if not org_id:
             return False
-        return Organization.accessible_objects(self.user, 'admin_role').filter(pk=org_id).exists()
+        return Organization.objects.filter(pk__in=self._manageable_org_ids(), pk=org_id).exists()
 
     def can_change(self, obj, data):
         if self.user.is_superuser:
             return True
+        if self.user in obj.admin_role:
+            return True
         if obj.organization_id is None:
             return False
-        return Organization.accessible_objects(self.user, 'admin_role').filter(pk=obj.organization_id).exists()
+        return Organization.objects.filter(pk__in=self._manageable_org_ids(), pk=obj.organization_id).exists()
 
     def can_delete(self, obj):
         return self.user.is_superuser

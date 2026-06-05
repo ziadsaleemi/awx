@@ -10,6 +10,8 @@ export type AwxRoleMetadaContentType = {
 
 export enum AwxContentTypes {
   CatalogItem = 'awx.catalogitem',
+  CloudProviderConnection = 'awx.cloudproviderconnection',
+  CloudProviderState = 'awx.cloudproviderstate',
   Credential = 'awx.credential',
   ExecutionEnvironement = 'awx.executionenvironment',
   InstanceGroup = 'awx.instancegroup',
@@ -41,6 +43,24 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
             'awx.change_catalogitem': t('Change catalog item'),
             'awx.delete_catalogitem': t('Delete catalog item'),
             'awx.view_catalogitem': t('View catalog item'),
+          },
+        },
+        'awx.cloudproviderconnection': {
+          displayName: t('Cloud provider connection'),
+          permissions: {
+            'awx.add_cloudproviderconnection': t('Add cloud provider connection'),
+            'awx.change_cloudproviderconnection': t('Change cloud provider connection'),
+            'awx.delete_cloudproviderconnection': t('Delete cloud provider connection'),
+            'awx.view_cloudproviderconnection': t('View cloud provider connection'),
+          },
+        },
+        'awx.cloudproviderstate': {
+          displayName: t('Cloud provider state'),
+          permissions: {
+            'awx.add_cloudproviderstate': t('Add cloud provider state'),
+            'awx.change_cloudproviderstate': t('Change cloud provider state'),
+            'awx.delete_cloudproviderstate': t('Delete cloud provider state'),
+            'awx.view_cloudproviderstate': t('View cloud provider state'),
           },
         },
         'awx.credential': {
@@ -155,6 +175,14 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
             'awx.change_catalogitem': t('Change catalog item'),
             'awx.delete_catalogitem': t('Delete catalog item'),
             'awx.view_catalogitem': t('View catalog item'),
+            'awx.add_cloudproviderconnection': t('Add cloud provider connection'),
+            'awx.change_cloudproviderconnection': t('Change cloud provider connection'),
+            'awx.delete_cloudproviderconnection': t('Delete cloud provider connection'),
+            'awx.view_cloudproviderconnection': t('View cloud provider connection'),
+            'awx.add_cloudproviderstate': t('Add cloud provider state'),
+            'awx.change_cloudproviderstate': t('Change cloud provider state'),
+            'awx.delete_cloudproviderstate': t('Delete cloud provider state'),
+            'awx.view_cloudproviderstate': t('View cloud provider state'),
           },
         },
         'awx.project': {

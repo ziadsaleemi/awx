@@ -153,7 +153,10 @@ def get_permissions_for_role(role_field, children_map, apps):
 
     # more special cases for those same above special org-level roles
     if role_field.name == 'auditor_role':
-        perm_list.append(Permission.objects.get(codename='view_notificationtemplate'))
+        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate'):
+            perm = Permission.objects.filter(codename=codename).first()
+            if perm is not None and perm not in perm_list:
+                perm_list.append(perm)
 
     return perm_list
 
@@ -487,6 +490,42 @@ def setup_managed_role_definitions(apps, schema_editor):
             'Has permission to manage catalog items within a single organization',
             org_ct,
             [perm for perm in org_perms if perm.codename in org_catalog_admin_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_cloud_user_permissions = {
+        'view_organization',
+        'view_cloudproviderconnection',
+        'view_cloudproviderstate',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Cloud User',
+            'Has permission to view cloud provider connections and state within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_cloud_user_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_cloud_admin_permissions = {
+        'view_organization',
+        'add_cloudproviderconnection',
+        'change_cloudproviderconnection',
+        'delete_cloudproviderconnection',
+        'view_cloudproviderconnection',
+        'add_cloudproviderstate',
+        'change_cloudproviderstate',
+        'delete_cloudproviderstate',
+        'view_cloudproviderstate',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Cloud Admin',
+            'Has permission to manage cloud provider connections and state within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_cloud_admin_permissions],
             RoleDefinition,
         )
     )

@@ -64,6 +64,8 @@ role_names = {
     'notification_admin_role': _('Notification Admin'),
     'catalog_admin_role': _('Catalog Admin'),
     'catalog_user_role': _('Catalog User'),
+    'cloud_admin_role': _('Cloud Admin'),
+    'cloud_user_role': _('Cloud User'),
     'auditor_role': _('Auditor'),
     'execute_role': _('Execute'),
     'member_role': _('Member'),
@@ -87,6 +89,8 @@ role_descriptions = {
     'notification_admin_role': _('Can manage all notifications of the %s'),
     'catalog_admin_role': _('Can manage all catalog items of the %s'),
     'catalog_user_role': _('Can browse and deploy catalog items of the %s'),
+    'cloud_admin_role': _('Can manage all cloud provider connections and state for the %s'),
+    'cloud_user_role': _('Can view cloud provider connections and state for the %s'),
     'auditor_role': _('Can view all aspects of the %s'),
     'execute_role': {
         'organization': _('May run any executable resources in the organization'),
@@ -568,9 +572,20 @@ def get_role_definition(role):
         except RoleDefinition.DoesNotExist:
             pass
 
+    preferred_cloud_object_role = {
+        'admin_role': f'{type(obj).__name__} Admin',
+    }.get(role.role_field)
+    if obj._meta.model_name in ('cloudproviderconnection', 'cloudproviderstate') and preferred_cloud_object_role:
+        try:
+            return RoleDefinition.objects.get(name=preferred_cloud_object_role)
+        except RoleDefinition.DoesNotExist:
+            pass
+
     preferred_managed_role = {
         'catalog_admin_role': 'Organization Catalog Admin',
         'catalog_user_role': 'Organization Catalog User',
+        'cloud_admin_role': 'Organization Cloud Admin',
+        'cloud_user_role': 'Organization Cloud User',
     }.get(role.role_field)
     if obj._meta.model_name == 'organization' and preferred_managed_role:
         try:
@@ -636,6 +651,8 @@ def get_role_from_object_role(object_role):
         role_name = 'admin_role'
     elif rd.name == 'Organization Audit':
         role_name = 'auditor_role'
+    elif rd.name.endswith(' Creator') and hasattr(object_role.content_object, 'admin_role'):
+        role_name = 'admin_role'
     else:
         model_name, role_name = rd.name.split()
         role_name = role_name.lower()
@@ -798,6 +815,12 @@ ROLE_DEFINITION_TO_ROLE_FIELD = {
     'Organization Catalog Admin': 'catalog_admin_role',
     'Organization Catalog User': 'catalog_user_role',
     'Organization CatalogItem Admin': 'catalog_admin_role',
+    'Organization Cloud Admin': 'cloud_admin_role',
+    'Organization Cloud User': 'cloud_user_role',
+    'Organization CloudProviderConnection Admin': 'cloud_admin_role',
+    'Organization CloudProviderState Admin': 'cloud_admin_role',
+    'CloudProviderConnection Admin': 'admin_role',
+    'CloudProviderState Admin': 'admin_role',
     'CatalogItem Admin': 'admin_role',
     'CatalogItem Use': 'use_role',
 }

@@ -6081,11 +6081,28 @@ class CatalogDeploymentCancel(GenericAPIView):
 
 
 def _cloud_admin_orgs(user):
-    return models.Organization.accessible_objects(user, 'admin_role')
+    return models.Organization.objects.filter(
+        Q(pk__in=models.Organization.accessible_objects(user, 'admin_role').values('pk'))
+        | Q(pk__in=models.Organization.accessible_objects(user, 'cloud_admin_role').values('pk'))
+    ).distinct()
+
+
+def _cloud_read_orgs(user):
+    return models.Organization.objects.filter(
+        Q(pk__in=models.Organization.accessible_objects(user, 'admin_role').values('pk'))
+        | Q(pk__in=models.Organization.accessible_objects(user, 'cloud_admin_role').values('pk'))
+        | Q(pk__in=models.Organization.accessible_objects(user, 'cloud_user_role').values('pk'))
+    ).distinct()
 
 
 def _user_can_read_cloud(user):
-    return bool(user.is_superuser or user.is_system_auditor or _cloud_admin_orgs(user).exists())
+    return bool(
+        user.is_superuser
+        or user.is_system_auditor
+        or _cloud_read_orgs(user).exists()
+        or models.CloudProviderConnection.objects.filter(Q(read_role__members=user) | Q(admin_role__members=user)).exists()
+        or models.CloudProviderState.objects.filter(Q(read_role__members=user) | Q(admin_role__members=user)).exists()
+    )
 
 
 def _user_can_manage_cloud(user):
@@ -6101,15 +6118,15 @@ def _get_request_organization_id(request):
     )
 
 
-def _resolve_cloud_organization(request, allow_auditor=False):
+def _resolve_cloud_organization(request, allow_auditor=False, require_manage=True):
+    orgs = _cloud_admin_orgs(request.user) if require_manage else _cloud_read_orgs(request.user)
     raw_org_id = _get_request_organization_id(request)
     if raw_org_id in (None, ''):
         if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
             return None
-        admin_orgs = _cloud_admin_orgs(request.user)
-        count = admin_orgs.count()
+        count = orgs.count()
         if count == 1:
-            return admin_orgs.first()
+            return orgs.first()
         if count == 0:
             raise PermissionDenied(_('You do not have permission to manage cloud provider state.'))
         raise ParseError(_('Organization is required because the user administers multiple organizations.'))
@@ -6122,7 +6139,7 @@ def _resolve_cloud_organization(request, allow_auditor=False):
     organization = get_object_or_400(models.Organization, pk=org_id)
     if request.user.is_superuser or (allow_auditor and request.user.is_system_auditor):
         return organization
-    if not _cloud_admin_orgs(request.user).filter(pk=organization.pk).exists():
+    if not orgs.filter(pk=organization.pk).exists():
         raise PermissionDenied(_('You do not have permission to manage cloud resources for this organization.'))
     return organization
 
@@ -6253,7 +6270,7 @@ class CloudProviderStateDetail(GenericAPIView):
     def get(self, request, provider_id, *args, **kwargs):
         if not _user_can_read_cloud(request.user):
             raise PermissionDenied(_('You do not have permission to view provider state.'))
-        organization = _resolve_cloud_organization(request, allow_auditor=True)
+        organization = _resolve_cloud_organization(request, allow_auditor=True, require_manage=False)
         obj = self._get_or_create(provider_id, organization)
         serializer = self.get_serializer(obj)
         return Response(serializer.data)

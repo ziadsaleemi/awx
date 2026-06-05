@@ -1,5 +1,7 @@
 export enum ContentTypeEnum {
   CatalogItem = 'awx.catalogitem',
+  CloudProviderConnection = 'awx.cloudproviderconnection',
+  CloudProviderState = 'awx.cloudproviderstate',
   Credential = 'awx.credential',
   ExecutionEnvironement = 'awx.executionenvironment',
   InstanceGroup = 'awx.instancegroup',

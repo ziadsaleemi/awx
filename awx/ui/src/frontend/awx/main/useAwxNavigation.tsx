@@ -553,6 +553,7 @@ export function useAwxNavigation() {
       ...(capabilities.canViewCatalog
         ? [filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog)]
         : []),
+      ...(capabilities.canViewCloud ? [awxCloudRoutes] : []),
       ...permissionInfrastructureItems,
       ...permissionAdministrationItems,
       ...permissionAccessItems,

@@ -32,6 +32,8 @@ export function AwxSelectRolesStep(props: {
     switch (resourceType as string) {
       case 'awx.credential':
         return t('Select roles to apply to all of your selected credentials.');
+      case 'awx.cloudproviderconnection':
+        return t('Select roles to apply to all of your selected cloud provider connections.');
       case 'awx.instancegroup':
         return t('Select roles to apply to all of your selected instance groups.');
       case 'awx.inventory':

@@ -93,6 +93,12 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
     catalog_user_role = ImplicitRoleField(
         parent_role='catalog_admin_role',
     )
+    cloud_admin_role = ImplicitRoleField(
+        parent_role='admin_role',
+    )
+    cloud_user_role = ImplicitRoleField(
+        parent_role='cloud_admin_role',
+    )
     execution_environment_admin_role = ImplicitRoleField(
         parent_role='admin_role',
     )
@@ -113,6 +119,8 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
             'job_template_admin_role',
             'approval_role',
             'execution_environment_admin_role',
+            'cloud_admin_role',
+            'cloud_user_role',
         ],
     )
     approval_role = ImplicitRoleField(

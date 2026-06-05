@@ -6,6 +6,20 @@ import { awxAPI } from '../../../common/api/awx-utils';
 
 type ContentTypeOption = [string, string];
 
+const supportedAwxResourceContentTypes = new Set([
+  'awx.catalogitem',
+  'awx.cloudproviderconnection',
+  'awx.credential',
+  'awx.executionenvironment',
+  'awx.instancegroup',
+  'awx.inventory',
+  'awx.jobtemplate',
+  'awx.notificationtemplate',
+  'awx.project',
+  'awx.terraformjobtemplate',
+  'awx.workflowjobtemplate',
+]);
+
 export function AwxSelectResourceTypeStep() {
   const { t } = useTranslation();
   const { wizardData, setStepData, setWizardData } = usePageWizard();
@@ -24,7 +38,7 @@ export function AwxSelectResourceTypeStep() {
       label={t('Resource type')}
       name="resourceType"
       options={options
-        .filter(([value, _]) => value?.startsWith('awx.'))
+        .filter(([value, _]) => supportedAwxResourceContentTypes.has(value))
         .map(([value, display_name]) => ({
           value,
           label: display_name,

@@ -15,6 +15,8 @@ Covers:
 
 import pytest
 
+from ansible_base.rbac.models import RoleDefinition
+
 from awx.api.versioning import reverse
 from awx.main.models import CatalogDeployment, CatalogItem, Credential, CredentialType, Organization
 from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
@@ -671,6 +673,83 @@ def test_do_cloud_provider_connection_not_accessible_by_non_admin(get, rando):
     """Non-admin cannot list cloud provider connections."""
     url = reverse('api:catalog_cloud_connection_list')
     get(url, rando, expect=403)
+
+
+@pytest.mark.django_db
+def test_cloud_user_persona_can_read_org_cloud_only(get, post, patch, rando, organization, setup_managed_roles):
+    """Organization Cloud User can read cloud rows for one org but cannot mutate them."""
+    other_org = Organization.objects.create(name='Other Cloud User Org')
+    own_connection = CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Own Cloud User Connection',
+        status='connected',
+        organization=organization,
+    )
+    CloudProviderConnection.objects.create(
+        provider_id='digitalocean',
+        name='Other Cloud User Connection',
+        status='connected',
+        organization=other_org,
+    )
+    state = CloudProviderState.objects.create(
+        provider_id='digitalocean',
+        organization=organization,
+        provider_data=DO_PROVIDER_DATA,
+        admin_settings=DO_ADMIN_SETTINGS,
+    )
+
+    RoleDefinition.objects.get(name='Organization Cloud User').give_permission(rando, organization)
+
+    response = get(reverse('api:catalog_cloud_connection_list'), rando, expect=200)
+    assert [entry['id'] for entry in response.data['results']] == [own_connection.pk]
+
+    state_response = get(
+        f"{reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})}?organization={organization.pk}",
+        rando,
+        expect=200,
+    )
+    assert state_response.data['id'] == state.pk
+
+    post(
+        reverse('api:catalog_cloud_connection_list'),
+        {'provider_id': 'digitalocean', 'name': 'Denied', 'organization': organization.pk},
+        rando,
+        expect=403,
+    )
+    patch(
+        f"{reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})}?organization={organization.pk}",
+        {'admin_settings': {'allowedSizeSlugs': ['s-2vcpu-2gb']}},
+        rando,
+        expect=403,
+    )
+
+
+@pytest.mark.django_db
+def test_cloud_admin_persona_can_manage_org_cloud(post, patch, rando, organization, setup_managed_roles):
+    """Organization Cloud Admin can create connections and update provider state inside that org."""
+    RoleDefinition.objects.get(name='Organization Cloud Admin').give_permission(rando, organization)
+
+    connection_response = post(
+        reverse('api:catalog_cloud_connection_list'),
+        {
+            'provider_id': 'digitalocean',
+            'name': 'Cloud Admin Connection',
+            'status': 'connected',
+            'organization': organization.pk,
+        },
+        rando,
+        expect=201,
+    )
+    assert connection_response.data['organization'] == organization.pk
+
+    state_response = patch(
+        f"{reverse('api:catalog_cloud_provider_state_detail', kwargs={'provider_id': 'digitalocean'})}?organization={organization.pk}",
+        {'admin_settings': {'allowedSizeSlugs': ['s-2vcpu-2gb']}},
+        rando,
+        expect=200,
+    )
+    assert state_response.data['organization'] == organization.pk
+    assert state_response.data['admin_settings']['allowedSizeSlugs'] == ['s-2vcpu-2gb']
 
 
 @pytest.mark.django_db

@@ -141,6 +141,8 @@ org_role_to_permission = {
     'execution_environment_admin_role': 'add_executionenvironment',
     'catalog_admin_role': 'change_catalogitem',
     'catalog_user_role': 'use_catalogitem',
+    'cloud_admin_role': 'change_cloudproviderconnection',
+    'cloud_user_role': 'view_cloudproviderconnection',
     'auditor_role': 'view_project',  # TODO: also doesnt really work
 }
 

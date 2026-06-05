@@ -437,6 +437,12 @@ class CloudProviderConnection(models.Model):
         help_text=_('Organization this connection belongs to.'),
     )
     updated_at = models.DateTimeField(auto_now=True)
+    admin_role = ImplicitRoleField(
+        parent_role=['organization.cloud_admin_role'],
+    )
+    read_role = ImplicitRoleField(
+        parent_role=['admin_role', 'organization.cloud_user_role'],
+    )
 
     def get_absolute_url(self, request=None):
         return reverse('api:catalog_cloud_connection_detail', kwargs={'pk': self.pk}, request=request)
@@ -497,6 +503,12 @@ class CloudProviderState(models.Model):
         blank=True,
         default=None,
         help_text=_('General provider settings (allow template pull, allowed networks, etc.).'),
+    )
+    admin_role = ImplicitRoleField(
+        parent_role=['organization.cloud_admin_role'],
+    )
+    read_role = ImplicitRoleField(
+        parent_role=['admin_role', 'organization.cloud_user_role'],
     )
 
     def get_absolute_url(self, request=None):

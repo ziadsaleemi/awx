@@ -61,9 +61,11 @@ class TestNewToOld:
         [
             ('Organization Catalog User', 'catalog_user_role'),
             ('Organization Catalog Admin', 'catalog_admin_role'),
+            ('Organization Cloud User', 'cloud_user_role'),
+            ('Organization Cloud Admin', 'cloud_admin_role'),
         ],
     )
-    def test_new_to_old_catalog_persona_addition(self, admin, post, organization, bob, setup_managed_roles, role_definition_name, role_field):
+    def test_new_to_old_organization_persona_addition(self, admin, post, organization, bob, setup_managed_roles, role_definition_name, role_field):
         rd = RoleDefinition.objects.get(name=role_definition_name)
 
         url = get_relative_url('roleuserassignment-list')

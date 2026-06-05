@@ -18,8 +18,14 @@ import { Project } from '../../../interfaces/Project';
 import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 
+interface CloudProviderConnectionResource {
+  id: number;
+  name: string;
+}
+
 export type AwxResourceType =
   | CatalogItem
+  | CloudProviderConnectionResource
   | Credential
   | ExecutionEnvironment
   | InstanceGroup
@@ -32,6 +38,7 @@ export type AwxResourceType =
 
 const resourceToEndpointMapping: { [key: string]: string } = {
   'awx.catalogitem': awxAPI`/catalog_items/`,
+  'awx.cloudproviderconnection': awxAPI`/catalog_cloud/connections/`,
   'awx.credential': awxAPI`/credentials/`,
   'awx.executionenvironment': awxAPI`/execution_environments/`,
   'awx.instancegroup': awxAPI`/instance_groups/`,
@@ -56,6 +63,7 @@ export function AwxSelectResourcesStep() {
   const resourceToTitleMapping = useMemo<{ [key: string]: string }>(() => {
     return {
       'awx.credential': t('Select credentials'),
+      'awx.cloudproviderconnection': t('Select cloud provider connections'),
       'awx.executionenvironment': t('Select execution environments'),
       'awx.instancegroup': t('Select instance groups'),
       'awx.inventory': t('Select inventories'),

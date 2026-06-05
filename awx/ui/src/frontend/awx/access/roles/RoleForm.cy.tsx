@@ -34,6 +34,38 @@ describe('AwxRoleForm', () => {
       });
   });
 
+  it('sends cloud provider connection permissions when creating a custom role', () => {
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        id: 103,
+        name: 'Cloud connection operator',
+        content_type: 'awx.cloudproviderconnection',
+        permissions: ['awx.view_cloudproviderconnection', 'awx.change_cloudproviderconnection'],
+      },
+    }).as('createCloudRole');
+
+    cy.mount(<CreateRole />);
+    cy.get('[data-cy="name"]').type('Cloud connection operator');
+    cy.get('[data-cy="description"]').type('Can operate cloud connections');
+    cy.selectDropdownOptionByResourceName('content-type', 'Cloud provider connection');
+    cy.get('#permissions').click();
+    cy.selectMultiSelectOption('#permissions-select', 'View cloud provider connection');
+    cy.selectMultiSelectOption('#permissions-select', 'Change cloud provider connection');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@createCloudRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('Cloud connection operator');
+        expect(role.content_type).to.equal('awx.cloudproviderconnection');
+        expect(role.permissions).to.deep.equal([
+          'awx.view_cloudproviderconnection',
+          'awx.change_cloudproviderconnection',
+        ]);
+      });
+  });
+
   it('copies a built-in role into a custom role payload', () => {
     cy.intercept('GET', awxAPI`/role_definitions/1/`, mockAwxBuiltInRole);
     cy.intercept('POST', awxAPI`/role_definitions/`, {

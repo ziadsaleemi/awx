@@ -24,6 +24,23 @@ describe('AWX navigation capabilities', () => {
     expect(capabilities.canViewCredentials).to.equal(false);
     expect(capabilities.canViewUsers).to.equal(false);
     expect(capabilities.canViewActivityStream).to.equal(false);
+    expect(capabilities.canViewCloud).to.equal(false);
+  });
+
+  it('maps cloud permissions to cloud navigation capability', () => {
+    const cloudUserCapabilities = buildAwxNavigationCapabilities([
+      'awx.view_cloudproviderconnection',
+      'awx.view_cloudproviderstate',
+    ]);
+    const cloudAdminCapabilities = buildAwxNavigationCapabilities([
+      'awx.change_cloudproviderconnection',
+      'awx.change_cloudproviderstate',
+    ]);
+
+    expect(cloudUserCapabilities.canViewCloud).to.equal(true);
+    expect(cloudUserCapabilities.canManageCloud).to.equal(false);
+    expect(cloudAdminCapabilities.canViewCloud).to.equal(true);
+    expect(cloudAdminCapabilities.canManageCloud).to.equal(true);
   });
 
   it('maps object permission codenames to resource navigation capabilities', () => {
