@@ -64,7 +64,6 @@ from awx.main.models import (
     SystemJobEvent,
     SystemJobTemplate,
     Team,
-    UserType,
     UnifiedJob,
     UnifiedJobTemplate,
     WorkflowJob,
@@ -78,6 +77,7 @@ from awx.main.models import (
     CatalogItem,
     CatalogDeployment,
 )
+from awx.main.models.organization import UserType
 from awx.main.models.catalog import CloudProviderConnection, CloudProviderState
 from awx.main.models.mixins import ResourceMixin
 
