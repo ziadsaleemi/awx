@@ -225,6 +225,77 @@ describe('AIAssistantPanel', () => {
       .and('contain.text', 'create inventory');
   });
 
+  it('keeps resource plan review cards inside a mobile viewport', () => {
+    cy.viewport(390, 760);
+    const longName =
+      'Create inventory with a very long generated name that should wrap safely inside the assistant panel';
+
+    cy.intercept('POST', '/api/v2/ai/resource_actions/', {
+      mode: 'preview',
+      generated: true,
+      plan: {
+        name: longName,
+        description:
+          'Review generated resources with long names, long file paths, and long values without horizontal overflow.',
+        operations: [
+          {
+            id: 'write-long-playbook',
+            operation: 'create',
+            resource_type: 'project_file',
+            data: {
+              project: 51,
+              path: 'roles/generated_long_role_name_with_many_segments/tasks/provision_a_long_named_service.yml',
+              content: 'name: ' + 'configure-a-very-long-service-name-'.repeat(4),
+            },
+          },
+        ],
+      },
+      operations: [
+        {
+          id: 'write-long-playbook',
+          operation: 'create',
+          resource_type: 'project_file',
+          valid: true,
+          errors: {},
+          project_id: 51,
+          path: 'roles/generated_long_role_name_with_many_segments/tasks/provision_a_long_named_service.yml',
+          content_bytes: 420,
+          validated_data: {
+            project: 51,
+            path: 'roles/generated_long_role_name_with_many_segments/tasks/provision_a_long_named_service.yml',
+            content: 'name: ' + 'configure-a-very-long-service-name-'.repeat(4),
+          },
+          preview: {
+            type: 'project_file',
+            project: 51,
+            path: 'roles/generated_long_role_name_with_many_segments/tasks/provision_a_long_named_service.yml',
+            content_bytes: 420,
+            will_create: true,
+            will_overwrite: false,
+          },
+        },
+      ],
+      can_apply: true,
+    }).as('previewLongResourcePlan');
+
+    mountAssistant();
+
+    cy.get('textarea[aria-label="Message"]').type('create long generated playbook');
+    cy.getByDataCy('ai-resource-plan-button').click();
+    cy.wait('@previewLongResourcePlan');
+
+    cy.getByDataCy('ai-resource-plan').should('contain.text', longName);
+    cy.getByDataCy('ai-resource-plan-header').should('be.visible');
+    cy.getByDataCy('ai-resource-plan').then(($plan) => {
+      const plan = $plan[0];
+      expect(plan.scrollWidth).to.be.lte(plan.clientWidth + 1);
+    });
+    cy.getByDataCy('ai-assistant-messages').then(($messages) => {
+      const messages = $messages[0];
+      expect(messages.scrollWidth).to.be.lte(messages.clientWidth + 1);
+    });
+  });
+
   it('links applied resource plans to their Activity Stream audit event', () => {
     let calls = 0;
 

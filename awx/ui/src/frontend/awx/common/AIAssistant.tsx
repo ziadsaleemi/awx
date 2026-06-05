@@ -198,6 +198,83 @@ const AssistantMessages = styled.div`
   gap: 10px;
 `;
 
+const AssistantResourcePlanCard = styled.div`
+  align-self: stretch;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--pf-v5-global--BorderColor--100);
+  border-radius: 6px;
+  background: var(--pf-v5-global--BackgroundColor--200);
+  padding: 12px;
+  overflow-wrap: anywhere;
+`;
+
+const AssistantResourcePlanHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  min-width: 0;
+`;
+
+const AssistantResourcePlanTitle = styled(TextContent)`
+  min-width: 0;
+  flex: 1 1 240px;
+  overflow-wrap: anywhere;
+`;
+
+const AssistantResourceOperationList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+`;
+
+const AssistantResourceOperationCard = styled.div`
+  border: 1px solid var(--pf-v5-global--BorderColor--100);
+  border-radius: 4px;
+  background: var(--pf-v5-global--BackgroundColor--100);
+  padding: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+`;
+
+const AssistantResourceOperationHeader = styled.div<{ $compact?: boolean }>`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: ${(props) => (props.$compact ? 6 : 8)}px;
+  min-width: 0;
+
+  .pf-v5-c-content,
+  .pf-v5-c-content small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+`;
+
+const AssistantResourceCodeBlock = styled.pre<{ $tall?: boolean }>`
+  margin: 0;
+  max-width: 100%;
+  max-height: ${(props) => (props.$tall ? 180 : 160)}px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  background: var(--pf-v5-global--BackgroundColor--300);
+  padding: 8px;
+  border-radius: 4px;
+`;
+
+const AssistantResourceRollbackCard = styled(AssistantResourceOperationCard)`
+  margin-top: 10px;
+`;
+
 const AssistantMessageBubble = styled.div<{ $role: ChatMessage['role'] }>`
   align-self: ${(props) => (props.$role === 'user' ? 'flex-end' : 'flex-start')};
   max-width: min(85%, 100%);
@@ -791,33 +868,16 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
           ))}
 
           {resourcePlan && (
-            <div
-              style={{
-                alignSelf: 'stretch',
-                border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                borderRadius: 6,
-                background: 'var(--pf-v5-global--BackgroundColor--200)',
-                padding: 12,
-              }}
-              data-cy="ai-resource-plan"
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  marginBottom: 10,
-                }}
-              >
-                <TextContent>
+            <AssistantResourcePlanCard data-cy="ai-resource-plan">
+              <AssistantResourcePlanHeader data-cy="ai-resource-plan-header">
+                <AssistantResourcePlanTitle>
                   <Text component={TextVariants.h4} style={{ margin: 0 }}>
                     {resourcePlan.plan.name || t('Resource plan')}
                   </Text>
                   {resourcePlan.plan.description ? (
                     <Text component={TextVariants.small}>{resourcePlan.plan.description}</Text>
                   ) : null}
-                </TextContent>
+                </AssistantResourcePlanTitle>
                 <Badge
                   isRead
                   style={{
@@ -831,7 +891,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 >
                   {resourcePlan.mode === 'apply' ? t('Applied') : t('Preview')}
                 </Badge>
-              </div>
+              </AssistantResourcePlanHeader>
 
               {resourcePlan.audit?.activity_stream_id ? (
                 <div style={{ marginBottom: 10 }}>
@@ -848,33 +908,17 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                 </div>
               ) : null}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <AssistantResourceOperationList>
                 {resourcePlan.operations.map((operation) => (
                   <div key={operation.id}>
-                    <div
-                      key={operation.id}
-                      style={{
-                        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                        borderRadius: 4,
-                        background: 'var(--pf-v5-global--BackgroundColor--100)',
-                        padding: 10,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 8,
-                          marginBottom: operation.valid ? 6 : 8,
-                        }}
-                      >
+                    <AssistantResourceOperationCard key={operation.id}>
+                      <AssistantResourceOperationHeader $compact={operation.valid}>
                         <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
                           {formatLabel(operation.operation)} {formatLabel(operation.resource_type)}
                           {operation.object_id ? ` #${operation.object_id}` : ''}
                         </Text>
                         <Badge isRead>{operation.valid ? t('Valid') : t('Blocked')}</Badge>
-                      </div>
+                      </AssistantResourceOperationHeader>
                       {operation.valid ? (
                         <>
                           {(() => {
@@ -950,25 +994,13 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                               ))}
                             </div>
                           ) : null}
-                          <pre
-                            style={{
-                              margin: 0,
-                              maxHeight: 160,
-                              overflow: 'auto',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              fontSize: 12,
-                              background: 'var(--pf-v5-global--BackgroundColor--300)',
-                              padding: 8,
-                              borderRadius: 4,
-                            }}
-                          >
+                          <AssistantResourceCodeBlock>
                             {JSON.stringify(
                               operation.object ?? operation.validated_data ?? operation.data,
                               null,
                               2
                             )}
-                          </pre>
+                          </AssistantResourceCodeBlock>
                           {operation.preview ? (
                             <>
                               <Text
@@ -993,47 +1025,26 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                                   ))}
                                 </div>
                               ) : null}
-                              <pre
-                                style={{
-                                  margin: '4px 0 0',
-                                  maxHeight: 180,
-                                  overflow: 'auto',
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  fontSize: 12,
-                                  background: 'var(--pf-v5-global--BackgroundColor--300)',
-                                  padding: 8,
-                                  borderRadius: 4,
-                                }}
-                              >
+                              <AssistantResourceCodeBlock $tall style={{ marginTop: 4 }}>
                                 {JSON.stringify(operation.preview, null, 2)}
-                              </pre>
+                              </AssistantResourceCodeBlock>
                             </>
                           ) : null}
                         </>
                       ) : (
                         <Alert isInline variant="danger" title={t('Operation cannot be applied')}>
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                          <AssistantResourceCodeBlock>
                             {errorSummary(operation.errors)}
-                          </pre>
+                          </AssistantResourceCodeBlock>
                         </Alert>
                       )}
-                    </div>
+                    </AssistantResourceOperationCard>
                   </div>
                 ))}
-              </div>
+              </AssistantResourceOperationList>
 
               {resourcePlan.rollback_plan?.operations?.length ? (
-                <div
-                  style={{
-                    border: '1px solid var(--pf-v5-global--BorderColor--100)',
-                    borderRadius: 4,
-                    background: 'var(--pf-v5-global--BackgroundColor--100)',
-                    padding: 10,
-                    marginTop: 10,
-                  }}
-                  data-cy="ai-resource-rollback-plan"
-                >
+                <AssistantResourceRollbackCard data-cy="ai-resource-rollback-plan">
                   <Text
                     component={TextVariants.small}
                     style={{ display: 'block', fontWeight: 600 }}
@@ -1045,22 +1056,10 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                       {resourcePlan.rollback_plan.description}
                     </Text>
                   ) : null}
-                  <pre
-                    style={{
-                      margin: '6px 0 0',
-                      maxHeight: 180,
-                      overflow: 'auto',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      fontSize: 12,
-                      background: 'var(--pf-v5-global--BackgroundColor--300)',
-                      padding: 8,
-                      borderRadius: 4,
-                    }}
-                  >
+                  <AssistantResourceCodeBlock $tall style={{ marginTop: 6 }}>
                     {JSON.stringify(resourcePlan.rollback_plan, null, 2)}
-                  </pre>
-                </div>
+                  </AssistantResourceCodeBlock>
+                </AssistantResourceRollbackCard>
               ) : null}
 
               <AssistantButtonGroup style={{ marginTop: 12, marginBottom: 0 }}>
@@ -1094,7 +1093,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
                   {t('Dismiss')}
                 </Button>
               </AssistantButtonGroup>
-            </div>
+            </AssistantResourcePlanCard>
           )}
 
           {busy && (
