@@ -34,6 +34,8 @@ export interface AwxNavigationCapabilities {
   canApproveWorkflows: boolean;
   canViewCloud: boolean;
   canManageCloud: boolean;
+  canViewPolicy: boolean;
+  canManagePolicy: boolean;
 }
 
 function hasAnyPermission(permissions: Set<string>, model: string, actions: string[]) {
@@ -193,6 +195,13 @@ export function buildAwxNavigationCapabilities(
   const canManageCloud =
     hasAnyPermission(permissionSet, 'cloudproviderconnection', ['add', 'change', 'delete']) ||
     hasAnyPermission(permissionSet, 'cloudproviderstate', ['add', 'change', 'delete']);
+  const canViewPolicy =
+    permissionSet.has('awx.view_policyascode') ||
+    permissionSet.has('shared.view_policyascode') ||
+    permissionSet.has('awx.change_policyascode') ||
+    permissionSet.has('shared.change_policyascode');
+  const canManagePolicy =
+    permissionSet.has('awx.change_policyascode') || permissionSet.has('shared.change_policyascode');
   const canViewActivityStream =
     canViewJobTemplates ||
     canViewTerraformTemplates ||
@@ -237,6 +246,8 @@ export function buildAwxNavigationCapabilities(
     canApproveWorkflows,
     canViewCloud,
     canManageCloud,
+    canViewPolicy,
+    canManagePolicy,
   };
 }
 

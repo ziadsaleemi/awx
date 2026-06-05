@@ -1,7 +1,11 @@
 import { PageNavigationItem } from '../../../framework/PageNavigation/PageNavigationItem';
 import { buildAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { AwxRoute } from './AwxRoutes';
-import { filterCatalogRoutesByPermissions, profileRoutesOnly } from './useAwxNavigation';
+import {
+  filterCatalogRoutesByPermissions,
+  filterPolicyRoutesByPermissions,
+  profileRoutesOnly,
+} from './useAwxNavigation';
 
 function childIds(route: PageNavigationItem) {
   if (!('children' in route)) {
@@ -41,6 +45,16 @@ describe('AWX navigation capabilities', () => {
     expect(cloudUserCapabilities.canManageCloud).to.equal(false);
     expect(cloudAdminCapabilities.canViewCloud).to.equal(true);
     expect(cloudAdminCapabilities.canManageCloud).to.equal(true);
+  });
+
+  it('maps policy permissions to policy navigation capability', () => {
+    const operatorCapabilities = buildAwxNavigationCapabilities(['shared.view_policyascode']);
+    const authorCapabilities = buildAwxNavigationCapabilities(['shared.change_policyascode']);
+
+    expect(operatorCapabilities.canViewPolicy).to.equal(true);
+    expect(operatorCapabilities.canManagePolicy).to.equal(false);
+    expect(authorCapabilities.canViewPolicy).to.equal(true);
+    expect(authorCapabilities.canManagePolicy).to.equal(true);
   });
 
   it('maps object permission codenames to resource navigation capabilities', () => {
@@ -106,6 +120,52 @@ describe('AWX navigation capabilities', () => {
     expect(childIds(filteredRoutes)).to.deep.equal([
       AwxRoute.CatalogItems,
       AwxRoute.CatalogDeployments,
+      undefined,
+    ]);
+  });
+
+  it('removes policy module routes when the user cannot manage policy as code', () => {
+    const policyRoutes: PageNavigationItem = {
+      id: AwxRoute.PolicyAsCode,
+      label: 'Policy as Code',
+      path: 'policy-as-code',
+      children: [
+        {
+          id: AwxRoute.PolicyAsCodeOverview,
+          label: 'Overview',
+          path: 'overview',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeGatekeeper,
+          label: 'Gatekeeper',
+          path: 'gatekeeper',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeModules,
+          label: 'Policy Modules',
+          path: 'modules',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeTester,
+          label: 'Policy Tester',
+          path: 'tester',
+          element: <div />,
+        },
+        { id: AwxRoute.PolicyAsCodeSmoke, label: 'Smoke Test', path: 'smoke', element: <div /> },
+        { path: '', element: <div /> },
+      ],
+    };
+
+    const filteredRoutes = filterPolicyRoutesByPermissions(policyRoutes, false);
+
+    expect(childIds(filteredRoutes)).to.deep.equal([
+      AwxRoute.PolicyAsCodeOverview,
+      AwxRoute.PolicyAsCodeGatekeeper,
+      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeSmoke,
       undefined,
     ]);
   });

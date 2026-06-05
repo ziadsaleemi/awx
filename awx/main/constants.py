@@ -128,6 +128,8 @@ role_name_to_perm_mapping = {
     'update_role': ['update_'],
     'member_role': ['member_'],
     'use_role': ['use_'],
+    'policy_author_role': ['change_policyascode', 'view_policyascode'],
+    'policy_operator_role': ['view_policyascode'],
 }
 
 org_role_to_permission = {
@@ -143,6 +145,8 @@ org_role_to_permission = {
     'catalog_user_role': 'use_catalogitem',
     'cloud_admin_role': 'change_cloudproviderconnection',
     'cloud_user_role': 'view_cloudproviderconnection',
+    'policy_author_role': 'change_policyascode',
+    'policy_operator_role': 'view_policyascode',
     'auditor_role': 'view_project',  # TODO: also doesnt really work
 }
 

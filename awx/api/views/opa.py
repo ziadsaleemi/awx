@@ -36,7 +36,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from awx.api.permissions import IsSystemAdmin as IsSuperUser
+from awx.api.views.policy_permissions import PolicyAsCodeAuthorPermission, PolicyAsCodeOperatePermission, PolicyAsCodeViewPermission
 from awx.main import models
 from awx.main.models import ActivityStream
 from awx.main.tasks.policy import OPA_AUTH_TYPES, opa_cert_file
@@ -688,7 +688,7 @@ class OPAPolicyListView(APIView):
     List configured OPA policy paths.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeViewPermission]
 
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
@@ -718,7 +718,7 @@ class OPAPolicyModuleListView(APIView):
     Manage live OPA policy modules through OPA's Policy API.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
@@ -761,7 +761,7 @@ class OPAPolicyModuleDetailView(APIView):
     DELETE /api/v2/opa/policy-modules/<policy_id>/
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def get(self, request, policy_id=None, *args, **kwargs):
         policy_id, error = _validate_policy_id(policy_id)
@@ -828,7 +828,7 @@ class OPAPolicyModuleVersionsView(APIView):
     from this list; rollback endpoints restore from audited snapshots server-side.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def get(self, request, policy_id=None, *args, **kwargs):
         policy_id, error = _validate_policy_id(policy_id)
@@ -846,7 +846,7 @@ class OPAPolicyModuleRollbackView(APIView):
     Restore a previous audited Rego snapshot to live OPA.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def post(self, request, policy_id=None, *args, **kwargs):
         policy_id, error = _validate_policy_id(policy_id)
@@ -940,7 +940,7 @@ class OPAPolicyEvaluateView(APIView):
         }
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeOperatePermission]
 
     def post(self, request, *args, **kwargs):
         policy_path = request.data.get('policy_path')
@@ -1005,7 +1005,7 @@ class OPAPolicySyncView(APIView):
     through OPA's Policy API.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def post(self, request, *args, **kwargs):
         policy_id = request.data.get('policy_id', 'awx/managed')

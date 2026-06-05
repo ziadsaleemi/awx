@@ -66,6 +66,8 @@ role_names = {
     'catalog_user_role': _('Catalog User'),
     'cloud_admin_role': _('Cloud Admin'),
     'cloud_user_role': _('Cloud User'),
+    'policy_author_role': _('Policy Author'),
+    'policy_operator_role': _('Policy Operator'),
     'auditor_role': _('Auditor'),
     'execute_role': _('Execute'),
     'member_role': _('Member'),
@@ -91,6 +93,8 @@ role_descriptions = {
     'catalog_user_role': _('Can browse and deploy catalog items of the %s'),
     'cloud_admin_role': _('Can manage all cloud provider connections and state for the %s'),
     'cloud_user_role': _('Can view cloud provider connections and state for the %s'),
+    'policy_author_role': _('Can author Policy as Code modules and apply governed policy changes for the %s'),
+    'policy_operator_role': _('Can view Policy as Code resources, run tests, smoke checks, previews, and dry-runs for the %s'),
     'auditor_role': _('Can view all aspects of the %s'),
     'execute_role': {
         'organization': _('May run any executable resources in the organization'),
@@ -586,6 +590,8 @@ def get_role_definition(role):
         'catalog_user_role': 'Organization Catalog User',
         'cloud_admin_role': 'Organization Cloud Admin',
         'cloud_user_role': 'Organization Cloud User',
+        'policy_author_role': 'Organization Policy Author',
+        'policy_operator_role': 'Organization Policy Operator',
     }.get(role.role_field)
     if obj._meta.model_name == 'organization' and preferred_managed_role:
         try:
@@ -819,6 +825,8 @@ ROLE_DEFINITION_TO_ROLE_FIELD = {
     'Organization Cloud User': 'cloud_user_role',
     'Organization CloudProviderConnection Admin': 'cloud_admin_role',
     'Organization CloudProviderState Admin': 'cloud_admin_role',
+    'Organization Policy Author': 'policy_author_role',
+    'Organization Policy Operator': 'policy_operator_role',
     'CloudProviderConnection Admin': 'admin_role',
     'CloudProviderState Admin': 'admin_role',
     'CatalogItem Admin': 'admin_role',

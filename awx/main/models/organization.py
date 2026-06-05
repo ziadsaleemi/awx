@@ -39,6 +39,8 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
         permissions = [
             ('member_organization', 'Basic participation permissions for organization'),
             ('audit_organization', 'Audit everything inside the organization'),
+            ('view_policyascode', 'View Policy as Code status and resources'),
+            ('change_policyascode', 'Manage Policy as Code modules and governed live changes'),
         ]
         # Remove add permission, only superuser can add
         default_permissions = ('change', 'delete', 'view')
@@ -99,6 +101,12 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
     cloud_user_role = ImplicitRoleField(
         parent_role='cloud_admin_role',
     )
+    policy_author_role = ImplicitRoleField(
+        parent_role='admin_role',
+    )
+    policy_operator_role = ImplicitRoleField(
+        parent_role='policy_author_role',
+    )
     execution_environment_admin_role = ImplicitRoleField(
         parent_role='admin_role',
     )
@@ -121,6 +129,8 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
             'execution_environment_admin_role',
             'cloud_admin_role',
             'cloud_user_role',
+            'policy_author_role',
+            'policy_operator_role',
         ],
     )
     approval_role = ImplicitRoleField(

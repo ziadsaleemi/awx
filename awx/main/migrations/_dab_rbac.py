@@ -153,7 +153,7 @@ def get_permissions_for_role(role_field, children_map, apps):
 
     # more special cases for those same above special org-level roles
     if role_field.name == 'auditor_role':
-        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate'):
+        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate', 'view_policyascode'):
             perm = Permission.objects.filter(codename=codename).first()
             if perm is not None and perm not in perm_list:
                 perm_list.append(perm)
@@ -385,7 +385,9 @@ def setup_managed_role_definitions(apps, schema_editor):
                     special_perms.append(perm)
             for perm in special_perms:
                 action = perm.codename.split('_')[0]
-                view_perm = Permission.objects.get(content_type=ct, codename__startswith='view_')
+                view_perm = Permission.objects.filter(content_type=ct, codename=f'view_{cls_name}').first()
+                if view_perm is None:
+                    view_perm = Permission.objects.filter(content_type=ct, codename__startswith='view_').first()
                 perm_list = [perm, view_perm]
                 # Handle special-case where adhoc role also listed use permission
                 if action == 'adhoc':
@@ -526,6 +528,35 @@ def setup_managed_role_definitions(apps, schema_editor):
             'Has permission to manage cloud provider connections and state within a single organization',
             org_ct,
             [perm for perm in org_perms if perm.codename in org_cloud_admin_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_policy_operator_permissions = {
+        'view_organization',
+        'view_policyascode',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Policy Operator',
+            'Has permission to view Policy as Code resources and run tests, smoke checks, previews, and dry-runs within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_policy_operator_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_policy_author_permissions = {
+        'view_organization',
+        'view_policyascode',
+        'change_policyascode',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization Policy Author',
+            'Has permission to author Policy as Code modules and apply governed policy changes within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_policy_author_permissions],
             RoleDefinition,
         )
     )

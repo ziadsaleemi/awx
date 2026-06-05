@@ -7,7 +7,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
-from awx.api.permissions import IsSystemAdmin
+from awx.api.views.policy_permissions import ExternalAutomationCheckPermission
 from awx.api.versioning import reverse
 from awx.main.models import ActivityStream
 from awx.main.management.commands.check_external_automation import run_external_automation_checks
@@ -73,7 +73,7 @@ def _audit_external_automation_check(request, result):
 class ExternalAutomationCheckView(APIView):
     name = _('External Automation Check')
     resource_purpose = 'live EDA and OPA automation smoke check'
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [ExternalAutomationCheckPermission]
 
     def post(self, request, format=None):
         data = request.data if isinstance(request.data, dict) else {}

@@ -91,6 +91,24 @@ export function filterCatalogRoutesByPermissions(
   );
 }
 
+export function filterPolicyRoutesByPermissions(
+  policyRoutes: PageNavigationItem,
+  canManagePolicy: boolean
+) {
+  if (canManagePolicy) {
+    return policyRoutes;
+  }
+  return filterRouteChildrenById(
+    policyRoutes,
+    new Set([
+      AwxRoute.PolicyAsCodeOverview,
+      AwxRoute.PolicyAsCodeGatekeeper,
+      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeSmoke,
+    ])
+  );
+}
+
 export function profileRoutesOnly(userRoutes: PageNavigationItem) {
   return {
     ...filterRouteChildrenById(
@@ -554,6 +572,9 @@ export function useAwxNavigation() {
         ? [filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog)]
         : []),
       ...(capabilities.canViewCloud ? [awxCloudRoutes] : []),
+      ...(capabilities.canViewPolicy
+        ? [filterPolicyRoutesByPermissions(awxPolicyRoutes, capabilities.canManagePolicy)]
+        : []),
       ...permissionInfrastructureItems,
       ...permissionAdministrationItems,
       ...permissionAccessItems,

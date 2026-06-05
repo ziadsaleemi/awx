@@ -66,6 +66,34 @@ describe('AwxRoleForm', () => {
       });
   });
 
+  it('sends policy as code permissions when creating an organization custom role', () => {
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        id: 104,
+        name: 'Policy operator',
+        content_type: 'shared.organization',
+        permissions: ['shared.view_policyascode'],
+      },
+    }).as('createPolicyRole');
+
+    cy.mount(<CreateRole />);
+    cy.get('[data-cy="name"]').type('Policy operator');
+    cy.get('[data-cy="description"]').type('Can test policy as code');
+    cy.selectDropdownOptionByResourceName('content-type', 'Organization');
+    cy.get('#permissions').click();
+    cy.selectMultiSelectOption('#permissions-select', 'View Policy as Code');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@createPolicyRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('Policy operator');
+        expect(role.content_type).to.equal('shared.organization');
+        expect(role.permissions).to.deep.equal(['shared.view_policyascode']);
+      });
+  });
+
   it('copies a built-in role into a custom role payload', () => {
     cy.intercept('GET', awxAPI`/role_definitions/1/`, mockAwxBuiltInRole);
     cy.intercept('POST', awxAPI`/role_definitions/`, {

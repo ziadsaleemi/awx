@@ -31,6 +31,8 @@ from ansible_base.rbac import permission_registry
         'catalog_user_role',
         'cloud_admin_role',
         'cloud_user_role',
+        'policy_author_role',
+        'policy_operator_role',
     ],
 )
 def test_round_trip_roles(organization, rando, role_name, setup_managed_roles):

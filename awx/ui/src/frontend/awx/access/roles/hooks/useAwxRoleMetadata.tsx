@@ -122,6 +122,8 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
           permissions: {
             'shared.member_organization': t('Member organization'),
             'shared.audit_organization': t('Audit organization'),
+            'shared.view_policyascode': t('View Policy as Code'),
+            'shared.change_policyascode': t('Change Policy as Code'),
             'shared.change_organization': t('Change organization'),
             'shared.delete_organization': t('Delete organization'),
             'shared.view_organization': t('View organization'),

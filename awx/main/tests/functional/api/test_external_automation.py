@@ -14,6 +14,42 @@ def test_external_automation_check_requires_system_admin(post, rando):
     assert ActivityStream.objects.filter(object1='external_automation').count() == 0
 
 
+def test_policy_operator_can_run_policy_only_external_automation_smoke(post, organization, rando, mocker):
+    organization.policy_operator_role.members.add(rando)
+    check = mocker.patch(
+        'awx.api.views.external_automation.run_external_automation_checks',
+        return_value={
+            'ok': True,
+            'checks': {
+                'opa': {'ok': True, 'status': 'available'},
+                'gatekeeper': {'ok': True, 'status': 'available', 'context': 'prod'},
+            },
+        },
+    )
+
+    response = post(
+        reverse('api:external_automation_check'),
+        {
+            'include_eda': False,
+            'include_opa': True,
+            'sync_opa_policy': True,
+            'opa_deny_smoke': True,
+            'include_gatekeeper': True,
+            'gatekeeper_context': 'prod',
+        },
+        user=rando,
+        expect=200,
+    )
+
+    assert response.data['ok'] is True
+    check.assert_called_once()
+
+
+def test_policy_operator_cannot_run_eda_external_automation_smoke(post, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+    post(reverse('api:external_automation_check'), {'include_eda': True, 'include_opa': False}, user=rando, expect=403)
+
+
 def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
     check = mocker.patch(
         'awx.api.views.external_automation.run_external_automation_checks',

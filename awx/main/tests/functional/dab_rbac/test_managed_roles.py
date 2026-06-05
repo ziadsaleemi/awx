@@ -88,6 +88,18 @@ def test_cloud_persona_roles(setup_managed_roles):
 
 
 @pytest.mark.django_db
+def test_policy_persona_roles(setup_managed_roles):
+    operator_rd = RoleDefinition.objects.get(name='Organization Policy Operator')
+    operator_codenames = set(operator_rd.permissions.values_list('codename', flat=True))
+    assert {'view_organization', 'view_policyascode'}.issubset(operator_codenames)
+    assert 'change_policyascode' not in operator_codenames
+
+    author_rd = RoleDefinition.objects.get(name='Organization Policy Author')
+    author_codenames = set(author_rd.permissions.values_list('codename', flat=True))
+    assert {'view_organization', 'view_policyascode', 'change_policyascode'}.issubset(author_codenames)
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('resource_name', ['Team', 'Organization'])
 @pytest.mark.parametrize('action', ['Member', 'Admin'])
 def test_legacy_RBAC_uses_platform_roles(setup_managed_roles, resource_name, action, team, bob, organization):

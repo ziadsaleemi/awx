@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from awx.api.permissions import IsSystemAdmin as IsSuperUser
+from awx.api.views.policy_permissions import GatekeeperGovernedWritePermission, PolicyAsCodeAuthorPermission, PolicyAsCodeOperatePermission
 from awx.api.views.ai import (
     AIProviderError,
     _PROVIDER_DEFAULTS,
@@ -855,7 +855,7 @@ class GatekeeperPolicyAuthorView(APIView):
     Generate one Gatekeeper manifest from AI using visible AWX and Gatekeeper context.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeAuthorPermission]
 
     def post(self, request, *args, **kwargs):
         prompt = request.data.get('prompt')
@@ -920,7 +920,7 @@ class GatekeeperPolicyManagerView(APIView):
     from the configured Kubernetes API.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [PolicyAsCodeOperatePermission]
 
     def get(self, request, *args, **kwargs):
         client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
@@ -1043,7 +1043,7 @@ class GatekeeperPolicyApplyView(APIView):
     Preview, dry-run, or apply one Gatekeeper manifest with OPA gating and audit.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [GatekeeperGovernedWritePermission]
 
     def post(self, request, *args, **kwargs):
         client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
@@ -1167,7 +1167,7 @@ class GatekeeperPolicyDeleteView(APIView):
     Preview, dry-run, or delete one Gatekeeper resource with OPA gating and audit.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [GatekeeperGovernedWritePermission]
 
     def post(self, request, *args, **kwargs):
         client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
@@ -1285,7 +1285,7 @@ class GatekeeperPolicyRollbackView(APIView):
     Preview, dry-run, or execute an apply/delete rollback plan.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [GatekeeperGovernedWritePermission]
 
     def post(self, request, *args, **kwargs):
         client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))

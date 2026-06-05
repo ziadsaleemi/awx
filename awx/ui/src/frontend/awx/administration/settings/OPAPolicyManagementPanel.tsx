@@ -202,15 +202,21 @@ function OPAAuditLink(props: {
 
 type OPAPolicyManagementSection = 'status' | 'modules' | 'tester';
 
-export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagementSection[] }) {
+export function OPAPolicyManagementPanel(props?: {
+  sections?: OPAPolicyManagementSection[];
+  canManagePolicy?: boolean;
+}) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
   const sections = props?.sections ?? ['status', 'modules', 'tester'];
+  const canManagePolicy = props?.canManagePolicy ?? true;
   const showStatus = sections.includes('status');
   const showModules = sections.includes('modules');
   const showTester = sections.includes('tester');
   const { data, isLoading, error } = useGet<OPAStatusResponse>(awxAPI`/opa/policies/`);
-  const modulesResponse = useGet<OPAPolicyModulesResponse>(awxAPI`/opa/policy-modules/`);
+  const modulesResponse = useGet<OPAPolicyModulesResponse>(
+    showModules ? awxAPI`/opa/policy-modules/` : undefined
+  );
   const policies = useMemo(() => data?.policies ?? [], [data?.policies]);
   const modules = useMemo(
     () => modulesResponse.data?.modules ?? [],
@@ -568,19 +574,21 @@ export function OPAPolicyManagementPanel(props?: { sections?: OPAPolicyManagemen
                         </DescriptionListGroup>
                       </DescriptionList>
                     </StackItem>
-                    <StackItem>
-                      <Button
-                        variant="secondary"
-                        icon={<SyncAltIcon />}
-                        onClick={() => void handleSync()}
-                        isLoading={syncLoading}
-                        isDisabled={
-                          syncLoading || !data?.enabled || !data?.policy_bundle?.configured
-                        }
-                      >
-                        {t('Sync policy bundle to OPA')}
-                      </Button>
-                    </StackItem>
+                    {canManagePolicy ? (
+                      <StackItem>
+                        <Button
+                          variant="secondary"
+                          icon={<SyncAltIcon />}
+                          onClick={() => void handleSync()}
+                          isLoading={syncLoading}
+                          isDisabled={
+                            syncLoading || !data?.enabled || !data?.policy_bundle?.configured
+                          }
+                        >
+                          {t('Sync policy bundle to OPA')}
+                        </Button>
+                      </StackItem>
+                    ) : null}
                     {syncError ? (
                       <StackItem>
                         <Alert variant="danger" isInline title={syncError} />

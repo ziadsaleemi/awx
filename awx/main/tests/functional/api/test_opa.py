@@ -57,6 +57,23 @@ def test_opa_policy_list_requires_system_admin(get, rando):
 
 @pytest.mark.django_db
 @override_settings(OPA_HOST='')
+def test_policy_operator_can_view_and_evaluate_policy_as_code(get, post, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+
+    get(reverse('api:opa_policies'), user=rando, expect=200)
+    response = post(
+        reverse('api:opa_evaluate'),
+        data={'policy_path': 'awx/job_launch/allow', 'input': {}},
+        user=rando,
+        expect=200,
+    )
+
+    assert response.data['allowed'] is True
+    assert response.data['detail'] == 'OPA is not enabled or configured.'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='')
 def test_opa_evaluate_disabled_fails_open(get, admin_user):
     response = get(reverse('api:opa_policies'), user=admin_user, expect=200)
 
@@ -238,6 +255,45 @@ def test_opa_policy_modules_require_system_admin(get, post, delete, rando):
 
 
 @pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_policy_author_can_manage_opa_policy_modules(post, organization, rando):
+    organization.policy_author_role.members.add(rando)
+    get_response = _json_error_response({'message': 'not found'}, status_code=404)
+    put_response = mock.Mock()
+    put_response.status_code = 200
+    put_response.content = b'{}'
+    put_response.json.return_value = {}
+    put_response.raise_for_status.return_value = None
+
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.put', return_value=put_response
+    ) as requests_put:
+        response = post(
+            reverse('api:opa_policy_modules'),
+            data={'policy_id': 'awx/operator', 'policy_text': 'package awx.operator\nallow := true\n'},
+            user=rando,
+            expect=200,
+        )
+
+    assert response.data['created'] is True
+    assert response.data['module']['id'] == 'awx/operator'
+    requests_put.assert_called_once()
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com')
+def test_policy_operator_cannot_mutate_opa_policy_modules(post, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+    post(
+        reverse('api:opa_policy_modules'),
+        data={'policy_id': 'awx/operator', 'policy_text': 'package awx.operator'},
+        user=rando,
+        expect=403,
+    )
+    post(reverse('api:opa_policies_sync'), data={'policy_id': 'awx/managed'}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
 @override_settings(GATEKEEPER_K8S_API_URL='')
 def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user):
     response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
@@ -266,6 +322,13 @@ def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user)
 @pytest.mark.django_db
 def test_gatekeeper_policy_manager_requires_system_admin(get, rando):
     get(reverse('api:opa_gatekeeper'), user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='')
+def test_policy_operator_can_view_gatekeeper(get, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+    get(reverse('api:opa_gatekeeper'), user=rando, expect=200)
 
 
 def _gatekeeper_policy_manager_responses():
@@ -657,6 +720,19 @@ spec:
 @pytest.mark.django_db
 def test_gatekeeper_apply_requires_system_admin(post, rando):
     post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_policy_operator_can_preview_gatekeeper_but_not_apply(post, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request:
+        post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=200)
+
+    requests_request.assert_not_called()
+    post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'apply', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
 
 
 @pytest.mark.django_db

@@ -654,8 +654,9 @@ function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
   );
 }
 
-export function GatekeeperPolicyManager() {
+export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
   const { t } = useTranslation();
+  const canManagePolicy = props?.canManagePolicy ?? true;
   const getPageUrl = useGetPageUrl();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamString = searchParams.toString();
@@ -710,6 +711,12 @@ export function GatekeeperPolicyManager() {
   }, [selectedContext, violationFilter, violationLimit, violationPage, violationSort]);
   const { data, isLoading, error, refresh } =
     useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
+  useEffect(() => {
+    if (canManagePolicy) return;
+    if (applyMode === 'apply') setApplyMode('preview');
+    if (deleteMode === 'delete') setDeleteMode('preview');
+    if (rollbackMode === 'apply') setRollbackMode('preview');
+  }, [applyMode, canManagePolicy, deleteMode, rollbackMode]);
   const activeContext = selectedContext || data?.cluster.context || '';
   const syncGatekeeperRoute = (
     next: {
@@ -1109,27 +1116,34 @@ export function GatekeeperPolicyManager() {
                       />
                     </StackItem>
                   ) : null}
-                  <StackItem>
-                    <FormGroup label={t('AI authoring prompt')} fieldId="gatekeeper-author-prompt">
-                      <TextArea
-                        id="gatekeeper-author-prompt"
-                        value={authorPrompt}
-                        rows={3}
-                        onChange={(_event, value) => setAuthorPrompt(value)}
-                        aria-label={t('Gatekeeper AI authoring prompt')}
-                      />
-                    </FormGroup>
-                  </StackItem>
-                  <StackItem>
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleAuthorManifest()}
-                      isLoading={authorLoading}
-                      isDisabled={authorLoading || !authorPrompt.trim()}
-                    >
-                      {t('Generate manifest')}
-                    </Button>
-                  </StackItem>
+                  {canManagePolicy ? (
+                    <>
+                      <StackItem>
+                        <FormGroup
+                          label={t('AI authoring prompt')}
+                          fieldId="gatekeeper-author-prompt"
+                        >
+                          <TextArea
+                            id="gatekeeper-author-prompt"
+                            value={authorPrompt}
+                            rows={3}
+                            onChange={(_event, value) => setAuthorPrompt(value)}
+                            aria-label={t('Gatekeeper AI authoring prompt')}
+                          />
+                        </FormGroup>
+                      </StackItem>
+                      <StackItem>
+                        <Button
+                          variant="secondary"
+                          onClick={() => void handleAuthorManifest()}
+                          isLoading={authorLoading}
+                          isDisabled={authorLoading || !authorPrompt.trim()}
+                        >
+                          {t('Generate manifest')}
+                        </Button>
+                      </StackItem>
+                    </>
+                  ) : null}
                   {authorError ? (
                     <StackItem>
                       <Alert variant="danger" isInline title={authorError} />
@@ -1168,7 +1182,9 @@ export function GatekeeperPolicyManager() {
                           >
                             <FormSelectOption value="preview" label={t('Preview')} />
                             <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            <FormSelectOption value="apply" label={t('Apply')} />
+                            {canManagePolicy ? (
+                              <FormSelectOption value="apply" label={t('Apply')} />
+                            ) : null}
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
@@ -1288,7 +1304,9 @@ export function GatekeeperPolicyManager() {
                           >
                             <FormSelectOption value="preview" label={t('Preview')} />
                             <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            <FormSelectOption value="delete" label={t('Delete')} />
+                            {canManagePolicy ? (
+                              <FormSelectOption value="delete" label={t('Delete')} />
+                            ) : null}
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
@@ -1394,7 +1412,9 @@ export function GatekeeperPolicyManager() {
                           >
                             <FormSelectOption value="preview" label={t('Preview')} />
                             <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            <FormSelectOption value="apply" label={t('Apply')} />
+                            {canManagePolicy ? (
+                              <FormSelectOption value="apply" label={t('Apply')} />
+                            ) : null}
                           </FormSelect>
                         </FormGroup>
                       </GridItem>
