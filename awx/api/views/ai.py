@@ -45,6 +45,7 @@ from awx.api.serializers import (
     WorkflowJobTemplateNodeDetailSerializer,
     WorkflowJobTemplateSerializer,
 )
+from awx.api.views.ai_permissions import AIResourceActionPermission
 from awx.api.views.opa import DEFAULT_POLICIES, OPAPolicyEngine, check_opa_policy
 from awx.conf.models import Setting
 from awx.main import models
@@ -5180,7 +5181,7 @@ class AIResourceActionView(APIView):
     Activity Stream, and OPA guardrails.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AIResourceActionPermission]
 
     def post(self, request, *args, **kwargs):
         if not isinstance(request.data, dict):

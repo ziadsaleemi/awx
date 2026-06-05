@@ -1036,6 +1036,49 @@ def test_ai_resource_action_preview_validates_inventory_without_saving(post, adm
 
 
 @pytest.mark.django_db
+def test_ai_resource_action_requires_author_role(post, rando, organization):
+    organization.inventory_admin_role.members.add(rando)
+    plan = {
+        'name': 'Create role-gated inventory',
+        'operations': [
+            {
+                'id': 'create-inventory',
+                'operation': 'create',
+                'resource_type': 'inventory',
+                'data': {'name': 'AI Role Gated Inventory', 'organization': organization.pk},
+            }
+        ],
+    }
+
+    post(reverse('api:ai_resource_actions'), data={'mode': 'preview', 'plan': plan}, user=rando, expect=403)
+
+    organization.ai_author_role.members.add(rando)
+    response = post(reverse('api:ai_resource_actions'), data={'mode': 'preview', 'plan': plan}, user=rando, expect=200)
+
+    assert response.data['can_apply'] is True
+    assert response.data['operations'][0]['valid'] is True
+
+
+@pytest.mark.django_db
+def test_ai_resource_action_approver_role_cannot_author_direct_changes(post, rando, organization):
+    organization.inventory_admin_role.members.add(rando)
+    organization.ai_approver_role.members.add(rando)
+    plan = {
+        'name': 'Create approver-only inventory',
+        'operations': [
+            {
+                'id': 'create-inventory',
+                'operation': 'create',
+                'resource_type': 'inventory',
+                'data': {'name': 'AI Approver Only Inventory', 'organization': organization.pk},
+            }
+        ],
+    }
+
+    post(reverse('api:ai_resource_actions'), data={'mode': 'preview', 'plan': plan}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
 def test_ai_resource_action_preview_smart_inventory_includes_matching_hosts_and_groups(post, admin_user, organization):
     inventory = Inventory.objects.create(name='AI Source Inventory', organization=organization)
     web_host = inventory.hosts.create(name='web01')
@@ -2303,7 +2346,8 @@ def test_ai_resource_action_apply_rejects_schedule_credential_when_template_not_
 
 
 @pytest.mark.django_db
-def test_ai_resource_action_apply_rejects_credential_reference_without_use_permission(post, rando, job_template, machine_credential):
+def test_ai_resource_action_apply_rejects_credential_reference_without_use_permission(post, rando, organization, job_template, machine_credential):
+    organization.ai_author_role.members.add(rando)
     job_template.admin_role.members.add(rando)
 
     response = post(
@@ -2486,7 +2530,8 @@ def test_ai_resource_action_apply_attaches_role_assignment_to_team(post, admin_u
 
 
 @pytest.mark.django_db
-def test_ai_resource_action_apply_rejects_role_assignment_without_target_admin(post, rando, job_template):
+def test_ai_resource_action_apply_rejects_role_assignment_without_target_admin(post, rando, organization, job_template):
+    organization.ai_author_role.members.add(rando)
     job_template.read_role.members.add(rando)
 
     response = post(
@@ -2712,7 +2757,8 @@ def test_ai_resource_action_apply_updates_terraform_survey_spec(post, admin_user
 
 
 @pytest.mark.django_db
-def test_ai_resource_action_apply_rejects_survey_spec_without_admin(post, rando, job_template):
+def test_ai_resource_action_apply_rejects_survey_spec_without_admin(post, rando, organization, job_template):
+    organization.ai_author_role.members.add(rando)
     job_template.read_role.members.add(rando)
 
     response = post(
@@ -2746,6 +2792,8 @@ def test_ai_resource_action_apply_rejects_survey_spec_without_admin(post, rando,
 
 @pytest.mark.django_db
 def test_ai_resource_action_apply_rejects_rbac_failure(post, rando, organization):
+    organization.ai_author_role.members.add(rando)
+
     response = post(
         reverse('api:ai_resource_actions'),
         data={

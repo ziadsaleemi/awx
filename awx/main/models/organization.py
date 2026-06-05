@@ -44,6 +44,9 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
             ('view_edaactivation', 'View Event-Driven Ansible activation status and events'),
             ('execute_edaactivation', 'Operate Event-Driven Ansible activations'),
             ('change_edaactivation', 'Manage Event-Driven Ansible activation lifecycle'),
+            ('view_airesourceaction', 'View AI resource action plans and audit context'),
+            ('change_airesourceaction', 'Author and apply AI resource action plans'),
+            ('approve_airesourceaction', 'Approve AI resource action plans'),
         ]
         # Remove add permission, only superuser can add
         default_permissions = ('change', 'delete', 'view')
@@ -116,6 +119,12 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
     eda_operator_role = ImplicitRoleField(
         parent_role='eda_admin_role',
     )
+    ai_author_role = ImplicitRoleField(
+        parent_role='admin_role',
+    )
+    ai_approver_role = ImplicitRoleField(
+        parent_role='admin_role',
+    )
     execution_environment_admin_role = ImplicitRoleField(
         parent_role='admin_role',
     )
@@ -142,6 +151,8 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
             'policy_operator_role',
             'eda_admin_role',
             'eda_operator_role',
+            'ai_author_role',
+            'ai_approver_role',
         ],
     )
     approval_role = ImplicitRoleField(

@@ -35,6 +35,8 @@ from ansible_base.rbac import permission_registry
         'policy_operator_role',
         'eda_admin_role',
         'eda_operator_role',
+        'ai_author_role',
+        'ai_approver_role',
     ],
 )
 def test_round_trip_roles(organization, rando, role_name, setup_managed_roles):

@@ -3369,6 +3369,7 @@ class WorkflowJobNodeApplyAIPlan(RetrieveAPIView):
 
     @extend_schema_if_available(extensions={"x-ai-description": "Apply an approved AI resource action plan for a workflow job node"})
     def post(self, request, *args, **kwargs):
+        from awx.api.views.ai_permissions import user_can_approve_ai_resources
         from awx.main.models.workflow import AIWorkflowTaskError
 
         obj = self.get_object()
@@ -3378,7 +3379,9 @@ class WorkflowJobNodeApplyAIPlan(RetrieveAPIView):
             return Response({'detail': _('AI task node is not awaiting approval.')}, status=status.HTTP_400_BAD_REQUEST)
 
         workflow_template = obj.workflow_job.workflow_job_template
-        if not (request.user.is_superuser or (workflow_template and request.user in workflow_template.approval_role)):
+        workflow_approver = workflow_template and request.user in workflow_template.approval_role
+        ai_approver = user_can_approve_ai_resources(request.user, organization=getattr(workflow_template, 'organization', None))
+        if not (request.user.is_superuser or workflow_approver or ai_approver):
             raise PermissionDenied(_('You do not have permission to approve this AI resource action plan.'))
 
         approval = obj.job if isinstance(obj.job, models.WorkflowApproval) and obj.job.status == 'pending' else None

@@ -139,6 +139,8 @@ def get_permissions_for_role(role_field, children_map, apps):
                     # using ImplicitRoleField that haven't been added to DAB RBAC yet).
                     # Skip gracefully so we don't break permission lookups for the parent role.
                     continue
+                if child_field.model._meta.model_name == 'organization' and child_field.name == 'approval_role' and perm_name == 'approve_':
+                    continue
                 if child_field.model._meta.model_name == 'organization' and child_field.name in ('admin_role', 'read_role'):
                     org_codename = {
                         'change_': 'change_organization',
@@ -161,7 +163,14 @@ def get_permissions_for_role(role_field, children_map, apps):
 
     # more special cases for those same above special org-level roles
     if role_field.name == 'auditor_role':
-        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate', 'view_policyascode', 'view_edaactivation'):
+        for codename in (
+            'view_notificationtemplate',
+            'view_cloudproviderconnection',
+            'view_cloudproviderstate',
+            'view_policyascode',
+            'view_edaactivation',
+            'view_airesourceaction',
+        ):
             perm = Permission.objects.filter(codename=codename).first()
             if perm is not None and perm not in perm_list:
                 perm_list.append(perm)
@@ -597,6 +606,36 @@ def setup_managed_role_definitions(apps, schema_editor):
             'Has permission to create, operate, and delete Event-Driven Ansible activations within a single organization',
             org_ct,
             [perm for perm in org_perms if perm.codename in org_eda_admin_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_ai_author_permissions = {
+        'view_organization',
+        'view_airesourceaction',
+        'change_airesourceaction',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization AI Resource Author',
+            'Has permission to author and apply AI resource action plans within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_ai_author_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_ai_approver_permissions = {
+        'view_organization',
+        'view_airesourceaction',
+        'approve_airesourceaction',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization AI Resource Approver',
+            'Has permission to approve AI resource action plans within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_ai_approver_permissions],
             RoleDefinition,
         )
     )

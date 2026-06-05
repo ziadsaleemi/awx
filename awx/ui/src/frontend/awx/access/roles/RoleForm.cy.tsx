@@ -126,6 +126,38 @@ describe('AwxRoleForm', () => {
       });
   });
 
+  it('sends AI resource action permissions when creating an organization custom role', () => {
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        id: 106,
+        name: 'AI approver',
+        content_type: 'shared.organization',
+        permissions: ['shared.view_airesourceaction', 'shared.approve_airesourceaction'],
+      },
+    }).as('createAiRole');
+
+    cy.mount(<CreateRole />);
+    cy.get('[data-cy="name"]').type('AI approver');
+    cy.get('[data-cy="description"]').type('Can approve AI resource changes');
+    cy.selectDropdownOptionByResourceName('content-type', 'Organization');
+    cy.get('#permissions').click();
+    cy.selectMultiSelectOption('#permissions-select', 'View AI resource actions');
+    cy.selectMultiSelectOption('#permissions-select', 'Approve AI resource actions');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@createAiRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('AI approver');
+        expect(role.content_type).to.equal('shared.organization');
+        expect(role.permissions).to.deep.equal([
+          'shared.view_airesourceaction',
+          'shared.approve_airesourceaction',
+        ]);
+      });
+  });
+
   it('copies a built-in role into a custom role payload', () => {
     cy.intercept('GET', awxAPI`/role_definitions/1/`, mockAwxBuiltInRole);
     cy.intercept('POST', awxAPI`/role_definitions/`, {

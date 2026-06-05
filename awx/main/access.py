@@ -3249,11 +3249,28 @@ class WorkflowApprovalAccess(BaseAccess):
         return True
 
     def filtered_queryset(self):
-        return self.model.objects.filter(unified_job_node__workflow_job__unified_job_template__in=WorkflowJobTemplate.accessible_pk_qs(self.user, 'read_role'))
+        queryset = self.model.objects.filter(
+            unified_job_node__workflow_job__unified_job_template__in=WorkflowJobTemplate.accessible_pk_qs(self.user, 'read_role')
+        )
+        from awx.api.views.ai_permissions import user_can_approve_ai_resources
+
+        if user_can_approve_ai_resources(self.user):
+            ai_orgs = Organization.accessible_objects(self.user, 'ai_approver_role') | Organization.accessible_objects(self.user, 'admin_role')
+            queryset |= self.model.objects.filter(
+                unified_job_node__node_type='ai_task',
+                unified_job_node__workflow_job__workflow_job_template__organization__in=ai_orgs,
+            )
+        return queryset.distinct()
 
     def can_approve_or_deny(self, obj):
         if (obj.workflow_job_template and self.user in obj.workflow_job_template.approval_role) or self.user.is_superuser:
             return True
+        ai_node = obj.ai_task_node
+        if ai_node and ai_node.ai_task_status == 'awaiting_approval':
+            from awx.api.views.ai_permissions import user_can_approve_ai_resources
+
+            workflow_template = ai_node.workflow_job.workflow_job_template
+            return user_can_approve_ai_resources(self.user, organization=getattr(workflow_template, 'organization', None))
 
 
 class WorkflowApprovalTemplateAccess(BaseAccess):

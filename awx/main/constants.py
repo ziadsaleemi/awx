@@ -132,6 +132,8 @@ role_name_to_perm_mapping = {
     'policy_operator_role': ['view_policyascode'],
     'eda_admin_role': ['change_edaactivation', 'execute_edaactivation', 'view_edaactivation'],
     'eda_operator_role': ['execute_edaactivation', 'view_edaactivation'],
+    'ai_author_role': ['change_airesourceaction', 'view_airesourceaction'],
+    'ai_approver_role': ['approve_airesourceaction', 'view_airesourceaction'],
 }
 
 org_role_to_permission = {
@@ -151,6 +153,8 @@ org_role_to_permission = {
     'policy_operator_role': 'view_policyascode',
     'eda_admin_role': 'change_edaactivation',
     'eda_operator_role': 'execute_edaactivation',
+    'ai_author_role': 'change_airesourceaction',
+    'ai_approver_role': 'approve_airesourceaction',
     'auditor_role': 'view_project',  # TODO: also doesnt really work
 }
 

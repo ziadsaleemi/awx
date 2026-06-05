@@ -112,6 +112,19 @@ def test_eda_persona_roles(setup_managed_roles):
 
 
 @pytest.mark.django_db
+def test_ai_persona_roles(setup_managed_roles):
+    author_rd = RoleDefinition.objects.get(name='Organization AI Resource Author')
+    author_codenames = set(author_rd.permissions.values_list('codename', flat=True))
+    assert {'view_organization', 'view_airesourceaction', 'change_airesourceaction'}.issubset(author_codenames)
+    assert 'approve_airesourceaction' not in author_codenames
+
+    approver_rd = RoleDefinition.objects.get(name='Organization AI Resource Approver')
+    approver_codenames = set(approver_rd.permissions.values_list('codename', flat=True))
+    assert {'view_organization', 'view_airesourceaction', 'approve_airesourceaction'}.issubset(approver_codenames)
+    assert 'change_airesourceaction' not in approver_codenames
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('resource_name', ['Team', 'Organization'])
 @pytest.mark.parametrize('action', ['Member', 'Admin'])
 def test_legacy_RBAC_uses_platform_roles(setup_managed_roles, resource_name, action, team, bob, organization):

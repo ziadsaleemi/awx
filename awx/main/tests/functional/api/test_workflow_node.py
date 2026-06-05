@@ -326,7 +326,7 @@ def test_launch_ai_task_node_waits_for_resource_action_approval(get, post, admin
             },
         },
     )
-    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow approval')
+    workflow_job_template = WorkflowJobTemplate.objects.create(name='ai workflow approval', organization=organization)
     workflow_job_template.read_role.members.add(rando)
     WorkflowJobTemplateNode.objects.create(
         workflow_job_template=workflow_job_template,
@@ -359,7 +359,9 @@ def test_launch_ai_task_node_waits_for_resource_action_approval(get, post, admin
 
     approve_url = reverse('api:workflow_approval_approve', kwargs={'pk': approval.pk})
     post(approve_url, user=rando, expect=403)
-    post(approve_url, user=admin_user, expect=204)
+    organization.ai_approver_role.members.add(rando)
+    apply_url = reverse('api:workflow_job_node_apply_ai_plan', kwargs={'pk': node.pk})
+    post(apply_url, user=rando, expect=201)
     node.refresh_from_db()
     approval.refresh_from_db()
 

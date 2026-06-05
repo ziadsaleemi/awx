@@ -39,6 +39,8 @@ export interface AwxNavigationCapabilities {
   canViewEda: boolean;
   canOperateEda: boolean;
   canManageEda: boolean;
+  canAuthorAi: boolean;
+  canApproveAi: boolean;
 }
 
 function hasAnyPermission(permissions: Set<string>, model: string, actions: string[]) {
@@ -221,6 +223,8 @@ export function buildAwxNavigationCapabilities(
     'change_edaactivation',
   ]);
   const canManageEda = hasAnyExactPermission(permissionSet, ['change_edaactivation']);
+  const canAuthorAi = hasAnyExactPermission(permissionSet, ['change_airesourceaction']);
+  const canApproveAi = hasAnyExactPermission(permissionSet, ['approve_airesourceaction']);
   const canViewActivityStream =
     canViewJobTemplates ||
     canViewTerraformTemplates ||
@@ -270,6 +274,8 @@ export function buildAwxNavigationCapabilities(
     canViewEda,
     canOperateEda,
     canManageEda,
+    canAuthorAi,
+    canApproveAi,
   };
 }
 

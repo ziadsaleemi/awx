@@ -73,6 +73,18 @@ describe('AWX navigation capabilities', () => {
     expect(adminCapabilities.canManageEda).to.equal(true);
   });
 
+  it('maps AI resource action permissions to AI capabilities', () => {
+    const authorCapabilities = buildAwxNavigationCapabilities(['shared.change_airesourceaction']);
+    const approverCapabilities = buildAwxNavigationCapabilities([
+      'shared.approve_airesourceaction',
+    ]);
+
+    expect(authorCapabilities.canAuthorAi).to.equal(true);
+    expect(authorCapabilities.canApproveAi).to.equal(false);
+    expect(approverCapabilities.canAuthorAi).to.equal(false);
+    expect(approverCapabilities.canApproveAi).to.equal(true);
+  });
+
   it('maps object permission codenames to resource navigation capabilities', () => {
     const capabilities = buildAwxNavigationCapabilities([
       'awx.add_jobtemplate',
