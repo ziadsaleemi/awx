@@ -14,6 +14,7 @@ import {
   Modal,
   ModalBoxBody,
   ModalVariant,
+  PageSection,
   Spinner,
   Title,
 } from '@patternfly/react-core';
@@ -114,6 +115,24 @@ const ProviderFallbackBtn = styled.button`
   }
 `;
 
+const CatalogBrowseSection = styled(PageSection)`
+  min-width: 0;
+`;
+
+const CatalogBrowseGallery = styled(Gallery)`
+  width: 100%;
+
+  .pf-v5-c-gallery__item {
+    min-width: 0;
+  }
+`;
+
+const CatalogCardDescription = styled.div`
+  flex: 1 1 auto;
+  min-height: 2.75rem;
+  overflow-wrap: anywhere;
+`;
+
 function getProviderSlugs(item: CatalogItem): string[] {
   if (item.available_providers && item.available_providers.length > 0) {
     return item.available_providers;
@@ -147,22 +166,28 @@ export function CatalogBrowse() {
         description={t('Browse and deploy available catalog items.')}
       />
       {isLoading ? (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <CatalogBrowseSection data-cy="catalog-browse-section">
           <Spinner />
-        </div>
+        </CatalogBrowseSection>
       ) : !items || items.length === 0 ? (
-        <EmptyState variant="full">
-          <EmptyStateIcon icon={CubesIcon} />
-          <Title headingLevel="h4" size="lg">
-            {t('No catalog items')}
-          </Title>
-          <EmptyStateBody>
-            {t('No catalog items are available. Contact your administrator to create items.')}
-          </EmptyStateBody>
-        </EmptyState>
+        <CatalogBrowseSection data-cy="catalog-browse-section">
+          <EmptyState variant="full">
+            <EmptyStateIcon icon={CubesIcon} />
+            <Title headingLevel="h4" size="lg">
+              {t('No catalog items')}
+            </Title>
+            <EmptyStateBody>
+              {t('No catalog items are available. Contact your administrator to create items.')}
+            </EmptyStateBody>
+          </EmptyState>
+        </CatalogBrowseSection>
       ) : (
-        <div style={{ padding: '1.5rem' }}>
-          <Gallery hasGutter minWidths={{ default: '280px' }}>
+        <CatalogBrowseSection data-cy="catalog-browse-section">
+          <CatalogBrowseGallery
+            hasGutter
+            minWidths={{ default: '260px', md: '300px', xl: '320px' }}
+            data-cy="catalog-browse-gallery"
+          >
             {items.map((item) => (
               <GalleryItem key={item.id}>
                 <CatalogItemCard
@@ -171,8 +196,8 @@ export function CatalogBrowse() {
                 />
               </GalleryItem>
             ))}
-          </Gallery>
-        </div>
+          </CatalogBrowseGallery>
+        </CatalogBrowseSection>
       )}
 
       {/* Per-provider deploy modal */}
@@ -210,8 +235,10 @@ const StyledCatalogCard = styled(Card)`
   box-shadow: var(--pf-v5-global--BoxShadow--sm) !important;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
   height: 100%;
+  min-height: 280px;
   display: flex;
   flex-direction: column;
+  overflow-wrap: anywhere;
 
   &:hover {
     transform: translateY(-4px);
@@ -233,7 +260,7 @@ function CatalogItemCard({
   const slugs = getProviderSlugs(item);
 
   return (
-    <StyledCatalogCard>
+    <StyledCatalogCard data-cy="catalog-browse-card">
       <CardHeader>
         <div
           style={{
@@ -254,14 +281,21 @@ function CatalogItemCard({
           <CardTitle>{item.name}</CardTitle>
         </div>
       </CardHeader>
-      <CardBody style={{ flexGrow: 1, textAlign: 'center' }}>
-        <div style={{ minHeight: '2.75rem' }}>
+      <CardBody
+        style={{
+          flexGrow: 1,
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <CatalogCardDescription>
           {item.description || (
             <span style={{ color: 'var(--pf-global--Color--200)' }}>
               {t('No description provided.')}
             </span>
           )}
-        </div>
+        </CatalogCardDescription>
 
         {/* Cloud provider icon badges — click to open per-provider deploy modal */}
         {slugs.length > 0 && (
@@ -273,6 +307,7 @@ function CatalogItemCard({
               justifyContent: 'center',
               alignItems: 'center',
               marginTop: '1.25rem',
+              marginBottom: 0,
             }}
           >
             {slugs.map((slug) => {

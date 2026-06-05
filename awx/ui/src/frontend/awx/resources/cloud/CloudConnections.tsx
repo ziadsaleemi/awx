@@ -94,13 +94,27 @@ const StyledConnectionCard = styled(Card)`
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
   cursor: pointer;
   height: 100%;
+  min-height: 260px;
   display: flex;
   flex-direction: column;
+  overflow-wrap: anywhere;
 
   &:hover {
     transform: translateY(-4px);
     border-color: var(--pf-v5-global--primary-color--100) !important;
     box-shadow: var(--pf-v5-global--BoxShadow--lg) !important;
+  }
+`;
+
+const CloudConnectionsSection = styled(PageSection)`
+  min-width: 0;
+`;
+
+const CloudConnectionsGallery = styled(Gallery)`
+  width: 100%;
+
+  .pf-v5-c-gallery__item {
+    min-width: 0;
   }
 `;
 
@@ -176,8 +190,12 @@ export function CloudConnections() {
           'Configure provider connectivity. Each provider supports multiple named connections — useful for multiple accounts or nodes.'
         )}
       />
-      <PageSection>
-        <Gallery hasGutter minWidths={{ default: '280px' }}>
+      <CloudConnectionsSection data-cy="cloud-connections-section">
+        <CloudConnectionsGallery
+          hasGutter
+          minWidths={{ default: '260px', md: '300px', xl: '320px' }}
+          data-cy="cloud-connections-gallery"
+        >
           {cloudProviders.map((provider) => {
             const entries = connections[provider.id] ?? [];
             const status = overallStatus(entries);
@@ -185,7 +203,10 @@ export function CloudConnections() {
             const connectedCount = entries.filter((e) => e.status === 'connected').length;
             return (
               <GalleryItem key={provider.id}>
-                <StyledConnectionCard onClick={() => setActiveModalProviderId(provider.id)}>
+                <StyledConnectionCard
+                  onClick={() => setActiveModalProviderId(provider.id)}
+                  data-cy={`cloud-connection-card-${provider.id}`}
+                >
                   <CardHeader>
                     <div
                       style={{
@@ -227,8 +248,8 @@ export function CloudConnections() {
               </GalleryItem>
             );
           })}
-        </Gallery>
-      </PageSection>
+        </CloudConnectionsGallery>
+      </CloudConnectionsSection>
       {activeModalProviderId && (
         <ConnectionModal
           providerId={activeModalProviderId}

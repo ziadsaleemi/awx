@@ -103,6 +103,11 @@ describe('CloudConnections', () => {
       initialEntries: ['/cloud/connections'],
     });
 
+    cy.getByDataCy('cloud-connections-section')
+      .should('be.visible')
+      .and('not.have.class', 'pf-m-limit-width');
+    cy.getByDataCy('cloud-connections-gallery').should('be.visible');
+    cy.getByDataCy('cloud-connection-card-proxmox').should('be.visible');
     cy.contains('Proxmox VE').click();
     cy.wait('@proxmoxCredentials');
     cy.contains('button', /^Add connection$/)
