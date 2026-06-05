@@ -94,6 +94,54 @@ def test_check_external_automation_can_start_eda_activation(mocker):
     eda_client.delete_activation.assert_called_once_with(42)
 
 
+def test_check_external_automation_can_check_proxmox(mocker):
+    session = mocker.Mock()
+    session.headers = {}
+    version_response = mocker.Mock(ok=True)
+    version_response.json.return_value = {'data': {'version': '8.2.7', 'release': '1'}}
+    resources_response = mocker.Mock(ok=True)
+    resources_response.json.return_value = {
+        'data': [
+            {'type': 'node', 'node': 'pve1', 'status': 'online'},
+            {'type': 'qemu', 'name': 'eda-server', 'status': 'running', 'node': 'pve1', 'vmid': 101},
+            {'type': 'qemu', 'name': 'opa-gatekeeper', 'status': 'running', 'node': 'pve1', 'vmid': 102},
+            {'type': 'qemu', 'name': 'ubuntu-template', 'template': 1, 'status': 'stopped', 'node': 'pve1', 'vmid': 9000},
+        ]
+    }
+    session.get.side_effect = [version_response, resources_response]
+    mocker.patch('awx.main.management.commands.check_external_automation.requests.Session', return_value=session)
+
+    output = StringIO()
+    call_command(
+        'check_external_automation',
+        '--json',
+        '--skip-eda',
+        '--skip-opa',
+        '--skip-gatekeeper',
+        '--check-proxmox',
+        '--proxmox-api-url=https://proxmox.example.test:8006/api2/json',
+        '--proxmox-api-token-id=awx@pve!token',
+        '--proxmox-api-token-secret=secret',
+        '--proxmox-tls-insecure',
+        '--proxmox-expected-vm=eda-server',
+        '--proxmox-expected-vm=opa-gatekeeper',
+        stdout=output,
+    )
+    payload = json.loads(output.getvalue())
+
+    proxmox = payload['checks']['proxmox']
+    assert payload['ok'] is True
+    assert proxmox['status'] == 'available'
+    assert proxmox['version'] == '8.2.7'
+    assert proxmox['counts'] == {'nodes': 1, 'vms': 2, 'containers': 0, 'templates': 1, 'running_vms': 2}
+    assert proxmox['expected_vms_found'] == 2
+    assert 'secret' not in json.dumps(proxmox)
+    assert session.verify is False
+    assert session.headers['Authorization'] == 'PVEAPIToken=awx@pve!token=secret'
+    assert session.get.call_args_list[0].args[0] == 'https://proxmox.example.test:8006/api2/json/version'
+    assert session.get.call_args_list[1].args[0] == 'https://proxmox.example.test:8006/api2/json/cluster/resources'
+
+
 @override_settings(
     EDA_SERVER_URL='',
     OPA_HOST='opa.example.test',

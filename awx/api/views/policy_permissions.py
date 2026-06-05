@@ -86,6 +86,9 @@ class ExternalAutomationCheckPermission(permissions.BasePermission):
             return True
 
         data = request.data if isinstance(request.data, dict) else {}
+        if bool(data.get('include_proxmox', False)):
+            return False
+
         include_eda = bool(data.get('include_eda', True))
         uses_eda_fields = any(
             bool(data.get(key))

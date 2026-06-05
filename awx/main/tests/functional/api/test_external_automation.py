@@ -4,9 +4,41 @@ import pytest
 
 from awx.api.versioning import reverse
 from awx.main.management.commands.check_external_automation import run_external_automation_checks
-from awx.main.models import ActivityStream
+from awx.main.models import ActivityStream, Credential, CredentialType
+from awx.main.models.catalog import CloudProviderConnection
 
 pytestmark = pytest.mark.django_db
+
+
+def _proxmox_credential(organization, user):
+    credential_type = CredentialType.objects.create(
+        name='Proxmox VE test credential type',
+        namespace='proxmox_ve',
+        kind='cloud',
+        inputs={
+            'fields': [
+                {'id': 'pm_api_url', 'label': 'Proxmox API URL', 'type': 'string'},
+                {'id': 'pm_api_token_id', 'label': 'Proxmox API token id', 'type': 'string'},
+                {'id': 'pm_api_token_secret', 'label': 'Proxmox API token secret', 'type': 'string'},
+                {'id': 'pm_tls_insecure', 'label': 'TLS insecure', 'type': 'boolean'},
+            ],
+            'required': ['pm_api_url', 'pm_api_token_id', 'pm_api_token_secret'],
+        },
+        injectors={},
+    )
+    credential = Credential.objects.create(
+        name='Lab Proxmox credential',
+        organization=organization,
+        credential_type=credential_type,
+        inputs={
+            'pm_api_url': 'https://proxmox.example.test:8006/api2/json',
+            'pm_api_token_id': 'awx@pve!token',
+            'pm_api_token_secret': 'secret',
+            'pm_tls_insecure': True,
+        },
+    )
+    credential.use_role.members.add(user)
+    return credential
 
 
 def test_external_automation_check_requires_system_admin(post, rando):
@@ -50,6 +82,16 @@ def test_policy_operator_cannot_run_eda_external_automation_smoke(post, organiza
     post(reverse('api:external_automation_check'), {'include_eda': True, 'include_opa': False}, user=rando, expect=403)
 
 
+def test_policy_operator_cannot_run_proxmox_external_automation_smoke(post, organization, rando):
+    organization.policy_operator_role.members.add(rando)
+    post(
+        reverse('api:external_automation_check'),
+        {'include_eda': False, 'include_opa': False, 'include_gatekeeper': False, 'include_proxmox': True},
+        user=rando,
+        expect=403,
+    )
+
+
 def test_eda_operator_can_run_eda_read_external_automation_smoke(post, organization, rando, mocker):
     organization.eda_operator_role.members.add(rando)
     check = mocker.patch(
@@ -61,6 +103,80 @@ def test_eda_operator_can_run_eda_read_external_automation_smoke(post, organizat
 
     assert response.data['ok'] is True
     check.assert_called_once()
+
+
+def test_external_automation_check_resolves_proxmox_connection(post, admin_user, organization, mocker):
+    credential = _proxmox_credential(organization, admin_user)
+    connection = CloudProviderConnection.objects.create(
+        provider_id='proxmox',
+        name='Lab Proxmox',
+        status='connected',
+        credential=credential,
+        credential_name=credential.name,
+        organization=organization,
+    )
+    check = mocker.patch(
+        'awx.api.views.external_automation.run_external_automation_checks',
+        return_value={
+            'ok': True,
+            'checks': {
+                'proxmox': {
+                    'ok': True,
+                    'status': 'available',
+                    'connection_id': str(connection.pk),
+                    'connection_name': 'Lab Proxmox',
+                    'counts': {'nodes': 1, 'vms': 2, 'running_vms': 2, 'containers': 0, 'templates': 1},
+                    'expected_vms_found': 2,
+                }
+            },
+        },
+    )
+
+    response = post(
+        reverse('api:external_automation_check'),
+        {
+            'include_eda': False,
+            'include_opa': False,
+            'include_gatekeeper': False,
+            'include_proxmox': True,
+            'proxmox_connection_id': str(connection.pk),
+            'proxmox_expected_vms': ['eda-server', 'opa-gatekeeper'],
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['checks']['proxmox']['connection_name'] == 'Lab Proxmox'
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    changes = json.loads(audit.changes)
+    assert changes['checks']['proxmox']['counts']['vms'] == 2
+    assert changes['checks']['proxmox']['expected_vms_found'] == 2
+    check.assert_called_once_with(
+        include_eda=False,
+        include_opa=False,
+        start_eda_activation=False,
+        eda_rulebook_name='codex-smoke.yml',
+        eda_activation_id='',
+        eda_event_source='',
+        eda_activation_extra_data='{}',
+        eda_include_events=False,
+        cleanup_eda_activation=False,
+        sync_opa_policy=False,
+        opa_policy_id='awx/managed',
+        opa_deny_smoke=False,
+        opa_deny_policy_id='awx/codex_deny_smoke',
+        include_gatekeeper=False,
+        gatekeeper_context='',
+        include_proxmox=True,
+        proxmox_api_url='https://proxmox.example.test:8006/api2/json',
+        proxmox_api_token_id='awx@pve!token',
+        proxmox_api_token_secret='secret',
+        proxmox_tls_insecure=True,
+        proxmox_expected_vms=['eda-server', 'opa-gatekeeper'],
+        proxmox_connection_id=str(connection.pk),
+        proxmox_connection_name='Lab Proxmox',
+        proxmox_connection_status='connected',
+    )
 
 
 def test_eda_operator_cannot_run_create_or_cleanup_external_automation_smoke(post, organization, rando):
@@ -164,6 +280,7 @@ def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
         opa_deny_policy_id='awx/codex_deny_smoke',
         include_gatekeeper=True,
         gatekeeper_context='prod',
+        include_proxmox=False,
     )
 
 

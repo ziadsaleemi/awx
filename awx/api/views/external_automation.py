@@ -4,12 +4,13 @@
 import json
 
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ParseError
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
 from awx.api.views.policy_permissions import ExternalAutomationCheckPermission
 from awx.api.versioning import reverse
-from awx.main.models import ActivityStream
+from awx.main.models import ActivityStream, CloudProviderConnection
 from awx.main.management.commands.check_external_automation import run_external_automation_checks
 
 
@@ -28,7 +29,14 @@ def _safe_check_summary(result):
                 entry[key] = check[key]
         counts = check.get('counts')
         if isinstance(counts, dict):
-            entry['counts'] = {key: counts.get(key) for key in ('constraint_templates', 'constraints', 'violations', 'configs') if key in counts}
+            entry['counts'] = {
+                key: counts.get(key)
+                for key in ('constraint_templates', 'constraints', 'violations', 'configs', 'nodes', 'vms', 'containers', 'templates', 'running_vms')
+                if key in counts
+            }
+        for key in ('api_url', 'connection_id', 'connection_name', 'connection_status', 'verify_ssl', 'expected_vms_found'):
+            if key in check:
+                entry[key] = check[key]
         policy_sync = check.get('policy_sync')
         if isinstance(policy_sync, dict):
             entry['policy_sync'] = {
@@ -70,13 +78,63 @@ def _audit_external_automation_check(request, result):
     }
 
 
+def _proxmox_check_kwargs_from_request(request, data):
+    if not bool(data.get('include_proxmox', False)):
+        return {}
+
+    connection_id = str(data.get('proxmox_connection_id') or '').strip()
+    if connection_id:
+        try:
+            int(connection_id)
+        except (TypeError, ValueError):
+            raise ParseError(_('proxmox_connection_id must be an integer.'))
+
+    qs = (
+        request.user.get_queryset(CloudProviderConnection)
+        .filter(provider_id='proxmox')
+        .select_related('credential', 'credential__credential_type')
+        .order_by('-status', 'name', 'id')
+    )
+    if connection_id:
+        qs = qs.filter(pk=connection_id)
+
+    connection = qs.first()
+    if connection is None:
+        return {
+            'proxmox_connection_id': connection_id,
+            'proxmox_connection_status': 'missing',
+            'proxmox_expected_vms': data.get('proxmox_expected_vms') or [],
+        }
+
+    credential = connection.credential
+    if credential is None or getattr(credential.credential_type, 'namespace', '') != 'proxmox_ve':
+        return {
+            'proxmox_connection_id': str(connection.pk),
+            'proxmox_connection_name': connection.name,
+            'proxmox_connection_status': 'missing_credential',
+            'proxmox_expected_vms': data.get('proxmox_expected_vms') or [],
+        }
+
+    return {
+        'proxmox_api_url': credential.get_input('pm_api_url', default='') or '',
+        'proxmox_api_token_id': credential.get_input('pm_api_token_id', default='') or '',
+        'proxmox_api_token_secret': credential.get_input('pm_api_token_secret', default='') or '',
+        'proxmox_tls_insecure': bool(credential.get_input('pm_tls_insecure', default=False)),
+        'proxmox_expected_vms': data.get('proxmox_expected_vms') or [],
+        'proxmox_connection_id': str(connection.pk),
+        'proxmox_connection_name': connection.name,
+        'proxmox_connection_status': connection.status,
+    }
+
+
 class ExternalAutomationCheckView(APIView):
     name = _('External Automation Check')
-    resource_purpose = 'live EDA and OPA automation smoke check'
+    resource_purpose = 'live EDA, OPA, Gatekeeper, and Proxmox automation smoke check'
     permission_classes = [ExternalAutomationCheckPermission]
 
     def post(self, request, format=None):
         data = request.data if isinstance(request.data, dict) else {}
+        proxmox_kwargs = _proxmox_check_kwargs_from_request(request, data)
         result = run_external_automation_checks(
             include_eda=bool(data.get('include_eda', True)),
             include_opa=bool(data.get('include_opa', True)),
@@ -93,6 +151,8 @@ class ExternalAutomationCheckView(APIView):
             opa_deny_policy_id=str(data.get('opa_deny_policy_id') or 'awx/codex_deny_smoke'),
             include_gatekeeper=bool(data.get('include_gatekeeper', False)),
             gatekeeper_context=str(data.get('gatekeeper_context') or ''),
+            include_proxmox=bool(data.get('include_proxmox', False)),
+            **proxmox_kwargs,
         )
         result['audit'] = _audit_external_automation_check(request, result)
         return Response(result)

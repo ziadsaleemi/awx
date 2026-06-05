@@ -46,7 +46,23 @@ interface ExternalAutomationCheck {
     constraints?: number;
     violations?: number;
     configs?: number;
+    nodes?: number;
+    vms?: number;
+    containers?: number;
+    templates?: number;
+    running_vms?: number;
   };
+  connection_name?: string;
+  expected_vms_found?: number;
+  expected_vm_names?: string[];
+  expected_vms?: {
+    name: string;
+    found: boolean;
+    status?: string;
+    node?: string;
+    type?: string;
+    vmid?: number;
+  }[];
   deny_smoke?: {
     ok: boolean;
     status: string;
@@ -66,6 +82,7 @@ interface ExternalAutomationCheckResponse {
     eda?: ExternalAutomationCheck;
     opa?: ExternalAutomationCheck;
     gatekeeper?: ExternalAutomationCheck;
+    proxmox?: ExternalAutomationCheck;
   };
   audit?: {
     activity_stream_id: number;
@@ -82,11 +99,15 @@ interface ExternalAutomationCheckRequest {
   start_eda_activation: boolean;
   include_gatekeeper: boolean;
   gatekeeper_context: string;
+  include_proxmox?: boolean;
+  proxmox_connection_id?: string;
+  proxmox_expected_vms?: string[];
 }
 
 interface PolicySmokeSelection {
   includeOpa: boolean;
   includeGatekeeper: boolean;
+  includeProxmox: boolean;
 }
 
 interface ExternalAutomationEvidenceReport {
@@ -139,13 +160,17 @@ export function ExternalAutomationSmokePanel(props?: {
   const includeOpa = props?.includeOpa ?? true;
   const includeGatekeeper = props?.includeGatekeeper ?? false;
   const policySelectionEnabled = !includeEda && includeGatekeeper;
+  const proxmoxProofEnabled = includeEda;
   const [policyCheckOpa, setPolicyCheckOpa] = useState(includeOpa);
   const [policyCheckGatekeeper, setPolicyCheckGatekeeper] = useState(includeGatekeeper);
+  const [proxmoxCheck, setProxmoxCheck] = useState(false);
   const [result, setResult] = useState<ExternalAutomationCheckResponse | null>(null);
   const [lastRunChecks, setLastRunChecks] = useState<PolicySmokeSelection | null>(null);
   const [lastRunRequest, setLastRunRequest] = useState<ExternalAutomationCheckRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [gatekeeperContext, setGatekeeperContext] = useState('');
+  const [proxmoxConnectionId, setProxmoxConnectionId] = useState('');
+  const [proxmoxExpectedVms, setProxmoxExpectedVms] = useState('');
   const [loading, setLoading] = useState(false);
   const selectedIncludeOpa = policySelectionEnabled ? policyCheckOpa : includeOpa;
   const selectedIncludeGatekeeper = policySelectionEnabled
@@ -153,8 +178,10 @@ export function ExternalAutomationSmokePanel(props?: {
     : includeGatekeeper;
   const resultIncludeOpa = lastRunChecks?.includeOpa ?? selectedIncludeOpa;
   const resultIncludeGatekeeper = lastRunChecks?.includeGatekeeper ?? selectedIncludeGatekeeper;
+  const resultIncludeProxmox = lastRunChecks?.includeProxmox ?? proxmoxCheck;
   const showOpaResult = Boolean(result?.checks.opa) || resultIncludeOpa;
   const showGatekeeperResult = Boolean(result?.checks.gatekeeper) || resultIncludeGatekeeper;
+  const showProxmoxResult = Boolean(result?.checks.proxmox) || resultIncludeProxmox;
   const gatekeeperNotConfigured =
     result?.checks.gatekeeper?.ok === false && result.checks.gatekeeper.status === 'not_configured';
 
@@ -191,6 +218,7 @@ export function ExternalAutomationSmokePanel(props?: {
     const runChecks = {
       includeOpa: selectedIncludeOpa,
       includeGatekeeper: selectedIncludeGatekeeper,
+      includeProxmox: proxmoxProofEnabled && proxmoxCheck,
     };
 
     if (!includeEda && !runChecks.includeOpa && !runChecks.includeGatekeeper) {
@@ -199,7 +227,7 @@ export function ExternalAutomationSmokePanel(props?: {
       return;
     }
 
-    const requestPayload = {
+    const requestPayload: ExternalAutomationCheckRequest = {
       include_eda: includeEda,
       include_opa: runChecks.includeOpa,
       sync_opa_policy: runChecks.includeOpa,
@@ -209,6 +237,15 @@ export function ExternalAutomationSmokePanel(props?: {
       include_gatekeeper: runChecks.includeGatekeeper,
       gatekeeper_context: runChecks.includeGatekeeper ? gatekeeperContext.trim() : '',
     };
+
+    if (proxmoxProofEnabled) {
+      requestPayload.include_proxmox = runChecks.includeProxmox;
+      requestPayload.proxmox_connection_id = proxmoxConnectionId.trim();
+      requestPayload.proxmox_expected_vms = proxmoxExpectedVms
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+    }
 
     setLastRunChecks(runChecks);
     setLastRunRequest(requestPayload);
@@ -274,6 +311,54 @@ export function ExternalAutomationSmokePanel(props?: {
                   />
                 </FormGroup>
               </StackItem>
+            ) : null}
+            {proxmoxProofEnabled ? (
+              <StackItem>
+                <FormGroup label={t('Live proof')} fieldId="external-automation-live-proof">
+                  <Checkbox
+                    id="external-automation-check-proxmox"
+                    label={t('Proxmox VE')}
+                    isChecked={proxmoxCheck}
+                    onChange={(_event, checked) => setProxmoxCheck(checked)}
+                    isDisabled={loading}
+                    data-cy="external-automation-check-proxmox"
+                  />
+                </FormGroup>
+              </StackItem>
+            ) : null}
+            {proxmoxProofEnabled && proxmoxCheck ? (
+              <>
+                <StackItem>
+                  <FormGroup
+                    label={t('Proxmox connection ID')}
+                    fieldId="external-automation-proxmox-connection-id"
+                  >
+                    <TextInput
+                      id="external-automation-proxmox-connection-id"
+                      value={proxmoxConnectionId}
+                      onChange={(_event, value) => setProxmoxConnectionId(value)}
+                      placeholder={t('First accessible Proxmox connection')}
+                      isDisabled={loading}
+                      data-cy="external-automation-proxmox-connection-id"
+                    />
+                  </FormGroup>
+                </StackItem>
+                <StackItem>
+                  <FormGroup
+                    label={t('Expected Proxmox VMs')}
+                    fieldId="external-automation-proxmox-expected-vms"
+                  >
+                    <TextInput
+                      id="external-automation-proxmox-expected-vms"
+                      value={proxmoxExpectedVms}
+                      onChange={(_event, value) => setProxmoxExpectedVms(value)}
+                      placeholder={t('eda-server, opa-gatekeeper, gatekeeper-policy-manager')}
+                      isDisabled={loading}
+                      data-cy="external-automation-proxmox-expected-vms"
+                    />
+                  </FormGroup>
+                </StackItem>
+              </>
             ) : null}
             <StackItem>
               <Button
@@ -397,6 +482,52 @@ export function ExternalAutomationSmokePanel(props?: {
                                   }
                                 )
                               : t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </>
+                    ) : null}
+                    {showProxmoxResult ? (
+                      <>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Proxmox VE')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            <StatusLabel check={result.checks.proxmox} />
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Proxmox connection')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.proxmox?.connection_name ||
+                              result.checks.proxmox?.status ||
+                              t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Proxmox resources')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.proxmox?.counts
+                              ? t(
+                                  '{{nodes}} nodes, {{vms}} VMs, {{running}} running, {{containers}} containers, {{templates}} templates',
+                                  {
+                                    nodes: result.checks.proxmox.counts.nodes ?? 0,
+                                    vms: result.checks.proxmox.counts.vms ?? 0,
+                                    running: result.checks.proxmox.counts.running_vms ?? 0,
+                                    containers: result.checks.proxmox.counts.containers ?? 0,
+                                    templates: result.checks.proxmox.counts.templates ?? 0,
+                                  }
+                                )
+                              : t('Not checked')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Expected VMs')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {result.checks.proxmox?.expected_vm_names?.length
+                              ? t('{{found}} of {{total}} found', {
+                                  found: result.checks.proxmox.expected_vms_found ?? 0,
+                                  total: result.checks.proxmox.expected_vm_names.length,
+                                })
+                              : t('No expected VMs provided')}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
                       </>

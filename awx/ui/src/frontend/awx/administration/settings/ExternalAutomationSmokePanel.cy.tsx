@@ -25,6 +25,71 @@ function SeedNavigation(props: { children: ReactNode }) {
 }
 
 describe('ExternalAutomationSmokePanel', () => {
+  it('can include Proxmox VM proof from the external automation smoke surface', () => {
+    cy.intercept('POST', awxAPI`/external_automation/check/`, (req) => {
+      expect(req.body).to.deep.equal({
+        include_eda: true,
+        include_opa: true,
+        sync_opa_policy: true,
+        opa_policy_id: 'awx/managed',
+        opa_deny_smoke: true,
+        start_eda_activation: false,
+        include_gatekeeper: false,
+        gatekeeper_context: '',
+        include_proxmox: true,
+        proxmox_connection_id: '7',
+        proxmox_expected_vms: ['eda-server', 'opa-gatekeeper'],
+      });
+      req.reply({
+        ok: true,
+        checks: {
+          eda: { ok: true, status: 'available', count: 1 },
+          opa: {
+            ok: true,
+            status: 'available',
+            allowed: true,
+            deny_smoke: { requested: true, ok: true, status: 'denied', allowed: false },
+            policy_sync: { requested: true, ok: true, status: 'synced', policy_id: 'awx/managed' },
+          },
+          proxmox: {
+            ok: true,
+            status: 'available',
+            connection_name: 'Lab Proxmox',
+            counts: {
+              nodes: 1,
+              vms: 2,
+              running_vms: 2,
+              containers: 0,
+              templates: 4,
+            },
+            expected_vm_names: ['eda-server', 'opa-gatekeeper'],
+            expected_vms_found: 2,
+          },
+        },
+        audit: {
+          activity_stream_id: 122,
+          activity_stream_url: '/api/v2/activity_stream/122/',
+        },
+      });
+    }).as('runSmoke');
+
+    cy.mount(
+      <SeedNavigation>
+        <ExternalAutomationSmokePanel />
+      </SeedNavigation>
+    );
+
+    cy.getByDataCy('external-automation-check-proxmox').check({ force: true });
+    cy.getByDataCy('external-automation-proxmox-connection-id').type('7');
+    cy.getByDataCy('external-automation-proxmox-expected-vms').type('eda-server, opa-gatekeeper');
+    cy.getByDataCy('external-automation-smoke-run-button').click();
+    cy.wait('@runSmoke');
+    cy.contains('External automation smoke passed.').should('be.visible');
+    cy.contains('Lab Proxmox').should('be.visible');
+    cy.contains('1 nodes, 2 VMs, 2 running, 0 containers, 4 templates').should('be.visible');
+    cy.contains('2 of 2 found').should('be.visible');
+  });
+
   it('runs OPA and Gatekeeper smoke from policy surfaces', () => {
     cy.window().then((win) => {
       cy.stub(win.URL, 'createObjectURL').as('createObjectURL').returns('blob:smoke-evidence');

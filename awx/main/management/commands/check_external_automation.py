@@ -46,6 +46,17 @@ class Command(BaseCommand):
         parser.add_argument('--opa-deny-policy-id', default=OPA_DENY_SMOKE_POLICY_ID, help='Temporary OPA policy id used with --opa-deny-smoke.')
         parser.add_argument('--skip-gatekeeper', action='store_true', help='Skip Gatekeeper Kubernetes API check.')
         parser.add_argument('--gatekeeper-context', default='', help='Optional configured Gatekeeper Kubernetes context to check.')
+        parser.add_argument('--check-proxmox', action='store_true', help='Check a Proxmox VE API endpoint.')
+        parser.add_argument('--proxmox-api-url', default='', help='Proxmox VE API URL, usually https://host:8006/api2/json.')
+        parser.add_argument('--proxmox-api-token-id', default='', help='Proxmox VE API token id.')
+        parser.add_argument('--proxmox-api-token-secret', default='', help='Proxmox VE API token secret.')
+        parser.add_argument('--proxmox-tls-insecure', action='store_true', help='Disable TLS verification for the Proxmox API check.')
+        parser.add_argument(
+            '--proxmox-expected-vm',
+            action='append',
+            default=[],
+            help='Expected EDA/OPA/Gatekeeper VM name to prove on Proxmox. Can be specified more than once.',
+        )
         parser.add_argument('--fail-on-unavailable', action='store_true', help='Return nonzero when a checked service is unavailable.')
 
     def handle(self, *args, **options):
@@ -65,6 +76,12 @@ class Command(BaseCommand):
             opa_deny_policy_id=options['opa_deny_policy_id'],
             include_gatekeeper=not options['skip_gatekeeper'],
             gatekeeper_context=options['gatekeeper_context'],
+            include_proxmox=options['check_proxmox'],
+            proxmox_api_url=options['proxmox_api_url'],
+            proxmox_api_token_id=options['proxmox_api_token_id'],
+            proxmox_api_token_secret=options['proxmox_api_token_secret'],
+            proxmox_tls_insecure=options['proxmox_tls_insecure'],
+            proxmox_expected_vms=options['proxmox_expected_vm'],
         )
 
         if options['json_output']:
@@ -344,6 +361,106 @@ class Command(BaseCommand):
         )
         return result
 
+    def _check_proxmox(
+        self,
+        api_url='',
+        api_token_id='',
+        api_token_secret='',
+        tls_insecure=False,
+        expected_vms=None,
+        connection_id='',
+        connection_name='',
+        connection_status='',
+    ):
+        api_url = str(api_url or '').strip().rstrip('/')
+        expected_names = _normalize_expected_vm_names(expected_vms)
+        result = {
+            'ok': False,
+            'status': 'not_configured',
+            'api_url': api_url,
+            'connection_id': str(connection_id or ''),
+            'connection_name': str(connection_name or ''),
+            'connection_status': str(connection_status or ''),
+            'verify_ssl': not bool(tls_insecure),
+            'expected_vm_names': expected_names,
+        }
+        if connection_status == 'missing':
+            result['status'] = 'missing_connection'
+            return result
+        if not api_url or not api_token_id or not api_token_secret:
+            return result
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                'Authorization': f'PVEAPIToken={api_token_id}={api_token_secret}',
+                'Accept': 'application/json',
+            }
+        )
+        session.verify = not bool(tls_insecure)
+
+        try:
+            version = self._proxmox_get(session, api_url, '/version')
+            resources = self._proxmox_get(session, api_url, '/cluster/resources')
+        except Exception as exc:
+            result.update({'status': 'unreachable', 'error': str(exc)})
+            return result
+
+        counts = {
+            'nodes': 0,
+            'vms': 0,
+            'containers': 0,
+            'templates': 0,
+            'running_vms': 0,
+        }
+        vm_resources = []
+        resource_list = resources if isinstance(resources, list) else []
+        for resource in resource_list:
+            if not isinstance(resource, dict):
+                continue
+            resource_type = resource.get('type')
+            if resource_type == 'node':
+                counts['nodes'] += 1
+            elif resource_type == 'qemu':
+                if resource.get('template', 0):
+                    counts['templates'] += 1
+                else:
+                    counts['vms'] += 1
+                    if str(resource.get('status') or '').lower() == 'running':
+                        counts['running_vms'] += 1
+                    vm_resources.append(resource)
+            elif resource_type == 'lxc':
+                counts['containers'] += 1
+                vm_resources.append(resource)
+
+        expected_results = _match_expected_vms(expected_names, vm_resources)
+        expected_found = sum(1 for item in expected_results if item['found'])
+        missing_expected = bool(expected_names) and expected_found != len(expected_names)
+        result.update(
+            {
+                'ok': not missing_expected,
+                'status': 'missing_expected_vms' if missing_expected else 'available',
+                'version': version.get('version') if isinstance(version, dict) else '',
+                'release': version.get('release') if isinstance(version, dict) else '',
+                'counts': counts,
+                'expected_vms': expected_results,
+                'expected_vms_found': expected_found,
+            }
+        )
+        return result
+
+    def _proxmox_get(self, session, api_url, path):
+        response = session.get(f'{api_url}/{path.lstrip("/")}', timeout=20)
+        if not response.ok:
+            detail = response.text
+            try:
+                body = response.json()
+                detail = body.get('errors') or body.get('message') or detail
+            except Exception:
+                pass
+            raise RuntimeError(f'Proxmox API error ({response.status_code}): {detail}')
+        return response.json().get('data', []) or []
+
     def _write_text_result(self, result):
         self.stdout.write(f"Overall: {'ok' if result['ok'] else 'failed'}")
         for name, check in result['checks'].items():
@@ -366,6 +483,15 @@ def run_external_automation_checks(
     opa_deny_policy_id=OPA_DENY_SMOKE_POLICY_ID,
     include_gatekeeper=False,
     gatekeeper_context='',
+    include_proxmox=False,
+    proxmox_api_url='',
+    proxmox_api_token_id='',
+    proxmox_api_token_secret='',
+    proxmox_tls_insecure=False,
+    proxmox_expected_vms=None,
+    proxmox_connection_id='',
+    proxmox_connection_name='',
+    proxmox_connection_status='',
 ):
     checker = Command()
     checks = {}
@@ -388,7 +514,56 @@ def run_external_automation_checks(
         )
     if include_gatekeeper:
         checks['gatekeeper'] = checker._check_gatekeeper(context_name=gatekeeper_context)
+    if include_proxmox:
+        checks['proxmox'] = checker._check_proxmox(
+            api_url=proxmox_api_url,
+            api_token_id=proxmox_api_token_id,
+            api_token_secret=proxmox_api_token_secret,
+            tls_insecure=proxmox_tls_insecure,
+            expected_vms=proxmox_expected_vms,
+            connection_id=proxmox_connection_id,
+            connection_name=proxmox_connection_name,
+            connection_status=proxmox_connection_status,
+        )
     return {
         'ok': all(check['ok'] for check in checks.values()) if checks else True,
         'checks': checks,
     }
+
+
+def _normalize_expected_vm_names(expected_vms):
+    if expected_vms is None:
+        return []
+    if isinstance(expected_vms, str):
+        values = expected_vms.split(',')
+    else:
+        values = expected_vms
+    names = []
+    for value in values:
+        name = str(value or '').strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _match_expected_vms(expected_names, resources):
+    by_name = {}
+    for resource in resources:
+        name = str(resource.get('name') or '').strip()
+        if name:
+            by_name.setdefault(name.lower(), resource)
+
+    results = []
+    for expected_name in expected_names:
+        resource = by_name.get(expected_name.lower())
+        results.append(
+            {
+                'name': expected_name,
+                'found': resource is not None,
+                'status': str((resource or {}).get('status') or ''),
+                'node': str((resource or {}).get('node') or ''),
+                'type': str((resource or {}).get('type') or ''),
+                'vmid': (resource or {}).get('vmid'),
+            }
+        )
+    return results
