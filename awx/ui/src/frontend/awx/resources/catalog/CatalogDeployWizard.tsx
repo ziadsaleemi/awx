@@ -74,25 +74,6 @@ interface DeploySurveyResponse {
   schema: JsonSchema;
 }
 
-// AWX WorkflowJobTemplate survey spec format
-interface WjtSurveyQuestion {
-  variable: string;
-  question_name: string;
-  question_description?: string;
-  required: boolean;
-  type: SurveyQuestionType;
-  default?: unknown;
-  choices?: string | string[]; // newline-separated or list choices for multiplechoice/multiselect
-  min?: number;
-  max?: number;
-}
-
-interface WjtSurveySpec {
-  name: string;
-  description?: string;
-  spec: WjtSurveyQuestion[];
-}
-
 function normalizeSurveyChoices(choices: unknown): string[] {
   const rawChoices = Array.isArray(choices)
     ? choices
@@ -112,50 +93,6 @@ function defaultToFormValue(prop: SchemaProperty): string {
 
 function formValueToArray(value: string | undefined): string[] {
   return normalizeSurveyChoices(value ?? '');
-}
-
-/** Convert an AWX WJT survey spec into the JsonSchema format used by the form renderer. */
-function surveySpecToSchema(spec: WjtSurveySpec): JsonSchema {
-  const properties: Record<string, SchemaProperty> = {};
-  const required: string[] = [];
-
-  for (const q of spec.spec) {
-    const prop: SchemaProperty = {
-      title: q.question_name,
-      description: q.question_description || undefined,
-      surveyType: q.type,
-    };
-
-    if (q.type === 'integer') {
-      prop.type = 'integer';
-    } else if (q.type === 'float') {
-      prop.type = 'number';
-    } else if (q.type === 'multiselect') {
-      prop.type = 'array';
-    } else {
-      prop.type = 'string';
-    }
-
-    if (q.default !== undefined && q.default !== null && q.default !== '') {
-      prop.default = q.default;
-    }
-
-    if (q.min !== undefined) prop.minimum = q.min;
-    if (q.max !== undefined) prop.maximum = q.max;
-
-    if ((q.type === 'multiplechoice' || q.type === 'multiselect') && q.choices) {
-      const choices = normalizeSurveyChoices(q.choices);
-      prop.enum = choices;
-      if (q.type === 'multiselect') {
-        prop.items = { type: 'string', enum: choices };
-      }
-    }
-
-    properties[q.variable] = prop;
-    if (q.required) required.push(q.variable);
-  }
-
-  return { type: 'object', properties, required };
 }
 
 interface CatalogDeploymentListResponse {
@@ -356,12 +293,13 @@ export function CatalogDeployContent({
     aws: 'Amazon AWS',
   };
 
-  // Fetch the WJT survey for the currently-selected provider, if configured
+  // Fetch the provider survey through the Catalog Item endpoint so catalog
+  // personas do not need direct Workflow Job Template read access.
   const providerSurveyUrl =
-    selectedProvider && item.related?.provider_workflow_surveys
-      ? item.related.provider_workflow_surveys[selectedProvider]
+    selectedProvider && selectedProvider !== 'default'
+      ? `${awxAPI`/catalog_items/${id}/deploy_survey/`}?provider=${encodeURIComponent(selectedProvider)}`
       : undefined;
-  const [providerSurveyData, setProviderSurveyData] = useState<WjtSurveySpec | undefined>();
+  const [providerSurveyData, setProviderSurveyData] = useState<DeploySurveyResponse | undefined>();
   const [providerSurveyError, setProviderSurveyError] = useState<Error | undefined>();
 
   useEffect(() => {
@@ -370,7 +308,7 @@ export function CatalogDeployContent({
     if (!providerSurveyUrl) return;
 
     const abortController = new AbortController();
-    void requestGet<WjtSurveySpec>(providerSurveyUrl, abortController.signal)
+    void requestGet<DeploySurveyResponse>(providerSurveyUrl, abortController.signal)
       .then((data) => setProviderSurveyData(data))
       .catch((err: unknown) => {
         if (err instanceof Error && err.name === 'AbortError') return;
@@ -382,8 +320,8 @@ export function CatalogDeployContent({
 
   // The active schema: provider survey > catalog deploy_survey > extra_vars_schema
   const schema = useMemo((): JsonSchema => {
-    if (providerSurveyData?.spec) {
-      return surveySpecToSchema(providerSurveyData);
+    if (providerSurveyData?.schema) {
+      return providerSurveyData.schema;
     }
     return (deploySurvey?.schema ?? item.extra_vars_schema ?? {}) as JsonSchema;
   }, [providerSurveyData, deploySurvey?.schema, item.extra_vars_schema]);

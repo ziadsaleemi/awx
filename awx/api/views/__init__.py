@@ -5450,7 +5450,7 @@ def _survey_question_to_schema_property(question):
     return prop
 
 
-def _build_catalog_item_live_schema(item):
+def _build_catalog_item_live_schema(item, workflow=None):
     schema = {'type': 'object', 'properties': {}, 'required': []}
     if isinstance(item.extra_vars_schema, dict):
         schema.update(item.extra_vars_schema)
@@ -5459,9 +5459,10 @@ def _build_catalog_item_live_schema(item):
         schema.setdefault('required', [])
 
     required_fields = set(schema.get('required') or [])
+    workflow = workflow if workflow is not None else item.provision_workflow
 
-    if item.provision_workflow_id and item.provision_workflow and item.provision_workflow.survey_enabled:
-        survey_spec = item.provision_workflow.survey_spec or {}
+    if workflow and workflow.survey_enabled:
+        survey_spec = workflow.survey_spec or {}
         for question in survey_spec.get('spec', []):
             variable = question.get('variable')
             if not variable:
@@ -5657,16 +5658,30 @@ def _catalog_validate_related_object_org(item, obj, field_name):
 class CatalogItemDeploySurvey(GenericAPIView):
     model = models.CatalogItem
     serializer_class = serializers.EmptySerializer
+    filter_backends = []
     obj_permission_type = 'use'
     resource_purpose = 'catalog item deploy survey schema'
 
     def get(self, request, *args, **kwargs):
         item = self.get_object()
-        if item.provision_workflow_id:
+        workflow = item.provision_workflow
+        provider = request.query_params.get('provider')
+
+        if provider and item.provider_workflows and provider in item.provider_workflows:
+            try:
+                workflow = models.WorkflowJobTemplate.objects.get(pk=item.provider_workflows[provider])
+            except models.WorkflowJobTemplate.DoesNotExist:
+                workflow = None
+            else:
+                mismatch = _catalog_validate_related_object_org(item, workflow, 'provider_workflows')
+                if mismatch is not None:
+                    return mismatch
+        elif item.provision_workflow_id:
             mismatch = _catalog_validate_related_object_org(item, item.provision_workflow, 'provision_workflow')
             if mismatch is not None:
                 return mismatch
-        schema = _build_catalog_item_live_schema(item)
+
+        schema = _build_catalog_item_live_schema(item, workflow=workflow)
         return Response({'schema': schema})
 
 

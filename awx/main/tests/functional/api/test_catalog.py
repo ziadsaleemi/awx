@@ -189,6 +189,44 @@ def test_catalog_user_persona_grants_browse_and_deploy_only(get, post, workflow_
 
 
 @pytest.mark.django_db
+def test_catalog_user_persona_can_load_provider_workflow_survey(get, workflow_job_template, organization, rando, setup_managed_roles):
+    workflow_job_template.survey_enabled = True
+    workflow_job_template.survey_spec = {
+        'name': 'DigitalOcean survey',
+        'description': 'Provider fields',
+        'spec': [
+            {
+                'question_name': 'Droplet name',
+                'question_description': 'Desired droplet name',
+                'required': True,
+                'type': 'text',
+                'variable': 'droplet_name',
+                'default': 'catalog-droplet',
+            }
+        ],
+    }
+    workflow_job_template.save(update_fields=['survey_enabled', 'survey_spec'])
+
+    item = CatalogItem.objects.create(
+        name='DigitalOcean Catalog VM',
+        organization=organization,
+        provider_workflows={'digitalocean': workflow_job_template.pk},
+        available_providers=['digitalocean'],
+    )
+    RoleDefinition.objects.get(name='Organization Catalog User').give_permission(rando, organization)
+
+    response = get(
+        f"{reverse('api:catalog_item_deploy_survey', kwargs={'pk': item.pk})}?provider=digitalocean",
+        rando,
+        expect=200,
+    )
+    schema = response.data['schema']
+
+    assert schema['properties']['droplet_name']['default'] == 'catalog-droplet'
+    assert 'droplet_name' in schema['required']
+
+
+@pytest.mark.django_db
 def test_catalog_user_team_persona_grants_browse(get, workflow_job_template, organization, team, rando, setup_managed_roles):
     item = CatalogItem.objects.create(name='Team Catalog User VM', organization=organization, provision_workflow=workflow_job_template)
     team.member_role.members.add(rando)
