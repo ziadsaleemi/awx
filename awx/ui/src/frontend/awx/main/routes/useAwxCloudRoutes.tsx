@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
+import { isRequestError } from '../../../common/crud/RequestError';
 import { CloudConnections } from '../../resources/cloud/CloudConnections';
 import { CloudProviderSettings } from '../../resources/cloud/CloudProviderSettings';
 import {
@@ -14,17 +15,27 @@ import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxCloudRoutes() {
   const { t } = useTranslation();
-  const { organizationId } = useCloudOrganization();
+  const { canReadCloud, organizationId } = useCloudOrganization();
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
   const refreshConnectedProviders = useCallback(() => {
-    void fetchCloudConnections(undefined, organizationId).then((entries) => {
-      const providers = [
-        ...new Set(entries.filter((e) => e.status === 'connected').map((e) => e.providerId)),
-      ];
-      setConnectedProviders(providers);
-    });
-  }, [organizationId]);
+    if (!canReadCloud) {
+      setConnectedProviders([]);
+      return;
+    }
+    void fetchCloudConnections(undefined, organizationId)
+      .then((entries) => {
+        const providers = [
+          ...new Set(entries.filter((e) => e.status === 'connected').map((e) => e.providerId)),
+        ];
+        setConnectedProviders(providers);
+      })
+      .catch((error: unknown) => {
+        if (isRequestError(error) && error.statusCode === 403) {
+          setConnectedProviders([]);
+        }
+      });
+  }, [canReadCloud, organizationId]);
 
   useEffect(() => {
     refreshConnectedProviders();

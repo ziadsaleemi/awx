@@ -18,7 +18,9 @@ export function CatalogAdminRouteGuard(props: { children: ReactNode }) {
       <PageLayout>
         <PageHeader
           title={t('Catalog administration')}
-          description={t('Catalog administration is available to organization administrators.')}
+          description={t(
+            'Catalog administration is available to catalog administrators and organization administrators.'
+          )}
         />
         <PageSection variant="light">
           <EmptyStateUnauthorized

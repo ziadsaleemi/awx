@@ -44,6 +44,34 @@ function interceptCloudConnectionRequests() {
 }
 
 describe('CloudConnections', () => {
+  it('does not preload cloud connections for catalog-only users', () => {
+    let connectionRequests = 0;
+    cy.intercept('GET', '/api/v2/users/31/admin_of_organizations/', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    });
+    cy.intercept('GET', '/api/v2/catalog_cloud/connections*', (req) => {
+      connectionRequests++;
+      req.reply({ statusCode: 403, body: { detail: 'Forbidden' } });
+    });
+
+    cy.mount(
+      <CloudConnections />,
+      {
+        path: '/cloud/connections',
+        initialEntries: ['/cloud/connections'],
+      },
+      'activeUserCatalogUser.json'
+    );
+
+    cy.contains('You do not have permission to manage cloud connections.').should('be.visible');
+    cy.then(() => {
+      expect(connectionRequests).to.equal(0);
+    });
+  });
+
   it('shows Add connection and filters Proxmox credentials by provider namespace', () => {
     interceptCloudConnectionRequests();
     cy.intercept('POST', '/api/v2/catalog_cloud/connections/', {

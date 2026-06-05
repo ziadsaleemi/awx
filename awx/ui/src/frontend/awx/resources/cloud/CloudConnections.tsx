@@ -128,15 +128,25 @@ export function CloudConnections() {
   const [connections, setConnections] = useState<Record<string, CloudConnectionEntry[]>>({});
 
   const refreshConnections = useCallback(() => {
-    void fetchCloudConnections(undefined, organizationId).then((entries) => {
-      const grouped: Record<string, CloudConnectionEntry[]> = {};
-      for (const e of entries) {
-        if (!grouped[e.providerId]) grouped[e.providerId] = [];
-        grouped[e.providerId].push(e);
-      }
-      setConnections(grouped);
-    });
-  }, [organizationId]);
+    if (!canReadCloud) {
+      setConnections({});
+      return;
+    }
+    void fetchCloudConnections(undefined, organizationId)
+      .then((entries) => {
+        const grouped: Record<string, CloudConnectionEntry[]> = {};
+        for (const e of entries) {
+          if (!grouped[e.providerId]) grouped[e.providerId] = [];
+          grouped[e.providerId].push(e);
+        }
+        setConnections(grouped);
+      })
+      .catch((err: unknown) => {
+        if (isRequestError(err) && err.statusCode === 403) {
+          setConnections({});
+        }
+      });
+  }, [canReadCloud, organizationId]);
 
   useEffect(() => {
     refreshConnections();

@@ -1,0 +1,45 @@
+{
+  "id": 32,
+  "type": "user",
+  "url": "/api/v2/users/32/",
+  "related": {
+    "teams": "/api/v2/users/32/teams/",
+    "organizations": "/api/v2/users/32/organizations/",
+    "admin_of_organizations": "/api/v2/users/32/admin_of_organizations/",
+    "projects": "/api/v2/users/32/projects/",
+    "credentials": "/api/v2/users/32/credentials/",
+    "roles": "/api/v2/users/32/roles/",
+    "activity_stream": "/api/v2/users/32/activity_stream/",
+    "access_list": "/api/v2/users/32/access_list/",
+    "tokens": "/api/v2/users/32/tokens/",
+    "authorized_tokens": "/api/v2/users/32/authorized_tokens/",
+    "personal_tokens": "/api/v2/users/32/personal_tokens/"
+  },
+  "summary_fields": {
+    "user_capabilities": { "edit": false, "delete": false },
+    "custom_user_type": {
+      "id": 75,
+      "name": "Catalog Administrator",
+      "description": "Catalog Administrator persona for catalog access testing.",
+      "role_definitions": [
+        {
+          "id": 45,
+          "name": "Organization Catalog Admin",
+          "description": "Has permission to manage catalog items within a single organization"
+        }
+      ]
+    }
+  },
+  "created": "2026-06-04T12:00:00Z",
+  "modified": "2026-06-04T12:00:00Z",
+  "username": "catalog-admin",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_superuser": false,
+  "is_system_auditor": false,
+  "ldap_dn": "",
+  "last_login": "2026-06-04T12:00:00Z",
+  "external_account": null,
+  "auth": []
+}
