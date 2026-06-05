@@ -26,7 +26,7 @@ export function useAwxRoleToolbarActions(onComplete: (roles: AwxRbacRole[]) => v
         selection: PageActionSelection.None,
         isPinned: true,
         icon: PlusCircleIcon,
-        label: t('Create user type'),
+        label: t('Create role'),
         isDisabled: activeAwxUser?.is_superuser
           ? undefined
           : t(
@@ -40,7 +40,7 @@ export function useAwxRoleToolbarActions(onComplete: (roles: AwxRbacRole[]) => v
         type: PageActionType.Button,
         selection: PageActionSelection.Multiple,
         icon: TrashIcon,
-        label: t('Delete roles'),
+        label: t('Delete selected roles'),
         onClick: deleteRoles,
         isDanger: true,
       },

@@ -84,6 +84,7 @@ class ApiVersionRootView(APIView):
         data['dashboard'] = reverse('api:dashboard_view', request=request)
         data['organizations'] = reverse('api:organization_list', request=request)
         data['users'] = reverse('api:user_list', request=request)
+        data['user_types'] = reverse('api:user_type_list', request=request)
         data['execution_environments'] = reverse('api:execution_environment_list', request=request)
         data['projects'] = reverse('api:project_list', request=request)
         data['project_updates'] = reverse('api:project_update_list', request=request)

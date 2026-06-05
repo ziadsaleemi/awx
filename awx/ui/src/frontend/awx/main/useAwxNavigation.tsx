@@ -14,7 +14,9 @@ import { PageSettingsForm } from '../../../framework/PageSettings/PageSettingsFo
 import { AwxRoleDetails } from '../access/roles/AwxRoleDetails';
 import { AwxRolePage } from '../access/roles/AwxRolePage';
 import { AwxRoles } from '../access/roles/AwxRoles';
-import { CloneRole, CreateRole, EditRole } from '../access/roles/RoleForm';
+import { CreateRole, EditRole } from '../access/roles/RoleForm';
+import { CloneUserType, CreateUserType, EditUserType } from '../access/user-types/UserTypeForm';
+import { UserTypes } from '../access/user-types/UserTypes';
 import { AwxSettings } from '../administration/settings/AwxSettings';
 import { AwxSettingsCategoryDetailsPage } from '../administration/settings/AwxSettingsCategoryDetails';
 import {
@@ -193,6 +195,32 @@ export function useAwxNavigation() {
         awxTeamsRoutes,
         awxUsersRoutes,
         {
+          id: AwxRoute.UserTypes,
+          label: t('User types'),
+          path: 'user-types',
+          children: [
+            {
+              id: AwxRoute.CreateUserType,
+              path: 'create',
+              element: <CreateUserType />,
+            },
+            {
+              id: AwxRoute.EditUserType,
+              path: ':id/edit',
+              element: <EditUserType />,
+            },
+            {
+              id: AwxRoute.CloneUserType,
+              path: ':id/clone',
+              element: <CloneUserType />,
+            },
+            {
+              path: '',
+              element: <UserTypes />,
+            },
+          ],
+        },
+        {
           id: AwxRoute.Roles,
           label: t('Roles'),
           path: 'roles',
@@ -206,11 +234,6 @@ export function useAwxNavigation() {
               id: AwxRoute.EditRole,
               path: ':id/edit',
               element: <EditRole />,
-            },
-            {
-              id: AwxRoute.CloneRole,
-              path: ':id/clone',
-              element: <CloneRole />,
             },
             {
               id: AwxRoute.RolePage,

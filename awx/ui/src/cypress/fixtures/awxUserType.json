@@ -1,0 +1,25 @@
+{
+  "id": 7,
+  "type": "user_type",
+  "url": "/api/v2/user_types/7/",
+  "related": {},
+  "summary_fields": {
+    "role_definitions": [
+      {
+        "id": 3,
+        "name": "Inventory Admin",
+        "description": "Has all permissions to a single inventory"
+      }
+    ],
+    "user_capabilities": {
+      "edit": true,
+      "delete": true,
+      "copy": true
+    }
+  },
+  "created": "2026-06-04T12:00:00.000000Z",
+  "modified": "2026-06-04T12:00:00.000000Z",
+  "name": "NOC operator",
+  "description": "Can administer inventories through assigned roles.",
+  "role_definitions": [3]
+}

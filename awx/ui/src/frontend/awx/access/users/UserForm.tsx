@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import useSWR from 'swr';
@@ -13,18 +14,48 @@ import { PageFormSingleSelect } from '../../../../framework/PageForm/Inputs/Page
 import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFormTextInput';
 import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSection';
 import { requestGet, requestPatch, swrOptions } from '../../../common/crud/Data';
+import { useGet } from '../../../common/crud/useGet';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
+import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { AwxPageForm } from '../../common/AwxPageForm';
 import { awxAPI } from '../../common/api/awx-utils';
+import { AwxUserType } from '../../interfaces/AwxUserType';
 import { AwxUser } from '../../interfaces/User';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { PageFormSelectOrganization } from '../organizations/components/PageFormOrganizationSelect';
 
 const UserType = {
-  SystemAdministrator: 'System administrator',
-  SystemAuditor: 'System auditor',
-  NormalUser: 'Normal user',
+  SystemAdministrator: 'built-in:administrator',
+  SystemAuditor: 'built-in:auditor',
+  NormalUser: 'built-in:normal',
 };
+const CUSTOM_USER_TYPE_PREFIX = 'custom:';
+
+function customUserTypeValue(id: number) {
+  return `${CUSTOM_USER_TYPE_PREFIX}${id.toString()}`;
+}
+
+function applyUserTypeToUser(user: AwxUser, userType: string) {
+  const customUserTypeId = userType.startsWith(CUSTOM_USER_TYPE_PREFIX)
+    ? Number(userType.slice(CUSTOM_USER_TYPE_PREFIX.length))
+    : undefined;
+  user.is_superuser = userType === UserType.SystemAdministrator;
+  user.is_system_auditor = userType === UserType.SystemAuditor;
+  user.custom_user_type = customUserTypeId ?? null;
+}
+
+function userToUserTypeValue(user: AwxUser) {
+  if (user.is_superuser) {
+    return UserType.SystemAdministrator;
+  }
+  if (user.is_system_auditor) {
+    return UserType.SystemAuditor;
+  }
+  if (user.custom_user_type) {
+    return customUserTypeValue(user.custom_user_type);
+  }
+  return UserType.NormalUser;
+}
 
 export function CreateUser() {
   const { t } = useTranslation();
@@ -37,8 +68,7 @@ export function CreateUser() {
     setFieldError
   ) => {
     const { userType, confirmPassword, ...user } = userInput;
-    user.is_superuser = userType === UserType.SystemAdministrator;
-    user.is_system_auditor = userType === UserType.SystemAuditor;
+    applyUserTypeToUser(user, userType);
     if (confirmPassword !== user.password) {
       setFieldError('confirmPassword', { message: t('Password does not match.') });
       return false;
@@ -89,8 +119,7 @@ export function EditUser() {
     setFieldError
   ) => {
     const { userType, confirmPassword, ...user } = userInput;
-    user.is_superuser = userType === UserType.SystemAdministrator;
-    user.is_system_auditor = userType === UserType.SystemAuditor;
+    applyUserTypeToUser(user, userType);
     if (user.password) {
       if (confirmPassword !== user.password) {
         setFieldError('confirmPassword', { message: t('Password does not match.') });
@@ -121,11 +150,7 @@ export function EditUser() {
   const { password, ...defaultUserValue } = user;
   const defaultValue: Partial<IUserInput> = {
     ...defaultUserValue,
-    userType: user.is_superuser
-      ? UserType.SystemAdministrator
-      : user.is_system_auditor
-        ? UserType.SystemAuditor
-        : UserType.NormalUser,
+    userType: userToUserTypeValue(user),
   };
   return (
     <PageLayout>
@@ -158,6 +183,41 @@ type IUserInput = AwxUser & { userType: string; confirmPassword: string };
 function UserInputs(props: { mode: 'create' | 'edit' }) {
   const { mode } = props;
   const { t } = useTranslation();
+  const { data: userTypes } = useGet<AwxItemsResponse<AwxUserType>>(awxAPI`/user_types/`, {
+    page_size: 200,
+  });
+  const userTypeOptions = useMemo(
+    () => [
+      {
+        label: t('System administrator'),
+        description: t('can edit, change, and update any inventory or automation definition'),
+        value: UserType.SystemAdministrator,
+      },
+      {
+        label: t('System auditor'),
+        description: t(
+          'can see all aspects of the systems automation, but has no permission to run or change automation'
+        ),
+        value: UserType.SystemAuditor,
+      },
+      {
+        label: t('Normal user'),
+        description: t(
+          'has read and write access limited to the resources (such as inventory, projects, and job templates) for which that user has been granted the appropriate roles and privileges'
+        ),
+        value: UserType.NormalUser,
+      },
+      ...(userTypes?.results ?? []).map((userType) => ({
+        label: userType.name,
+        description:
+          userType.summary_fields.role_definitions
+            ?.map((roleDefinition) => roleDefinition.name)
+            .join(', ') || userType.description,
+        value: customUserTypeValue(userType.id),
+      })),
+    ],
+    [t, userTypes?.results]
+  );
   return (
     <>
       <PageFormTextInput<IUserInput>
@@ -180,27 +240,7 @@ function UserInputs(props: { mode: 'create' | 'edit' }) {
         name="userType"
         label={t('User type')}
         placeholder={t('Select user type')}
-        options={[
-          {
-            label: t('System administrator'),
-            description: t('can edit, change, and update any inventory or automation definition'),
-            value: UserType.SystemAdministrator,
-          },
-          {
-            label: t('System auditor'),
-            description: t(
-              'can see all aspects of the systems automation, but has no permission to run or change automation'
-            ),
-            value: UserType.SystemAuditor,
-          },
-          {
-            label: t('Normal user'),
-            description: t(
-              'has read and write access limited to the resources (such as inventory, projects, and job templates) for which that user has been granted the appropriate roles and privileges'
-            ),
-            value: UserType.NormalUser,
-          },
-        ]}
+        options={userTypeOptions}
         isRequired
       />
       {mode === 'create' && (

@@ -12,6 +12,7 @@ from django.utils.translation import gettext_lazy as _
 
 # django-ansible-base
 from ansible_base.resource_registry.fields import AnsibleResourceField
+from ansible_base.rbac.models import RoleDefinition
 
 # AWX
 from awx.api.versioning import reverse
@@ -24,7 +25,7 @@ from awx.main.models.rbac import (
 from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.models.mixins import ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin
 
-__all__ = ['Organization', 'Team', 'UserUISettings', 'UserSessionMembership']
+__all__ = ['Organization', 'Team', 'UserType', 'UserTypeAssignment', 'UserUISettings', 'UserSessionMembership']
 
 
 class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin):
@@ -177,8 +178,42 @@ class UserUISettings(CreatedModifiedModel):
     class Meta:
         app_label = 'main'
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='ui_settings', editable=False, on_delete=models.CASCADE)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name='ui_settings',
+        editable=False,
+        on_delete=models.CASCADE,
+    )
     ui_preferences = models.JSONField(default=dict, blank=True)
+
+
+class UserType(CreatedModifiedModel):
+    class Meta:
+        app_label = 'main'
+        ordering = ('name',)
+
+    name = models.CharField(max_length=512, unique=True)
+    description = models.TextField(blank=True, default='')
+    role_definitions = models.ManyToManyField(
+        RoleDefinition,
+        blank=True,
+        related_name='awx_user_types',
+    )
+
+    def get_absolute_url(self, request=None):
+        return reverse('api:user_type_detail', kwargs={'pk': self.pk}, request=request)
+
+
+class UserTypeAssignment(CreatedModifiedModel):
+    class Meta:
+        app_label = 'main'
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name='custom_user_type_assignment',
+        on_delete=models.CASCADE,
+    )
+    user_type = models.ForeignKey(UserType, related_name='assignments', on_delete=models.CASCADE)
 
 
 class UserSessionMembership(BaseModel):

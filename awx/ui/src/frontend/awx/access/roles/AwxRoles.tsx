@@ -1,4 +1,3 @@
-import { Alert } from '@patternfly/react-core';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,17 +23,11 @@ export function AwxRoles() {
         title={t('Roles')}
         titleHelpTitle={t('Roles')}
         titleHelp={t(
-          'A role represents a set of actions that a team or user may perform on a resource or set of resources. Custom roles can be used as user types.'
+          'A role represents a set of actions that a team or user may perform on a resource or set of resources.'
         )}
         description={t(
-          'Create or clone role-based user types, then assign them to users or teams from their access tabs.'
+          'Create and manage custom roles, then assign them to users or teams from their access tabs.'
         )}
-      />
-      <Alert
-        variant="info"
-        title={t('System administrators can create custom user types from role permissions.')}
-        isInline
-        className="border-bottom"
       />
       <AwxRolesTable />;
     </PageLayout>

@@ -23,6 +23,7 @@ export interface AwxUser
   id: number;
   username: string;
   user_type?: 'normal' | 'administrator' | 'auditor';
+  custom_user_type?: number | null;
   disassociate?: boolean;
   organization?: number;
   related?: Partial<{
@@ -45,6 +46,16 @@ export interface AwxUser
       resource_type: 'shared.user';
     };
     organization: SummaryFieldsOrganization;
+    custom_user_type?: {
+      id: number;
+      name: string;
+      description?: string;
+      role_definitions?: {
+        id: number;
+        name: string;
+        description?: string;
+      }[];
+    };
     user_capabilities: {
       edit: boolean;
       delete: boolean;

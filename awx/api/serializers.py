@@ -43,7 +43,7 @@ from polymorphic.models import PolymorphicModel
 
 # django-ansible-base
 from ansible_base.lib.utils.models import get_type_for_model
-from ansible_base.rbac.models import RoleEvaluation, ObjectRole
+from ansible_base.rbac.models import RoleEvaluation, ObjectRole, RoleDefinition
 from ansible_base.rbac import permission_registry
 
 # AWX
@@ -88,6 +88,8 @@ from awx.main.models import (
     SystemJobEvent,
     SystemJobTemplate,
     Team,
+    UserType,
+    UserTypeAssignment,
     TerraformJob,
     TerraformJobEvent,
     TerraformJobTemplate,
@@ -1051,9 +1053,36 @@ class UnifiedJobStdoutSerializer(UnifiedJobSerializer):
             return super(UnifiedJobStdoutSerializer, self).get_types()
 
 
+class UserTypeSerializer(BaseSerializer):
+    role_definitions = serializers.PrimaryKeyRelatedField(
+        queryset=RoleDefinition.objects.all(),
+        many=True,
+        required=False,
+    )
+    show_capabilities = ['edit', 'delete', 'copy']
+
+    class Meta:
+        model = UserType
+        fields = (
+            '*',
+            'role_definitions',
+        )
+
+    def get_summary_fields(self, obj):
+        summary_fields = super(UserTypeSerializer, self).get_summary_fields(obj)
+        summary_fields['role_definitions'] = [UserSerializer._role_definition_summary(role_definition) for role_definition in obj.role_definitions.all()]
+        return summary_fields
+
+
 class UserSerializer(BaseSerializer):
     password = serializers.CharField(required=False, default='', allow_blank=True, help_text=_('Field used to change the password.'))
     is_system_auditor = serializers.BooleanField(default=False)
+    custom_user_type = serializers.PrimaryKeyRelatedField(
+        queryset=UserType.objects.all(),
+        allow_null=True,
+        required=False,
+        write_only=True,
+    )
     show_capabilities = ['edit', 'delete']
 
     class Meta:
@@ -1068,19 +1097,59 @@ class UserSerializer(BaseSerializer):
             'email',
             'is_superuser',
             'is_system_auditor',
+            'custom_user_type',
             'password',
             'last_login',
         )
         extra_kwargs = {'last_login': {'read_only': True}}
 
+    @staticmethod
+    def _role_definition_summary(role_definition):
+        return OrderedDict(
+            [
+                ('id', role_definition.id),
+                ('name', role_definition.name),
+                ('description', role_definition.description),
+            ]
+        )
+
+    @classmethod
+    def _user_type_summary(cls, user_type):
+        return OrderedDict(
+            [
+                ('id', user_type.id),
+                ('name', user_type.name),
+                ('description', user_type.description),
+                (
+                    'role_definitions',
+                    [cls._role_definition_summary(role_definition) for role_definition in user_type.role_definitions.all()],
+                ),
+            ]
+        )
+
+    def _get_custom_user_type(self, obj):
+        try:
+            return obj.custom_user_type_assignment.user_type
+        except UserTypeAssignment.DoesNotExist:
+            return None
+
     def to_representation(self, obj):
         ret = super(UserSerializer, self).to_representation(obj)
         ret['password'] = '$encrypted$'
+        custom_user_type = self._get_custom_user_type(obj)
+        ret['custom_user_type'] = custom_user_type.id if custom_user_type else None
         return ret
+
+    def get_summary_fields(self, obj):
+        summary_fields = super(UserSerializer, self).get_summary_fields(obj)
+        custom_user_type = self._get_custom_user_type(obj)
+        if custom_user_type:
+            summary_fields['custom_user_type'] = self._user_type_summary(custom_user_type)
+        return summary_fields
 
     def get_validation_exclusions(self, obj=None):
         ret = super(UserSerializer, self).get_validation_exclusions(obj)
-        ret.extend(['password', 'is_system_auditor'])
+        ret.extend(['password', 'is_system_auditor', 'custom_user_type'])
         return ret
 
     def validate_password(self, value):
@@ -1166,22 +1235,39 @@ class UserSerializer(BaseSerializer):
             obj.set_unusable_password()
             obj.save(update_fields=['password'])
 
+    def _update_custom_user_type(self, obj, custom_user_type):
+        if custom_user_type is serializers.empty:
+            return
+        if obj.is_superuser or obj.is_system_auditor:
+            custom_user_type = None
+        if custom_user_type is None:
+            UserTypeAssignment.objects.filter(user=obj).delete()
+        else:
+            UserTypeAssignment.objects.update_or_create(
+                user=obj,
+                defaults={'user_type': custom_user_type},
+            )
+
     def create(self, validated_data):
         new_password = validated_data.pop('password', None)
         is_system_auditor = validated_data.pop('is_system_auditor', None)
+        custom_user_type = validated_data.pop('custom_user_type', serializers.empty)
         obj = super(UserSerializer, self).create(validated_data)
         self._update_password(obj, new_password)
         if is_system_auditor is not None:
             obj.is_system_auditor = is_system_auditor
+        self._update_custom_user_type(obj, custom_user_type)
         return obj
 
     def update(self, obj, validated_data):
         new_password = validated_data.pop('password', None)
         is_system_auditor = validated_data.pop('is_system_auditor', None)
+        custom_user_type = validated_data.pop('custom_user_type', serializers.empty)
         obj = super(UserSerializer, self).update(obj, validated_data)
         self._update_password(obj, new_password)
         if is_system_auditor is not None:
             obj.is_system_auditor = is_system_auditor
+        self._update_custom_user_type(obj, custom_user_type)
         return obj
 
     def get_related(self, obj):

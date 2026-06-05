@@ -42,6 +42,7 @@ from awx.api.views.analytics import AWX_ANALYTICS_API_PREFIX
 
 from .organization import urls as organization_urls
 from .user import urls as user_urls
+from .user_type import urls as user_type_urls
 from .project import urls as project_urls
 from .project_update import urls as project_update_urls
 from .inventory import urls as inventory_urls, constructed_inventory_urls
@@ -113,6 +114,7 @@ v2_urls = [
     re_path(r'^schedules/', include(schedule_urls)),
     re_path(r'^organizations/', include(organization_urls)),
     re_path(r'^users/', include(user_urls)),
+    re_path(r'^user_types/', include(user_type_urls)),
     re_path(r'^execution_environments/', include(execution_environment_urls)),
     re_path(r'^projects/', include(project_urls)),
     re_path(r'^project_updates/', include(project_update_urls)),

@@ -64,6 +64,7 @@ from awx.main.models import (
     SystemJobEvent,
     SystemJobTemplate,
     Team,
+    UserType,
     UnifiedJob,
     UnifiedJobTemplate,
     WorkflowJob,
@@ -642,7 +643,7 @@ class UserAccess(BaseAccess):
     """
 
     model = User
-    prefetch_related = ('resource',)
+    prefetch_related = ('resource', 'custom_user_type_assignment__user_type__role_definitions')
 
     def filtered_queryset(self):
         if settings.ORG_ADMINS_CAN_SEE_ALL_USERS and (
@@ -658,6 +659,8 @@ class UserAccess(BaseAccess):
         return qs
 
     def can_add(self, data):
+        if data is not None and data.get('custom_user_type') and not self.user.is_superuser:
+            return False
         if data is not None and ('is_superuser' in data or 'is_system_auditor' in data):
             if (
                 to_python_boolean(data.get('is_superuser', 'false'), allow_none=True)
@@ -671,6 +674,8 @@ class UserAccess(BaseAccess):
         return Organization.access_qs(self.user, 'change').exists()
 
     def can_change(self, obj, data):
+        if data is not None and 'custom_user_type' in data and not self.user.is_superuser:
+            return False
         if data is not None and ('is_superuser' in data or 'is_system_auditor' in data):
             if to_python_boolean(data.get('is_superuser', 'false'), allow_none=True) and not self.user.is_superuser:
                 return False
@@ -753,6 +758,31 @@ class UserAccess(BaseAccess):
 
         logger.error('Unexpected attempt to de-associate {} from a user.'.format(sub_obj))
         return False
+
+
+class UserTypeAccess(BaseAccess):
+    """
+    User types are administrative profile presets. They can reference role
+    definitions, but concrete object access remains with role assignments.
+    """
+
+    model = UserType
+    prefetch_related = ('role_definitions',)
+
+    def filtered_queryset(self):
+        return self.model.objects.none()
+
+    def can_add(self, data):
+        return self.user.is_superuser
+
+    def can_change(self, obj, data):
+        return self.user.is_superuser
+
+    def can_delete(self, obj):
+        return self.user.is_superuser
+
+    def can_copy(self, obj):
+        return self.user.is_superuser
 
 
 class OrganizationAccess(NotificationAttachMixin, BaseAccess):

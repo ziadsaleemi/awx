@@ -1245,6 +1245,43 @@ class UserList(ListCreateAPIView):
     resource_purpose = 'users'
 
 
+class UserTypeList(ListCreateAPIView):
+    model = models.UserType
+    serializer_class = serializers.UserTypeSerializer
+    ordering = ('name',)
+    search_fields = ('name', 'description')
+    resource_purpose = 'user types'
+
+
+class UserTypeDetail(RetrieveUpdateDestroyAPIView):
+    model = models.UserType
+    serializer_class = serializers.UserTypeSerializer
+    resource_purpose = 'user type detail'
+
+
+class UserTypeCopy(APIView):
+    model = models.UserType
+    serializer_class = serializers.UserTypeSerializer
+    permission_classes = (IsAuthenticated,)
+    resource_purpose = 'copy user type'
+
+    def post(self, request, *args, **kwargs):
+        obj = get_object_or_404(models.UserType, pk=kwargs['pk'])
+        if not request.user.can_access(models.UserType, 'copy', obj):
+            raise PermissionDenied()
+
+        role_definition_ids = list(obj.role_definitions.values_list('id', flat=True))
+        data = {
+            'name': request.data.get('name') or _('Copy of %(name)s') % {'name': obj.name},
+            'description': request.data.get('description', obj.description),
+            'role_definitions': request.data.get('role_definitions', role_definition_ids),
+        }
+        serializer = self.serializer_class(data=data, context={'request': request, 'view': self})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class UserMeList(ListAPIView):
     model = models.User
     serializer_class = serializers.UserMeSerializer
@@ -1407,7 +1444,7 @@ class UserDetail(RetrieveUpdateDestroyAPIView):
         can_change = request.user.can_access(models.User, 'change', obj, request.data)
         can_admin = request.user.can_access(models.User, 'admin', obj, request.data)
 
-        su_only_edit_fields = ('is_superuser', 'is_system_auditor')
+        su_only_edit_fields = ('is_superuser', 'is_system_auditor', 'custom_user_type')
         admin_only_edit_fields = ('username', 'is_active')
 
         fields_to_check = ()
