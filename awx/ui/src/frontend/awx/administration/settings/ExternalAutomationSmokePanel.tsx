@@ -15,6 +15,8 @@ import {
   FormGroup,
   FormSelect,
   FormSelectOption,
+  Grid,
+  GridItem,
   Label,
   PageSection,
   Spinner,
@@ -317,129 +319,131 @@ export function ExternalAutomationSmokePanel(props?: {
         </CardHeader>
         <CardBody>
           <Stack hasGutter>
-            {policySelectionEnabled ? (
-              <StackItem>
-                <FormGroup label={t('Policy checks')} fieldId="external-automation-policy-checks">
-                  <Checkbox
-                    id="external-automation-check-opa"
-                    label={t('OPA')}
-                    isChecked={policyCheckOpa}
-                    onChange={(_event, checked) => setPolicyCheckOpa(checked)}
-                    isDisabled={loading}
-                    data-cy="external-automation-check-opa"
-                  />
-                  <Checkbox
-                    id="external-automation-check-gatekeeper"
-                    label={t('Gatekeeper')}
-                    isChecked={policyCheckGatekeeper}
-                    onChange={(_event, checked) => setPolicyCheckGatekeeper(checked)}
-                    isDisabled={loading}
-                    data-cy="external-automation-check-gatekeeper"
-                  />
-                </FormGroup>
-              </StackItem>
-            ) : null}
-            {selectedIncludeGatekeeper ? (
-              <StackItem>
-                <FormGroup
-                  label={t('Gatekeeper context')}
-                  fieldId="external-automation-gatekeeper-context"
-                >
-                  <TextInput
-                    id="external-automation-gatekeeper-context"
-                    value={gatekeeperContext}
-                    onChange={(_event, value) => setGatekeeperContext(value)}
-                    placeholder={t('Default context')}
-                    isDisabled={loading}
-                    data-cy="external-automation-gatekeeper-context"
-                  />
-                </FormGroup>
-              </StackItem>
-            ) : null}
-            {proxmoxProofEnabled ? (
-              <StackItem>
-                <FormGroup label={t('Live proof')} fieldId="external-automation-live-proof">
-                  <Checkbox
-                    id="external-automation-check-proxmox"
-                    label={t('Proxmox VE')}
-                    isChecked={proxmoxCheck}
-                    onChange={(_event, checked) => setProxmoxCheck(checked)}
-                    isDisabled={loading}
-                    data-cy="external-automation-check-proxmox"
-                  />
-                </FormGroup>
-              </StackItem>
-            ) : null}
-            {proxmoxProofEnabled && proxmoxCheck ? (
-              <>
-                {proxmoxConnectionsError ? (
-                  <StackItem>
-                    <Alert variant="warning" isInline title={proxmoxConnectionsError} />
-                  </StackItem>
-                ) : null}
-                {!proxmoxConnectionsLoading && proxmoxConnections.length === 0 ? (
-                  <StackItem>
-                    <Alert variant="info" isInline title={t('No Proxmox VE connections found.')}>
-                      <Link
-                        to={getPageUrl(AwxRoute.CloudConnections)}
-                        data-cy="external-automation-cloud-connections-link"
-                      >
-                        {t('Open Cloud Connections')}
-                      </Link>
-                    </Alert>
-                  </StackItem>
-                ) : null}
-                <StackItem>
-                  <FormGroup
-                    label={t('Proxmox connection')}
-                    fieldId="external-automation-proxmox-connection-id"
-                  >
-                    <FormSelect
-                      id="external-automation-proxmox-connection-id"
-                      value={proxmoxConnectionId}
-                      onChange={(_event, value) => setProxmoxConnectionId(value)}
-                      isDisabled={loading || proxmoxConnectionsLoading}
-                      data-cy="external-automation-proxmox-connection-id"
-                    >
-                      <FormSelectOption
-                        value=""
-                        label={
-                          proxmoxConnectionsLoading
-                            ? t('Loading Proxmox connections')
-                            : t('First accessible Proxmox connection')
-                        }
-                        isPlaceholder
-                      />
-                      {proxmoxConnections.map((connection) => (
-                        <FormSelectOption
-                          key={connection.id}
-                          value={connection.id}
-                          label={t('{{name}} ({{status}})', {
-                            name: connection.name,
-                            status: connection.status,
-                          })}
-                        />
-                      ))}
-                    </FormSelect>
-                  </FormGroup>
-                </StackItem>
-                <StackItem>
-                  <FormGroup
-                    label={t('Expected Proxmox VMs')}
-                    fieldId="external-automation-proxmox-expected-vms"
-                  >
-                    <TextInput
-                      id="external-automation-proxmox-expected-vms"
-                      value={proxmoxExpectedVms}
-                      onChange={(_event, value) => setProxmoxExpectedVms(value)}
-                      placeholder={t('eda-server, opa-gatekeeper, gatekeeper-policy-manager')}
+            <Grid hasGutter data-cy="external-automation-smoke-controls">
+              {policySelectionEnabled ? (
+                <GridItem span={12} md={4}>
+                  <FormGroup label={t('Policy checks')} fieldId="external-automation-policy-checks">
+                    <Checkbox
+                      id="external-automation-check-opa"
+                      label={t('OPA')}
+                      isChecked={policyCheckOpa}
+                      onChange={(_event, checked) => setPolicyCheckOpa(checked)}
                       isDisabled={loading}
-                      data-cy="external-automation-proxmox-expected-vms"
+                      data-cy="external-automation-check-opa"
+                    />
+                    <Checkbox
+                      id="external-automation-check-gatekeeper"
+                      label={t('Gatekeeper')}
+                      isChecked={policyCheckGatekeeper}
+                      onChange={(_event, checked) => setPolicyCheckGatekeeper(checked)}
+                      isDisabled={loading}
+                      data-cy="external-automation-check-gatekeeper"
                     />
                   </FormGroup>
-                </StackItem>
-              </>
-            ) : null}
+                </GridItem>
+              ) : null}
+              {selectedIncludeGatekeeper ? (
+                <GridItem span={12} md={4}>
+                  <FormGroup
+                    label={t('Gatekeeper context')}
+                    fieldId="external-automation-gatekeeper-context"
+                  >
+                    <TextInput
+                      id="external-automation-gatekeeper-context"
+                      value={gatekeeperContext}
+                      onChange={(_event, value) => setGatekeeperContext(value)}
+                      placeholder={t('Default context')}
+                      isDisabled={loading}
+                      data-cy="external-automation-gatekeeper-context"
+                    />
+                  </FormGroup>
+                </GridItem>
+              ) : null}
+              {proxmoxProofEnabled ? (
+                <GridItem span={12} md={4}>
+                  <FormGroup label={t('Live proof')} fieldId="external-automation-live-proof">
+                    <Checkbox
+                      id="external-automation-check-proxmox"
+                      label={t('Proxmox VE')}
+                      isChecked={proxmoxCheck}
+                      onChange={(_event, checked) => setProxmoxCheck(checked)}
+                      isDisabled={loading}
+                      data-cy="external-automation-check-proxmox"
+                    />
+                  </FormGroup>
+                </GridItem>
+              ) : null}
+              {proxmoxProofEnabled && proxmoxCheck ? (
+                <>
+                  {proxmoxConnectionsError ? (
+                    <GridItem span={12}>
+                      <Alert variant="warning" isInline title={proxmoxConnectionsError} />
+                    </GridItem>
+                  ) : null}
+                  {!proxmoxConnectionsLoading && proxmoxConnections.length === 0 ? (
+                    <GridItem span={12}>
+                      <Alert variant="info" isInline title={t('No Proxmox VE connections found.')}>
+                        <Link
+                          to={getPageUrl(AwxRoute.CloudConnections)}
+                          data-cy="external-automation-cloud-connections-link"
+                        >
+                          {t('Open Cloud Connections')}
+                        </Link>
+                      </Alert>
+                    </GridItem>
+                  ) : null}
+                  <GridItem span={12} md={6}>
+                    <FormGroup
+                      label={t('Proxmox connection')}
+                      fieldId="external-automation-proxmox-connection-id"
+                    >
+                      <FormSelect
+                        id="external-automation-proxmox-connection-id"
+                        value={proxmoxConnectionId}
+                        onChange={(_event, value) => setProxmoxConnectionId(value)}
+                        isDisabled={loading || proxmoxConnectionsLoading}
+                        data-cy="external-automation-proxmox-connection-id"
+                      >
+                        <FormSelectOption
+                          value=""
+                          label={
+                            proxmoxConnectionsLoading
+                              ? t('Loading Proxmox connections')
+                              : t('First accessible Proxmox connection')
+                          }
+                          isPlaceholder
+                        />
+                        {proxmoxConnections.map((connection) => (
+                          <FormSelectOption
+                            key={connection.id}
+                            value={connection.id}
+                            label={t('{{name}} ({{status}})', {
+                              name: connection.name,
+                              status: connection.status,
+                            })}
+                          />
+                        ))}
+                      </FormSelect>
+                    </FormGroup>
+                  </GridItem>
+                  <GridItem span={12} md={6}>
+                    <FormGroup
+                      label={t('Expected Proxmox VMs')}
+                      fieldId="external-automation-proxmox-expected-vms"
+                    >
+                      <TextInput
+                        id="external-automation-proxmox-expected-vms"
+                        value={proxmoxExpectedVms}
+                        onChange={(_event, value) => setProxmoxExpectedVms(value)}
+                        placeholder={t('eda-server, opa-gatekeeper, gatekeeper-policy-manager')}
+                        isDisabled={loading}
+                        data-cy="external-automation-proxmox-expected-vms"
+                      />
+                    </FormGroup>
+                  </GridItem>
+                </>
+              ) : null}
+            </Grid>
             <StackItem>
               <Button
                 variant="secondary"

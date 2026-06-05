@@ -113,6 +113,7 @@ describe('ExternalAutomationSmokePanel', () => {
     );
 
     cy.getByDataCy('external-automation-check-proxmox').check({ force: true });
+    cy.getByDataCy('external-automation-smoke-controls').should('be.visible');
     cy.wait('@loadProxmoxConnections');
     cy.getByDataCy('external-automation-proxmox-connection-id')
       .should('contain.text', 'Lab Proxmox')
