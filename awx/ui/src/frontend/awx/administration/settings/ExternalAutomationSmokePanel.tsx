@@ -13,6 +13,8 @@ import {
   DescriptionListGroup,
   DescriptionListTerm,
   FormGroup,
+  FormSelect,
+  FormSelectOption,
   Label,
   PageSection,
   Spinner,
@@ -26,13 +28,17 @@ import {
   SyncAltIcon,
   TimesCircleIcon,
 } from '@patternfly/react-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useGetPageUrl } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
+import {
+  CloudConnectionEntry,
+  fetchCloudConnections,
+} from '../../resources/cloud/cloudConnectionStore';
 
 interface ExternalAutomationCheck {
   ok: boolean;
@@ -171,6 +177,9 @@ export function ExternalAutomationSmokePanel(props?: {
   const [gatekeeperContext, setGatekeeperContext] = useState('');
   const [proxmoxConnectionId, setProxmoxConnectionId] = useState('');
   const [proxmoxExpectedVms, setProxmoxExpectedVms] = useState('');
+  const [proxmoxConnections, setProxmoxConnections] = useState<CloudConnectionEntry[]>([]);
+  const [proxmoxConnectionsLoading, setProxmoxConnectionsLoading] = useState(false);
+  const [proxmoxConnectionsError, setProxmoxConnectionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const selectedIncludeOpa = policySelectionEnabled ? policyCheckOpa : includeOpa;
   const selectedIncludeGatekeeper = policySelectionEnabled
@@ -213,6 +222,41 @@ export function ExternalAutomationSmokePanel(props?: {
       : resultIncludeGatekeeper
         ? t('Gatekeeper smoke failed.')
         : t('OPA smoke failed.');
+
+  useEffect(() => {
+    if (!proxmoxProofEnabled || !proxmoxCheck) {
+      return;
+    }
+
+    let cancelled = false;
+    setProxmoxConnectionsLoading(true);
+    setProxmoxConnectionsError(null);
+    void fetchCloudConnections('proxmox')
+      .then((entries) => {
+        if (cancelled) return;
+        const sorted = [...entries].sort((a, b) => {
+          if (a.status === b.status) return a.name.localeCompare(b.name);
+          if (a.status === 'connected') return -1;
+          if (b.status === 'connected') return 1;
+          return a.status.localeCompare(b.status);
+        });
+        setProxmoxConnections(sorted);
+        setProxmoxConnectionId((current) =>
+          current && sorted.some((entry) => entry.id === current) ? current : sorted[0]?.id ?? ''
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProxmoxConnections([]);
+        setProxmoxConnectionsError(t('Failed to load Proxmox VE connections.'));
+      })
+      .finally(() => {
+        if (!cancelled) setProxmoxConnectionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [proxmoxCheck, proxmoxProofEnabled, t]);
 
   const runSmoke = async () => {
     const runChecks = {
@@ -328,19 +372,55 @@ export function ExternalAutomationSmokePanel(props?: {
             ) : null}
             {proxmoxProofEnabled && proxmoxCheck ? (
               <>
+                {proxmoxConnectionsError ? (
+                  <StackItem>
+                    <Alert variant="warning" isInline title={proxmoxConnectionsError} />
+                  </StackItem>
+                ) : null}
+                {!proxmoxConnectionsLoading && proxmoxConnections.length === 0 ? (
+                  <StackItem>
+                    <Alert variant="info" isInline title={t('No Proxmox VE connections found.')}>
+                      <Link
+                        to={getPageUrl(AwxRoute.CloudConnections)}
+                        data-cy="external-automation-cloud-connections-link"
+                      >
+                        {t('Open Cloud Connections')}
+                      </Link>
+                    </Alert>
+                  </StackItem>
+                ) : null}
                 <StackItem>
                   <FormGroup
-                    label={t('Proxmox connection ID')}
+                    label={t('Proxmox connection')}
                     fieldId="external-automation-proxmox-connection-id"
                   >
-                    <TextInput
+                    <FormSelect
                       id="external-automation-proxmox-connection-id"
                       value={proxmoxConnectionId}
                       onChange={(_event, value) => setProxmoxConnectionId(value)}
-                      placeholder={t('First accessible Proxmox connection')}
-                      isDisabled={loading}
+                      isDisabled={loading || proxmoxConnectionsLoading}
                       data-cy="external-automation-proxmox-connection-id"
-                    />
+                    >
+                      <FormSelectOption
+                        value=""
+                        label={
+                          proxmoxConnectionsLoading
+                            ? t('Loading Proxmox connections')
+                            : t('First accessible Proxmox connection')
+                        }
+                        isPlaceholder
+                      />
+                      {proxmoxConnections.map((connection) => (
+                        <FormSelectOption
+                          key={connection.id}
+                          value={connection.id}
+                          label={t('{{name}} ({{status}})', {
+                            name: connection.name,
+                            status: connection.status,
+                          })}
+                        />
+                      ))}
+                    </FormSelect>
                   </FormGroup>
                 </StackItem>
                 <StackItem>
@@ -496,7 +576,7 @@ export function ExternalAutomationSmokePanel(props?: {
                         </DescriptionListGroup>
                         <DescriptionListGroup>
                           <DescriptionListTerm>{t('Proxmox connection')}</DescriptionListTerm>
-                          <DescriptionListDescription>
+                          <DescriptionListDescription data-cy="external-automation-proxmox-connection-result">
                             {result.checks.proxmox?.connection_name ||
                               result.checks.proxmox?.status ||
                               t('Not checked')}

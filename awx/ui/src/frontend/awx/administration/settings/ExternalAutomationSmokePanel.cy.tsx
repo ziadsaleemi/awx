@@ -19,6 +19,11 @@ function SeedNavigation(props: { children: ReactNode }) {
         path: 'activity-stream',
         element: <div />,
       } as PageNavigationItem,
+      {
+        id: AwxRoute.CloudConnections,
+        path: 'cloud/connections',
+        element: <div />,
+      } as PageNavigationItem,
     ]);
   }, [setNavigation]);
   return <>{props.children}</>;
@@ -26,6 +31,34 @@ function SeedNavigation(props: { children: ReactNode }) {
 
 describe('ExternalAutomationSmokePanel', () => {
   it('can include Proxmox VM proof from the external automation smoke surface', () => {
+    cy.intercept('GET', awxAPI`/catalog_cloud/connections/?provider_id=proxmox`, {
+      count: 2,
+      results: [
+        {
+          id: 6,
+          provider_id: 'proxmox',
+          name: 'Offline Proxmox',
+          status: 'disconnected',
+          credential: 16,
+          credential_name: 'Offline credential',
+          error: '',
+          organization: null,
+          updated_at: '2026-06-05T00:00:00Z',
+        },
+        {
+          id: 7,
+          provider_id: 'proxmox',
+          name: 'Lab Proxmox',
+          status: 'connected',
+          credential: 17,
+          credential_name: 'Lab credential',
+          error: '',
+          organization: null,
+          updated_at: '2026-06-05T00:00:00Z',
+        },
+      ],
+    }).as('loadProxmoxConnections');
+
     cy.intercept('POST', awxAPI`/external_automation/check/`, (req) => {
       expect(req.body).to.deep.equal({
         include_eda: true,
@@ -80,14 +113,40 @@ describe('ExternalAutomationSmokePanel', () => {
     );
 
     cy.getByDataCy('external-automation-check-proxmox').check({ force: true });
-    cy.getByDataCy('external-automation-proxmox-connection-id').type('7');
+    cy.wait('@loadProxmoxConnections');
+    cy.getByDataCy('external-automation-proxmox-connection-id')
+      .should('contain.text', 'Lab Proxmox')
+      .select('7');
     cy.getByDataCy('external-automation-proxmox-expected-vms').type('eda-server, opa-gatekeeper');
     cy.getByDataCy('external-automation-smoke-run-button').click();
     cy.wait('@runSmoke');
     cy.contains('External automation smoke passed.').should('be.visible');
-    cy.contains('Lab Proxmox').should('be.visible');
+    cy.getByDataCy('external-automation-proxmox-connection-result').should(
+      'contain.text',
+      'Lab Proxmox'
+    );
     cy.contains('1 nodes, 2 VMs, 2 running, 0 containers, 4 templates').should('be.visible');
     cy.contains('2 of 2 found').should('be.visible');
+  });
+
+  it('links empty Proxmox proof setup to Cloud Connections', () => {
+    cy.intercept('GET', awxAPI`/catalog_cloud/connections/?provider_id=proxmox`, {
+      count: 0,
+      results: [],
+    }).as('loadProxmoxConnections');
+
+    cy.mount(
+      <SeedNavigation>
+        <ExternalAutomationSmokePanel />
+      </SeedNavigation>
+    );
+
+    cy.getByDataCy('external-automation-check-proxmox').check({ force: true });
+    cy.wait('@loadProxmoxConnections');
+    cy.contains('No Proxmox VE connections found.').should('be.visible');
+    cy.getByDataCy('external-automation-cloud-connections-link')
+      .should('be.visible')
+      .and('have.attr', 'href', '/cloud/connections');
   });
 
   it('runs OPA and Gatekeeper smoke from policy surfaces', () => {
