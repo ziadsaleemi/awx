@@ -52,6 +52,7 @@ describe('AwxRoles', () => {
         cy.get('#edit-role').should('have.attr', 'aria-disabled', 'true');
         cy.getByDataCy('actions-dropdown').click();
       });
+    cy.get('[data-cy="copy-role"]').should('not.have.attr', 'aria-disabled', 'true');
     cy.contains('#delete-role', /^Delete role$/).should('have.attr', 'aria-disabled', 'true');
   });
 
@@ -74,6 +75,7 @@ describe('AwxRoles', () => {
         cy.get('#edit-role').should('have.attr', 'aria-disabled', 'true');
         cy.getByDataCy('actions-dropdown').click();
       });
+    cy.get('[data-cy="copy-role"]').should('have.class', 'pf-m-aria-disabled');
     cy.contains('#delete-role', /^Delete role$/).should('have.attr', 'aria-disabled', 'true');
   });
 

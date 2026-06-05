@@ -9,6 +9,7 @@ export type AwxRoleMetadaContentType = {
 };
 
 export enum AwxContentTypes {
+  CatalogItem = 'awx.catalogitem',
   Credential = 'awx.credential',
   ExecutionEnvironement = 'awx.executionenvironment',
   InstanceGroup = 'awx.instancegroup',
@@ -18,6 +19,7 @@ export enum AwxContentTypes {
   Organization = 'shared.organization',
   Project = 'awx.project',
   Team = 'shared.team',
+  TerraformJobTemplate = 'awx.terraformjobtemplate',
   WorkflowJobTemplate = 'awx.workflowjobtemplate',
 }
 
@@ -31,6 +33,16 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
   return useMemo(
     () => ({
       content_types: {
+        'awx.catalogitem': {
+          displayName: t('Catalog item'),
+          permissions: {
+            'awx.use_catalogitem': t('Use catalog item'),
+            'awx.add_catalogitem': t('Add catalog item'),
+            'awx.change_catalogitem': t('Change catalog item'),
+            'awx.delete_catalogitem': t('Delete catalog item'),
+            'awx.view_catalogitem': t('View catalog item'),
+          },
+        },
         'awx.credential': {
           displayName: t('Credential'),
           permissions: {
@@ -109,7 +121,11 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
             'awx.add_workflowjobtemplate': t('Add workflow job template'),
             'awx.change_workflowjobtemplate': t('Change workflow job template'),
             'awx.delete_workflowjobtemplate': t('Delete workflow job template'),
-            'awx.view_workflowjobtemplate': t('Delete workflow job template'),
+            'awx.view_workflowjobtemplate': t('View workflow job template'),
+            'awx.execute_terraformjobtemplate': t('Execute Terraform job template'),
+            'awx.change_terraformjobtemplate': t('Change Terraform job template'),
+            'awx.delete_terraformjobtemplate': t('Delete Terraform job template'),
+            'awx.view_terraformjobtemplate': t('View Terraform job template'),
             'awx.execute_jobtemplate': t('Execute job template'),
             'awx.change_jobtemplate': t('Change job template'),
             'awx.delete_jobtemplate': t('Delete job template'),
@@ -134,6 +150,11 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
             'awx.change_executionenvironment': t('Change execution environment'),
             'awx.delete_executionenvironment': t('Delete execution environment'),
             'awx.view_executionenvironment': t('View execution environment'),
+            'awx.add_catalogitem': t('Add catalog item'),
+            'awx.use_catalogitem': t('Use catalog item'),
+            'awx.change_catalogitem': t('Change catalog item'),
+            'awx.delete_catalogitem': t('Delete catalog item'),
+            'awx.view_catalogitem': t('View catalog item'),
           },
         },
         'awx.project': {
@@ -153,6 +174,15 @@ export function useAwxRoleMetadata(): AwxRoleMetadata {
             'shared.change_team': t('Change team'),
             'shared.delete_team': t('Delete team'),
             'shared.view_team': t('View team'),
+          },
+        },
+        'awx.terraformjobtemplate': {
+          displayName: t('Terraform job template'),
+          permissions: {
+            'awx.execute_terraformjobtemplate': t('Execute Terraform job template'),
+            'awx.change_terraformjobtemplate': t('Change Terraform job template'),
+            'awx.delete_terraformjobtemplate': t('Delete Terraform job template'),
+            'awx.view_terraformjobtemplate': t('View Terraform job template'),
           },
         },
         'awx.workflowjobtemplate': {

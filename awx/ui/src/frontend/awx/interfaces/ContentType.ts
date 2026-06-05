@@ -1,4 +1,5 @@
 export enum ContentTypeEnum {
+  CatalogItem = 'awx.catalogitem',
   Credential = 'awx.credential',
   ExecutionEnvironement = 'awx.executionenvironment',
   InstanceGroup = 'awx.instancegroup',
@@ -8,5 +9,6 @@ export enum ContentTypeEnum {
   Organization = 'shared.organization',
   Project = 'awx.project',
   Team = 'shared.team',
+  TerraformJobTemplate = 'awx.terraformjobtemplate',
   WorkflowJobTemplate = 'awx.workflowjobtemplate',
 }

@@ -1,0 +1,64 @@
+import { awxAPI } from '../../common/api/awx-utils';
+import { AwxRbacRole } from '../../interfaces/AwxRbacRole';
+import mockAwxBuiltInRole from '../../../../cypress/fixtures/awxBuiltInRoleDefinition.json';
+import { CloneRole, CreateRole } from './RoleForm';
+
+describe('AwxRoleForm', () => {
+  it('sends catalog item permissions when creating a custom role', () => {
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        id: 101,
+        name: 'Catalog item launcher',
+        content_type: 'awx.catalogitem',
+        permissions: ['awx.use_catalogitem', 'awx.view_catalogitem'],
+      },
+    }).as('createRole');
+
+    cy.mount(<CreateRole />);
+    cy.get('[data-cy="name"]').type('Catalog item launcher');
+    cy.get('[data-cy="description"]').type('Can deploy catalog items');
+    cy.selectDropdownOptionByResourceName('content-type', 'Catalog item');
+    cy.get('#permissions').click();
+    cy.selectMultiSelectOption('#permissions-select', 'Use catalog item');
+    cy.selectMultiSelectOption('#permissions-select', 'View catalog item');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@createRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('Catalog item launcher');
+        expect(role.description).to.equal('Can deploy catalog items');
+        expect(role.content_type).to.equal('awx.catalogitem');
+        expect(role.permissions).to.deep.equal(['awx.use_catalogitem', 'awx.view_catalogitem']);
+      });
+  });
+
+  it('copies a built-in role into a custom role payload', () => {
+    cy.intercept('GET', awxAPI`/role_definitions/1/`, mockAwxBuiltInRole);
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        ...mockAwxBuiltInRole,
+        id: 102,
+        managed: false,
+        name: 'Copy of Credential Admin',
+      },
+    }).as('copyRole');
+
+    cy.mount(<CloneRole />, { path: '/roles/:id/copy', initialEntries: ['/roles/1/copy'] });
+    cy.get('[data-cy="name"]').should('have.value', 'Copy of Credential Admin');
+    cy.get('[data-cy="content-type-form-group"]').contains('Credential');
+    cy.multiSelectShouldHaveSelectedOption('#permissions', 'Use credential');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@copyRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('Copy of Credential Admin');
+        expect(role.content_type).to.equal('awx.credential');
+        expect(role.permissions).to.deep.equal(mockAwxBuiltInRole.permissions);
+        expect(role).not.to.have.property('managed');
+      });
+  });
+});

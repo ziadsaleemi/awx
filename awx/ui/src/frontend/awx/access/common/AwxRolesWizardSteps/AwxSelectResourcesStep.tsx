@@ -8,15 +8,18 @@ import styled from 'styled-components';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxMultiSelectListView } from '../../../common/useAwxMultiSelectListView';
 import { Credential } from '../../../interfaces/Credential';
+import { CatalogItem } from '../../../interfaces/CatalogItem';
 import { ExecutionEnvironment } from '../../../interfaces/ExecutionEnvironment';
 import { InstanceGroup } from '../../../interfaces/InstanceGroup';
 import { Inventory } from '../../../interfaces/Inventory';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
 import { NotificationTemplate } from '../../../interfaces/NotificationTemplate';
 import { Project } from '../../../interfaces/Project';
+import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 
 export type AwxResourceType =
+  | CatalogItem
   | Credential
   | ExecutionEnvironment
   | InstanceGroup
@@ -24,9 +27,11 @@ export type AwxResourceType =
   | JobTemplate
   | NotificationTemplate
   | Project
+  | TerraformJobTemplate
   | WorkflowJobTemplate;
 
 const resourceToEndpointMapping: { [key: string]: string } = {
+  'awx.catalogitem': awxAPI`/catalog_items/`,
   'awx.credential': awxAPI`/credentials/`,
   'awx.executionenvironment': awxAPI`/execution_environments/`,
   'awx.instancegroup': awxAPI`/instance_groups/`,
@@ -34,6 +39,7 @@ const resourceToEndpointMapping: { [key: string]: string } = {
   'awx.jobtemplate': awxAPI`/job_templates/`,
   'awx.notificationtemplate': awxAPI`/notification_templates/`,
   'awx.project': awxAPI`/projects/`,
+  'awx.terraformjobtemplate': awxAPI`/terraform_job_templates/`,
   'awx.workflowjobtemplate': awxAPI`/workflow_job_templates/`,
 };
 
@@ -56,6 +62,8 @@ export function AwxSelectResourcesStep() {
       'awx.jobtemplate': t('Select job templates'),
       'awx.notificationtemplate': t('Select notification templates'),
       'awx.project': t('Select projects'),
+      'awx.catalogitem': t('Select catalog items'),
+      'awx.terraformjobtemplate': t('Select Terraform job templates'),
       'awx.workflowjobtemplate': t('Select workflow job templates'),
     };
   }, [t]);

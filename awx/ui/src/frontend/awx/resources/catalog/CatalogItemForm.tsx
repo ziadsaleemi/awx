@@ -925,8 +925,8 @@ function CloudProvidersTab() {
   const organizationId = watch('organization');
 
   const connectionsUrl =
-    organizationId !== null
-      ? `${awxAPI`/catalog_cloud/connections/`}?organization=${organizationId.toString()}`
+    organizationId !== null && organizationId !== undefined
+      ? `${awxAPI`/catalog_cloud/connections/`}?organization=${String(organizationId)}`
       : awxAPI`/catalog_cloud/connections/`;
 
   const { data: connectionsData } = useGet<CloudConnectionApiResult>(connectionsUrl);

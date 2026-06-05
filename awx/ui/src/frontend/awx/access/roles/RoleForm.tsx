@@ -135,6 +135,70 @@ export function EditRole(props: { breadcrumbLabelForPreviousPage?: string }) {
   }
 }
 
+export function CloneRole(props: { breadcrumbLabelForPreviousPage?: string }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const pageNavigate = usePageNavigate();
+  const params = useParams<{ id?: string }>();
+  const id = Number(params.id);
+  const { data: role } = useGet<AwxRbacRole>(awxAPI`/role_definitions/${id.toString()}/`);
+
+  useInvalidateCacheOnUnmount();
+
+  const postRequest = usePostRequest<RoleDefinitionFormData, AwxRbacRole>();
+
+  const onSubmit: PageFormSubmitHandler<RoleDefinitionFormData> = async (data) => {
+    const newRole = await postRequest(awxAPI`/role_definitions/`, data);
+    pageNavigate(AwxRoute.RoleDetails, { params: { id: newRole.id } });
+  };
+  const onCancel = () => navigate(-1);
+  const getPageUrl = useGetPageUrl();
+  const title = role?.name ? t('Copy {{roleName}}', { roleName: role.name }) : t('Copy role');
+
+  if (!Number.isInteger(id) || !role) {
+    return (
+      <PageLayout>
+        <PageHeader
+          breadcrumbs={[
+            {
+              label: props.breadcrumbLabelForPreviousPage || t('Roles'),
+              to: getPageUrl(AwxRoute.Roles),
+            },
+            { label: t('Copy role') },
+          ]}
+        />
+      </PageLayout>
+    );
+  }
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={title}
+        breadcrumbs={[
+          {
+            label: props.breadcrumbLabelForPreviousPage || t('Roles'),
+            to: getPageUrl(AwxRoute.Roles),
+          },
+          { label: title },
+        ]}
+      />
+      <AwxPageForm<RoleDefinitionFormData>
+        submitText={t('Create role')}
+        onSubmit={onSubmit}
+        cancelText={t('Cancel')}
+        onCancel={onCancel}
+        defaultValue={{
+          ...roleToFormData(role),
+          name: t('Copy of {{roleName}}', { roleName: role.name }),
+        }}
+      >
+        <AwxRoleInputs />
+      </AwxPageForm>
+    </PageLayout>
+  );
+}
+
 function AwxRoleInputs(props: { disableContentType?: boolean }) {
   const { t } = useTranslation();
   const { disableContentType } = props;

@@ -14,7 +14,7 @@ import { PageSettingsForm } from '../../../framework/PageSettings/PageSettingsFo
 import { AwxRoleDetails } from '../access/roles/AwxRoleDetails';
 import { AwxRolePage } from '../access/roles/AwxRolePage';
 import { AwxRoles } from '../access/roles/AwxRoles';
-import { CreateRole, EditRole } from '../access/roles/RoleForm';
+import { CloneRole, CreateRole, EditRole } from '../access/roles/RoleForm';
 import { CloneUserType, CreateUserType, EditUserType } from '../access/user-types/UserTypeForm';
 import { UserTypes } from '../access/user-types/UserTypes';
 import { AwxSettings } from '../administration/settings/AwxSettings';
@@ -288,6 +288,11 @@ export function useAwxNavigation() {
               id: AwxRoute.EditRole,
               path: ':id/edit',
               element: <EditRole />,
+            },
+            {
+              id: AwxRoute.CloneRole,
+              path: ':id/copy',
+              element: <CloneRole />,
             },
             {
               id: AwxRoute.RolePage,

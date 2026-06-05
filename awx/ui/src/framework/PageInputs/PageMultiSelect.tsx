@@ -103,6 +103,15 @@ export interface PageMultiSelectProps<ValueT> {
   compareOptionValues?: (a: ValueT, b: ValueT) => boolean;
 }
 
+function optionIdentity<ValueT>(option: PageSelectOption<ValueT>) {
+  if (option.key !== undefined) return option.key;
+  const value = option.value as unknown;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return option.label;
+}
+
 /**
  * Select dropdown component for multiple selection of options.
  *
@@ -180,6 +189,14 @@ export function PageMultiSelect<
     return selectedOptions;
   }, [options, queryLabel, values, compareOptionValues]);
 
+  const clearSelection = useCallback(
+    (event?: React.MouseEvent) => {
+      event?.stopPropagation();
+      onSelect(() => []);
+    },
+    [onSelect]
+  );
+
   const Toggle = (toggleRef: Ref<MenuToggleElement>) => {
     return (
       <Tooltip content={props.isDisabled} trigger={props.isDisabled ? undefined : 'manual'}>
@@ -214,27 +231,28 @@ export function PageMultiSelect<
           {selectedOptions.length > 0 ? (
             <>
               {variant === 'count' ? (
-                <Chip
-                  isReadOnly={disableClearSelection}
-                  onClick={() => onSelect(() => [])}
-                  style={{ marginTop: -4, marginBottom: -4 }}
-                >
-                  {selectedOptions.length}
-                </Chip>
+                <>
+                  <Chip isReadOnly style={{ marginTop: -4, marginBottom: -4 }}>
+                    {selectedOptions.length}
+                  </Chip>
+                  {!disableClearSelection && (
+                    <TimesIcon
+                      role="button"
+                      aria-label={t('Clear selection')}
+                      onClick={clearSelection}
+                      style={{ verticalAlign: 'middle', marginLeft: 8 }}
+                    />
+                  )}
+                </>
               ) : (
                 <>
                   <ChipGroup numChips={99}>
                     {selectedOptions.map((option) => (
                       <Chip
-                        key={option.label}
-                        isReadOnly={props.disableClearChips}
+                        key={optionIdentity(option)}
+                        isReadOnly
                         textMaxWidth={maxChipSize}
                         style={{ marginTop: -2, marginBottom: -2 }}
-                        onClick={() =>
-                          onSelect((previousValues) =>
-                            previousValues?.filter((v) => v !== option.value)
-                          )
-                        }
                       >
                         {option.label}
                       </Chip>
@@ -243,8 +261,8 @@ export function PageMultiSelect<
                   {!disableClearSelection && (
                     <TimesIcon
                       role="button"
-                      aria-hidden
-                      onClick={() => onSelect(() => [])}
+                      aria-label={t('Clear selection')}
+                      onClick={clearSelection}
                       style={{ verticalAlign: 'middle', marginLeft: 8 }}
                     />
                   )}
@@ -265,8 +283,7 @@ export function PageMultiSelect<
     (_: unknown, itemId: string | number | undefined) => {
       onSelect((previousValues: ValueT[] | undefined) => {
         const newSelectedOption = options.find((option) => {
-          if (option.key !== undefined) return option.key === itemId;
-          else return option.label === itemId;
+          return String(optionIdentity(option)) === String(itemId);
         });
         if (newSelectedOption) {
           if (
@@ -388,7 +405,7 @@ export function PageMultiSelect<
                 <SelectGroup label={groupName} key={groupName}>
                   <PageMultiSelectList
                     searchRef={searchRef}
-                    options={visibleOptions}
+                    options={groups[groupName]}
                     selectedOptions={selectedOptions}
                   />
                 </SelectGroup>
@@ -426,13 +443,14 @@ function PageMultiSelectList(props: {
       }}
     >
       {props.options.map((option) => {
-        const optionId = getID(option);
+        const itemId = optionIdentity(option);
+        const optionId = getID(String(itemId));
         return (
           <SelectOption
             id={optionId}
             icon={option.icon}
-            key={option.key !== undefined ? option.key : option.label}
-            value={option.key !== undefined ? option.key : option.label}
+            key={itemId}
+            value={itemId}
             description={
               option.description ? (
                 <div style={{ maxWidth: 300 }}>{option.description}</div>

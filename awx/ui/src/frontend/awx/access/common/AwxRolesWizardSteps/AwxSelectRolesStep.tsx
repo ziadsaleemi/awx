@@ -46,6 +46,10 @@ export function AwxSelectRolesStep(props: {
         return t('Select roles to apply to all of your selected execution environments.');
       case 'awx.workflowjobtemplate':
         return t('Select roles to apply to all of your selected workflow job templates.');
+      case 'awx.terraformjobtemplate':
+        return t('Select roles to apply to all of your selected Terraform job templates.');
+      case 'awx.catalogitem':
+        return t('Select roles to apply to all of your selected catalog items.');
       default:
         return t('Select roles to apply to all of your selected resources.');
     }
