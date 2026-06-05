@@ -90,6 +90,8 @@ describe('OPAPolicyManagementPanel', () => {
     cy.getByDataCy('opa-policy-management')
       .should('be.visible')
       .and('not.have.class', 'pf-m-limit-width');
+    cy.getByDataCy('opa-module-toolbar').should('be.visible');
+    cy.getByDataCy('opa-module-metadata-grid').should('be.visible');
     cy.getByDataCy('opa-module-selected-version-audit-link')
       .should('be.visible')
       .and('have.attr', 'href', '/activity-stream?id=77');
@@ -158,5 +160,43 @@ describe('OPAPolicyManagementPanel', () => {
       .should('be.visible')
       .and('have.attr', 'href', '/activity-stream?id=99');
     cy.wrap(null).then(() => expect(deleteCalls).to.equal(1));
+  });
+
+  it('uses a responsive grid for policy tester input and results', () => {
+    cy.intercept('GET', awxAPI`/opa/policies/`, {
+      enabled: true,
+      server_url: 'http://opa:8181',
+      policies: [
+        {
+          id: 'awx/job_launch',
+          path: 'awx/job_launch/allow',
+          description: 'Job launch guardrail',
+          input_example: {
+            action: 'launch',
+            user: { username: 'admin', is_superuser: true },
+          },
+        },
+      ],
+      policy_bundle: { configured: true, size: 42, line_count: 4 },
+    });
+    cy.intercept('POST', awxAPI`/opa/evaluate/`, {
+      allowed: true,
+      result: true,
+      opa_response: { result: true },
+    }).as('evaluatePolicy');
+
+    cy.mount(
+      <SeedNavigation>
+        <OPAPolicyManagementPanel sections={['tester']} />
+      </SeedNavigation>
+    );
+
+    cy.getByDataCy('opa-policy-management')
+      .should('be.visible')
+      .and('not.have.class', 'pf-m-limit-width');
+    cy.getByDataCy('opa-policy-tester-grid').should('be.visible');
+    cy.contains('button', 'Evaluate').click();
+    cy.wait('@evaluatePolicy');
+    cy.contains('Decision: Allow').should('be.visible');
   });
 });

@@ -15,6 +15,8 @@ import {
   FormGroup,
   FormSelect,
   FormSelectOption,
+  Grid,
+  GridItem,
   Label,
   Modal,
   ModalVariant,
@@ -631,41 +633,45 @@ export function OPAPolicyManagementPanel(props?: {
                 ) : (
                   <Stack hasGutter>
                     <StackItem>
-                      <FormGroup label={t('Loaded module')} fieldId="opa-module-select">
-                        <FormSelect
-                          id="opa-module-select"
-                          value={selectedModuleId}
-                          onChange={(_event, value) => {
-                            setModuleAutoSelect(false);
-                            setSelectedModuleId(String(value));
-                          }}
-                          isDisabled={moduleLoading || modules.length === 0}
-                        >
-                          {modules.length === 0 ? (
-                            <FormSelectOption value="" label={t('No live modules found')} />
-                          ) : null}
-                          {modules.map((module) => (
-                            <FormSelectOption
-                              key={module.id}
-                              value={module.id}
-                              label={`${module.id}${module.package ? ` - ${module.package}` : ''}`}
-                            />
-                          ))}
-                        </FormSelect>
-                      </FormGroup>
-                    </StackItem>
-                    <StackItem>
-                      <Button variant="secondary" icon={<PlusCircleIcon />} onClick={newModule}>
-                        {t('New module')}
-                      </Button>{' '}
-                      <Button
-                        variant="secondary"
-                        icon={<SyncAltIcon />}
-                        onClick={() => modulesResponse.refresh()}
-                        isDisabled={modulesResponse.isLoading}
-                      >
-                        {t('Refresh modules')}
-                      </Button>
+                      <Grid hasGutter data-cy="opa-module-toolbar">
+                        <GridItem sm={12} lg={8}>
+                          <FormGroup label={t('Loaded module')} fieldId="opa-module-select">
+                            <FormSelect
+                              id="opa-module-select"
+                              value={selectedModuleId}
+                              onChange={(_event, value) => {
+                                setModuleAutoSelect(false);
+                                setSelectedModuleId(String(value));
+                              }}
+                              isDisabled={moduleLoading || modules.length === 0}
+                            >
+                              {modules.length === 0 ? (
+                                <FormSelectOption value="" label={t('No live modules found')} />
+                              ) : null}
+                              {modules.map((module) => (
+                                <FormSelectOption
+                                  key={module.id}
+                                  value={module.id}
+                                  label={`${module.id}${module.package ? ` - ${module.package}` : ''}`}
+                                />
+                              ))}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} lg={4} style={{ alignSelf: 'end' }}>
+                          <Button variant="secondary" icon={<PlusCircleIcon />} onClick={newModule}>
+                            {t('New module')}
+                          </Button>{' '}
+                          <Button
+                            variant="secondary"
+                            icon={<SyncAltIcon />}
+                            onClick={() => modulesResponse.refresh()}
+                            isDisabled={modulesResponse.isLoading}
+                          >
+                            {t('Refresh modules')}
+                          </Button>
+                        </GridItem>
+                      </Grid>
                     </StackItem>
                     <StackItem>
                       <FormGroup label={t('Policy ID')} fieldId="opa-module-id">
@@ -742,155 +748,181 @@ export function OPAPolicyManagementPanel(props?: {
                     ) : null}
                     {moduleDetail ? (
                       <StackItem>
-                        <DescriptionList isHorizontal isCompact>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Package')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {moduleDetail.package || t('Not detected')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Rules')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {moduleDetail.rules.length
-                                ? moduleDetail.rules.join(', ')
-                                : t('Not detected')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Decision paths')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {moduleDetail.decision_paths.length
-                                ? moduleDetail.decision_paths.join(', ')
-                                : t('Not detected')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Checksum')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                                {moduleDetail.sha256}
-                              </ClipboardCopy>
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                        </DescriptionList>
-                      </StackItem>
-                    ) : null}
-                    {moduleDetail ? (
-                      <StackItem>
-                        <Stack hasGutter>
-                          <StackItem>
-                            <FormGroup label={t('Version history')} fieldId="opa-module-version">
-                              {moduleVersionsLoading ? (
-                                <Spinner size="md" />
-                              ) : (
-                                <FormSelect
-                                  id="opa-module-version"
-                                  value={selectedVersionId}
-                                  onChange={(_event, value) => {
-                                    const nextId = String(value);
-                                    const nextVersion = moduleVersions.find(
-                                      (version) => String(version.activity_stream_id) === nextId
-                                    );
-                                    setSelectedVersionId(nextId);
-                                    setSelectedVersionSide(
-                                      nextVersion?.can_restore_before ? 'before' : 'after'
-                                    );
-                                  }}
-                                  isDisabled={moduleVersions.length === 0 || moduleRollbackLoading}
+                        <Grid hasGutter data-cy="opa-module-metadata-grid">
+                          <GridItem sm={12} xl={6}>
+                            <DescriptionList isHorizontal isCompact>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Package')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {moduleDetail.package || t('Not detected')}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Rules')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {moduleDetail.rules.length
+                                    ? moduleDetail.rules.join(', ')
+                                    : t('Not detected')}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Decision paths')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {moduleDetail.decision_paths.length
+                                    ? moduleDetail.decision_paths.join(', ')
+                                    : t('Not detected')}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Checksum')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  <ClipboardCopy
+                                    isReadOnly
+                                    hoverTip={t('Copy')}
+                                    clickTip={t('Copied')}
+                                  >
+                                    {moduleDetail.sha256}
+                                  </ClipboardCopy>
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                            </DescriptionList>
+                          </GridItem>
+                          <GridItem sm={12} xl={6}>
+                            <Stack hasGutter>
+                              <StackItem>
+                                <FormGroup
+                                  label={t('Version history')}
+                                  fieldId="opa-module-version"
                                 >
-                                  {moduleVersions.length === 0 ? (
-                                    <FormSelectOption
-                                      value=""
-                                      label={t('No audited versions found')}
-                                    />
-                                  ) : null}
-                                  {moduleVersions.map((version) => (
-                                    <FormSelectOption
-                                      key={version.activity_stream_id}
-                                      value={String(version.activity_stream_id)}
-                                      label={formatVersionLabel(version)}
-                                    />
-                                  ))}
-                                </FormSelect>
-                              )}
-                            </FormGroup>
-                          </StackItem>
-                          {moduleVersionError ? (
-                            <StackItem>
-                              <Alert variant="danger" isInline title={moduleVersionError} />
-                            </StackItem>
-                          ) : null}
-                          {selectedVersion ? (
-                            <StackItem>
-                              <DescriptionList isHorizontal isCompact>
-                                <DescriptionListGroup>
-                                  <DescriptionListTerm>{t('Activity Stream')}</DescriptionListTerm>
-                                  <DescriptionListDescription>
-                                    <OPAAuditLink
-                                      activityStreamId={selectedVersion.activity_stream_id}
-                                      dataCy="opa-module-selected-version-audit-link"
-                                      getPageUrl={getPageUrl}
-                                    />
-                                  </DescriptionListDescription>
-                                </DescriptionListGroup>
-                                <DescriptionListGroup>
-                                  <DescriptionListTerm>{t('Changed by')}</DescriptionListTerm>
-                                  <DescriptionListDescription>
-                                    {selectedVersion.actor?.username ?? t('Unknown')}
-                                  </DescriptionListDescription>
-                                </DescriptionListGroup>
-                                <DescriptionListGroup>
-                                  <DescriptionListTerm>{t('Before checksum')}</DescriptionListTerm>
-                                  <DescriptionListDescription>
-                                    {selectedVersion.before?.sha256 || t('None')}
-                                  </DescriptionListDescription>
-                                </DescriptionListGroup>
-                                <DescriptionListGroup>
-                                  <DescriptionListTerm>{t('After checksum')}</DescriptionListTerm>
-                                  <DescriptionListDescription>
-                                    {selectedVersion.after?.sha256 || t('None')}
-                                  </DescriptionListDescription>
-                                </DescriptionListGroup>
-                              </DescriptionList>
-                            </StackItem>
-                          ) : null}
-                          <StackItem>
-                            <FormGroup label={t('Restore snapshot')} fieldId="opa-module-restore">
-                              <FormSelect
-                                id="opa-module-restore"
-                                value={selectedVersionSide}
-                                onChange={(_event, value) =>
-                                  setSelectedVersionSide(
-                                    String(value) as OPAPolicyModuleVersionSide
-                                  )
-                                }
-                                isDisabled={!selectedVersion || moduleRollbackLoading}
-                              >
-                                <FormSelectOption
-                                  value="before"
-                                  label={t('Before change')}
-                                  isDisabled={!selectedVersion?.can_restore_before}
-                                />
-                                <FormSelectOption
-                                  value="after"
-                                  label={t('After change')}
-                                  isDisabled={!selectedVersion?.can_restore_after}
-                                />
-                              </FormSelect>
-                            </FormGroup>
-                          </StackItem>
-                          <StackItem>
-                            <Button
-                              variant="secondary"
-                              onClick={() => void handleRollbackModule()}
-                              isLoading={moduleRollbackLoading}
-                              isDisabled={moduleRollbackLoading || !selectedVersionCanRestore}
-                            >
-                              {t('Rollback version')}
-                            </Button>
-                          </StackItem>
-                        </Stack>
+                                  {moduleVersionsLoading ? (
+                                    <Spinner size="md" />
+                                  ) : (
+                                    <FormSelect
+                                      id="opa-module-version"
+                                      value={selectedVersionId}
+                                      onChange={(_event, value) => {
+                                        const nextId = String(value);
+                                        const nextVersion = moduleVersions.find(
+                                          (version) => String(version.activity_stream_id) === nextId
+                                        );
+                                        setSelectedVersionId(nextId);
+                                        setSelectedVersionSide(
+                                          nextVersion?.can_restore_before ? 'before' : 'after'
+                                        );
+                                      }}
+                                      isDisabled={
+                                        moduleVersions.length === 0 || moduleRollbackLoading
+                                      }
+                                    >
+                                      {moduleVersions.length === 0 ? (
+                                        <FormSelectOption
+                                          value=""
+                                          label={t('No audited versions found')}
+                                        />
+                                      ) : null}
+                                      {moduleVersions.map((version) => (
+                                        <FormSelectOption
+                                          key={version.activity_stream_id}
+                                          value={String(version.activity_stream_id)}
+                                          label={formatVersionLabel(version)}
+                                        />
+                                      ))}
+                                    </FormSelect>
+                                  )}
+                                </FormGroup>
+                              </StackItem>
+                              {moduleVersionError ? (
+                                <StackItem>
+                                  <Alert variant="danger" isInline title={moduleVersionError} />
+                                </StackItem>
+                              ) : null}
+                              {selectedVersion ? (
+                                <StackItem>
+                                  <DescriptionList isHorizontal isCompact>
+                                    <DescriptionListGroup>
+                                      <DescriptionListTerm>
+                                        {t('Activity Stream')}
+                                      </DescriptionListTerm>
+                                      <DescriptionListDescription>
+                                        <OPAAuditLink
+                                          activityStreamId={selectedVersion.activity_stream_id}
+                                          dataCy="opa-module-selected-version-audit-link"
+                                          getPageUrl={getPageUrl}
+                                        />
+                                      </DescriptionListDescription>
+                                    </DescriptionListGroup>
+                                    <DescriptionListGroup>
+                                      <DescriptionListTerm>{t('Changed by')}</DescriptionListTerm>
+                                      <DescriptionListDescription>
+                                        {selectedVersion.actor?.username ?? t('Unknown')}
+                                      </DescriptionListDescription>
+                                    </DescriptionListGroup>
+                                    <DescriptionListGroup>
+                                      <DescriptionListTerm>
+                                        {t('Before checksum')}
+                                      </DescriptionListTerm>
+                                      <DescriptionListDescription>
+                                        {selectedVersion.before?.sha256 || t('None')}
+                                      </DescriptionListDescription>
+                                    </DescriptionListGroup>
+                                    <DescriptionListGroup>
+                                      <DescriptionListTerm>
+                                        {t('After checksum')}
+                                      </DescriptionListTerm>
+                                      <DescriptionListDescription>
+                                        {selectedVersion.after?.sha256 || t('None')}
+                                      </DescriptionListDescription>
+                                    </DescriptionListGroup>
+                                  </DescriptionList>
+                                </StackItem>
+                              ) : null}
+                              <StackItem>
+                                <Grid hasGutter>
+                                  <GridItem sm={12} lg={8}>
+                                    <FormGroup
+                                      label={t('Restore snapshot')}
+                                      fieldId="opa-module-restore"
+                                    >
+                                      <FormSelect
+                                        id="opa-module-restore"
+                                        value={selectedVersionSide}
+                                        onChange={(_event, value) =>
+                                          setSelectedVersionSide(
+                                            String(value) as OPAPolicyModuleVersionSide
+                                          )
+                                        }
+                                        isDisabled={!selectedVersion || moduleRollbackLoading}
+                                      >
+                                        <FormSelectOption
+                                          value="before"
+                                          label={t('Before change')}
+                                          isDisabled={!selectedVersion?.can_restore_before}
+                                        />
+                                        <FormSelectOption
+                                          value="after"
+                                          label={t('After change')}
+                                          isDisabled={!selectedVersion?.can_restore_after}
+                                        />
+                                      </FormSelect>
+                                    </FormGroup>
+                                  </GridItem>
+                                  <GridItem sm={12} lg={4} style={{ alignSelf: 'end' }}>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() => void handleRollbackModule()}
+                                      isLoading={moduleRollbackLoading}
+                                      isDisabled={
+                                        moduleRollbackLoading || !selectedVersionCanRestore
+                                      }
+                                    >
+                                      {t('Rollback version')}
+                                    </Button>
+                                  </GridItem>
+                                </Grid>
+                              </StackItem>
+                            </Stack>
+                          </GridItem>
+                        </Grid>
                       </StackItem>
                     ) : null}
                   </Stack>
@@ -906,68 +938,76 @@ export function OPAPolicyManagementPanel(props?: {
                 <CardTitle>{t('Policy Tester')}</CardTitle>
               </CardHeader>
               <CardBody>
-                <Stack hasGutter>
-                  <StackItem>
-                    <FormGroup label={t('Decision path')} fieldId="opa-policy-path">
-                      <FormSelect
-                        id="opa-policy-path"
-                        value={policyPath}
-                        onChange={(_event, value) => selectPolicy(String(value))}
-                        isDisabled={isLoading || policies.length === 0}
-                      >
-                        {policies.map((policy) => (
-                          <FormSelectOption
-                            key={policy.path}
-                            value={policy.path}
-                            label={`${policy.id} - ${policy.path}`}
+                <Grid hasGutter data-cy="opa-policy-tester-grid">
+                  <GridItem sm={12} xl={5}>
+                    <Stack hasGutter>
+                      <StackItem>
+                        <FormGroup label={t('Decision path')} fieldId="opa-policy-path">
+                          <FormSelect
+                            id="opa-policy-path"
+                            value={policyPath}
+                            onChange={(_event, value) => selectPolicy(String(value))}
+                            isDisabled={isLoading || policies.length === 0}
+                          >
+                            {policies.map((policy) => (
+                              <FormSelectOption
+                                key={policy.path}
+                                value={policy.path}
+                                label={`${policy.id} - ${policy.path}`}
+                              />
+                            ))}
+                          </FormSelect>
+                        </FormGroup>
+                      </StackItem>
+                      <StackItem>
+                        <FormGroup label={t('Input JSON')} fieldId="opa-input-json">
+                          <TextArea
+                            id="opa-input-json"
+                            value={inputJson}
+                            rows={10}
+                            onChange={(_event, value) => setInputJson(value)}
+                            aria-label={t('Input JSON')}
+                            style={{ fontFamily: 'monospace' }}
                           />
-                        ))}
-                      </FormSelect>
-                    </FormGroup>
-                  </StackItem>
-                  <StackItem>
-                    <FormGroup label={t('Input JSON')} fieldId="opa-input-json">
-                      <TextArea
-                        id="opa-input-json"
-                        value={inputJson}
-                        rows={10}
-                        onChange={(_event, value) => setInputJson(value)}
-                        aria-label={t('Input JSON')}
-                        style={{ fontFamily: 'monospace' }}
-                      />
-                    </FormGroup>
-                  </StackItem>
-                  <StackItem>
-                    <Button
-                      variant="primary"
-                      onClick={() => void handleEvaluate()}
-                      isLoading={evalLoading}
-                      isDisabled={evalLoading || !policyPath}
-                    >
-                      {t('Evaluate')}
-                    </Button>
-                  </StackItem>
-                  {evalError ? (
-                    <StackItem>
-                      <Alert variant="danger" isInline title={evalError} />
-                    </StackItem>
-                  ) : null}
-                  {evalResult ? (
-                    <StackItem>
-                      <Alert
-                        variant={evalResult.allowed ? 'success' : 'danger'}
-                        isInline
-                        title={evalResult.allowed ? t('Decision: Allow') : t('Decision: Deny')}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <CodeBlock>
-                        <CodeBlockCode>
-                          {JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}
-                        </CodeBlockCode>
-                      </CodeBlock>
-                    </StackItem>
-                  ) : null}
-                </Stack>
+                        </FormGroup>
+                      </StackItem>
+                      <StackItem>
+                        <Button
+                          variant="primary"
+                          onClick={() => void handleEvaluate()}
+                          isLoading={evalLoading}
+                          isDisabled={evalLoading || !policyPath}
+                        >
+                          {t('Evaluate')}
+                        </Button>
+                      </StackItem>
+                    </Stack>
+                  </GridItem>
+                  <GridItem sm={12} xl={7}>
+                    <Stack hasGutter>
+                      {evalError ? (
+                        <StackItem>
+                          <Alert variant="danger" isInline title={evalError} />
+                        </StackItem>
+                      ) : null}
+                      {evalResult ? (
+                        <StackItem>
+                          <Alert
+                            variant={evalResult.allowed ? 'success' : 'danger'}
+                            isInline
+                            title={evalResult.allowed ? t('Decision: Allow') : t('Decision: Deny')}
+                            style={{ marginBottom: 12 }}
+                          />
+                          <CodeBlock>
+                            <CodeBlockCode>
+                              {JSON.stringify(evalResult.opa_response ?? evalResult, null, 2)}
+                            </CodeBlockCode>
+                          </CodeBlock>
+                        </StackItem>
+                      ) : null}
+                    </Stack>
+                  </GridItem>
+                </Grid>
               </CardBody>
             </Card>
           </StackItem>
