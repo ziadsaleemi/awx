@@ -130,6 +130,8 @@ role_name_to_perm_mapping = {
     'use_role': ['use_'],
     'policy_author_role': ['change_policyascode', 'view_policyascode'],
     'policy_operator_role': ['view_policyascode'],
+    'eda_admin_role': ['change_edaactivation', 'execute_edaactivation', 'view_edaactivation'],
+    'eda_operator_role': ['execute_edaactivation', 'view_edaactivation'],
 }
 
 org_role_to_permission = {
@@ -147,6 +149,8 @@ org_role_to_permission = {
     'cloud_user_role': 'view_cloudproviderconnection',
     'policy_author_role': 'change_policyascode',
     'policy_operator_role': 'view_policyascode',
+    'eda_admin_role': 'change_edaactivation',
+    'eda_operator_role': 'execute_edaactivation',
     'auditor_role': 'view_project',  # TODO: also doesnt really work
 }
 

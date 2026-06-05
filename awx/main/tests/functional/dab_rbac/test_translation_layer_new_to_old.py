@@ -65,6 +65,8 @@ class TestNewToOld:
             ('Organization Cloud Admin', 'cloud_admin_role'),
             ('Organization Policy Operator', 'policy_operator_role'),
             ('Organization Policy Author', 'policy_author_role'),
+            ('Organization EDA Operator', 'eda_operator_role'),
+            ('Organization EDA Admin', 'eda_admin_role'),
         ],
     )
     def test_new_to_old_organization_persona_addition(self, admin, post, organization, bob, setup_managed_roles, role_definition_name, role_field):

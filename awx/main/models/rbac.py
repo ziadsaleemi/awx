@@ -68,6 +68,8 @@ role_names = {
     'cloud_user_role': _('Cloud User'),
     'policy_author_role': _('Policy Author'),
     'policy_operator_role': _('Policy Operator'),
+    'eda_admin_role': _('EDA Admin'),
+    'eda_operator_role': _('EDA Operator'),
     'auditor_role': _('Auditor'),
     'execute_role': _('Execute'),
     'member_role': _('Member'),
@@ -95,6 +97,8 @@ role_descriptions = {
     'cloud_user_role': _('Can view cloud provider connections and state for the %s'),
     'policy_author_role': _('Can author Policy as Code modules and apply governed policy changes for the %s'),
     'policy_operator_role': _('Can view Policy as Code resources, run tests, smoke checks, previews, and dry-runs for the %s'),
+    'eda_admin_role': _('Can create, operate, and delete Event-Driven Ansible activations for the %s'),
+    'eda_operator_role': _('Can view and operate Event-Driven Ansible activations for the %s'),
     'auditor_role': _('Can view all aspects of the %s'),
     'execute_role': {
         'organization': _('May run any executable resources in the organization'),
@@ -592,6 +596,8 @@ def get_role_definition(role):
         'cloud_user_role': 'Organization Cloud User',
         'policy_author_role': 'Organization Policy Author',
         'policy_operator_role': 'Organization Policy Operator',
+        'eda_admin_role': 'Organization EDA Admin',
+        'eda_operator_role': 'Organization EDA Operator',
     }.get(role.role_field)
     if obj._meta.model_name == 'organization' and preferred_managed_role:
         try:
@@ -827,6 +833,8 @@ ROLE_DEFINITION_TO_ROLE_FIELD = {
     'Organization CloudProviderState Admin': 'cloud_admin_role',
     'Organization Policy Author': 'policy_author_role',
     'Organization Policy Operator': 'policy_operator_role',
+    'Organization EDA Admin': 'eda_admin_role',
+    'Organization EDA Operator': 'eda_operator_role',
     'CloudProviderConnection Admin': 'admin_role',
     'CloudProviderState Admin': 'admin_role',
     'CatalogItem Admin': 'admin_role',

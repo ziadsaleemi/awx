@@ -36,10 +36,19 @@ export interface AwxNavigationCapabilities {
   canManageCloud: boolean;
   canViewPolicy: boolean;
   canManagePolicy: boolean;
+  canViewEda: boolean;
+  canOperateEda: boolean;
+  canManageEda: boolean;
 }
 
 function hasAnyPermission(permissions: Set<string>, model: string, actions: string[]) {
   return actions.some((action) => permissions.has(`awx.${action}_${model}`));
+}
+
+function hasAnyExactPermission(permissions: Set<string>, codenames: string[]) {
+  return codenames.some(
+    (codename) => permissions.has(`awx.${codename}`) || permissions.has(`shared.${codename}`)
+  );
 }
 
 export function getCustomUserTypeRoleDefinitionIds(activeAwxUser: AwxUser | null | undefined) {
@@ -202,6 +211,16 @@ export function buildAwxNavigationCapabilities(
     permissionSet.has('shared.change_policyascode');
   const canManagePolicy =
     permissionSet.has('awx.change_policyascode') || permissionSet.has('shared.change_policyascode');
+  const canViewEda = hasAnyExactPermission(permissionSet, [
+    'view_edaactivation',
+    'execute_edaactivation',
+    'change_edaactivation',
+  ]);
+  const canOperateEda = hasAnyExactPermission(permissionSet, [
+    'execute_edaactivation',
+    'change_edaactivation',
+  ]);
+  const canManageEda = hasAnyExactPermission(permissionSet, ['change_edaactivation']);
   const canViewActivityStream =
     canViewJobTemplates ||
     canViewTerraformTemplates ||
@@ -248,6 +267,9 @@ export function buildAwxNavigationCapabilities(
     canManageCloud,
     canViewPolicy,
     canManagePolicy,
+    canViewEda,
+    canOperateEda,
+    canManageEda,
   };
 }
 

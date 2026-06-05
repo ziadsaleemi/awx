@@ -57,6 +57,22 @@ describe('AWX navigation capabilities', () => {
     expect(authorCapabilities.canManagePolicy).to.equal(true);
   });
 
+  it('maps EDA activation permissions to EDA navigation capability', () => {
+    const viewerCapabilities = buildAwxNavigationCapabilities(['shared.view_edaactivation']);
+    const operatorCapabilities = buildAwxNavigationCapabilities(['shared.execute_edaactivation']);
+    const adminCapabilities = buildAwxNavigationCapabilities(['shared.change_edaactivation']);
+
+    expect(viewerCapabilities.canViewEda).to.equal(true);
+    expect(viewerCapabilities.canOperateEda).to.equal(false);
+    expect(viewerCapabilities.canManageEda).to.equal(false);
+    expect(operatorCapabilities.canViewEda).to.equal(true);
+    expect(operatorCapabilities.canOperateEda).to.equal(true);
+    expect(operatorCapabilities.canManageEda).to.equal(false);
+    expect(adminCapabilities.canViewEda).to.equal(true);
+    expect(adminCapabilities.canOperateEda).to.equal(true);
+    expect(adminCapabilities.canManageEda).to.equal(true);
+  });
+
   it('maps object permission codenames to resource navigation capabilities', () => {
     const capabilities = buildAwxNavigationCapabilities([
       'awx.add_jobtemplate',

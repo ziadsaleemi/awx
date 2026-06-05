@@ -94,6 +94,38 @@ describe('AwxRoleForm', () => {
       });
   });
 
+  it('sends EDA activation permissions when creating an organization custom role', () => {
+    cy.intercept('POST', awxAPI`/role_definitions/`, {
+      statusCode: 201,
+      body: {
+        id: 105,
+        name: 'EDA operator',
+        content_type: 'shared.organization',
+        permissions: ['shared.view_edaactivation', 'shared.execute_edaactivation'],
+      },
+    }).as('createEdaRole');
+
+    cy.mount(<CreateRole />);
+    cy.get('[data-cy="name"]').type('EDA operator');
+    cy.get('[data-cy="description"]').type('Can operate EDA activations');
+    cy.selectDropdownOptionByResourceName('content-type', 'Organization');
+    cy.get('#permissions').click();
+    cy.selectMultiSelectOption('#permissions-select', 'View EDA activations');
+    cy.selectMultiSelectOption('#permissions-select', 'Operate EDA activations');
+    cy.clickButton(/^Create role$/);
+
+    cy.wait('@createEdaRole')
+      .its('request.body')
+      .then((role: AwxRbacRole) => {
+        expect(role.name).to.equal('EDA operator');
+        expect(role.content_type).to.equal('shared.organization');
+        expect(role.permissions).to.deep.equal([
+          'shared.view_edaactivation',
+          'shared.execute_edaactivation',
+        ]);
+      });
+  });
+
   it('copies a built-in role into a custom role payload', () => {
     cy.intercept('GET', awxAPI`/role_definitions/1/`, mockAwxBuiltInRole);
     cy.intercept('POST', awxAPI`/role_definitions/`, {

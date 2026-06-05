@@ -297,6 +297,69 @@ def test_eda_activation_delete_proxies_to_controller(delete, admin_user, mocker)
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='')
+def test_eda_operator_can_read_activation_facade(get, organization, rando):
+    organization.eda_operator_role.members.add(rando)
+
+    response = get(reverse('api:eda_activation_list'), user=rando, expect=200)
+
+    assert response.data['source'] == 'not_configured'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_operator_can_operate_existing_activation(post, organization, rando, mocker):
+    organization.eda_operator_role.members.add(rando)
+    control = mocker.patch('awx.api.views.eda.EDAControllerClient.control_activation', return_value={'id': 42, 'status': 'running'})
+
+    response = post(reverse('api:eda_activation_action', kwargs={'pk': '42', 'action': 'restart'}), {}, user=rando, expect=200)
+
+    assert response.data['activation']['id'] == 42
+    control.assert_called_once_with('42', 'restart')
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_operator_can_start_existing_activation_by_id(post, organization, rando, mocker):
+    organization.eda_operator_role.members.add(rando)
+    start = mocker.patch(
+        'awx.api.views.eda.EDAControllerClient.ensure_activation_started',
+        return_value={'activation': {'id': 42, 'status': 'running'}, 'actions': ['started'], 'events': []},
+    )
+
+    response = post(reverse('api:eda_activation_start'), {'activation_id': '42'}, user=rando, expect=200)
+
+    assert response.data['activation']['id'] == 42
+    start.assert_called_once()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_operator_cannot_create_or_delete_activation(post, delete, organization, rando):
+    organization.eda_operator_role.members.add(rando)
+
+    post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=403)
+    delete(reverse('api:eda_activation_detail', kwargs={'pk': '42'}), user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_admin_can_create_and_delete_activation(post, delete, organization, rando, mocker):
+    organization.eda_admin_role.members.add(rando)
+    start = mocker.patch(
+        'awx.api.views.eda.EDAControllerClient.ensure_activation_started',
+        return_value={'activation': {'id': 42, 'status': 'running'}, 'actions': ['created', 'started'], 'events': []},
+    )
+    delete_activation = mocker.patch('awx.api.views.eda.EDAControllerClient.delete_activation', return_value={'id': '42', 'status': 'deleted'})
+
+    post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=200)
+    delete(reverse('api:eda_activation_detail', kwargs={'pk': '42'}), user=rando, expect=202)
+
+    start.assert_called_once()
+    delete_activation.assert_called_once_with('42')
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_activation_start_rejects_non_admin(post, rando):
     response = post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=403)

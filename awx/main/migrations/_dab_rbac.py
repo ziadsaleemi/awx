@@ -139,7 +139,15 @@ def get_permissions_for_role(role_field, children_map, apps):
                     # using ImplicitRoleField that haven't been added to DAB RBAC yet).
                     # Skip gracefully so we don't break permission lookups for the parent role.
                     continue
-                perm = Permission.objects.filter(content_type=ct, codename__startswith=perm_name).first()
+                if child_field.model._meta.model_name == 'organization' and child_field.name in ('admin_role', 'read_role'):
+                    org_codename = {
+                        'change_': 'change_organization',
+                        'delete_': 'delete_organization',
+                        'view_': 'view_organization',
+                    }.get(perm_name)
+                    perm = Permission.objects.filter(content_type=ct, codename=org_codename).first() if org_codename else None
+                else:
+                    perm = Permission.objects.filter(content_type=ct, codename__startswith=perm_name).first()
                 if perm is not None and perm not in perm_list:
                     perm_list.append(perm)
 
@@ -153,7 +161,7 @@ def get_permissions_for_role(role_field, children_map, apps):
 
     # more special cases for those same above special org-level roles
     if role_field.name == 'auditor_role':
-        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate', 'view_policyascode'):
+        for codename in ('view_notificationtemplate', 'view_cloudproviderconnection', 'view_cloudproviderstate', 'view_policyascode', 'view_edaactivation'):
             perm = Permission.objects.filter(codename=codename).first()
             if perm is not None and perm not in perm_list:
                 perm_list.append(perm)
@@ -445,6 +453,7 @@ def setup_managed_role_definitions(apps, schema_editor):
         'execute_workflowjobtemplate',
         'view_terraformjobtemplate',
         'execute_terraformjobtemplate',
+        'execute_edaactivation',
         'view_organization',
     }
     managed_role_definitions.append(
@@ -557,6 +566,37 @@ def setup_managed_role_definitions(apps, schema_editor):
             'Has permission to author Policy as Code modules and apply governed policy changes within a single organization',
             org_ct,
             [perm for perm in org_perms if perm.codename in org_policy_author_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_eda_operator_permissions = {
+        'view_organization',
+        'view_edaactivation',
+        'execute_edaactivation',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization EDA Operator',
+            'Has permission to view and operate Event-Driven Ansible activations within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_eda_operator_permissions],
+            RoleDefinition,
+        )
+    )
+
+    org_eda_admin_permissions = {
+        'view_organization',
+        'view_edaactivation',
+        'execute_edaactivation',
+        'change_edaactivation',
+    }
+    managed_role_definitions.append(
+        get_or_create_managed(
+            'Organization EDA Admin',
+            'Has permission to create, operate, and delete Event-Driven Ansible activations within a single organization',
+            org_ct,
+            [perm for perm in org_perms if perm.codename in org_eda_admin_permissions],
             RoleDefinition,
         )
     )

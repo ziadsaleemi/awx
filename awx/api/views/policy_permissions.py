@@ -1,8 +1,12 @@
 from django.db.models import Q
 from rest_framework import permissions
 
+from awx.api.views.eda_permissions import (
+    user_can_admin_eda_activations,
+    user_can_operate_eda_activations,
+    user_can_view_eda_activations,
+)
 from awx.main import models
-
 
 POLICY_VIEW_CODENAMES = ('view_policyascode', 'change_policyascode')
 POLICY_OPERATE_CODENAMES = ('view_policyascode', 'change_policyascode')
@@ -38,9 +42,7 @@ def user_can_operate_policy_as_code(user):
         return False
     if user.is_superuser:
         return True
-    return _has_dab_policy_permission(user, POLICY_OPERATE_CODENAMES) or _has_org_role(
-        user, ('admin_role', 'policy_author_role', 'policy_operator_role')
-    )
+    return _has_dab_policy_permission(user, POLICY_OPERATE_CODENAMES) or _has_org_role(user, ('admin_role', 'policy_author_role', 'policy_operator_role'))
 
 
 def user_can_author_policy_as_code(user):
@@ -85,20 +87,35 @@ class ExternalAutomationCheckPermission(permissions.BasePermission):
 
         data = request.data if isinstance(request.data, dict) else {}
         include_eda = bool(data.get('include_eda', True))
-        uses_eda_write = any(
+        uses_eda_fields = any(
             bool(data.get(key))
             for key in (
                 'start_eda_activation',
                 'eda_activation_id',
                 'eda_event_source',
+                'eda_activation_extra_data',
                 'eda_include_events',
                 'cleanup_eda_activation',
             )
         )
-        if include_eda or uses_eda_write:
-            return False
+        eda_smoke_requested = include_eda or uses_eda_fields
+        if eda_smoke_requested:
+            starts_activation = bool(data.get('start_eda_activation'))
+            activation_id = str(data.get('eda_activation_id') or '').strip()
+            cleanup_activation = bool(data.get('cleanup_eda_activation'))
+            if cleanup_activation or (starts_activation and not activation_id):
+                eda_allowed = user_can_admin_eda_activations(user)
+            elif starts_activation or activation_id:
+                eda_allowed = user_can_operate_eda_activations(user)
+            else:
+                eda_allowed = user_can_view_eda_activations(user)
+            if not eda_allowed:
+                return False
 
         include_opa = bool(data.get('include_opa', True))
         include_gatekeeper = bool(data.get('include_gatekeeper', False))
         policy_smoke_requested = include_opa or include_gatekeeper or bool(data.get('sync_opa_policy')) or bool(data.get('opa_deny_smoke'))
-        return policy_smoke_requested and user_can_operate_policy_as_code(user)
+        if policy_smoke_requested and not user_can_operate_policy_as_code(user):
+            return False
+
+        return eda_smoke_requested or policy_smoke_requested

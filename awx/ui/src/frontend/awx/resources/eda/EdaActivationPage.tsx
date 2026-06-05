@@ -33,6 +33,7 @@ import {
   EdaActivationActionResponse,
   EdaActivationEvent,
 } from '../../interfaces/EdaActivation';
+import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { AwxRoute } from '../../main/AwxRoutes';
 
 export function EdaActivationPage() {
@@ -44,6 +45,9 @@ export function EdaActivationPage() {
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest<unknown, EdaActivationActionResponse>();
   const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canOperateEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canOperateEda);
+  const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
   const {
     data: activation,
     error,
@@ -141,28 +145,28 @@ export function EdaActivationPage() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Button
               variant="secondary"
-              isDisabled={!activeAwxUser?.is_superuser}
+              isDisabled={!canOperateEda}
               onClick={() => void runAction('restart')}
             >
               {t('Restart')}
             </Button>
             <Button
               variant="secondary"
-              isDisabled={!activeAwxUser?.is_superuser}
+              isDisabled={!canOperateEda}
               onClick={() => void runAction('enable')}
             >
               {t('Enable')}
             </Button>
             <Button
               variant="secondary"
-              isDisabled={!activeAwxUser?.is_superuser}
+              isDisabled={!canOperateEda}
               onClick={() => void runAction('disable')}
             >
               {t('Disable')}
             </Button>
             <Button
               variant="danger"
-              isDisabled={!activeAwxUser?.is_superuser}
+              isDisabled={!canManageEda}
               onClick={() => void deleteActivation()}
             >
               {t('Delete')}

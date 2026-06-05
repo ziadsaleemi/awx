@@ -575,6 +575,7 @@ export function useAwxNavigation() {
       ...(capabilities.canViewPolicy
         ? [filterPolicyRoutesByPermissions(awxPolicyRoutes, capabilities.canManagePolicy)]
         : []),
+      ...(capabilities.canViewEda ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }] : []),
       ...permissionInfrastructureItems,
       ...permissionAdministrationItems,
       ...permissionAccessItems,

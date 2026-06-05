@@ -38,6 +38,7 @@ import {
   EdaActivationActionResponse,
   EdaStatus,
 } from '../../interfaces/EdaActivation';
+import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { AwxRoute } from '../../main/AwxRoutes';
 
 export function EdaActivations() {
@@ -46,6 +47,9 @@ export function EdaActivations() {
   const pageNavigate = usePageNavigate();
   const postRequest = usePostRequest<unknown, EdaActivationActionResponse>();
   const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canOperateEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canOperateEda);
+  const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const tableColumns = useEdaActivationColumns();
   const {
@@ -115,13 +119,13 @@ export function EdaActivations() {
         isPinned: true,
         icon: PlusCircleIcon,
         label: t('Create/start activation'),
-        isDisabled: !activeAwxUser?.is_superuser
-          ? t('Only system administrators can create or start EDA activations.')
+        isDisabled: !canOperateEda
+          ? t('You need EDA operator or administrator permissions to start activations.')
           : undefined,
         onClick: () => setShowCreateModal(true),
       },
     ],
-    [activeAwxUser?.is_superuser, t]
+    [canOperateEda, t]
   );
 
   const rowActions = useMemo<IPageAction<EdaActivation>[]>(
@@ -139,8 +143,8 @@ export function EdaActivations() {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('Restart'),
-        isDisabled: !activeAwxUser?.is_superuser
-          ? t('Only system administrators can restart EDA activations.')
+        isDisabled: !canOperateEda
+          ? t('You need EDA operator or administrator permissions to restart activations.')
           : undefined,
         onClick: (activation) => void runAction(activation, 'restart'),
       },
@@ -148,8 +152,8 @@ export function EdaActivations() {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('Enable'),
-        isDisabled: !activeAwxUser?.is_superuser
-          ? t('Only system administrators can enable EDA activations.')
+        isDisabled: !canOperateEda
+          ? t('You need EDA operator or administrator permissions to enable activations.')
           : undefined,
         onClick: (activation) => void runAction(activation, 'enable'),
       },
@@ -157,8 +161,8 @@ export function EdaActivations() {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('Disable'),
-        isDisabled: !activeAwxUser?.is_superuser
-          ? t('Only system administrators can disable EDA activations.')
+        isDisabled: !canOperateEda
+          ? t('You need EDA operator or administrator permissions to disable activations.')
           : undefined,
         onClick: (activation) => void runAction(activation, 'disable'),
       },
@@ -167,13 +171,13 @@ export function EdaActivations() {
         selection: PageActionSelection.Single,
         label: t('Delete'),
         isDanger: true,
-        isDisabled: !activeAwxUser?.is_superuser
-          ? t('Only system administrators can delete EDA activations.')
+        isDisabled: !canManageEda
+          ? t('You need EDA administrator permissions to delete activations.')
           : undefined,
         onClick: (activation) => void deleteActivation(activation),
       },
     ],
-    [activeAwxUser?.is_superuser, deleteActivation, pageNavigate, runAction, t]
+    [canManageEda, canOperateEda, deleteActivation, pageNavigate, runAction, t]
   );
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
@@ -204,17 +208,14 @@ export function EdaActivations() {
         errorStateTitle={t('Error loading EDA activations')}
         emptyStateTitle={t('No EDA activations found')}
         emptyStateDescription={t('Create an activation or configure the EDA Controller settings.')}
-        emptyStateButtonIcon={activeAwxUser?.is_superuser ? <PlusCircleIcon /> : undefined}
-        emptyStateButtonText={
-          activeAwxUser?.is_superuser ? t('Create/start activation') : undefined
-        }
-        emptyStateButtonClick={
-          activeAwxUser?.is_superuser ? () => setShowCreateModal(true) : undefined
-        }
+        emptyStateButtonIcon={canOperateEda ? <PlusCircleIcon /> : undefined}
+        emptyStateButtonText={canOperateEda ? t('Create/start activation') : undefined}
+        emptyStateButtonClick={canOperateEda ? () => setShowCreateModal(true) : undefined}
         {...view}
       />
       {showCreateModal && (
         <EdaActivationStartModal
+          canCreateActivation={canManageEda}
           onClose={() => setShowCreateModal(false)}
           onStarted={async () => {
             setShowCreateModal(false);
@@ -278,7 +279,11 @@ function useEdaActivationColumns(): ITableColumn<EdaActivation>[] {
   );
 }
 
-function EdaActivationStartModal(props: { onClose: () => void; onStarted: () => Promise<void> }) {
+function EdaActivationStartModal(props: {
+  canCreateActivation: boolean;
+  onClose: () => void;
+  onStarted: () => Promise<void>;
+}) {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest<Record<string, unknown>, EdaActivationActionResponse>();
@@ -341,7 +346,11 @@ function EdaActivationStartModal(props: { onClose: () => void; onStarted: () => 
           key="start"
           variant="primary"
           isLoading={isSubmitting}
-          isDisabled={isSubmitting || (!rulebookName.trim() && !activationId.trim())}
+          isDisabled={
+            isSubmitting ||
+            (!props.canCreateActivation && !activationId.trim()) ||
+            (props.canCreateActivation && !rulebookName.trim() && !activationId.trim())
+          }
           onClick={() => void submit()}
         >
           {t('Start')}
@@ -356,6 +365,7 @@ function EdaActivationStartModal(props: { onClose: () => void; onStarted: () => 
           <TextInput
             id="eda-rulebook-name"
             value={rulebookName}
+            isDisabled={!props.canCreateActivation}
             onChange={(_, value) => setRulebookName(value)}
           />
         </FormGroup>

@@ -1,0 +1,45 @@
+{
+  "id": 33,
+  "type": "user",
+  "url": "/api/v2/users/33/",
+  "related": {
+    "teams": "/api/v2/users/33/teams/",
+    "organizations": "/api/v2/users/33/organizations/",
+    "admin_of_organizations": "/api/v2/users/33/admin_of_organizations/",
+    "projects": "/api/v2/users/33/projects/",
+    "credentials": "/api/v2/users/33/credentials/",
+    "roles": "/api/v2/users/33/roles/",
+    "activity_stream": "/api/v2/users/33/activity_stream/",
+    "access_list": "/api/v2/users/33/access_list/",
+    "tokens": "/api/v2/users/33/tokens/",
+    "authorized_tokens": "/api/v2/users/33/authorized_tokens/",
+    "personal_tokens": "/api/v2/users/33/personal_tokens/"
+  },
+  "summary_fields": {
+    "user_capabilities": { "edit": false, "delete": false },
+    "custom_user_type": {
+      "id": 76,
+      "name": "EDA Operator",
+      "description": "EDA Operator persona for activation access testing.",
+      "role_definitions": [
+        {
+          "id": 54,
+          "name": "Organization EDA Operator",
+          "description": "Has permission to view and operate Event-Driven Ansible activations within a single organization"
+        }
+      ]
+    }
+  },
+  "created": "2026-06-04T12:00:00Z",
+  "modified": "2026-06-04T12:00:00Z",
+  "username": "eda-operator",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_superuser": false,
+  "is_system_auditor": false,
+  "ldap_dn": "",
+  "last_login": "2026-06-04T12:00:00Z",
+  "external_account": null,
+  "auth": []
+}

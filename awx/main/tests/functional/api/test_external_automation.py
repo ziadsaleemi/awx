@@ -50,6 +50,52 @@ def test_policy_operator_cannot_run_eda_external_automation_smoke(post, organiza
     post(reverse('api:external_automation_check'), {'include_eda': True, 'include_opa': False}, user=rando, expect=403)
 
 
+def test_eda_operator_can_run_eda_read_external_automation_smoke(post, organization, rando, mocker):
+    organization.eda_operator_role.members.add(rando)
+    check = mocker.patch(
+        'awx.api.views.external_automation.run_external_automation_checks',
+        return_value={'ok': True, 'checks': {'eda': {'ok': True, 'status': 'available'}}},
+    )
+
+    response = post(reverse('api:external_automation_check'), {'include_eda': True, 'include_opa': False}, user=rando, expect=200)
+
+    assert response.data['ok'] is True
+    check.assert_called_once()
+
+
+def test_eda_operator_cannot_run_create_or_cleanup_external_automation_smoke(post, organization, rando):
+    organization.eda_operator_role.members.add(rando)
+    post(
+        reverse('api:external_automation_check'),
+        {'include_eda': True, 'include_opa': False, 'start_eda_activation': True, 'eda_rulebook_name': 'ops.yml'},
+        user=rando,
+        expect=403,
+    )
+    post(
+        reverse('api:external_automation_check'),
+        {'include_eda': True, 'include_opa': False, 'cleanup_eda_activation': True, 'eda_activation_id': '42'},
+        user=rando,
+        expect=403,
+    )
+
+
+def test_eda_admin_can_run_create_external_automation_smoke(post, organization, rando, mocker):
+    organization.eda_admin_role.members.add(rando)
+    check = mocker.patch(
+        'awx.api.views.external_automation.run_external_automation_checks',
+        return_value={'ok': True, 'checks': {'eda': {'ok': True, 'status': 'available'}}},
+    )
+
+    post(
+        reverse('api:external_automation_check'),
+        {'include_eda': True, 'include_opa': False, 'start_eda_activation': True, 'eda_rulebook_name': 'ops.yml'},
+        user=rando,
+        expect=200,
+    )
+
+    check.assert_called_once()
+
+
 def test_external_automation_check_runs_shared_smoke(post, admin_user, mocker):
     check = mocker.patch(
         'awx.api.views.external_automation.run_external_automation_checks',

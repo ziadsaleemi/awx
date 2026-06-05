@@ -8,7 +8,12 @@ from rest_framework import status as http_status
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
-from awx.api.permissions import IsSystemAdmin, IsSystemAdminOrAuditor
+from awx.api.views.eda_permissions import (
+    EDAActivationAdminPermission,
+    EDAActivationOperatePermission,
+    EDAActivationStartPermission,
+    EDAActivationViewPermission,
+)
 from awx.api.versioning import reverse
 from awx.main import models
 from awx.main.access import get_user_queryset
@@ -46,6 +51,7 @@ def _page_link(request, page):
 class EDAStatusView(APIView):
     name = _('EDA Status')
     resource_purpose = 'event-driven ansible controller status'
+    permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, format=None):
         client = EDAControllerClient()
@@ -75,6 +81,7 @@ class EDAStatusView(APIView):
 class EDAActivationListView(APIView):
     name = _('EDA Activations')
     resource_purpose = 'event-driven ansible activation summary'
+    permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, format=None):
         page = _parse_positive_int(request.query_params.get('page'), 1)
@@ -141,7 +148,7 @@ def _eda_error_response(exc):
 class EDAActivationDetailView(APIView):
     name = _('EDA Activation Detail')
     resource_purpose = 'event-driven ansible activation detail'
-    permission_classes = [IsSystemAdminOrAuditor]
+    permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, pk, format=None):
         client = EDAControllerClient()
@@ -152,7 +159,7 @@ class EDAActivationDetailView(APIView):
         return Response(activation)
 
     def delete(self, request, pk, format=None):
-        if not request.user.is_superuser:
+        if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to delete EDA activations.')}, status=http_status.HTTP_403_FORBIDDEN)
         client = EDAControllerClient()
         try:
@@ -165,7 +172,7 @@ class EDAActivationDetailView(APIView):
 class EDAActivationEventsView(APIView):
     name = _('EDA Activation Events')
     resource_purpose = 'event-driven ansible activation events'
-    permission_classes = [IsSystemAdminOrAuditor]
+    permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, pk, format=None):
         limit = _parse_positive_int(request.query_params.get('page_size') or request.query_params.get('limit'), 20, maximum=200)
@@ -180,7 +187,7 @@ class EDAActivationEventsView(APIView):
 class EDAActivationActionView(APIView):
     name = _('EDA Activation Action')
     resource_purpose = 'event-driven ansible activation action'
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [EDAActivationOperatePermission]
 
     def post(self, request, pk, action, format=None):
         client = EDAControllerClient()
@@ -194,7 +201,7 @@ class EDAActivationActionView(APIView):
 class EDAActivationStartView(APIView):
     name = _('EDA Activation Start')
     resource_purpose = 'event-driven ansible activation create/start'
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [EDAActivationStartPermission]
 
     def post(self, request, format=None):
         data = request.data if isinstance(request.data, dict) else {}
