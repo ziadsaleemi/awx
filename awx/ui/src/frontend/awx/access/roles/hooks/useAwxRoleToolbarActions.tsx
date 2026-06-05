@@ -26,7 +26,7 @@ export function useAwxRoleToolbarActions(onComplete: (roles: AwxRbacRole[]) => v
         selection: PageActionSelection.None,
         isPinned: true,
         icon: PlusCircleIcon,
-        label: t('Create role'),
+        label: t('Create user type'),
         isDisabled: activeAwxUser?.is_superuser
           ? undefined
           : t(

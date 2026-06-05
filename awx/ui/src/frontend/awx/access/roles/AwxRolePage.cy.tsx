@@ -44,7 +44,7 @@ describe('AwxRoles', () => {
     cy.clearAllFilters();
   });
 
-  it('should disable edit and delete row action for built-in roles', () => {
+  it('should disable edit and delete row action for built-in roles while allowing clone', () => {
     cy.mount(<AwxRoles />);
     cy.contains('td', 'Credential Admin')
       .parent()
@@ -52,6 +52,10 @@ describe('AwxRoles', () => {
         cy.get('#edit-role').should('have.attr', 'aria-disabled', 'true');
         cy.getByDataCy('actions-dropdown').click();
       });
+    cy.getByDataCy('clone-role')
+      .contains(/^Clone role$/)
+      .should('be.visible');
+    cy.getByDataCy('clone-role').should('not.have.attr', 'aria-disabled', 'true');
     cy.contains('#delete-role', /^Delete role$/).should('have.attr', 'aria-disabled', 'true');
   });
 
@@ -74,17 +78,21 @@ describe('AwxRoles', () => {
         cy.get('#edit-role').should('have.attr', 'aria-disabled', 'true');
         cy.getByDataCy('actions-dropdown').click();
       });
+    cy.getByDataCy('clone-role')
+      .contains(/^Clone role$/)
+      .should('be.visible');
+    cy.getByDataCy('clone-role').should('have.class', 'pf-m-aria-disabled');
     cy.contains('#delete-role', /^Delete role$/).should('have.attr', 'aria-disabled', 'true');
   });
 
-  it('should enable Create Role button if the user has permission to create roles', () => {
+  it('should enable Create user type button if the user has permission to create roles', () => {
     cy.mount(<AwxRoles />);
-    cy.contains('a', /^Create role$/).should('have.attr', 'aria-disabled', 'false');
+    cy.contains('a', /^Create user type$/).should('have.attr', 'aria-disabled', 'false');
   });
 
-  it('should disable Create Role button if the user does not have permission to create roles', () => {
+  it('should disable Create user type button if the user does not have permission to create roles', () => {
     cy.mount(<AwxRoles />, undefined, 'awxNormalUser.json');
-    cy.contains('a', /^Create role$/).should('have.attr', 'aria-disabled', 'true');
+    cy.contains('a', /^Create user type$/).should('have.attr', 'aria-disabled', 'true');
   });
 
   it('should display error if roles are not successfully loaded', () => {

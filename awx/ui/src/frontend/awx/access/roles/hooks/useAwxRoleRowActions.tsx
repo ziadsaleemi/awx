@@ -1,4 +1,4 @@
-import { PencilAltIcon, PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
+import { CopyIcon, PencilAltIcon, PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -74,6 +74,25 @@ export function useAwxRoleRowActions(onComplete: (roles: AwxRbacRole[]) => void)
                 ),
         href: (role) => {
           return getPageUrl(AwxRoute.EditRole, {
+            params: { id: role.id ?? '' },
+          });
+        },
+      },
+      {
+        type: PageActionType.Link,
+        selection: PageActionSelection.Single,
+        icon: CopyIcon,
+        label: t('Clone role'),
+        isDisabled: (role) =>
+          !role.content_type
+            ? t('System-wide roles cannot be cloned.')
+            : activeAwxUser?.is_superuser
+              ? undefined
+              : t(
+                  'You do not have permission to clone this role. Please contact your system administrator if there is an issue with your access.'
+                ),
+        href: (role) => {
+          return getPageUrl(AwxRoute.CloneRole, {
             params: { id: role.id ?? '' },
           });
         },

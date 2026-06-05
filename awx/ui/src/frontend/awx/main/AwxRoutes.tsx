@@ -253,6 +253,7 @@ export enum AwxRoute {
   Roles = 'awx-roles',
   CreateRole = 'awx-create-role',
   EditRole = 'awx-edit-role',
+  CloneRole = 'awx-clone-role',
   RolePage = 'awx-role-page',
   RoleDetails = 'awx-role-details',
 

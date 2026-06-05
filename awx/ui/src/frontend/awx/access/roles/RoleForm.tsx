@@ -1,4 +1,4 @@
-import { useWatch } from 'react-hook-form';
+import { DefaultValues, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -22,6 +22,20 @@ import { AwxRbacRole } from '../../interfaces/AwxRbacRole';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { AwxContentTypes, useAwxRoleMetadata } from './hooks/useAwxRoleMetadata';
 
+type RoleDefinitionFormData = Pick<
+  AwxRbacRole,
+  'name' | 'description' | 'content_type' | 'permissions'
+>;
+
+function roleToFormData(role: AwxRbacRole): RoleDefinitionFormData {
+  return {
+    name: role.name,
+    description: role.description,
+    content_type: role.content_type,
+    permissions: role.permissions,
+  };
+}
+
 export function CreateRole(props: { breadcrumbLabelForPreviousPage?: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -29,10 +43,10 @@ export function CreateRole(props: { breadcrumbLabelForPreviousPage?: string }) {
 
   useInvalidateCacheOnUnmount();
 
-  const postRequest = usePostRequest<Partial<AwxRbacRole>, AwxRbacRole>();
+  const postRequest = usePostRequest<RoleDefinitionFormData, AwxRbacRole>();
 
-  const onSubmit: PageFormSubmitHandler<AwxRbacRole> = async (Role) => {
-    const newRole = await postRequest(awxAPI`/role_definitions/`, Role);
+  const onSubmit: PageFormSubmitHandler<RoleDefinitionFormData> = async (role) => {
+    const newRole = await postRequest(awxAPI`/role_definitions/`, role);
     pageNavigate(AwxRoute.RoleDetails, { params: { id: newRole.id } });
   };
   const onCancel = () => navigate(-1);
@@ -41,17 +55,17 @@ export function CreateRole(props: { breadcrumbLabelForPreviousPage?: string }) {
   return (
     <PageLayout>
       <PageHeader
-        title={t('Create role')}
+        title={t('Create user type')}
         breadcrumbs={[
           {
             label: props.breadcrumbLabelForPreviousPage || t('Roles'),
             to: getPageUrl(AwxRoute.Roles),
           },
-          { label: t('Create role') },
+          { label: t('Create user type') },
         ]}
       />
-      <AwxPageForm<AwxRbacRole>
-        submitText={t('Create role')}
+      <AwxPageForm<RoleDefinitionFormData>
+        submitText={t('Create user type')}
         onSubmit={onSubmit}
         cancelText={t('Cancel')}
         onCancel={onCancel}
@@ -72,9 +86,9 @@ export function EditRole(props: { breadcrumbLabelForPreviousPage?: string }) {
 
   useInvalidateCacheOnUnmount();
 
-  const patchRequest = usePatchRequest<Partial<AwxRbacRole>, AwxRbacRole>();
+  const patchRequest = usePatchRequest<RoleDefinitionFormData, AwxRbacRole>();
 
-  const onSubmit: PageFormSubmitHandler<AwxRbacRole> = async (data) => {
+  const onSubmit: PageFormSubmitHandler<RoleDefinitionFormData> = async (data) => {
     await patchRequest(awxAPI`/role_definitions/${id.toString()}/`, data);
     pageNavigate(AwxRoute.RoleDetails, { params: { id } });
   };
@@ -106,12 +120,12 @@ export function EditRole(props: { breadcrumbLabelForPreviousPage?: string }) {
               { label: role?.name ? t('Edit {{roleName}}', { roleName: role?.name }) : t('Roles') },
             ]}
           />
-          <AwxPageForm<AwxRbacRole>
+          <AwxPageForm<RoleDefinitionFormData>
             submitText={t('Save role')}
             onSubmit={onSubmit}
             cancelText={t('Cancel')}
             onCancel={onCancel}
-            defaultValue={role}
+            defaultValue={roleToFormData(role)}
           >
             <AwxRoleInputs disableContentType />
           </AwxPageForm>
@@ -121,15 +135,80 @@ export function EditRole(props: { breadcrumbLabelForPreviousPage?: string }) {
   }
 }
 
+export function CloneRole(props: { breadcrumbLabelForPreviousPage?: string }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const pageNavigate = usePageNavigate();
+  const params = useParams<{ id?: string }>();
+  const id = Number(params.id);
+  const { data: role } = useGet<AwxRbacRole>(awxAPI`/role_definitions/${id.toString()}/`);
+
+  useInvalidateCacheOnUnmount();
+
+  const postRequest = usePostRequest<RoleDefinitionFormData, AwxRbacRole>();
+
+  const onSubmit: PageFormSubmitHandler<RoleDefinitionFormData> = async (data) => {
+    const newRole = await postRequest(awxAPI`/role_definitions/`, data);
+    pageNavigate(AwxRoute.RoleDetails, { params: { id: newRole.id } });
+  };
+  const onCancel = () => navigate(-1);
+  const getPageUrl = useGetPageUrl();
+
+  if (!Number.isInteger(id) || !role) {
+    return (
+      <PageLayout>
+        <PageHeader
+          breadcrumbs={[
+            {
+              label: props.breadcrumbLabelForPreviousPage || t('Roles'),
+              to: getPageUrl(AwxRoute.Roles),
+            },
+            { label: t('Clone role') },
+          ]}
+        />
+      </PageLayout>
+    );
+  }
+
+  const defaultValue: DefaultValues<RoleDefinitionFormData> = {
+    ...roleToFormData(role),
+    name: t('Copy of {{roleName}}', { roleName: role.name }),
+  };
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={t('Clone {{roleName}}', { roleName: role.name })}
+        breadcrumbs={[
+          {
+            label: props.breadcrumbLabelForPreviousPage || t('Roles'),
+            to: getPageUrl(AwxRoute.Roles),
+          },
+          { label: t('Clone {{roleName}}', { roleName: role.name }) },
+        ]}
+      />
+      <AwxPageForm<RoleDefinitionFormData>
+        submitText={t('Create user type')}
+        onSubmit={onSubmit}
+        cancelText={t('Cancel')}
+        onCancel={onCancel}
+        defaultValue={defaultValue}
+      >
+        <AwxRoleInputs disableContentType />
+      </AwxPageForm>
+    </PageLayout>
+  );
+}
+
 function AwxRoleInputs(props: { disableContentType?: boolean }) {
   const { t } = useTranslation();
   const { disableContentType } = props;
   const awxRoleMetadata = useAwxRoleMetadata();
-  const content_type = useWatch<AwxRbacRole>({ name: 'content_type' });
+  const content_type = useWatch<RoleDefinitionFormData>({ name: 'content_type' });
   return (
     <>
-      <PageFormTextInput<AwxRbacRole> name="name" label={t('Name')} isRequired />
-      <PageFormTextInput<AwxRbacRole> name="description" label={t('Description')} />
+      <PageFormTextInput<RoleDefinitionFormData> name="name" label={t('Name')} isRequired />
+      <PageFormTextInput<RoleDefinitionFormData> name="description" label={t('Description')} />
       <PageFormSelect
         name={'content_type'}
         label={t('Content type')}

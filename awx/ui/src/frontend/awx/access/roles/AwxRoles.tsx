@@ -24,15 +24,15 @@ export function AwxRoles() {
         title={t('Roles')}
         titleHelpTitle={t('Roles')}
         titleHelp={t(
-          'A role represents a set of actions that a team or user may perform on a resource or set of resources.'
+          'A role represents a set of actions that a team or user may perform on a resource or set of resources. Custom roles can be used as user types.'
         )}
         description={t(
-          'A role represents a set of actions that a team or user may perform on a resource or set of resources.'
+          'Create or clone role-based user types, then assign them to users or teams from their access tabs.'
         )}
       />
       <Alert
         variant="info"
-        title={t('Roles can be assigned to teams and users from the teams and users pages.')}
+        title={t('System administrators can create custom user types from role permissions.')}
         isInline
         className="border-bottom"
       />
