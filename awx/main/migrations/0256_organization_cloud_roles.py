@@ -3,19 +3,13 @@ import django.db.models.deletion
 from django.db import migrations
 
 from awx.main.migrations._dab_rbac import setup_managed_role_definitions
+from awx.main.migrations._implicit_roles import create_missing_implicit_roles
 
 
 def sync_cloud_persona_roles(apps, schema_editor):
     from ansible_base.rbac.management import sync_dab_permissions
 
-    Organization = apps.get_model('main', 'Organization')
-    for organization in Organization.objects.iterator():
-        organization.save()
-    for model_name in ('CloudProviderConnection', 'CloudProviderState'):
-        model = apps.get_model('main', model_name)
-        for obj in model.objects.iterator():
-            obj.save()
-
+    create_missing_implicit_roles(apps, 'Organization', 'CloudProviderConnection', 'CloudProviderState')
     sync_dab_permissions(apps=apps)
     setup_managed_role_definitions(apps, schema_editor)
 
