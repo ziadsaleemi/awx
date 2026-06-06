@@ -133,6 +133,26 @@ const DynamicFieldRow = styled.div`
   margin-bottom: 8px;
 `;
 
+const ResponsiveFormGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+
+  & > * {
+    min-width: 0;
+  }
+
+  @media (max-width: 768px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+`;
+
+const ResponsiveCompactGrid = styled(ResponsiveFormGrid)`
+  gap: 8px 16px;
+`;
+
 const SuggestionDropdown = styled.div`
   position: absolute;
   left: 0;
@@ -469,14 +489,7 @@ function CatalogItemFormInputs() {
       <PageTabs initialTabIndex={0}>
         <PageTab label={t('Details')}>
           <div style={{ marginTop: 16, display: 'grid', gap: 20 }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
+            <ResponsiveFormGrid data-cy="catalog-item-details-grid">
               <PageFormTextInput<CatalogItemFormValues>
                 name="name"
                 label={t('Name')}
@@ -490,27 +503,13 @@ function CatalogItemFormInputs() {
                 placeholder={t('Enter an optional description')}
               />
               <CatalogNameTemplateInput />
-            </div>
+            </ResponsiveFormGrid>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
+            <ResponsiveFormGrid data-cy="catalog-item-org-grid">
               <PageFormSelectOrganization<CatalogItemFormValues> name="organization" />
-            </div>
+            </ResponsiveFormGrid>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
+            <ResponsiveFormGrid data-cy="catalog-item-options-grid">
               <CatalogItemImageUpload />
               <PageFormCheckbox<CatalogItemFormValues>
                 name="override_workflow_limit"
@@ -537,16 +536,9 @@ function CatalogItemFormInputs() {
                 )}
                 placeholder={extraVarsSchemaPlaceholder}
               />
-            </div>
+            </ResponsiveFormGrid>
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
+            <ResponsiveFormGrid data-cy="catalog-item-workflow-grid">
               <GlobalWorkflowPicker
                 name="configure_workflow"
                 label={t('Configure workflow')}
@@ -561,17 +553,10 @@ function CatalogItemFormInputs() {
                   'Optional workflow to run after configure workflow (or after provision if no configure workflow is set) to validate the resource is healthy.'
                 )}
               />
-            </div>
+            </ResponsiveFormGrid>
 
             {/* ---- Lease / TTL settings ---- */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: 16,
-                alignItems: 'start',
-              }}
-            >
+            <ResponsiveFormGrid data-cy="catalog-item-lease-grid">
               <PageFormTextInput<CatalogItemFormValues>
                 name="default_lease_minutes"
                 label={t('Default lease (minutes)')}
@@ -590,7 +575,7 @@ function CatalogItemFormInputs() {
                   'When enabled, deployers must choose a lease duration before submitting. Deployments without a TTL will be rejected.'
                 )}
               />
-            </div>
+            </ResponsiveFormGrid>
           </div>
         </PageTab>
         <PageTab label={t('Cloud providers')}>
@@ -1276,7 +1261,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
             'Use {variable} syntax to dynamically resolve the target inventory and group from survey variable values.'
           )}
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+        <ResponsiveCompactGrid data-cy="catalog-provider-target-grid">
           {/* Target inventory template input */}
           <div>
             <label
@@ -1393,7 +1378,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
               })()}
             </div>
           </div>
-        </div>
+        </ResponsiveCompactGrid>
         {allTemplateVars.length > 0 && (
           <div style={{ marginTop: 10 }}>
             <p
@@ -1606,7 +1591,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
               })
             }
           />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+          <ResponsiveCompactGrid data-cy="catalog-provider-vm-size-grid">
             <div>
               <label
                 htmlFor={`${provider}_vms_cpu_var`}
@@ -1717,7 +1702,7 @@ function ProviderFormFieldsTab({ provider }: { provider: string }) {
                 }
               />
             </div>
-          </div>
+          </ResponsiveCompactGrid>
           <Switch
             id={`${provider}_vms_require_approval`}
             label={t('Require admin approval when limits are exceeded')}
