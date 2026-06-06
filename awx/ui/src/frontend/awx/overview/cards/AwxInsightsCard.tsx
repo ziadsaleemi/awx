@@ -541,7 +541,9 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
     <PageDashboardCard
       title={t('Automation Insights')}
       width="half"
-      height="md"
+      height="lg"
+      maxHeight="lg"
+      style={{ minWidth: 0 }}
       headerControls={
         aiEnabled && aiConfigured ? (
           <Button
@@ -560,7 +562,14 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
         ) : undefined
       }
     >
-      <CardBody style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+      <CardBody
+        style={{
+          minWidth: 0,
+          overflowX: 'hidden',
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
+        }}
+      >
         {isLoading ? (
           <Spinner size="lg" />
         ) : hasError ? (
@@ -660,6 +669,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
                     style={{
                       fontSize: 13,
                       whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
                       borderLeft: '3px solid var(--pf-v5-global--primary-color--100)',
                       paddingLeft: 10,
                       marginTop: 4,

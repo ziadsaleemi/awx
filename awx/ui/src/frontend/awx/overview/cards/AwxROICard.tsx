@@ -70,8 +70,8 @@ export function AwxROICard() {
   }, [data, hourlyRate, manualMultiplier]);
 
   return (
-    <PageDashboardCard title={t('Automation ROI')} width="half" height="md">
-      <CardBody>
+    <PageDashboardCard title={t('Automation ROI')} width="half" height="lg" style={{ minWidth: 0 }}>
+      <CardBody style={{ minWidth: 0 }}>
         {isLoading ? (
           <Spinner size="lg" />
         ) : (
