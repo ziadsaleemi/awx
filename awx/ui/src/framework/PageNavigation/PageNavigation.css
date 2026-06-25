@@ -15,6 +15,8 @@
 }
 
 .page-navigation__expandable-title {
+  max-width: 100%;
+  min-width: 0;
   text-align: left;
 }
 
@@ -25,11 +27,14 @@
 
 .page-navigation__subtitle {
   color: var(--pf-v5-global--Color--200);
-  font-size: var(--pf-v5-global--FontSize--sm);
-  line-height: 1.35;
+  font-size: var(--pf-v5-global--FontSize--xs);
+  line-height: 1.25;
   opacity: 0.75;
+  overflow: hidden;
   overflow-wrap: anywhere;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Collapsed sidebar styles */
