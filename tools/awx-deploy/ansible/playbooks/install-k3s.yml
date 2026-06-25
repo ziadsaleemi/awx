@@ -1,0 +1,9 @@
+---
+- name: Install k3s only
+  hosts: awx_k3s_servers
+  gather_facts: true
+  become: true
+  vars:
+    awx_validate_app_secrets: false
+  roles:
+    - awx_k3s

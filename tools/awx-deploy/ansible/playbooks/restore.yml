@@ -2,5 +2,6 @@
 - name: Restore AWX
   hosts: awx_server_nodes
   gather_facts: true
+  become: true
   roles:
     - awx_restore

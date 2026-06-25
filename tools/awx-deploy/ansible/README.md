@@ -47,6 +47,14 @@ export AWX_POSTGRES_PASSWORD='change-me'
 ansible-playbook -i localhost, playbooks/deploy-k8s.yml
 ```
 
+To expose AWX through a node port instead of an ingress, set:
+
+```bash
+ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
+  -e awx_k8s_service_type=NodePort \
+  -e awx_k8s_node_port=30813
+```
+
 ## Quick Start: k3s
 
 ```bash
@@ -54,6 +62,12 @@ cd tools/awx-deploy/ansible
 export AWX_ADMIN_PASSWORD='change-me'
 export AWX_POSTGRES_PASSWORD='change-me'
 ansible-playbook -i inventories/example.ini playbooks/deploy-k3s.yml
+```
+
+To install k3s without deploying AWX, use:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/install-k3s.yml
 ```
 
 ## Backup / Restore

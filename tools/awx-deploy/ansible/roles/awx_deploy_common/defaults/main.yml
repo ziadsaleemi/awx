@@ -31,7 +31,8 @@ awx_remote_host_headers:
   - REMOTE_ADDR
   - REMOTE_HOST
 
-awx_postgres_host: "{{ groups['awx_database'] | first | default('127.0.0.1') }}"
+awx_postgres_inventory_host: "{{ groups.get('awx_database', ['127.0.0.1']) | first }}"
+awx_postgres_host: "{{ hostvars.get(awx_postgres_inventory_host, {}).get('ansible_host', awx_postgres_inventory_host) }}"
 awx_postgres_port: 5432
 awx_postgres_database: awx
 awx_postgres_user: awx
@@ -39,7 +40,8 @@ awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
 awx_postgres_image: quay.io/sclorg/postgresql-15-c9s
 awx_postgres_data_dir: "{{ awx_server_data_dir }}/postgres"
 
-awx_redis_host: "{{ groups['awx_redis'] | first | default('127.0.0.1') }}"
+awx_redis_inventory_host: "{{ groups.get('awx_redis', ['127.0.0.1']) | first }}"
+awx_redis_host: "{{ hostvars.get(awx_redis_inventory_host, {}).get('ansible_host', awx_redis_inventory_host) }}"
 awx_redis_port: 6379
 awx_redis_image: docker.io/library/redis:7.4
 awx_redis_data_dir: "{{ awx_server_data_dir }}/redis"
@@ -73,15 +75,20 @@ awx_k8s_postgres_storage_size: 20Gi
 awx_k8s_projects_storage_size: 10Gi
 awx_k8s_web_replicas: 2
 awx_k8s_task_replicas: 2
+awx_k8s_service_type: ClusterIP
+awx_k8s_node_port: 30813
 awx_k8s_ingress_enabled: false
 awx_k8s_ingress_host: ""
+awx_k8s_kubectl_binary: kubectl
 awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
 awx_k8s_work_dir: /tmp/awx-k8s
 
 awx_k3s_install_url: https://get.k3s.io
 awx_k3s_channel: stable
+awx_k3s_write_kubeconfig_mode: "0644"
 awx_k3s_disable:
   - traefik
+  - network-policy
 
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
 awx_restore_confirm: false

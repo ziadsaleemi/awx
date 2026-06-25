@@ -2,6 +2,7 @@
 - name: Prepare AWX server nodes
   hosts: awx_server_nodes
   gather_facts: true
+  become: true
   roles:
     - awx_deploy_common
     - awx_container_runtime
@@ -9,35 +10,41 @@
 - name: Deploy PostgreSQL
   hosts: awx_database
   gather_facts: true
+  become: true
   roles:
     - awx_postgres
 
 - name: Deploy Redis
   hosts: awx_redis
   gather_facts: true
+  become: true
   roles:
     - awx_redis
 
 - name: Deploy AWX receptor nodes
   hosts: awx_receptor
   gather_facts: true
+  become: true
   roles:
     - awx_receptor
 
 - name: Deploy AWX task nodes
   hosts: awx_task
   gather_facts: true
+  become: true
   roles:
     - awx_task
 
 - name: Deploy AWX web nodes
   hosts: awx_web
   gather_facts: true
+  become: true
   roles:
     - awx_web
 
 - name: Deploy AWX load balancer
   hosts: awx_lb
   gather_facts: true
+  become: true
   roles:
     - awx_lb

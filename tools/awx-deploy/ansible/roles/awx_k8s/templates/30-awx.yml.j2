@@ -15,6 +15,10 @@ spec:
         app.kubernetes.io/name: {{ awx_k8s_name }}-web
     spec:
       serviceAccountName: {{ awx_k8s_name }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
       containers:
         - name: awx-web
           image: {{ awx_image }}:{{ awx_image_tag }}
@@ -115,6 +119,10 @@ spec:
         app.kubernetes.io/name: {{ awx_k8s_name }}-task
     spec:
       serviceAccountName: {{ awx_k8s_name }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
       containers:
         - name: awx-task
           image: {{ awx_image }}:{{ awx_image_tag }}
@@ -191,11 +199,14 @@ metadata:
   name: {{ awx_k8s_name }}-web
   namespace: {{ awx_k8s_namespace }}
 spec:
-  type: ClusterIP
+  type: {{ awx_k8s_service_type }}
   ports:
     - name: http
       port: 80
       targetPort: 8013
+{% if awx_k8s_service_type == 'NodePort' and (awx_k8s_node_port | int) > 0 %}
+      nodePort: {{ awx_k8s_node_port }}
+{% endif %}
   selector:
     app.kubernetes.io/name: {{ awx_k8s_name }}-web
 {% if awx_k8s_ingress_enabled | bool %}

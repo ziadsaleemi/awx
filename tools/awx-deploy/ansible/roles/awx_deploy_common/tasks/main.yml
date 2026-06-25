@@ -17,7 +17,9 @@
       - awx_admin_password | length > 0
       - awx_postgres_password | length > 0
     fail_msg: "Set AWX_ADMIN_PASSWORD and AWX_POSTGRES_PASSWORD through env, vault, or extra vars."
-  when: awx_deploy_method in ['server', 'k3s', 'k8s']
+  when:
+    - awx_validate_app_secrets | default(true) | bool
+    - awx_deploy_method in ['server', 'k3s', 'k8s']
   no_log: true
 
 - name: Create AWX server directories

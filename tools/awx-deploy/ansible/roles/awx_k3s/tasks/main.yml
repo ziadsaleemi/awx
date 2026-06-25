@@ -5,29 +5,82 @@
       - curl
     state: present
 
+- name: Install Oracle UEK netfilter modules when available
+  ansible.builtin.package:
+    name: "kernel-uek-modules-extra-netfilter-{{ ansible_kernel }}"
+    state: present
+  register: awx_k3s_uek_netfilter
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Load k3s kernel modules when present
+  ansible.builtin.command:
+    cmd: "modprobe {{ item }}"
+  loop:
+    - br_netfilter
+    - overlay
+    - xt_multiport
+    - iptable_nat
+    - iptable_filter
+  changed_when: false
+  failed_when: false
+
 - name: Download k3s installer
   ansible.builtin.get_url:
     url: "{{ awx_k3s_install_url }}"
     dest: /tmp/install-k3s.sh
     mode: "0755"
 
+- name: Create k3s config directory
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: Configure k3s server
+  ansible.builtin.copy:
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0644"
+    content: |
+      write-kubeconfig-mode: "{{ awx_k3s_write_kubeconfig_mode }}"
+      disable:
+      {% for item in awx_k3s_disable %}
+        - {{ item }}
+      {% endfor %}
+  register: awx_k3s_config
+
 - name: Install k3s server
   ansible.builtin.command:
     cmd: /tmp/install-k3s.sh
   environment:
     INSTALL_K3S_CHANNEL: "{{ awx_k3s_channel }}"
-    INSTALL_K3S_EXEC: "server{% for item in awx_k3s_disable %} --disable {{ item }}{% endfor %}"
   args:
     creates: /usr/local/bin/k3s
+  register: awx_k3s_install
+
+- name: Restart k3s when server config changes
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+    daemon_reload: true
+  when:
+    - awx_k3s_config is changed
+    - awx_k3s_install is not changed
 
 - name: Wait for k3s API
   ansible.builtin.command:
-    cmd: k3s kubectl get nodes
+    cmd: /usr/local/bin/k3s kubectl get nodes
   register: awx_k3s_nodes
   retries: 30
   delay: 5
   until: awx_k3s_nodes.rc == 0
   changed_when: false
+
+- name: Install kubectl symlink for k3s
+  ansible.builtin.file:
+    src: /usr/local/bin/k3s
+    dest: /usr/local/bin/kubectl
+    state: link
 
 - name: Create kubeconfig directory
   ansible.builtin.file:

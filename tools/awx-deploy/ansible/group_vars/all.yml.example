@@ -55,14 +55,19 @@ awx_k8s_postgres_storage_size: 20Gi
 awx_k8s_projects_storage_size: 10Gi
 awx_k8s_web_replicas: 2
 awx_k8s_task_replicas: 2
+awx_k8s_service_type: ClusterIP
+awx_k8s_node_port: 30813
 awx_k8s_ingress_enabled: false
 awx_k8s_ingress_host: ""
+awx_k8s_kubectl_binary: kubectl
 awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
 
 awx_k3s_install_url: https://get.k3s.io
 awx_k3s_channel: stable
+awx_k3s_write_kubeconfig_mode: "0644"
 awx_k3s_disable:
   - traefik
+  - network-policy
 
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short }}"
 awx_restore_confirm: false

@@ -15,11 +15,11 @@
     cmd: >-
       {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
       -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }}
-      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z
-      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z
-      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z
-      -v {{ awx_projects_dir }}:/var/lib/awx/projects:Z
-      -v {{ awx_media_dir }}:/var/lib/awx/public/media:Z
+      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,z
+      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,z
+      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,z
+      -v {{ awx_projects_dir }}:/var/lib/awx/projects:z
+      -v {{ awx_media_dir }}:/var/lib/awx/public/media:z
       {{ awx_image }}:{{ awx_image_tag }}
       awx-manage migrate --noinput
   register: awx_migration_result
@@ -43,9 +43,9 @@
       {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
       --env-file /run/awx-admin-bootstrap.env
       -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }}
-      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z
-      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z
-      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z
+      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,z
+      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,z
+      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,z
       {{ awx_image }}:{{ awx_image_tag }}
       awx-manage shell -c "import os; from django.contrib.auth import get_user_model; User=get_user_model(); user,_=User.objects.get_or_create(username='{{ awx_admin_user }}', defaults={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}); changed=[]; desired={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}; [changed.append(k) or setattr(user,k,v) for k,v in desired.items() if getattr(user,k)!=v]; password=os.environ.get('DJANGO_SUPERUSER_PASSWORD'); (password and not user.check_password(password)) and (user.set_password(password) or changed.append('password')); changed and user.save(); print('Admin synchronized')"
   register: awx_admin_sync_result

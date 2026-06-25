@@ -10,15 +10,26 @@ spec:
     spec:
       serviceAccountName: {{ awx_k8s_name }}
       restartPolicy: OnFailure
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
       containers:
         - name: migrate
           image: {{ awx_image }}:{{ awx_image_tag }}
           command:
-            - awx-manage
+            - /bin/bash
+            - -lc
           args:
-            - migrate
-            - --noinput
+            - |
+              awx-manage migrate --noinput
+              awx-manage shell -c "import os; from django.contrib.auth import get_user_model; User=get_user_model(); user,_=User.objects.get_or_create(username='{{ awx_admin_user }}', defaults={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}); desired={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}; [setattr(user,k,v) for k,v in desired.items() if getattr(user,k)!=v]; password=os.environ.get('DJANGO_SUPERUSER_PASSWORD'); password and user.set_password(password); user.save(); print('Admin synchronized')"
           env:
+            - name: DJANGO_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_k8s_name }}-secret
+                  key: ADMIN_PASSWORD
             - name: AWX_CLUSTER_HOST_ID
               valueFrom:
                 fieldRef:

@@ -2,7 +2,16 @@
 - name: Resolve kubectl command
   ansible.builtin.set_fact:
     awx_k8s_kubectl: >-
-      kubectl{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} get --raw=/readyz"
+  register: awx_k8s_readyz
+  retries: 60
+  delay: 5
+  until: awx_k8s_readyz.rc == 0
+  changed_when: false
 
 - name: Generate Kubernetes secret key when not provided
   ansible.builtin.command:
@@ -79,6 +88,53 @@
     cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/30-awx.yml"
   register: awx_k8s_apply_awx
   changed_when: "'created' in awx_k8s_apply_awx.stdout or 'configured' in awx_k8s_apply_awx.stdout"
+
+- name: Restart AWX deployments after config changes
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout restart deployment/{{ item }}"
+  loop:
+    - "{{ awx_k8s_name }}-web"
+    - "{{ awx_k8s_name }}-task"
+  register: awx_k8s_rollout_restart
+  changed_when: "'restarted' in awx_k8s_rollout_restart.stdout"
+  when: awx_k8s_apply_core is changed or awx_k8s_apply_awx is changed
+
+- name: Check firewalld state for Kubernetes NodePort
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_k8s_firewalld_state
+  changed_when: false
+  failed_when: false
+  when: awx_k8s_service_type == "NodePort"
+
+- name: Check Kubernetes NodePort firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_k8s_node_port }}/tcp"
+  register: awx_k8s_firewalld_port
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_k8s_service_type == "NodePort"
+    - awx_k8s_firewalld_state.stdout == "active"
+
+- name: Open Kubernetes NodePort in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_k8s_node_port }}/tcp"
+  register: awx_k8s_firewalld_open
+  changed_when: true
+  when:
+    - awx_k8s_service_type == "NodePort"
+    - awx_k8s_firewalld_state.stdout == "active"
+    - awx_k8s_firewalld_port.rc != 0
+
+- name: Reload firewalld for Kubernetes NodePort
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_k8s_service_type == "NodePort"
+    - awx_k8s_firewalld_state.stdout == "active"
+    - awx_k8s_firewalld_open is changed
 
 - name: Wait for AWX web deployment
   ansible.builtin.command:

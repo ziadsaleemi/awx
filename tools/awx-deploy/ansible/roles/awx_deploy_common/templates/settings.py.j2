@@ -1,5 +1,10 @@
 import os
 
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY and os.path.exists("/etc/tower/SECRET_KEY"):
+    with open("/etc/tower/SECRET_KEY", "r", encoding="utf-8") as secret_key_file:
+        SECRET_KEY = secret_key_file.read().strip()
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
