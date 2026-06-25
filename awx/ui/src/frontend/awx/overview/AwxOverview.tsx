@@ -71,7 +71,7 @@ function AwxOverviewInternal(props: { managedResources: Resource[] }) {
   }
 
   return (
-    <PageDashboard>
+    <PageDashboard sectionStyle={{ padding: '16px' }}>
       {managedResources.map((resource: Resource) => {
         switch (resource.id) {
           case 'counts':

@@ -1,14 +1,14 @@
 /* eslint-disable i18next/no-literal-string */
 import { PageSection } from '@patternfly/react-core';
 import useResizeObserver from '@react-hook/resize-observer';
-import { ReactNode, createContext, useLayoutEffect, useRef, useState } from 'react';
+import { CSSProperties, ReactNode, createContext, useLayoutEffect, useRef, useState } from 'react';
 import { Scrollable } from '../components/Scrollable';
 
 export const PageDashboardContext = createContext({ columns: 1 });
 
 const Divisor = 1662 / 24;
 
-export function PageDashboard(props: { children?: ReactNode }) {
+export function PageDashboard(props: { children?: ReactNode; sectionStyle?: CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null);
 
   const [columns, setColumns] = useState(1);
@@ -26,7 +26,7 @@ export function PageDashboard(props: { children?: ReactNode }) {
   return (
     <PageDashboardContext.Provider value={{ columns }}>
       <Scrollable>
-        <PageSection style={{ padding: '16px 0' }}>
+        <PageSection style={{ padding: '16px 0', ...props.sectionStyle }}>
           <div
             ref={ref}
             style={{ display: 'grid', gap: 16, gridTemplateColumns: `repeat(${columns}, 1fr)` }}
