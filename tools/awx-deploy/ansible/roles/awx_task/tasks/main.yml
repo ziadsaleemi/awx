@@ -1,0 +1,79 @@
+---
+- name: Wait for AWX dependencies
+  ansible.builtin.wait_for:
+    host: "{{ item.host }}"
+    port: "{{ item.port }}"
+    timeout: 180
+  loop:
+    - host: "{{ awx_postgres_host }}"
+      port: "{{ awx_postgres_port }}"
+    - host: "{{ awx_redis_host }}"
+      port: "{{ awx_redis_port }}"
+
+- name: Run AWX database migrations
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
+      -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }}
+      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z
+      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z
+      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z
+      -v {{ awx_projects_dir }}:/var/lib/awx/projects:Z
+      -v {{ awx_media_dir }}:/var/lib/awx/public/media:Z
+      {{ awx_image }}:{{ awx_image_tag }}
+      awx-manage migrate --noinput
+  register: awx_migration_result
+  changed_when: "'Applying' in awx_migration_result.stdout"
+  when: inventory_hostname == (groups.get('awx_task', []) | first)
+
+- name: Create temporary admin bootstrap env file
+  ansible.builtin.copy:
+    dest: /run/awx-admin-bootstrap.env
+    content: |
+      DJANGO_SUPERUSER_PASSWORD={{ awx_admin_password }}
+    owner: root
+    group: root
+    mode: "0600"
+  when: inventory_hostname == (groups.get('awx_task', []) | first)
+  no_log: true
+
+- name: Synchronize AWX admin user
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
+      --env-file /run/awx-admin-bootstrap.env
+      -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }}
+      -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z
+      -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z
+      -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z
+      {{ awx_image }}:{{ awx_image_tag }}
+      awx-manage shell -c "import os; from django.contrib.auth import get_user_model; User=get_user_model(); user,_=User.objects.get_or_create(username='{{ awx_admin_user }}', defaults={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}); changed=[]; desired={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}; [changed.append(k) or setattr(user,k,v) for k,v in desired.items() if getattr(user,k)!=v]; password=os.environ.get('DJANGO_SUPERUSER_PASSWORD'); (password and not user.check_password(password)) and (user.set_password(password) or changed.append('password')); changed and user.save(); print('Admin synchronized')"
+  register: awx_admin_sync_result
+  changed_when: "'Admin synchronized' in awx_admin_sync_result.stdout"
+  when: inventory_hostname == (groups.get('awx_task', []) | first)
+  no_log: true
+
+- name: Remove temporary admin bootstrap env file
+  ansible.builtin.file:
+    path: /run/awx-admin-bootstrap.env
+    state: absent
+  when: inventory_hostname == (groups.get('awx_task', []) | first)
+  no_log: true
+
+- name: Render AWX task systemd service
+  ansible.builtin.template:
+    src: awx-task.service.j2
+    dest: /etc/systemd/system/awx-task.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start AWX task
+  ansible.builtin.systemd:
+    name: awx-task
+    state: restarted
+    enabled: true

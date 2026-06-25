@@ -1,0 +1,43 @@
+---
+- name: Install k3s prerequisites
+  ansible.builtin.package:
+    name:
+      - curl
+    state: present
+
+- name: Download k3s installer
+  ansible.builtin.get_url:
+    url: "{{ awx_k3s_install_url }}"
+    dest: /tmp/install-k3s.sh
+    mode: "0755"
+
+- name: Install k3s server
+  ansible.builtin.command:
+    cmd: /tmp/install-k3s.sh
+  environment:
+    INSTALL_K3S_CHANNEL: "{{ awx_k3s_channel }}"
+    INSTALL_K3S_EXEC: "server{% for item in awx_k3s_disable %} --disable {{ item }}{% endfor %}"
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for k3s API
+  ansible.builtin.command:
+    cmd: k3s kubectl get nodes
+  register: awx_k3s_nodes
+  retries: 30
+  delay: 5
+  until: awx_k3s_nodes.rc == 0
+  changed_when: false
+
+- name: Create kubeconfig directory
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: "0700"
+
+- name: Install root kubeconfig
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /root/.kube/config
+    remote_src: true
+    mode: "0600"

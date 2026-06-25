@@ -1,0 +1,78 @@
+---
+- name: Validate vCenter lab inputs
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_hostname | length > 0
+      - awx_vcenter_username | length > 0
+      - awx_vcenter_password | length > 0
+      - awx_vcenter_datacenter | length > 0
+      - awx_vcenter_cluster | length > 0
+      - awx_vcenter_template | length > 0
+      - awx_vcenter_datastore | length > 0
+      - awx_vcenter_network | length > 0
+    fail_msg: "Set vCenter host/user/password plus datacenter/cluster/template/datastore/network."
+  no_log: true
+
+- name: Create AWX lab VMs from template
+  community.vmware.vmware_guest:
+    hostname: "{{ awx_vcenter_hostname }}"
+    username: "{{ awx_vcenter_username }}"
+    password: "{{ awx_vcenter_password }}"
+    validate_certs: "{{ awx_vcenter_validate_certs }}"
+    datacenter: "{{ awx_vcenter_datacenter }}"
+    cluster: "{{ awx_vcenter_cluster }}"
+    folder: "{{ awx_vcenter_folder | default(omit, true) }}"
+    name: "{{ awx_vcenter_vm_prefix }}-{{ '%02d' | format(item) }}"
+    template: "{{ awx_vcenter_template }}"
+    datastore: "{{ awx_vcenter_datastore }}"
+    state: "{{ awx_vcenter_vm_state }}"
+    hardware:
+      num_cpus: "{{ awx_vcenter_vm_cpus }}"
+      memory_mb: "{{ awx_vcenter_vm_memory_mb }}"
+    disk:
+      - size_gb: "{{ awx_vcenter_vm_disk_gb }}"
+        type: thin
+        datastore: "{{ awx_vcenter_datastore }}"
+    networks:
+      - name: "{{ awx_vcenter_network }}"
+        type: dhcp
+    wait_for_ip_address: "{{ awx_vcenter_wait_for_ip }}"
+  loop: "{{ range(1, (awx_vcenter_vm_count | int) + 1) | list }}"
+  register: awx_vcenter_created_vms
+  no_log: true
+
+- name: Show created VM names
+  ansible.builtin.debug:
+    msg: "{{ awx_vcenter_created_vms.results | map(attribute='instance.hw_name') | list }}"
+  when: awx_vcenter_created_vms is defined
+
+- name: Build AWX lab VM inventory facts
+  ansible.builtin.set_fact:
+    awx_vcenter_lab_vms: >-
+      {{
+        (awx_vcenter_lab_vms | default([])) +
+        [{
+          'name': vm_instance.hw_name | default(awx_vcenter_vm_prefix ~ '-' ~ ('%02d' | format(item.item | int))),
+          'ip': vm_instance.ipv4 | default(vm_instance.ip_address | default(vm_instance.guest_ip_address | default('')))
+        }]
+      }}
+  vars:
+    vm_instance: "{{ item.instance | default({}) }}"
+  loop: "{{ awx_vcenter_created_vms.results | default([]) }}"
+  when: awx_vcenter_created_vms is defined
+
+- name: Write generated AWX lab inventory
+  ansible.builtin.template:
+    src: lab-inventory.ini.j2
+    dest: "{{ awx_vcenter_inventory_path }}"
+    mode: "0600"
+  when:
+    - awx_vcenter_inventory_path | length > 0
+    - awx_vcenter_lab_vms | default([]) | length > 0
+
+- name: Show generated inventory path
+  ansible.builtin.debug:
+    msg: "Generated lab inventory: {{ awx_vcenter_inventory_path }}"
+  when:
+    - awx_vcenter_inventory_path | length > 0
+    - awx_vcenter_lab_vms | default([]) | length > 0

@@ -1,0 +1,3 @@
+---
+awx_failback_image_tag: ""
+awx_failback_restore_path: ""

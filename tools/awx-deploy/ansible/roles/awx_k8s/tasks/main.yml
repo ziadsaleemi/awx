@@ -1,0 +1,91 @@
+---
+- name: Resolve kubectl command
+  ansible.builtin.set_fact:
+    awx_k8s_kubectl: >-
+      kubectl{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Generate Kubernetes secret key when not provided
+  ansible.builtin.command:
+    cmd: openssl rand -base64 32
+  register: awx_k8s_generated_secret_key
+  changed_when: false
+  when: (awx_secret_key | default('')) | length == 0
+  no_log: true
+
+- name: Set Kubernetes secret key fact
+  ansible.builtin.set_fact:
+    awx_k8s_effective_secret_key: "{{ awx_secret_key | default('') if (awx_secret_key | default('')) | length > 0 else awx_k8s_generated_secret_key.stdout }}"
+  no_log: true
+
+- name: Create Kubernetes manifest workspace
+  ansible.builtin.file:
+    path: "{{ awx_k8s_work_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Render Kubernetes manifests
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ awx_k8s_work_dir }}/{{ item }}"
+    mode: "0600"
+  loop:
+    - 00-core.yml
+    - 10-data.yml
+    - 20-migrate.yml
+    - 30-awx.yml
+  no_log: true
+
+- name: Apply core Kubernetes resources
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/00-core.yml"
+  register: awx_k8s_apply_core
+  changed_when: "'created' in awx_k8s_apply_core.stdout or 'configured' in awx_k8s_apply_core.stdout"
+
+- name: Apply data services
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/10-data.yml"
+  register: awx_k8s_apply_data
+  changed_when: "'created' in awx_k8s_apply_data.stdout or 'configured' in awx_k8s_apply_data.stdout"
+
+- name: Wait for PostgreSQL deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-postgres --timeout=300s"
+  changed_when: false
+
+- name: Wait for Redis deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-redis --timeout=180s"
+  changed_when: false
+
+- name: Remove previous migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} delete job {{ awx_k8s_name }}-migrate --ignore-not-found=true"
+  changed_when: "'deleted' in awx_k8s_delete_migrate.stdout"
+  register: awx_k8s_delete_migrate
+
+- name: Apply migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/20-migrate.yml"
+  register: awx_k8s_apply_migrate
+  changed_when: "'created' in awx_k8s_apply_migrate.stdout or 'configured' in awx_k8s_apply_migrate.stdout"
+
+- name: Wait for migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} wait --for=condition=complete job/{{ awx_k8s_name }}-migrate --timeout=600s"
+  changed_when: false
+
+- name: Apply AWX application
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/30-awx.yml"
+  register: awx_k8s_apply_awx
+  changed_when: "'created' in awx_k8s_apply_awx.stdout or 'configured' in awx_k8s_apply_awx.stdout"
+
+- name: Wait for AWX web deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-web --timeout=300s"
+  changed_when: false
+
+- name: Wait for AWX task deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-task --timeout=300s"
+  changed_when: false

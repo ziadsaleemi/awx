@@ -61,6 +61,12 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 12 | **Bulk job cancel** — "Cancel all running jobs" one-click action on the Jobs list | High | ✅ |
 | 13 | **Job output full-screen mode** — expanded full-viewport view for the job output console | Medium | ✅ |
 
+### Deployment & Lifecycle
+
+| # | Enhancement | Priority | Status |
+|---|-------------|----------|--------|
+| 13a | **Repo-owned AWX deployment roles** — Ansible role suite for this fork's AWX image on direct servers, k3s, existing Kubernetes, and vCenter lab VMs; includes server component roles for PostgreSQL, Redis, Web, Task, Receptor, HAProxy, plus backup/restore/upgrade/failback playbooks. Syntax/render checks pass; live vCenter VM smoke remains pending. | High | 🔄 |
+
 ### Security & Administration
 
 | # | Enhancement | Priority | Status |

@@ -1,0 +1,32 @@
+---
+- node:
+    id: "{{ inventory_hostname }}"
+    firewallrules:
+      - action: reject
+        tonode: "{{ inventory_hostname }}"
+        toservice: control
+
+- log-level: "{{ awx_receptor_log_level }}"
+
+{% if awx_receptor_enable_tcp_listener | bool %}
+- tcp-listener:
+    port: {{ awx_receptor_listen_port }}
+
+{% endif %}
+{% for peer in awx_receptor_peer_hosts %}
+- tcp-peer:
+    address: {{ hostvars[peer].ansible_host | default(peer) }}:{{ hostvars[peer].awx_receptor_listen_port | default(awx_receptor_listen_port) }}
+    redial: true
+
+{% endfor %}
+- control-service:
+    service: control
+    filename: {{ awx_receptor_socket_file }}
+    permissions: "0660"
+
+- work-command:
+    worktype: {{ awx_receptor_work_type }}
+    command: ansible-runner
+    params: worker
+    allowruntimeparams: true
+    verifysignature: {{ awx_receptor_enable_work_signing | bool | lower }}

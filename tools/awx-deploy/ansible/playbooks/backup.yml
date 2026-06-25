@@ -1,0 +1,6 @@
+---
+- name: Backup AWX
+  hosts: awx_server_nodes
+  gather_facts: true
+  roles:
+    - awx_backup

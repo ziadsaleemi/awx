@@ -1,0 +1,84 @@
+---
+# Copy to group_vars/all.yml or pass as extra vars. Do not commit secrets.
+
+awx_deploy_method: server # server | k3s | k8s
+
+awx_image: docker.io/ziadsaleemi/awx
+awx_image_tag: "25.1.1"
+awx_ee_image: quay.io/ansible/awx-ee:latest
+
+awx_admin_user: admin
+awx_admin_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') }}"
+
+awx_container_engine: podman # podman | docker
+awx_server_base_dir: /opt/awx
+awx_server_config_dir: /etc/awx
+awx_server_data_dir: /var/lib/awx
+awx_server_backup_dir: /var/backups/awx
+awx_server_http_port: 8080
+awx_server_https_port: 8443
+awx_server_root_owner: root
+awx_server_root_group: root
+awx_server_runtime_owner: "1000"
+awx_server_runtime_group: "0"
+
+awx_hostname: "{{ groups['awx_lb'] | default([]) | first | default(groups['awx_web'] | first | default(inventory_hostname)) }}"
+awx_allowed_hosts:
+  - "*"
+awx_csrf_trusted_origins: []
+awx_proxy_ip_allowed_list: []
+
+awx_postgres_host: "{{ groups['awx_database'] | first | default('127.0.0.1') }}"
+awx_postgres_port: 5432
+awx_postgres_database: awx
+awx_postgres_user: awx
+awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
+awx_postgres_image: quay.io/sclorg/postgresql-15-c9s
+
+awx_redis_host: "{{ groups['awx_redis'] | first | default('127.0.0.1') }}"
+awx_redis_port: 6379
+awx_redis_image: docker.io/library/redis:7.4
+
+awx_receptor_listen_port: 2222
+awx_receptor_peer_hosts: "{{ groups.get('awx_receptor', []) | difference([inventory_hostname]) }}"
+awx_receptor_container_privileged: true
+awx_instance_node_type: hybrid
+
+awx_lb_http_port: 80
+awx_lb_https_port: 443
+awx_lb_stats_port: 1936
+
+awx_k8s_namespace: awx
+awx_k8s_name: awx
+awx_k8s_storage_class: ""
+awx_k8s_postgres_storage_size: 20Gi
+awx_k8s_projects_storage_size: 10Gi
+awx_k8s_web_replicas: 2
+awx_k8s_task_replicas: 2
+awx_k8s_ingress_enabled: false
+awx_k8s_ingress_host: ""
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+
+awx_k3s_install_url: https://get.k3s.io
+awx_k3s_channel: stable
+awx_k3s_disable:
+  - traefik
+
+awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short }}"
+awx_restore_confirm: false
+awx_restore_path: ""
+
+awx_vcenter_hostname: "{{ lookup('env', 'VCENTER_HOSTNAME') }}"
+awx_vcenter_username: "{{ lookup('env', 'VCENTER_USERNAME') }}"
+awx_vcenter_password: "{{ lookup('env', 'VCENTER_PASSWORD') }}"
+awx_vcenter_validate_certs: false
+awx_vcenter_datacenter: ""
+awx_vcenter_cluster: ""
+awx_vcenter_folder: ""
+awx_vcenter_template: ""
+awx_vcenter_datastore: ""
+awx_vcenter_network: ""
+awx_vcenter_vm_prefix: awx-test
+awx_vcenter_vm_count: 1
+awx_vcenter_vm_cpus: 2
+awx_vcenter_vm_memory_mb: 4096

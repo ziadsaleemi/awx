@@ -1,0 +1,15 @@
+[Unit]
+Description=AWX Web
+After=network-online.target awx-postgres.service awx-redis.service
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=10
+ExecStartPre=-{{ awx_container_engine_cmd }} rm -f awx-web
+ExecStart={{ awx_container_engine_cmd }} run --rm --name awx-web --network host --user 1000:0 --hostname {{ inventory_hostname }} -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }} -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z -v {{ awx_server_config_dir }}/receptor.conf:/etc/receptor/receptor.conf:ro,Z -v {{ awx_server_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro,Z -v {{ awx_server_config_dir }}/nginx.locations.conf:/etc/nginx/conf.d/nginx.locations.conf:ro,Z -v {{ awx_projects_dir }}:/var/lib/awx/projects:Z -v {{ awx_media_dir }}:/var/lib/awx/public/media:Z -v {{ awx_containers_storage_dir }}:/var/lib/awx/.local/share/containers:Z -v {{ awx_receptor_socket_dir }}:/var/run/awx-receptor:Z -v {{ awx_nginx_state_dir }}:/var/lib/nginx:Z -v {{ awx_rsyslog_dir }}:/var/lib/awx/rsyslog:Z {{ awx_image }}:{{ awx_image_tag }} /usr/bin/launch_awx_web.sh
+ExecStop={{ awx_container_engine_cmd }} stop awx-web
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target

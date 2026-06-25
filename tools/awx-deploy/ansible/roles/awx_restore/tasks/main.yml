@@ -1,0 +1,53 @@
+---
+- name: Validate restore confirmation
+  ansible.builtin.assert:
+    that:
+      - awx_restore_confirm | bool
+      - awx_restore_path | length > 0
+    fail_msg: "Restore is destructive. Set awx_restore_confirm=true and awx_restore_path."
+
+- name: Stop AWX services before restore
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - awx-web
+    - awx-task
+  failed_when: false
+
+- name: Restore AWX configuration archive
+  ansible.builtin.unarchive:
+    src: "{{ awx_restore_path }}/config-{{ inventory_hostname }}.tar.gz"
+    dest: /
+    remote_src: true
+  ignore_errors: true
+
+- name: Restore AWX project/media archive
+  ansible.builtin.unarchive:
+    src: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
+    dest: /
+    remote_src: true
+  ignore_errors: true
+
+- name: Restore PostgreSQL database
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_restore_path }}/awx.sql |
+      {{ awx_container_engine_cmd }} exec -i awx-postgres
+      psql -U {{ awx_postgres_user }} -d {{ awx_postgres_database }}
+    executable: /bin/bash
+  changed_when: true
+  when: inventory_hostname in (groups.get('awx_database', []) | default([]))
+
+- name: Start AWX task after restore
+  ansible.builtin.systemd:
+    name: awx-task
+    state: started
+  failed_when: false
+
+- name: Start AWX web after restore
+  ansible.builtin.systemd:
+    name: awx-web
+    state: started
+  failed_when: false

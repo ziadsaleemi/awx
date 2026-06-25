@@ -1,0 +1,50 @@
+import os
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "{{ awx_postgres_database }}",
+        "USER": "{{ awx_postgres_user }}",
+        "PASSWORD": "{{ awx_postgres_password }}",
+        "HOST": "{{ awx_postgres_host }}",
+        "PORT": "{{ awx_postgres_port }}",
+        "OPTIONS": {},
+    }
+}
+
+ALLOWED_HOSTS = {{ awx_allowed_hosts | to_json }}
+CSRF_TRUSTED_ORIGINS = {{ awx_csrf_trusted_origins | to_json }}
+REMOTE_HOST_HEADERS = {{ awx_remote_host_headers | to_json }}
+PROXY_IP_ALLOWED_LIST = {{ awx_proxy_ip_allowed_list | to_json }}
+
+BROKER_URL = "redis://{{ awx_redis_host }}:{{ awx_redis_port }}/0"
+CACHES = {
+    "default": {
+        "BACKEND": "awx.main.cache.AWXRedisCache",
+        "LOCATION": "redis://{{ awx_redis_host }}:{{ awx_redis_port }}/1",
+    }
+}
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [BROKER_URL], "capacity": 10000, "group_expiry": 157784760},
+    }
+}
+
+CLUSTER_HOST_ID = os.environ.get("AWX_CLUSTER_HOST_ID", os.uname().nodename)
+if os.path.exists("/etc/tower/SYSTEM_UUID"):
+    with open("/etc/tower/SYSTEM_UUID", "r", encoding="utf-8") as uuid_file:
+        SYSTEM_UUID = uuid_file.read().strip()
+else:
+    SYSTEM_UUID = os.environ.get("AWX_SYSTEM_UUID", "")
+
+STATIC_ROOT = "/var/lib/awx/public/static"
+MEDIA_ROOT = "/var/lib/awx/public/media"
+PROJECTS_ROOT = "/var/lib/awx/projects"
+AWX_ISOLATION_SHOW_PATHS = [
+    "/etc/pki/ca-trust:/etc/pki/ca-trust:O",
+    "/usr/share/pki:/usr/share/pki:O",
+]
+
+GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{"name": "AWX EE (latest)", "image": "{{ awx_ee_image }}"}]
+CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_ee_image }}"

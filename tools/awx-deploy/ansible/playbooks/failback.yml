@@ -1,0 +1,6 @@
+---
+- name: Fail back AWX server deployment
+  hosts: awx_server_nodes
+  gather_facts: true
+  roles:
+    - awx_failback

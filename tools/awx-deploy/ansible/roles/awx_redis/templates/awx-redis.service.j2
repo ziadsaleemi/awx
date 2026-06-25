@@ -1,0 +1,15 @@
+[Unit]
+Description=AWX Redis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=10
+ExecStartPre=-{{ awx_container_engine_cmd }} rm -f awx-redis
+ExecStart={{ awx_container_engine_cmd }} run --rm --name awx-redis --network host -v {{ awx_redis_data_dir }}:/data:Z {{ awx_redis_image }} redis-server --appendonly yes --port {{ awx_redis_port }}
+ExecStop={{ awx_container_engine_cmd }} stop awx-redis
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

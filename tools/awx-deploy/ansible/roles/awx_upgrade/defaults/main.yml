@@ -1,0 +1,2 @@
+---
+awx_upgrade_skip_backup: false

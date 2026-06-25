@@ -1,0 +1,42 @@
+---
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ awx_postgres_data_dir }}"
+    state: directory
+    owner: "26"
+    group: "0"
+    mode: "0770"
+
+- name: Render PostgreSQL environment file
+  ansible.builtin.template:
+    src: awx-postgres.env.j2
+    dest: /etc/awx/postgres.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render PostgreSQL systemd service
+  ansible.builtin.template:
+    src: awx-postgres.service.j2
+    dest: /etc/systemd/system/awx-postgres.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+  no_log: true
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start PostgreSQL
+  ansible.builtin.systemd:
+    name: awx-postgres
+    state: started
+    enabled: true
+
+- name: Wait for PostgreSQL
+  ansible.builtin.wait_for:
+    host: "{{ awx_postgres_host }}"
+    port: "{{ awx_postgres_port }}"
+    timeout: 120

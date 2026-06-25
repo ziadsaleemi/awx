@@ -1,0 +1,3 @@
+---
+dependencies:
+  - role: awx_deploy_common

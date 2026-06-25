@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ awx_k8s_name }}-migrate
+  namespace: {{ awx_k8s_namespace }}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: {{ awx_k8s_name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - awx-manage
+          args:
+            - migrate
+            - --noinput
+          env:
+            - name: AWX_CLUSTER_HOST_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AWX_SYSTEM_UUID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          volumeMounts:
+            - name: awx-secret
+              mountPath: /etc/tower/settings.py
+              subPath: settings.py
+              readOnly: true
+            - name: awx-secret
+              mountPath: /etc/tower/SECRET_KEY
+              subPath: SECRET_KEY
+              readOnly: true
+      volumes:
+        - name: awx-secret
+          secret:
+            secretName: {{ awx_k8s_name }}-secret

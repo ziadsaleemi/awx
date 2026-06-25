@@ -1,0 +1,59 @@
+---
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ awx_server_backup_dir }}/{{ awx_backup_name }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Dump PostgreSQL database
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ awx_container_engine_cmd }} exec awx-postgres
+      pg_dump -U {{ awx_postgres_user }} {{ awx_postgres_database }}
+      > {{ awx_server_backup_dir }}/{{ awx_backup_name }}/awx.sql
+    executable: /bin/bash
+  changed_when: true
+  when: inventory_hostname in (groups.get('awx_database', []) | default([]))
+
+- name: Archive AWX configuration
+  ansible.builtin.archive:
+    path:
+      - "{{ awx_server_config_dir }}/settings.py"
+      - "{{ awx_server_config_dir }}/SECRET_KEY"
+      - "{{ awx_server_config_dir }}/SYSTEM_UUID"
+      - "{{ awx_server_config_dir }}/receptor.conf"
+    dest: "{{ awx_server_backup_dir }}/{{ awx_backup_name }}/config-{{ inventory_hostname }}.tar.gz"
+    format: gz
+    mode: "0600"
+  ignore_errors: true
+
+- name: Archive AWX projects and media
+  ansible.builtin.archive:
+    path:
+      - "{{ awx_projects_dir }}"
+      - "{{ awx_media_dir }}"
+    dest: "{{ awx_server_backup_dir }}/{{ awx_backup_name }}/data-{{ inventory_hostname }}.tar.gz"
+    format: gz
+    mode: "0600"
+  ignore_errors: true
+
+- name: Write backup manifest
+  ansible.builtin.copy:
+    dest: "{{ awx_server_backup_dir }}/{{ awx_backup_name }}/manifest-{{ inventory_hostname }}.yml"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      backup_name: {{ awx_backup_name }}
+      host: {{ inventory_hostname }}
+      deploy_method: {{ awx_deploy_method }}
+      awx_image: {{ awx_image }}
+      awx_image_tag: {{ awx_image_tag }}
+      created_at: {{ ansible_date_time.iso8601 | default('unknown') }}
+      includes:
+        database: {{ inventory_hostname in (groups.get('awx_database', []) | default([])) }}
+        config: true
+        projects_media: true

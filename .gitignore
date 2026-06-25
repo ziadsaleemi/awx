@@ -159,3 +159,6 @@ _readthedocs/
 
 # Pyenv
 .python-version
+
+# Local Codex deployment tracker, source of truth for in-flight lab status.
+.codex/awx-deploy-tracker.md

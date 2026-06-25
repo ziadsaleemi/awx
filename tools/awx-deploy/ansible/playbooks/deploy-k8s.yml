@@ -1,0 +1,6 @@
+---
+- name: Deploy AWX to Kubernetes
+  hosts: all
+  gather_facts: false
+  roles:
+    - awx_k8s

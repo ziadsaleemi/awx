@@ -1,0 +1,35 @@
+---
+- name: Wait for AWX dependencies
+  ansible.builtin.wait_for:
+    host: "{{ item.host }}"
+    port: "{{ item.port }}"
+    timeout: 180
+  loop:
+    - host: "{{ awx_postgres_host }}"
+      port: "{{ awx_postgres_port }}"
+    - host: "{{ awx_redis_host }}"
+      port: "{{ awx_redis_port }}"
+
+- name: Render AWX web systemd service
+  ansible.builtin.template:
+    src: awx-web.service.j2
+    dest: /etc/systemd/system/awx-web.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start AWX web
+  ansible.builtin.systemd:
+    name: awx-web
+    state: restarted
+    enabled: true
+
+- name: Wait for AWX web
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: "{{ awx_web_http_port }}"
+    timeout: 180

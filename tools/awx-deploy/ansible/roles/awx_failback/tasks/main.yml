@@ -1,0 +1,33 @@
+---
+- name: Validate failback target
+  ansible.builtin.assert:
+    that:
+      - awx_failback_image_tag | length > 0 or awx_failback_restore_path | length > 0
+    fail_msg: "Set awx_failback_image_tag for image failback or awx_failback_restore_path for full restore."
+
+- name: Restore backup for failback
+  ansible.builtin.include_role:
+    name: awx_restore
+  vars:
+    awx_restore_path: "{{ awx_failback_restore_path }}"
+    awx_restore_confirm: true
+  when: awx_failback_restore_path | length > 0
+
+- name: Fail back image tag
+  ansible.builtin.set_fact:
+    awx_image_tag: "{{ awx_failback_image_tag }}"
+  when: awx_failback_image_tag | length > 0
+
+- name: Re-run task role for image failback
+  ansible.builtin.include_role:
+    name: awx_task
+  when:
+    - awx_failback_image_tag | length > 0
+    - inventory_hostname in (groups.get('awx_task', []) | default([]))
+
+- name: Re-run web role for image failback
+  ansible.builtin.include_role:
+    name: awx_web
+  when:
+    - awx_failback_image_tag | length > 0
+    - inventory_hostname in (groups.get('awx_web', []) | default([]))

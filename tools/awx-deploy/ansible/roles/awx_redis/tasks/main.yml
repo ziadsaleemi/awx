@@ -1,0 +1,32 @@
+---
+- name: Create Redis data directory
+  ansible.builtin.file:
+    path: "{{ awx_redis_data_dir }}"
+    state: directory
+    owner: "999"
+    group: "0"
+    mode: "0770"
+
+- name: Render Redis systemd service
+  ansible.builtin.template:
+    src: awx-redis.service.j2
+    dest: /etc/systemd/system/awx-redis.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Redis
+  ansible.builtin.systemd:
+    name: awx-redis
+    state: started
+    enabled: true
+
+- name: Wait for Redis
+  ansible.builtin.wait_for:
+    host: "{{ awx_redis_host }}"
+    port: "{{ awx_redis_port }}"
+    timeout: 60

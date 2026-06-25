@@ -1,0 +1,182 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ awx_k8s_namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ awx_k8s_name }}
+  namespace: {{ awx_k8s_namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ awx_k8s_name }}
+  namespace: {{ awx_k8s_namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "services", "configmaps", "secrets", "events", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ awx_k8s_name }}
+  namespace: {{ awx_k8s_namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ awx_k8s_name }}
+    namespace: {{ awx_k8s_namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ awx_k8s_name }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ awx_k8s_name }}-secret
+  namespace: {{ awx_k8s_namespace }}
+type: Opaque
+stringData:
+  SECRET_KEY: {{ awx_k8s_effective_secret_key | quote }}
+  settings.py: |
+    import os
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "{{ awx_postgres_database }}",
+            "USER": "{{ awx_postgres_user }}",
+            "PASSWORD": "{{ awx_postgres_password }}",
+            "HOST": "{{ awx_k8s_name }}-postgres",
+            "PORT": "5432",
+            "OPTIONS": {},
+        }
+    }
+
+    ALLOWED_HOSTS = {{ awx_allowed_hosts | to_json }}
+    CSRF_TRUSTED_ORIGINS = {{ awx_csrf_trusted_origins | to_json }}
+    REMOTE_HOST_HEADERS = {{ awx_remote_host_headers | to_json }}
+    PROXY_IP_ALLOWED_LIST = {{ awx_proxy_ip_allowed_list | to_json }}
+
+    BROKER_URL = "redis://{{ awx_k8s_name }}-redis:6379/0"
+    CACHES = {
+        "default": {
+            "BACKEND": "awx.main.cache.AWXRedisCache",
+            "LOCATION": "redis://{{ awx_k8s_name }}-redis:6379/1",
+        }
+    }
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [BROKER_URL], "capacity": 10000, "group_expiry": 157784760},
+        }
+    }
+
+    CLUSTER_HOST_ID = os.environ.get("AWX_CLUSTER_HOST_ID", os.uname().nodename)
+    SYSTEM_UUID = os.environ.get("AWX_SYSTEM_UUID", "")
+    IS_K8S = True
+    AWX_AUTO_DEPROVISION_INSTANCES = True
+    STATIC_ROOT = "/var/lib/awx/public/static"
+    MEDIA_ROOT = "/var/lib/awx/public/media"
+    PROJECTS_ROOT = "/var/lib/awx/projects"
+    GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{"name": "AWX EE (latest)", "image": "{{ awx_ee_image }}"}]
+    CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_ee_image }}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ awx_k8s_name }}-postgres
+  namespace: {{ awx_k8s_namespace }}
+type: Opaque
+stringData:
+  POSTGRESQL_USER: {{ awx_postgres_user | quote }}
+  POSTGRESQL_DATABASE: {{ awx_postgres_database | quote }}
+  POSTGRESQL_PASSWORD: {{ awx_postgres_password | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ awx_k8s_name }}-nginx
+  namespace: {{ awx_k8s_namespace }}
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+    events { worker_connections 1024; }
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      server_tokens off;
+      map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+      upstream uwsgi { server 127.0.0.1:8050; }
+      upstream daphne { server 127.0.0.1:8051; }
+      server {
+        listen 8013 default_server;
+        server_name _;
+        include /etc/nginx/conf.d/*.conf;
+      }
+    }
+  nginx.locations.conf: |
+    location /static { alias /var/lib/awx/public/static/; }
+    location /locales { alias /var/lib/awx/public/static/awx/locales; }
+    location ~ ^(/websocket/|/api/websocket/) {
+      proxy_pass http://daphne;
+      proxy_http_version 1.1;
+      proxy_buffering off;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Host $http_host;
+      proxy_redirect off;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+    }
+    location / {
+      uwsgi_read_timeout 120s;
+      uwsgi_pass uwsgi;
+      include /etc/nginx/uwsgi_params;
+    }
+  receptor.conf: |
+    ---
+    - local-only:
+    - log-level: {{ awx_receptor_log_level }}
+    - node:
+        id: __HOSTNAME__
+        firewallrules:
+          - action: reject
+            tonode: __HOSTNAME__
+            toservice: control
+    - control-service:
+        service: control
+        filename: {{ awx_receptor_socket_file }}
+        permissions: "0660"
+    - work-command:
+        worktype: {{ awx_receptor_work_type }}
+        command: ansible-runner
+        params: worker
+        allowruntimeparams: true
+        verifysignature: false
+    - work-kubernetes:
+        worktype: kubernetes-runtime-auth
+        authmethod: runtime
+        allowruntimeauth: true
+        allowruntimepod: true
+        allowruntimeparams: true
+        verifysignature: false
+    - work-kubernetes:
+        worktype: kubernetes-incluster-auth
+        authmethod: incluster
+        allowruntimeauth: true
+        allowruntimepod: true
+        allowruntimeparams: true
+        verifysignature: false

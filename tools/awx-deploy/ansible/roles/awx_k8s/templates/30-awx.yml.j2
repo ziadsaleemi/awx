@@ -1,0 +1,220 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_k8s_name }}-web
+  namespace: {{ awx_k8s_namespace }}
+spec:
+  replicas: {{ awx_k8s_web_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_k8s_name }}-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_k8s_name }}-web
+    spec:
+      serviceAccountName: {{ awx_k8s_name }}
+      containers:
+        - name: awx-web
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /usr/bin/launch_awx_web.sh
+          env:
+            - name: AWX_CLUSTER_HOST_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AWX_SYSTEM_UUID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - containerPort: 8013
+          volumeMounts:
+            - name: awx-secret
+              mountPath: /etc/tower/settings.py
+              subPath: settings.py
+              readOnly: true
+            - name: awx-secret
+              mountPath: /etc/tower/SECRET_KEY
+              subPath: SECRET_KEY
+              readOnly: true
+            - name: awx-nginx
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: awx-nginx
+              mountPath: /etc/nginx/conf.d/nginx.locations.conf
+              subPath: nginx.locations.conf
+              readOnly: true
+            - name: awx-nginx
+              mountPath: /etc/receptor/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: projects
+              mountPath: /var/lib/awx/projects
+              subPath: projects
+            - name: projects
+              mountPath: /var/lib/awx/public/media
+              subPath: media
+            - name: containers
+              mountPath: /var/lib/awx/.local/share/containers
+            - name: receptor
+              mountPath: /var/run/awx-receptor
+            - name: nginx-state
+              mountPath: /var/lib/nginx
+        - name: receptor
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
+          volumeMounts:
+            - name: awx-nginx
+              mountPath: /etc/receptor/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: receptor
+              mountPath: /var/run/awx-receptor
+      volumes:
+        - name: awx-secret
+          secret:
+            secretName: {{ awx_k8s_name }}-secret
+        - name: awx-nginx
+          configMap:
+            name: {{ awx_k8s_name }}-nginx
+        - name: projects
+          persistentVolumeClaim:
+            claimName: {{ awx_k8s_name }}-projects
+        - name: containers
+          emptyDir: {}
+        - name: receptor
+          emptyDir: {}
+        - name: nginx-state
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_k8s_name }}-task
+  namespace: {{ awx_k8s_namespace }}
+spec:
+  replicas: {{ awx_k8s_task_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_k8s_name }}-task
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_k8s_name }}-task
+    spec:
+      serviceAccountName: {{ awx_k8s_name }}
+      containers:
+        - name: awx-task
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /usr/bin/launch_awx_task.sh
+          env:
+            - name: AWX_CLUSTER_HOST_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AWX_SYSTEM_UUID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: awx-secret
+              mountPath: /etc/tower/settings.py
+              subPath: settings.py
+              readOnly: true
+            - name: awx-secret
+              mountPath: /etc/tower/SECRET_KEY
+              subPath: SECRET_KEY
+              readOnly: true
+            - name: awx-nginx
+              mountPath: /etc/receptor/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: projects
+              mountPath: /var/lib/awx/projects
+              subPath: projects
+            - name: projects
+              mountPath: /var/lib/awx/public/media
+              subPath: media
+            - name: containers
+              mountPath: /var/lib/awx/.local/share/containers
+            - name: receptor
+              mountPath: /var/run/awx-receptor
+        - name: receptor
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
+          volumeMounts:
+            - name: awx-nginx
+              mountPath: /etc/receptor/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: receptor
+              mountPath: /var/run/awx-receptor
+      volumes:
+        - name: awx-secret
+          secret:
+            secretName: {{ awx_k8s_name }}-secret
+        - name: awx-nginx
+          configMap:
+            name: {{ awx_k8s_name }}-nginx
+        - name: projects
+          persistentVolumeClaim:
+            claimName: {{ awx_k8s_name }}-projects
+        - name: containers
+          emptyDir: {}
+        - name: receptor
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_k8s_name }}-web
+  namespace: {{ awx_k8s_namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8013
+  selector:
+    app.kubernetes.io/name: {{ awx_k8s_name }}-web
+{% if awx_k8s_ingress_enabled | bool %}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ awx_k8s_name }}
+  namespace: {{ awx_k8s_namespace }}
+spec:
+  rules:
+    - host: {{ awx_k8s_ingress_host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ awx_k8s_name }}-web
+                port:
+                  number: 80
+{% endif %}

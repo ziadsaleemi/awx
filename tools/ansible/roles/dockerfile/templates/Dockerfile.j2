@@ -135,6 +135,7 @@ RUN dnf -y update && dnf install -y 'dnf-command(config-manager)' && \
     glibc-langpack-en \
     krb5-workstation \
     nginx \
+    podman \
     postgresql \
     python3.12 \
     "python3.12-devel" \
@@ -199,9 +200,8 @@ COPY --from=builder /var/lib/awx /var/lib/awx
 
 RUN ln -s /var/lib/awx/venv/awx/bin/awx-manage /usr/bin/awx-manage
 
-{% if build_dev|bool %}
 COPY --from={{ receptor_image }} /usr/bin/receptor /usr/bin/receptor
-
+{% if build_dev|bool %}
 RUN openssl req -nodes -newkey rsa:2048 -keyout /etc/nginx/nginx.key -out /etc/nginx/nginx.csr \
         -subj "/C=US/ST=North Carolina/L=Durham/O=Ansible/OU=AWX Development/CN=awx.localhost" && \
     openssl x509 -req -days 365 -in /etc/nginx/nginx.csr -signkey /etc/nginx/nginx.key -out /etc/nginx/nginx.crt && \
@@ -209,7 +209,8 @@ RUN openssl req -nodes -newkey rsa:2048 -keyout /etc/nginx/nginx.key -out /etc/n
 {% endif %}
 
 {% if build_dev|bool %}
-RUN dnf install -y podman && rpm --restore shadow-utils 2>/dev/null
+RUN rpm --restore shadow-utils 2>/dev/null
+{% endif %}
 
 # chmod containers.conf and adjust storage.conf to enable Fuse storage.
 RUN sed -i -e 's|^#mount_program|mount_program|g' -e '/additionalimage.*/a "/var/lib/shared",' -e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' /etc/containers/storage.conf
@@ -219,7 +220,6 @@ ENV _CONTAINERS_USERNS_CONFIGURED=""
 # Ensure we must use fully qualified image names
 # This prevents podman prompt that hangs when trying to pull unqualified images
 RUN mkdir -p /etc/containers/registries.conf.d/ && echo "unqualified-search-registries = []" >> /etc/containers/registries.conf.d/force-fully-qualified-images.conf && chmod 644 /etc/containers/registries.conf.d/force-fully-qualified-images.conf
-{% endif %}
 
 ADD tools/ansible/roles/dockerfile/files/rsyslog.conf /var/lib/awx/rsyslog/rsyslog.conf
 ADD tools/ansible/roles/dockerfile/files/wait-for-migrations /usr/local/bin/wait-for-migrations

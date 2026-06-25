@@ -1,0 +1,6 @@
+---
+- name: Create vCenter AWX test lab VMs
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - awx_vcenter_lab

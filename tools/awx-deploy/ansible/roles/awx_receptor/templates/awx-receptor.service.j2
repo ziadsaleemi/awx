@@ -1,0 +1,15 @@
+[Unit]
+Description=AWX Receptor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=10
+ExecStartPre=-{{ awx_container_engine_cmd }} rm -f awx-receptor
+ExecStart={{ awx_container_engine_cmd }} run --rm --name awx-receptor --network host --hostname {{ inventory_hostname }} --user 1000:0 {% if awx_receptor_container_privileged | bool %}--privileged {% endif %}{{ awx_receptor_container_extra_args }} -e AWX_CLUSTER_HOST_ID={{ inventory_hostname }} -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,Z -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,Z -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,Z -v {{ awx_server_config_dir }}/receptor.conf:/etc/receptor/receptor.conf:ro,Z -v {{ awx_projects_dir }}:/var/lib/awx/projects:Z -v {{ awx_media_dir }}:/var/lib/awx/public/media:Z -v {{ awx_containers_storage_dir }}:/var/lib/awx/.local/share/containers:Z -v {{ awx_receptor_socket_dir }}:/var/run/awx-receptor:Z -v {{ awx_rsyslog_dir }}:/var/lib/awx/rsyslog:Z {{ awx_image }}:{{ awx_image_tag }} receptor --config /etc/receptor/receptor.conf
+ExecStop={{ awx_container_engine_cmd }} stop awx-receptor
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

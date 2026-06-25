@@ -1,0 +1,6 @@
+---
+- name: AWX deploy preflight
+  hosts: all
+  gather_facts: true
+  roles:
+    - awx_deploy_common

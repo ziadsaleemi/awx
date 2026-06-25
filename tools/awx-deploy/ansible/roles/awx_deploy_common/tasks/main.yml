@@ -1,0 +1,149 @@
+---
+- name: Validate deployment method
+  ansible.builtin.assert:
+    that:
+      - awx_deploy_method in ['server', 'k3s', 'k8s']
+      - awx_image | length > 0
+      - awx_image_tag | length > 0
+    fail_msg: "Set awx_deploy_method to server, k3s, or k8s and provide awx_image/awx_image_tag."
+
+- name: Resolve container engine command
+  ansible.builtin.set_fact:
+    awx_container_engine_cmd: "{{ 'docker' if awx_container_engine == 'docker' else 'podman' }}"
+
+- name: Validate server secrets
+  ansible.builtin.assert:
+    that:
+      - awx_admin_password | length > 0
+      - awx_postgres_password | length > 0
+    fail_msg: "Set AWX_ADMIN_PASSWORD and AWX_POSTGRES_PASSWORD through env, vault, or extra vars."
+  when: awx_deploy_method in ['server', 'k3s', 'k8s']
+  no_log: true
+
+- name: Create AWX server directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(awx_server_root_owner) }}"
+    group: "{{ item.group | default(awx_server_root_group) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - path: "{{ awx_server_base_dir }}"
+    - path: "{{ awx_server_config_dir }}"
+    - path: "{{ awx_server_config_dir }}/conf.d"
+    - path: "{{ awx_server_data_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_projects_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_media_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_containers_storage_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_receptor_socket_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_nginx_state_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+    - path: "{{ awx_rsyslog_dir }}"
+      owner: "{{ awx_server_runtime_owner }}"
+      group: "{{ awx_server_runtime_group }}"
+      mode: "0775"
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+
+- name: Check existing AWX secret key
+  ansible.builtin.stat:
+    path: "{{ awx_server_config_dir }}/SECRET_KEY"
+  register: awx_secret_key_stat
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+
+- name: Generate AWX secret key
+  ansible.builtin.command:
+    cmd: openssl rand -base64 32
+  register: awx_generated_secret_key
+  changed_when: false
+  when:
+    - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+    - not awx_secret_key_stat.stat.exists
+  no_log: true
+
+- name: Persist AWX secret key
+  ansible.builtin.copy:
+    dest: "{{ awx_server_config_dir }}/SECRET_KEY"
+    content: "{{ awx_generated_secret_key.stdout }}\n"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when:
+    - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+    - not awx_secret_key_stat.stat.exists
+  no_log: true
+
+- name: Check existing AWX system UUID
+  ansible.builtin.stat:
+    path: "{{ awx_server_config_dir }}/SYSTEM_UUID"
+  register: awx_system_uuid_stat
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+
+- name: Generate AWX system UUID
+  ansible.builtin.command:
+    cmd: python3 -c 'import uuid; print(uuid.uuid4())'
+  register: awx_generated_system_uuid
+  changed_when: false
+  when:
+    - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+    - not awx_system_uuid_stat.stat.exists
+
+- name: Persist AWX system UUID
+  ansible.builtin.copy:
+    dest: "{{ awx_server_config_dir }}/SYSTEM_UUID"
+    content: "{{ awx_generated_system_uuid.stdout }}\n"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when:
+    - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+    - not awx_system_uuid_stat.stat.exists
+
+- name: Render AWX settings
+  ansible.builtin.template:
+    src: settings.py.j2
+    dest: "{{ awx_server_config_dir }}/settings.py"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+  no_log: true
+
+- name: Render AWX nginx config
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ awx_server_config_dir }}/{{ item.dest }}"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  loop:
+    - src: nginx.conf.j2
+      dest: nginx.conf
+    - src: nginx.locations.conf.j2
+      dest: nginx.locations.conf
+  when: inventory_hostname in (groups.get('awx_web', []) | default([]))
+
+- name: Render receptor config
+  ansible.builtin.template:
+    src: receptor.conf.j2
+    dest: "{{ awx_server_config_dir }}/receptor.conf"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when: inventory_hostname in (groups.get('awx_receptor', []) | default([]))
