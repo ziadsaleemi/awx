@@ -978,25 +978,69 @@ def test_vmware_pull_resources_accepts_supported_credential_types(
     session.post.return_value = _FakeResponse({'value': 'session-token'})
     session.get.side_effect = [
         _FakeResponse({'value': [{'datacenter': 'dc-1', 'name': 'Datacenter'}]}),
-        _FakeResponse({'value': [{'cluster': 'cluster-1', 'name': 'Cluster', 'datacenter': 'dc-1', 'ha_enabled': True}]}),
+        _FakeResponse({'value': [{'cluster': 'cluster-1', 'name': 'Cluster', 'ha_enabled': True, 'drs_enabled': True}]}),
+        _FakeResponse({'value': [{'cluster': 'cluster-1', 'name': 'Cluster', 'ha_enabled': True, 'drs_enabled': True}]}),
         _FakeResponse(
             {
                 'value': [
                     {
                         'host': 'host-1',
                         'name': 'esxi-1',
-                        'cluster': 'cluster-1',
                         'power_state': 'POWERED_ON',
                         'connection_state': 'CONNECTED',
-                        'cpu_count': 16,
-                        'memory_size_MiB': 65536,
                     }
                 ]
             }
         ),
-        _FakeResponse({'value': [{'vm': 'vm-1', 'name': 'web-1', 'power_state': 'POWERED_ON', 'host': 'host-1'}]}),
+        _FakeResponse(
+            {
+                'value': [
+                    {
+                        'host': 'host-1',
+                        'name': 'esxi-1',
+                        'power_state': 'POWERED_ON',
+                        'connection_state': 'CONNECTED',
+                    }
+                ]
+            }
+        ),
+        _FakeResponse({'value': [{'vm': 'vm-1', 'name': 'web-1', 'power_state': 'POWERED_ON', 'cpu_count': 2, 'memory_size_MiB': 4096}]}),
+        _FakeResponse({'value': [{'vm': 'vm-1', 'name': 'web-1', 'power_state': 'POWERED_ON', 'cpu_count': 2, 'memory_size_MiB': 4096}]}),
+        _FakeResponse(
+            {
+                'value': {
+                    'guest_OS': 'UBUNTU_64',
+                    'cpu': {'count': 4, 'cores_per_socket': 2, 'hot_add_enabled': True},
+                    'memory': {'size_MiB': 8192, 'hot_add_enabled': True},
+                    'hardware': {'version': 'VMX_19'},
+                    'identity': {'instance_uuid': 'instance-uuid', 'bios_uuid': 'bios-uuid'},
+                    'disks': [
+                        {
+                            'value': {
+                                'capacity': 10737418240,
+                                'backing': {'vmdk_file': '[datastore1] web-1/web-1.vmdk'},
+                            }
+                        }
+                    ],
+                    'nics': [{'value': {'label': 'Network adapter 1'}}],
+                    'cdroms': [],
+                }
+            }
+        ),
+        _FakeResponse(
+            {
+                'value': {
+                    'full_name': {'default_message': 'Ubuntu Linux (64-bit)'},
+                    'name': 'UBUNTU_64',
+                    'host_name': 'web-1.example.test',
+                    'ip_address': '192.0.2.10',
+                }
+            }
+        ),
         _FakeResponse({'value': [{'network': 'network-1', 'name': 'VM Network', 'type': 'STANDARD_PORTGROUP'}]}),
-        _FakeResponse({'value': [{'datastore': 'datastore-1', 'name': 'datastore1', 'type': 'VMFS', 'capacity': 1024, 'free_space': 512}]}),
+        _FakeResponse({'value': [{'network': 'network-1', 'name': 'VM Network', 'type': 'STANDARD_PORTGROUP'}]}),
+        _FakeResponse({'value': [{'datastore': 'datastore-1', 'name': 'datastore1', 'type': 'VMFS', 'capacity': 1073741824, 'free_space': 536870912}]}),
+        _FakeResponse({'value': [{'datastore': 'datastore-1', 'name': 'datastore1', 'type': 'VMFS', 'capacity': 1073741824, 'free_space': 536870912}]}),
     ]
     mocker.patch('awx.api.views.requests.Session', return_value=session)
 
@@ -1019,7 +1063,18 @@ def test_vmware_pull_resources_accepts_supported_credential_types(
 
     state = CloudProviderState.objects.get(provider_id='vmware', organization=organization)
     assert state.provider_data[str(connection.pk)]['hosts'][0]['name'] == 'esxi-1'
-    assert state.provider_data[str(connection.pk)]['vms'][0]['name'] == 'web-1'
+    assert state.provider_data[str(connection.pk)]['hosts'][0]['cluster_id'] == 'cluster-1'
+    assert state.provider_data[str(connection.pk)]['hosts'][0]['vm_count'] == 1
+    vm = state.provider_data[str(connection.pk)]['vms'][0]
+    assert vm['name'] == 'web-1'
+    assert vm['host_id'] == 'host-1'
+    assert vm['cluster_id'] == 'cluster-1'
+    assert vm['guest_full_name'] == 'Ubuntu Linux (64-bit)'
+    assert vm['ip_address'] == '192.0.2.10'
+    assert vm['disk_capacity_bytes'] == 10737418240
+    assert vm['datastore_names'] == ['datastore1']
+    assert state.provider_data[str(connection.pk)]['datastores'][0]['capacity_mb'] == 1024
+    assert state.provider_data[str(connection.pk)]['datacenters'][0]['cluster_count'] == 1
 
 
 @pytest.mark.django_db

@@ -171,6 +171,14 @@ export interface ProxmoxAdminSettings {
 
 /** Admin-configurable allow-list for VMware vSphere resources shown to end users. */
 export interface VmwareAdminSettings {
+  /** null = all datacenters allowed; array = explicit allowlist by datacenter id */
+  allowedDatacenterIds: string[] | null;
+  /** null = all clusters allowed; array = explicit allowlist by cluster id */
+  allowedClusterIds: string[] | null;
+  /** null = all hosts allowed; array = explicit allowlist by host id */
+  allowedHostIds: string[] | null;
+  /** null = all VMs allowed; array = explicit allowlist by VM id */
+  allowedVMIds: string[] | null;
   /** null = all networks allowed; array = explicit allowlist by network name */
   allowedNetworkNames: string[] | null;
   /** null = all datastores allowed; array = explicit allowlist by datastore name */
@@ -200,6 +208,10 @@ export interface AzureAdminSettings {
 export interface VmwareDatacenter {
   id: string;
   name: string;
+  cluster_count?: number;
+  host_count?: number;
+  datastore_count?: number;
+  network_count?: number;
 }
 
 export interface VmwareCluster {
@@ -219,6 +231,7 @@ export interface VmwareHost {
   connection_state: string;
   cpu_count?: number;
   memory_size_mib?: number;
+  vm_count?: number;
 }
 
 export interface VmwareVM {
@@ -226,14 +239,31 @@ export interface VmwareVM {
   name: string;
   power_state: string;
   host_id?: string;
+  cluster_id?: string;
   memory_size_mib: number;
   cpu_count: number;
+  guest_os?: string;
+  guest_full_name?: string;
+  guest_hostname?: string;
+  ip_address?: string;
+  instance_uuid?: string;
+  bios_uuid?: string;
+  hardware_version?: string;
+  cpu_cores_per_socket?: number;
+  cpu_hot_add_enabled?: boolean;
+  memory_hot_add_enabled?: boolean;
+  disk_count?: number;
+  disk_capacity_bytes?: number;
+  datastore_names?: string[];
+  nics_count?: number;
+  cdrom_count?: number;
 }
 
 export interface VmwareNetwork {
   id: string;
   name: string;
   type: string;
+  datacenter_id?: string;
 }
 
 export interface VmwareDatastore {
@@ -243,6 +273,7 @@ export interface VmwareDatastore {
   capacity_mb: number;
   free_space_mb: number;
   accessible: boolean;
+  datacenter_id?: string;
 }
 
 export interface VmwareProviderData {

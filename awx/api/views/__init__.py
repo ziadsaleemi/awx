@@ -7102,77 +7102,211 @@ class CatalogVmwarePullResources(GenericAPIView):
                 raise ParseError(_('vCenter API error (%(status)s): %(detail)s') % {'status': resp.status_code, 'detail': detail})
             return resp.json().get('value', []) or []
 
+        def _get_optional(path, default):
+            try:
+                return _get(path)
+            except ParseError:
+                return default
+
+        def _bytes_to_mib(value):
+            try:
+                return int(int(value or 0) / 1024 / 1024)
+            except (TypeError, ValueError):
+                return 0
+
+        def _detail_values(value):
+            if isinstance(value, list):
+                return [item.get('value', item) if isinstance(item, dict) else item for item in value]
+            if isinstance(value, dict):
+                return list(value.values())
+            return []
+
+        def _message_text(value):
+            if isinstance(value, dict):
+                return value.get('default_message') or value.get('id') or ''
+            return value or ''
+
+        def _datastore_names_from_disks(disks):
+            names = []
+            for disk in disks:
+                if not isinstance(disk, dict):
+                    continue
+                backing = disk.get('backing') if isinstance(disk.get('backing'), dict) else {}
+                vmdk_file = backing.get('vmdk_file') or ''
+                match = re.match(r'^\[([^\]]+)\]', vmdk_file)
+                if match and match.group(1) not in names:
+                    names.append(match.group(1))
+            return names
+
         try:
             # ── Datacenters ──────────────────────────────────────────────────
             raw_dcs = _get('/vcenter/datacenter')
-            datacenters = [{'id': dc.get('datacenter', ''), 'name': dc.get('name', '')} for dc in raw_dcs]
+            datacenter_ids = [dc.get('datacenter', '') for dc in raw_dcs if dc.get('datacenter')]
 
             # ── Clusters ────────────────────────────────────────────────────
             raw_clusters = _get('/vcenter/cluster')
+            datacenter_by_cluster = {}
+            clusters_by_datacenter = {}
+            for dc_id in datacenter_ids:
+                filtered_clusters = _get_optional(f'/vcenter/cluster?filter.datacenters={dc_id}', [])
+                for cluster in filtered_clusters:
+                    cluster_id = cluster.get('cluster', '')
+                    if cluster_id:
+                        datacenter_by_cluster[cluster_id] = dc_id
+                        clusters_by_datacenter.setdefault(dc_id, set()).add(cluster_id)
+
+            hosts_by_cluster = {}
+            cluster_by_host = {}
+            for cluster in raw_clusters:
+                cluster_id = cluster.get('cluster', '')
+                if not cluster_id:
+                    continue
+                filtered_hosts = _get_optional(f'/vcenter/host?filter.clusters={cluster_id}', [])
+                for host in filtered_hosts:
+                    host_id = host.get('host', '')
+                    if host_id:
+                        cluster_by_host[host_id] = cluster_id
+                        hosts_by_cluster.setdefault(cluster_id, set()).add(host_id)
+
             clusters = [
                 {
                     'id': c.get('cluster', ''),
                     'name': c.get('name', ''),
-                    'datacenter_id': c.get('datacenter', ''),
+                    'datacenter_id': datacenter_by_cluster.get(c.get('cluster', ''), c.get('datacenter', '')),
                     'ha_enabled': bool(c.get('ha_enabled', False)),
                     'drs_enabled': bool(c.get('drs_enabled', False)),
-                    'host_count': c.get('host_count', 0),
+                    'host_count': len(hosts_by_cluster.get(c.get('cluster', ''), [])) or c.get('host_count', 0),
                 }
                 for c in raw_clusters
             ]
 
             # ── Hosts ────────────────────────────────────────────────────────
             raw_hosts = _get('/vcenter/host')
+            vm_by_host = {}
+            host_by_vm = {}
+            for host in raw_hosts:
+                host_id = host.get('host', '')
+                if not host_id:
+                    continue
+                filtered_vms = _get_optional(f'/vcenter/vm?filter.hosts={host_id}', [])
+                for vm in filtered_vms:
+                    vm_id = vm.get('vm', '')
+                    if vm_id:
+                        host_by_vm[vm_id] = host_id
+                        vm_by_host.setdefault(host_id, set()).add(vm_id)
+
             hosts = [
                 {
                     'id': h.get('host', ''),
                     'name': h.get('name', ''),
-                    'cluster_id': h.get('cluster', ''),
+                    'cluster_id': cluster_by_host.get(h.get('host', ''), h.get('cluster', '')),
                     'power_state': h.get('power_state', ''),
                     'connection_state': h.get('connection_state', ''),
                     'cpu_count': h.get('cpu_count', 0),
                     'memory_size_mib': h.get('memory_size_MiB', 0),
+                    'vm_count': len(vm_by_host.get(h.get('host', ''), [])),
                 }
                 for h in raw_hosts
             ]
 
             # ── VMs ──────────────────────────────────────────────────────────
             raw_vms = _get('/vcenter/vm')
-            vms = [
-                {
-                    'id': vm.get('vm', ''),
-                    'name': vm.get('name', ''),
-                    'power_state': vm.get('power_state', ''),
-                    'host_id': vm.get('host', ''),
-                    'memory_size_mib': vm.get('memory_size_MiB', 0),
-                    'cpu_count': vm.get('cpu_count', 0),
-                }
-                for vm in raw_vms
-            ]
+            vms = []
+            for vm in raw_vms:
+                vm_id = vm.get('vm', '')
+                host_id = host_by_vm.get(vm_id, vm.get('host', ''))
+                detail = _get_optional(f'/vcenter/vm/{vm_id}', {}) if vm_id else {}
+                guest_identity = _get_optional(f'/vcenter/vm/{vm_id}/guest/identity', {}) if vm_id else {}
+                cpu = detail.get('cpu') if isinstance(detail.get('cpu'), dict) else {}
+                memory = detail.get('memory') if isinstance(detail.get('memory'), dict) else {}
+                hardware = detail.get('hardware') if isinstance(detail.get('hardware'), dict) else {}
+                identity = detail.get('identity') if isinstance(detail.get('identity'), dict) else {}
+                disks = _detail_values(detail.get('disks'))
+                nics = _detail_values(detail.get('nics'))
+                cdroms = _detail_values(detail.get('cdroms'))
+
+                vms.append(
+                    {
+                        'id': vm.get('vm', ''),
+                        'name': vm.get('name', ''),
+                        'power_state': vm.get('power_state', ''),
+                        'host_id': host_id,
+                        'cluster_id': cluster_by_host.get(host_id, ''),
+                        'memory_size_mib': memory.get('size_MiB') or vm.get('memory_size_MiB', 0),
+                        'cpu_count': cpu.get('count') or vm.get('cpu_count', 0),
+                        'guest_os': detail.get('guest_OS') or guest_identity.get('name', ''),
+                        'guest_full_name': _message_text(guest_identity.get('full_name')),
+                        'guest_hostname': guest_identity.get('host_name', ''),
+                        'ip_address': guest_identity.get('ip_address', ''),
+                        'instance_uuid': identity.get('instance_uuid', ''),
+                        'bios_uuid': identity.get('bios_uuid', ''),
+                        'hardware_version': hardware.get('version', ''),
+                        'cpu_cores_per_socket': cpu.get('cores_per_socket'),
+                        'cpu_hot_add_enabled': cpu.get('hot_add_enabled'),
+                        'memory_hot_add_enabled': memory.get('hot_add_enabled'),
+                        'disk_count': len(disks),
+                        'disk_capacity_bytes': sum(int(disk.get('capacity') or 0) for disk in disks if isinstance(disk, dict)),
+                        'datastore_names': _datastore_names_from_disks(disks),
+                        'nics_count': len(nics),
+                        'cdrom_count': len(cdroms),
+                    }
+                )
 
             # ── Networks ─────────────────────────────────────────────────────
             raw_networks = _get('/vcenter/network')
+            datacenter_by_network = {}
+            networks_by_datacenter = {}
+            for dc_id in datacenter_ids:
+                filtered_networks = _get_optional(f'/vcenter/network?filter.datacenters={dc_id}', [])
+                for network in filtered_networks:
+                    network_id = network.get('network', '')
+                    if network_id:
+                        datacenter_by_network[network_id] = dc_id
+                        networks_by_datacenter.setdefault(dc_id, set()).add(network_id)
             networks = [
                 {
                     'id': n.get('network', ''),
                     'name': n.get('name', ''),
                     'type': n.get('type', ''),
+                    'datacenter_id': datacenter_by_network.get(n.get('network', ''), n.get('datacenter', '')),
                 }
                 for n in raw_networks
             ]
 
             # ── Datastores ───────────────────────────────────────────────────
             raw_datastores = _get('/vcenter/datastore')
+            datacenter_by_datastore = {}
+            datastores_by_datacenter = {}
+            for dc_id in datacenter_ids:
+                filtered_datastores = _get_optional(f'/vcenter/datastore?filter.datacenters={dc_id}', [])
+                for datastore in filtered_datastores:
+                    datastore_id = datastore.get('datastore', '')
+                    if datastore_id:
+                        datacenter_by_datastore[datastore_id] = dc_id
+                        datastores_by_datacenter.setdefault(dc_id, set()).add(datastore_id)
             datastores = [
                 {
                     'id': ds.get('datastore', ''),
                     'name': ds.get('name', ''),
                     'type': ds.get('type', ''),
-                    'capacity_mb': ds.get('capacity', 0),
-                    'free_space_mb': ds.get('free_space', 0),
+                    'capacity_mb': _bytes_to_mib(ds.get('capacity', 0)),
+                    'free_space_mb': _bytes_to_mib(ds.get('free_space', 0)),
                     'accessible': bool(ds.get('accessible', True)),
+                    'datacenter_id': datacenter_by_datastore.get(ds.get('datastore', ''), ds.get('datacenter', '')),
                 }
                 for ds in raw_datastores
+            ]
+
+            datacenters = [
+                {
+                    'id': dc.get('datacenter', ''),
+                    'name': dc.get('name', ''),
+                    'cluster_count': len(clusters_by_datacenter.get(dc.get('datacenter', ''), [])),
+                    'host_count': sum(len(hosts_by_cluster.get(cluster_id, [])) for cluster_id in clusters_by_datacenter.get(dc.get('datacenter', ''), [])),
+                    'datastore_count': len(datastores_by_datacenter.get(dc.get('datacenter', ''), [])),
+                    'network_count': len(networks_by_datacenter.get(dc.get('datacenter', ''), [])),
+                }
+                for dc in raw_dcs
             ]
 
         finally:

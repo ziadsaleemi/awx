@@ -15,6 +15,7 @@ import {
   GridItem,
   Label,
   PageSection,
+  Switch,
   Title,
   ToggleGroup,
   ToggleGroupItem,
@@ -74,6 +75,20 @@ function fmtMiB(mib: number): string {
   return `${mib} MiB`;
 }
 
+function fmtBytes(bytes: number | undefined): string {
+  const value = bytes ?? 0;
+  if (!value) return '0 B';
+  if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(1)} TiB`;
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GiB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${value} B`;
+}
+
+function isAllowed(allowList: string[] | null | undefined, key: string): boolean {
+  return allowList === null || allowList === undefined || allowList.includes(key);
+}
+
 // ─── styled ──────────────────────────────────────────────────────────────────
 
 const DarkCard = styled(Card)`
@@ -84,8 +99,41 @@ const DarkCard = styled(Card)`
 
 // ─── sub-tabs ────────────────────────────────────────────────────────────────
 
-function VMsTab(props: { vms: VmwareVM[] }) {
+function VMsTab(props: {
+  vms: VmwareVM[];
+  adminSettings?: VmwareAdminSettings | null;
+  onBulkToggle?: (ids: string[], allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { vms, adminSettings, onBulkToggle } = props;
+  const allowedIds = adminSettings?.allowedVMIds ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareVM>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareVM[]) =>
+          onBulkToggle(
+            items.map((vm) => vm.id),
+            true
+          ),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareVM[]) =>
+          onBulkToggle(
+            items.map((vm) => vm.id),
+            false
+          ),
+      },
+    ];
+  }, [onBulkToggle, t]);
+
   const tableColumns = useMemo<ITableColumn<VmwareVM>[]>(
     () => [
       {
@@ -119,6 +167,39 @@ function VMsTab(props: { vms: VmwareVM[] }) {
         cell: (vm) => <TextCell text={fmtMiB(vm.memory_size_mib)} />,
       },
       {
+        header: t('Guest OS'),
+        cell: (vm) => <TextCell text={vm.guest_full_name || vm.guest_os || '-'} />,
+      },
+      {
+        header: t('IP Address'),
+        cell: (vm) => <TextCell text={vm.ip_address || '-'} />,
+      },
+      {
+        header: t('Disk'),
+        cell: (vm) => <TextCell text={fmtBytes(vm.disk_capacity_bytes)} />,
+      },
+      ...(onBulkToggle
+        ? [
+            {
+              header: t('Allowed'),
+              cell: (vm: VmwareVM) => (
+                <Switch
+                  id={`vmware-vm-allowed-${vm.id}`}
+                  isChecked={isAllowed(allowedIds, vm.id)}
+                  onChange={(_evt, checked) => onBulkToggle([vm.id], checked)}
+                  aria-label={vm.name}
+                />
+              ),
+            },
+          ]
+        : []),
+      {
+        header: t('Guest hostname'),
+        type: 'text',
+        value: (vm) => vm.guest_hostname || undefined,
+        table: 'expanded',
+      },
+      {
         header: t('ID'),
         type: 'text',
         value: (vm) => vm.id,
@@ -130,13 +211,50 @@ function VMsTab(props: { vms: VmwareVM[] }) {
         value: (vm) => vm.host_id || undefined,
         table: 'expanded',
       },
+      {
+        header: t('Cluster ID'),
+        type: 'text',
+        value: (vm) => vm.cluster_id || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Hardware'),
+        type: 'text',
+        value: (vm) => vm.hardware_version || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Datastores'),
+        type: 'text',
+        value: (vm) => vm.datastore_names?.join(', ') || undefined,
+        table: 'expanded',
+      },
+      {
+        header: t('Devices'),
+        type: 'text',
+        value: (vm) =>
+          `${vm.disk_count ?? 0} disk(s), ${vm.nics_count ?? 0} NIC(s), ${vm.cdrom_count ?? 0} CD-ROM(s)`,
+        table: 'expanded',
+      },
+      {
+        header: t('UUIDs'),
+        type: 'text',
+        value: (vm) =>
+          [
+            vm.instance_uuid ? `instance=${vm.instance_uuid}` : '',
+            vm.bios_uuid ? `bios=${vm.bios_uuid}` : '',
+          ]
+            .filter(Boolean)
+            .join(', ') || undefined,
+        table: 'expanded',
+      },
     ],
-    [t]
+    [allowedIds, onBulkToggle, t]
   );
 
   const view = useInMemoryView<VmwareVM>({
     keyFn: (vm) => vm.id,
-    items: props.vms,
+    items: vms,
     tableColumns,
   });
 
@@ -144,6 +262,7 @@ function VMsTab(props: { vms: VmwareVM[] }) {
     <PageTable<VmwareVM>
       id="vmware-vms-table"
       tableColumns={tableColumns}
+      toolbarActions={toolbarActions}
       errorStateTitle={t('Error loading virtual machines')}
       emptyStateTitle={t('No virtual machines found')}
       emptyStateDescription={t('Pull data from vCenter to discover virtual machines.')}
@@ -154,8 +273,41 @@ function VMsTab(props: { vms: VmwareVM[] }) {
   );
 }
 
-function HostsTab(props: { hosts: VmwareHost[] }) {
+function HostsTab(props: {
+  hosts: VmwareHost[];
+  adminSettings?: VmwareAdminSettings | null;
+  onBulkToggle?: (ids: string[], allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { hosts, adminSettings, onBulkToggle } = props;
+  const allowedIds = adminSettings?.allowedHostIds ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareHost>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareHost[]) =>
+          onBulkToggle(
+            items.map((host) => host.id),
+            true
+          ),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareHost[]) =>
+          onBulkToggle(
+            items.map((host) => host.id),
+            false
+          ),
+      },
+    ];
+  }, [onBulkToggle, t]);
+
   const tableColumns = useMemo<ITableColumn<VmwareHost>[]>(
     () => [
       {
@@ -203,6 +355,25 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
         ),
       },
       {
+        header: t('VMs'),
+        cell: (h) => <TextCell text={String(h.vm_count ?? 0)} />,
+      },
+      ...(onBulkToggle
+        ? [
+            {
+              header: t('Allowed'),
+              cell: (h: VmwareHost) => (
+                <Switch
+                  id={`vmware-host-allowed-${h.id}`}
+                  isChecked={isAllowed(allowedIds, h.id)}
+                  onChange={(_evt, checked) => onBulkToggle([h.id], checked)}
+                  aria-label={h.name}
+                />
+              ),
+            },
+          ]
+        : []),
+      {
         header: t('ID'),
         type: 'text',
         value: (h) => h.id,
@@ -215,12 +386,12 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
         table: 'expanded',
       },
     ],
-    [t]
+    [allowedIds, onBulkToggle, t]
   );
 
   const view = useInMemoryView<VmwareHost>({
     keyFn: (h) => h.id,
-    items: props.hosts,
+    items: hosts,
     tableColumns,
   });
 
@@ -228,6 +399,7 @@ function HostsTab(props: { hosts: VmwareHost[] }) {
     <PageTable<VmwareHost>
       id="vmware-hosts-table"
       tableColumns={tableColumns}
+      toolbarActions={toolbarActions}
       errorStateTitle={t('Error loading hosts')}
       emptyStateTitle={t('No hosts found')}
       emptyStateDescription={t('Pull data from vCenter to discover ESXi hosts.')}
@@ -309,18 +481,24 @@ function DatastoresTab(props: {
       ...(onBulkToggle
         ? [
             {
-              header: t('Catalog'),
-              cell: (ds: VmwareDatastore) => {
-                const isAllowed = allowedNames === null || allowedNames.includes(ds.name);
-                return (
-                  <Label color={isAllowed ? 'green' : 'red'}>
-                    {isAllowed ? t('Allowed') : t('Denied')}
-                  </Label>
-                );
-              },
+              header: t('Allowed'),
+              cell: (ds: VmwareDatastore) => (
+                <Switch
+                  id={`vmware-datastore-allowed-${ds.id}`}
+                  isChecked={isAllowed(allowedNames, ds.name)}
+                  onChange={(_evt, checked) => onBulkToggle([ds.name], checked)}
+                  aria-label={ds.name}
+                />
+              ),
             },
           ]
         : []),
+      {
+        header: t('Datacenter ID'),
+        type: 'text',
+        value: (ds) => ds.datacenter_id || undefined,
+        table: 'expanded',
+      },
       {
         header: t('Datastore ID'),
         type: 'text',
@@ -421,18 +599,24 @@ function NetworksTab(props: {
       ...(onBulkToggle
         ? [
             {
-              header: t('Catalog'),
-              cell: (n: VmwareNetwork) => {
-                const isAllowed = allowedNames === null || allowedNames.includes(n.name);
-                return (
-                  <Label color={isAllowed ? 'green' : 'red'}>
-                    {isAllowed ? t('Allowed') : t('Denied')}
-                  </Label>
-                );
-              },
+              header: t('Allowed'),
+              cell: (n: VmwareNetwork) => (
+                <Switch
+                  id={`vmware-network-allowed-${n.id}`}
+                  isChecked={isAllowed(allowedNames, n.name)}
+                  onChange={(_evt, checked) => onBulkToggle([n.name], checked)}
+                  aria-label={n.name}
+                />
+              ),
             },
           ]
         : []),
+      {
+        header: t('Datacenter ID'),
+        type: 'text',
+        value: (n) => n.datacenter_id || undefined,
+        table: 'expanded',
+      },
       {
         header: t('ID'),
         type: 'text',
@@ -479,8 +663,158 @@ function NetworksTab(props: {
   );
 }
 
-function DatacentersTab(props: { datacenters: VmwareDatacenter[]; clusters: VmwareCluster[] }) {
+function ClustersTab(props: {
+  clusters: VmwareCluster[];
+  adminSettings?: VmwareAdminSettings | null;
+  onBulkToggle?: (ids: string[], allowed: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const { clusters, adminSettings, onBulkToggle } = props;
+  const allowedIds = adminSettings?.allowedClusterIds ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareCluster>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareCluster[]) =>
+          onBulkToggle(
+            items.map((cluster) => cluster.id),
+            true
+          ),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareCluster[]) =>
+          onBulkToggle(
+            items.map((cluster) => cluster.id),
+            false
+          ),
+      },
+    ];
+  }, [onBulkToggle, t]);
+
+  const tableColumns = useMemo<ITableColumn<VmwareCluster>[]>(
+    () => [
+      {
+        header: t('Name'),
+        cell: (cluster) => <TextCell text={cluster.name} />,
+        sort: 'name',
+      },
+      {
+        header: t('Hosts'),
+        cell: (cluster) => <TextCell text={String(cluster.host_count ?? 0)} />,
+      },
+      {
+        header: t('HA'),
+        cell: (cluster) =>
+          cluster.ha_enabled ? (
+            <Label color="green">{t('Enabled')}</Label>
+          ) : (
+            <Label color="grey">{t('Disabled')}</Label>
+          ),
+      },
+      {
+        header: t('DRS'),
+        cell: (cluster) =>
+          cluster.drs_enabled ? (
+            <Label color="green">{t('Enabled')}</Label>
+          ) : (
+            <Label color="grey">{t('Disabled')}</Label>
+          ),
+      },
+      ...(onBulkToggle
+        ? [
+            {
+              header: t('Allowed'),
+              cell: (cluster: VmwareCluster) => (
+                <Switch
+                  id={`vmware-cluster-allowed-${cluster.id}`}
+                  isChecked={isAllowed(allowedIds, cluster.id)}
+                  onChange={(_evt, checked) => onBulkToggle([cluster.id], checked)}
+                  aria-label={cluster.name}
+                />
+              ),
+            },
+          ]
+        : []),
+      {
+        header: t('ID'),
+        type: 'text',
+        value: (cluster) => cluster.id,
+        table: 'expanded',
+      },
+      {
+        header: t('Datacenter ID'),
+        type: 'text',
+        value: (cluster) => cluster.datacenter_id || undefined,
+        table: 'expanded',
+      },
+    ],
+    [allowedIds, onBulkToggle, t]
+  );
+
+  const view = useInMemoryView<VmwareCluster>({
+    keyFn: (cluster) => cluster.id,
+    items: clusters,
+    tableColumns,
+  });
+
+  return (
+    <PageTable<VmwareCluster>
+      id="vmware-clusters-table"
+      tableColumns={tableColumns}
+      toolbarActions={toolbarActions}
+      errorStateTitle={t('Error loading clusters')}
+      emptyStateTitle={t('No clusters found')}
+      emptyStateDescription={t('Pull data from vCenter to discover clusters.')}
+      disableListView
+      disableCardView
+      {...view}
+    />
+  );
+}
+
+function DatacentersTab(props: {
+  datacenters: VmwareDatacenter[];
+  clusters: VmwareCluster[];
+  adminSettings?: VmwareAdminSettings | null;
+  onBulkToggle?: (ids: string[], allowed: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const { datacenters, adminSettings, onBulkToggle } = props;
+  const allowedIds = adminSettings?.allowedDatacenterIds ?? null;
+
+  const toolbarActions = useMemo<IPageAction<VmwareDatacenter>[]>(() => {
+    if (!onBulkToggle) return [];
+    return [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Allow selected'),
+        onClick: (items: VmwareDatacenter[]) =>
+          onBulkToggle(
+            items.map((dc) => dc.id),
+            true
+          ),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Multiple,
+        label: t('Deny selected'),
+        onClick: (items: VmwareDatacenter[]) =>
+          onBulkToggle(
+            items.map((dc) => dc.id),
+            false
+          ),
+      },
+    ];
+  }, [onBulkToggle, t]);
+
   const tableColumns = useMemo<ITableColumn<VmwareDatacenter>[]>(
     () => [
       {
@@ -496,18 +830,45 @@ function DatacentersTab(props: { datacenters: VmwareDatacenter[]; clusters: Vmwa
         },
       },
       {
+        header: t('Hosts'),
+        cell: (dc) => <TextCell text={String(dc.host_count ?? 0)} />,
+      },
+      {
+        header: t('Datastores'),
+        cell: (dc) => <TextCell text={String(dc.datastore_count ?? 0)} />,
+      },
+      {
+        header: t('Networks'),
+        cell: (dc) => <TextCell text={String(dc.network_count ?? 0)} />,
+      },
+      ...(onBulkToggle
+        ? [
+            {
+              header: t('Allowed'),
+              cell: (dc: VmwareDatacenter) => (
+                <Switch
+                  id={`vmware-datacenter-allowed-${dc.id}`}
+                  isChecked={isAllowed(allowedIds, dc.id)}
+                  onChange={(_evt, checked) => onBulkToggle([dc.id], checked)}
+                  aria-label={dc.name}
+                />
+              ),
+            },
+          ]
+        : []),
+      {
         header: t('ID'),
         type: 'text',
         value: (dc) => dc.id,
         table: 'expanded',
       },
     ],
-    [t, props.clusters]
+    [allowedIds, onBulkToggle, props.clusters, t]
   );
 
   const view = useInMemoryView<VmwareDatacenter>({
     keyFn: (dc) => dc.id,
-    items: props.datacenters,
+    items: datacenters,
     tableColumns,
   });
 
@@ -515,6 +876,7 @@ function DatacentersTab(props: { datacenters: VmwareDatacenter[]; clusters: Vmwa
     <PageTable<VmwareDatacenter>
       id="vmware-datacenters-table"
       tableColumns={tableColumns}
+      toolbarActions={toolbarActions}
       errorStateTitle={t('Error loading datacenters')}
       emptyStateTitle={t('No datacenters found')}
       emptyStateDescription={t('Pull data from vCenter to discover datacenters.')}
@@ -724,6 +1086,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function completeVmwareAdminSettings(
+  settings: VmwareAdminSettings | null | undefined
+): VmwareAdminSettings {
+  return {
+    allowedDatacenterIds: settings?.allowedDatacenterIds ?? null,
+    allowedClusterIds: settings?.allowedClusterIds ?? null,
+    allowedHostIds: settings?.allowedHostIds ?? null,
+    allowedVMIds: settings?.allowedVMIds ?? null,
+    allowedNetworkNames: settings?.allowedNetworkNames ?? null,
+    allowedDatastoreNames: settings?.allowedDatastoreNames ?? null,
+  };
+}
+
+function nextAllowList(
+  current: string[] | null,
+  allKeys: string[],
+  changedKeys: string[],
+  allowed: boolean
+): string[] | null {
+  if (allowed) {
+    if (current === null) return null;
+    return [...new Set([...current, ...changedKeys])];
+  }
+
+  const deny = new Set(changedKeys);
+  return current === null
+    ? allKeys.filter((key) => !deny.has(key))
+    : current.filter((key) => !deny.has(key));
+}
+
+function resolveVmwareSettingsOrgId(
+  entries: CloudConnectionEntry[],
+  selectedConnectorId: string,
+  fallbackOrgId: number | null | undefined
+): number | null {
+  if (selectedConnectorId !== 'all') {
+    const selected = entries.find((entry) => entry.id === selectedConnectorId);
+    if (selected) return selected.organizationId ?? null;
+  }
+
+  const orgIds = [...new Set(entries.map((entry) => entry.organizationId ?? null))];
+  if (orgIds.length === 1) return orgIds[0];
+  return fallbackOrgId ?? null;
+}
+
+type VmwareAllowListField =
+  | 'allowedDatacenterIds'
+  | 'allowedClusterIds'
+  | 'allowedHostIds'
+  | 'allowedVMIds'
+  | 'allowedNetworkNames'
+  | 'allowedDatastoreNames';
+
 // ─── overview tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab(props: {
@@ -851,6 +1266,13 @@ export function VmwareProviderSettings() {
       orgKeys.add(
         organizationId === null || organizationId === undefined ? 'global' : String(organizationId)
       );
+      const settingsOrgId = resolveVmwareSettingsOrgId(
+        entries,
+        selectedConnectorId,
+        organizationId
+      );
+      const settingsOrgKey =
+        settingsOrgId === null || settingsOrgId === undefined ? 'global' : String(settingsOrgId);
       for (const entry of entries) {
         orgKeys.add(
           entry.organizationId === null || entry.organizationId === undefined
@@ -861,6 +1283,7 @@ export function VmwareProviderSettings() {
 
       const mergedProviderData: Record<string, unknown> = {};
       let nextAdminSettings: VmwareAdminSettings | null = null;
+      let fallbackAdminSettings: VmwareAdminSettings | null = null;
 
       for (const orgKey of orgKeys) {
         const orgId = orgKey === 'global' ? null : Number(orgKey);
@@ -868,15 +1291,25 @@ export function VmwareProviderSettings() {
         if (isRecord(state?.provider_data)) {
           Object.assign(mergedProviderData, state.provider_data);
         }
-        if (nextAdminSettings === null && state?.admin_settings) {
-          nextAdminSettings = state.admin_settings as VmwareAdminSettings;
+        if (state?.admin_settings) {
+          const normalizedSettings = completeVmwareAdminSettings(
+            state.admin_settings as VmwareAdminSettings
+          );
+          if (orgKey === settingsOrgKey) {
+            nextAdminSettings = normalizedSettings;
+          }
+          if (fallbackAdminSettings === null) {
+            fallbackAdminSettings = normalizedSettings;
+          }
         }
       }
 
       setRawProviderData(Object.keys(mergedProviderData).length > 0 ? mergedProviderData : null);
-      setAdminSettings(nextAdminSettings);
+      setAdminSettings(
+        nextAdminSettings ?? fallbackAdminSettings ?? completeVmwareAdminSettings(null)
+      );
     },
-    [organizationId]
+    [organizationId, selectedConnectorId]
   );
 
   const loadData = useCallback(() => {
@@ -965,55 +1398,93 @@ export function VmwareProviderSettings() {
     );
   }, [selectedConnectorId, allData, connectionDataMap]);
 
-  // Admin bulk toggle handlers
-  const onBulkToggleNetwork = useCallback(
-    async (names: string[], allowed: boolean) => {
-      const current = adminSettings?.allowedNetworkNames ?? null;
-      let next: string[] | null;
-      if (allowed) {
-        if (current === null) return; // already all-allowed
-        const set = new Set([...current, ...names]);
-        next = [...set];
-      } else {
-        const deny = new Set(names);
-        next =
-          current === null
-            ? allData.networks.map((n) => n.name).filter((n) => !deny.has(n))
-            : current.filter((n) => !deny.has(n));
-      }
-      const newSettings: VmwareAdminSettings = {
-        allowedNetworkNames: next,
-        allowedDatastoreNames: adminSettings?.allowedDatastoreNames ?? null,
+  const settingsOrganizationId = useMemo(
+    () => resolveVmwareSettingsOrgId(connectedEntries, selectedConnectorId, organizationId),
+    [connectedEntries, organizationId, selectedConnectorId]
+  );
+
+  const updateAllowList = useCallback(
+    async (
+      field: VmwareAllowListField,
+      allKeys: string[],
+      changedKeys: string[],
+      allowed: boolean
+    ) => {
+      const currentSettings = completeVmwareAdminSettings(adminSettings);
+      const nextSettings: VmwareAdminSettings = {
+        ...currentSettings,
+        [field]: nextAllowList(currentSettings[field], allKeys, changedKeys, allowed),
       };
-      setAdminSettings(newSettings);
-      await patchProviderState('vmware', { admin_settings: newSettings }, organizationId);
+      setAdminSettings(nextSettings);
+      await patchProviderState('vmware', { admin_settings: nextSettings }, settingsOrganizationId);
     },
-    [adminSettings, allData.networks, organizationId]
+    [adminSettings, settingsOrganizationId]
+  );
+
+  const onBulkToggleDatacenter = useCallback(
+    (ids: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedDatacenterIds',
+        activeData.datacenters.map((dc) => dc.id),
+        ids,
+        allowed
+      ),
+    [activeData.datacenters, updateAllowList]
+  );
+
+  const onBulkToggleCluster = useCallback(
+    (ids: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedClusterIds',
+        activeData.clusters.map((cluster) => cluster.id),
+        ids,
+        allowed
+      ),
+    [activeData.clusters, updateAllowList]
+  );
+
+  const onBulkToggleHost = useCallback(
+    (ids: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedHostIds',
+        activeData.hosts.map((host) => host.id),
+        ids,
+        allowed
+      ),
+    [activeData.hosts, updateAllowList]
+  );
+
+  const onBulkToggleVM = useCallback(
+    (ids: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedVMIds',
+        activeData.vms.map((vm) => vm.id),
+        ids,
+        allowed
+      ),
+    [activeData.vms, updateAllowList]
+  );
+
+  const onBulkToggleNetwork = useCallback(
+    (names: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedNetworkNames',
+        activeData.networks.map((network) => network.name),
+        names,
+        allowed
+      ),
+    [activeData.networks, updateAllowList]
   );
 
   const onBulkToggleDatastore = useCallback(
-    async (names: string[], allowed: boolean) => {
-      const current = adminSettings?.allowedDatastoreNames ?? null;
-      let next: string[] | null;
-      if (allowed) {
-        if (current === null) return;
-        const set = new Set([...current, ...names]);
-        next = [...set];
-      } else {
-        const deny = new Set(names);
-        next =
-          current === null
-            ? allData.datastores.map((d) => d.name).filter((n) => !deny.has(n))
-            : current.filter((n) => !deny.has(n));
-      }
-      const newSettings: VmwareAdminSettings = {
-        allowedNetworkNames: adminSettings?.allowedNetworkNames ?? null,
-        allowedDatastoreNames: next,
-      };
-      setAdminSettings(newSettings);
-      await patchProviderState('vmware', { admin_settings: newSettings }, organizationId);
-    },
-    [adminSettings, allData.datastores, organizationId]
+    (names: string[], allowed: boolean) =>
+      void updateAllowList(
+        'allowedDatastoreNames',
+        activeData.datastores.map((datastore) => datastore.name),
+        names,
+        allowed
+      ),
+    [activeData.datastores, updateAllowList]
   );
 
   const onPull = async () => {
@@ -1189,14 +1660,42 @@ export function VmwareProviderSettings() {
               (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab vms={activeData.vms} />
+            <VMsTab
+              vms={activeData.vms}
+              adminSettings={canManageCloud ? adminSettings : undefined}
+              onBulkToggle={
+                canManageCloud ? (ids, allowed) => void onBulkToggleVM(ids, allowed) : undefined
+              }
+            />
           </PageTab>
           <PageTab
             label={
               t('Hosts') + (activeData.hosts.length > 0 ? ` (${activeData.hosts.length})` : '')
             }
           >
-            <HostsTab hosts={activeData.hosts} />
+            <HostsTab
+              hosts={activeData.hosts}
+              adminSettings={canManageCloud ? adminSettings : undefined}
+              onBulkToggle={
+                canManageCloud ? (ids, allowed) => void onBulkToggleHost(ids, allowed) : undefined
+              }
+            />
+          </PageTab>
+          <PageTab
+            label={
+              t('Clusters') +
+              (activeData.clusters.length > 0 ? ` (${activeData.clusters.length})` : '')
+            }
+          >
+            <ClustersTab
+              clusters={activeData.clusters}
+              adminSettings={canManageCloud ? adminSettings : undefined}
+              onBulkToggle={
+                canManageCloud
+                  ? (ids, allowed) => void onBulkToggleCluster(ids, allowed)
+                  : undefined
+              }
+            />
           </PageTab>
           <PageTab
             label={
@@ -1236,7 +1735,16 @@ export function VmwareProviderSettings() {
               (activeData.datacenters.length > 0 ? ` (${activeData.datacenters.length})` : '')
             }
           >
-            <DatacentersTab datacenters={activeData.datacenters} clusters={activeData.clusters} />
+            <DatacentersTab
+              datacenters={activeData.datacenters}
+              clusters={activeData.clusters}
+              adminSettings={canManageCloud ? adminSettings : undefined}
+              onBulkToggle={
+                canManageCloud
+                  ? (ids, allowed) => void onBulkToggleDatacenter(ids, allowed)
+                  : undefined
+              }
+            />
           </PageTab>
           <PageTab label={t('Inventory mapping')}>
             <CloudInventoryMapping
