@@ -40,3 +40,35 @@
     host: "{{ awx_postgres_host }}"
     port: "{{ awx_postgres_port }}"
     timeout: 120
+
+- name: Check firewalld state for PostgreSQL
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_postgres_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Check PostgreSQL firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_postgres_port }}/tcp"
+  register: awx_postgres_firewalld_port
+  changed_when: false
+  failed_when: false
+  when: awx_postgres_firewalld_state.stdout == "active"
+
+- name: Open PostgreSQL firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_postgres_port }}/tcp"
+  register: awx_postgres_firewalld_open
+  changed_when: true
+  when:
+    - awx_postgres_firewalld_state.stdout == "active"
+    - awx_postgres_firewalld_port.rc != 0
+
+- name: Reload firewalld for PostgreSQL
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_postgres_firewalld_state.stdout == "active"
+    - awx_postgres_firewalld_open is changed

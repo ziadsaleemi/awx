@@ -13,10 +13,17 @@
     awx_restore_confirm: true
   when: awx_failback_restore_path | length > 0
 
-- name: Fail back image tag
+- name: Set failback image tag override
   ansible.builtin.set_fact:
-    awx_image_tag: "{{ awx_failback_image_tag }}"
+    awx_effective_image_tag: "{{ awx_failback_image_tag }}"
   when: awx_failback_image_tag | length > 0
+
+- name: Re-run receptor role for image failback
+  ansible.builtin.include_role:
+    name: awx_receptor
+  when:
+    - awx_failback_image_tag | length > 0
+    - inventory_hostname in (groups.get('awx_receptor', []) | default([]))
 
 - name: Re-run task role for image failback
   ansible.builtin.include_role:

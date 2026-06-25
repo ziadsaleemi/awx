@@ -4,6 +4,76 @@
     name: haproxy
     state: present
 
+- name: Install SELinux port tooling for HAProxy
+  ansible.builtin.package:
+    name: policycoreutils-python-utils
+    state: present
+  when:
+    - ansible_os_family == "RedHat"
+    - awx_lb_manage_selinux_ports | default(true) | bool
+
+- name: Check SELinux mode for HAProxy
+  ansible.builtin.command:
+    cmd: getenforce
+  register: awx_lb_selinux_mode
+  changed_when: false
+  failed_when: false
+  when: awx_lb_manage_selinux_ports | default(true) | bool
+
+- name: List SELinux HTTP ports for HAProxy
+  ansible.builtin.command:
+    cmd: semanage port -l
+  register: awx_lb_selinux_ports
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_lb_manage_selinux_ports | default(true) | bool
+    - awx_lb_selinux_mode.stdout | default("Disabled") != "Disabled"
+
+- name: Add HAProxy SELinux ports
+  ansible.builtin.command:
+    cmd: "semanage port -a -t http_port_t -p tcp {{ item }}"
+  loop:
+    - "{{ awx_lb_http_port }}"
+    - "{{ awx_lb_stats_port }}"
+  register: awx_lb_selinux_port_add
+  changed_when: awx_lb_selinux_port_add.rc == 0
+  failed_when: false
+  when:
+    - awx_lb_manage_selinux_ports | default(true) | bool
+    - awx_lb_selinux_mode.stdout | default("Disabled") != "Disabled"
+    - awx_lb_selinux_ports.stdout is not regex('^http_port_t\\s+tcp\\s+.*\\b' ~ (item | string) ~ '\\b', multiline=True)
+
+- name: Update existing HAProxy SELinux ports
+  ansible.builtin.command:
+    cmd: "semanage port -m -t http_port_t -p tcp {{ item.item }}"
+  loop: "{{ awx_lb_selinux_port_add.results | default([]) }}"
+  changed_when: true
+  when:
+    - awx_lb_manage_selinux_ports | default(true) | bool
+    - (item.rc | default(0)) != 0
+    - "'already defined' in (item.stderr | default(''))"
+
+- name: Check HAProxy SELinux backend connection boolean
+  ansible.builtin.command:
+    cmd: getsebool haproxy_connect_any
+  register: awx_lb_selinux_connect_any
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_lb_manage_selinux_ports | default(true) | bool
+    - awx_lb_selinux_mode.stdout | default("Disabled") != "Disabled"
+
+- name: Enable HAProxy SELinux backend connections
+  ansible.builtin.command:
+    cmd: setsebool -P haproxy_connect_any 1
+  notify: Restart HAProxy
+  changed_when: true
+  when:
+    - awx_lb_manage_selinux_ports | default(true) | bool
+    - awx_lb_selinux_mode.stdout | default("Disabled") != "Disabled"
+    - "'--> on' not in (awx_lb_selinux_connect_any.stdout | default(''))"
+
 - name: Render HAProxy config
   ansible.builtin.template:
     src: haproxy.cfg.j2
@@ -13,8 +83,53 @@
     mode: "0644"
   notify: Restart HAProxy
 
+- name: Flush HAProxy handlers
+  ansible.builtin.meta: flush_handlers
+
 - name: Enable HAProxy
   ansible.builtin.service:
     name: haproxy
     enabled: true
     state: started
+
+- name: Check firewalld state for HAProxy
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_lb_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Check HAProxy firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ item }}/tcp"
+  loop:
+    - "{{ awx_lb_http_port }}"
+    - "{{ awx_lb_stats_port }}"
+  register: awx_lb_firewalld_ports
+  changed_when: false
+  failed_when: false
+  when: awx_lb_firewalld_state.stdout == "active"
+
+- name: Open HAProxy firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ item.item }}/tcp"
+  loop: "{{ awx_lb_firewalld_ports.results | default([]) }}"
+  register: awx_lb_firewalld_open
+  changed_when: true
+  when:
+    - awx_lb_firewalld_state.stdout == "active"
+    - item.rc != 0
+
+- name: Reload firewalld for HAProxy
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_lb_firewalld_state.stdout == "active"
+    - awx_lb_firewalld_open is changed
+
+- name: Wait for HAProxy
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: "{{ awx_lb_http_port }}"
+    timeout: 120

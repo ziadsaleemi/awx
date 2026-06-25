@@ -30,3 +30,35 @@
     host: "{{ awx_redis_host }}"
     port: "{{ awx_redis_port }}"
     timeout: 60
+
+- name: Check firewalld state for Redis
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_redis_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Check Redis firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_redis_port }}/tcp"
+  register: awx_redis_firewalld_port
+  changed_when: false
+  failed_when: false
+  when: awx_redis_firewalld_state.stdout == "active"
+
+- name: Open Redis firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_redis_port }}/tcp"
+  register: awx_redis_firewalld_open
+  changed_when: true
+  when:
+    - awx_redis_firewalld_state.stdout == "active"
+    - awx_redis_firewalld_port.rc != 0
+
+- name: Reload firewalld for Redis
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_redis_firewalld_state.stdout == "active"
+    - awx_redis_firewalld_open is changed

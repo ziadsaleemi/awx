@@ -13,7 +13,21 @@
   loop:
     - awx-web
     - awx-task
+    - awx-receptor
   failed_when: false
+
+- name: Validate database backup file
+  ansible.builtin.stat:
+    path: "{{ awx_restore_path }}/awx.sql"
+  register: awx_restore_sql_stat
+  when: inventory_hostname in (groups.get('awx_database', []) | default([]))
+
+- name: Fail when database backup is missing
+  ansible.builtin.assert:
+    that:
+      - awx_restore_sql_stat.stat.exists
+    fail_msg: "Database backup not found at {{ awx_restore_path }}/awx.sql."
+  when: inventory_hostname in (groups.get('awx_database', []) | default([]))
 
 - name: Restore AWX configuration archive
   ansible.builtin.unarchive:
@@ -22,12 +36,18 @@
     remote_src: true
   ignore_errors: true
 
+- name: Check AWX project/media archive
+  ansible.builtin.stat:
+    path: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
+  register: awx_restore_data_archive
+
 - name: Restore AWX project/media archive
   ansible.builtin.unarchive:
     src: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
     dest: /
     remote_src: true
   ignore_errors: true
+  when: awx_restore_data_archive.stat.size | default(0) > 128
 
 - name: Restore PostgreSQL database
   ansible.builtin.shell:
@@ -35,10 +55,16 @@
       set -o pipefail &&
       cat {{ awx_restore_path }}/awx.sql |
       {{ awx_container_engine_cmd }} exec -i awx-postgres
-      psql -U {{ awx_postgres_user }} -d {{ awx_postgres_database }}
+      psql -v ON_ERROR_STOP=1 -U {{ awx_postgres_user }} -d {{ awx_postgres_database }}
     executable: /bin/bash
   changed_when: true
   when: inventory_hostname in (groups.get('awx_database', []) | default([]))
+
+- name: Start AWX receptor after restore
+  ansible.builtin.systemd:
+    name: awx-receptor
+    state: started
+  failed_when: false
 
 - name: Start AWX task after restore
   ansible.builtin.systemd:

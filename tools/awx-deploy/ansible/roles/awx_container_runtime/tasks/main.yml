@@ -25,12 +25,26 @@
     cmd: "{{ awx_container_engine_cmd }} pull {{ awx_image }}:{{ awx_image_tag }}"
   changed_when: "'Downloaded newer image' in awx_pull_image.stdout or 'Pull complete' in awx_pull_image.stdout"
   register: awx_pull_image
+  until: awx_pull_image.rc == 0
+  retries: 5
+  delay: 20
+  when: >-
+    inventory_hostname in (
+      (
+        groups.get('awx_receptor', []) +
+        groups.get('awx_task', []) +
+        groups.get('awx_web', [])
+      ) | unique
+    )
 
 - name: Pull PostgreSQL image
   ansible.builtin.command:
     cmd: "{{ awx_container_engine_cmd }} pull {{ awx_postgres_image }}"
   changed_when: "'Downloaded newer image' in awx_pull_postgres.stdout or 'Pull complete' in awx_pull_postgres.stdout"
   register: awx_pull_postgres
+  until: awx_pull_postgres.rc == 0
+  retries: 5
+  delay: 20
   when: inventory_hostname in (groups.get('awx_database', []) | default([]))
 
 - name: Pull Redis image
@@ -38,4 +52,7 @@
     cmd: "{{ awx_container_engine_cmd }} pull {{ awx_redis_image }}"
   changed_when: "'Downloaded newer image' in awx_pull_redis.stdout or 'Pull complete' in awx_pull_redis.stdout"
   register: awx_pull_redis
+  until: awx_pull_redis.rc == 0
+  retries: 5
+  delay: 20
   when: inventory_hostname in (groups.get('awx_redis', []) | default([]))

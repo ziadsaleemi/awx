@@ -19,7 +19,9 @@ frontend awx_http
 
 backend awx_web
     balance roundrobin
-    option httpchk GET /api/
+    option httpchk
+    http-check send meth GET uri /api/v2/ping/ ver HTTP/1.1 hdr Host awx.local
+    http-check expect status 200
 {% for host in groups.get('awx_web', []) %}
     server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ awx_web_http_port }} check
 {% endfor %}

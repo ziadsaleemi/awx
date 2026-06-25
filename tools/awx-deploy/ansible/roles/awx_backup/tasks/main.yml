@@ -12,7 +12,7 @@
     cmd: >-
       set -o pipefail &&
       {{ awx_container_engine_cmd }} exec awx-postgres
-      pg_dump -U {{ awx_postgres_user }} {{ awx_postgres_database }}
+      pg_dump --clean --if-exists -U {{ awx_postgres_user }} {{ awx_postgres_database }}
       > {{ awx_server_backup_dir }}/{{ awx_backup_name }}/awx.sql
     executable: /bin/bash
   changed_when: true

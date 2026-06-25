@@ -20,7 +20,7 @@
       -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,z
       -v {{ awx_projects_dir }}:/var/lib/awx/projects:z
       -v {{ awx_media_dir }}:/var/lib/awx/public/media:z
-      {{ awx_image }}:{{ awx_image_tag }}
+      {{ awx_image }}:{{ awx_effective_image_tag | default(awx_image_tag) }}
       awx-manage migrate --noinput
   register: awx_migration_result
   changed_when: "'Applying' in awx_migration_result.stdout"
@@ -46,7 +46,7 @@
       -v {{ awx_server_config_dir }}/settings.py:/etc/tower/settings.py:ro,z
       -v {{ awx_server_config_dir }}/SECRET_KEY:/etc/tower/SECRET_KEY:ro,z
       -v {{ awx_server_config_dir }}/SYSTEM_UUID:/etc/tower/SYSTEM_UUID:ro,z
-      {{ awx_image }}:{{ awx_image_tag }}
+      {{ awx_image }}:{{ awx_effective_image_tag | default(awx_image_tag) }}
       awx-manage shell -c "import os; from django.contrib.auth import get_user_model; User=get_user_model(); user,_=User.objects.get_or_create(username='{{ awx_admin_user }}', defaults={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}); changed=[]; desired={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}; [changed.append(k) or setattr(user,k,v) for k,v in desired.items() if getattr(user,k)!=v]; password=os.environ.get('DJANGO_SUPERUSER_PASSWORD'); (password and not user.check_password(password)) and (user.set_password(password) or changed.append('password')); changed and user.save(); print('Admin synchronized')"
   register: awx_admin_sync_result
   changed_when: "'Admin synchronized' in awx_admin_sync_result.stdout"

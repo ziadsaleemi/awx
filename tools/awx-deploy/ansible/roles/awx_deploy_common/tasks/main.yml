@@ -67,6 +67,8 @@
   ansible.builtin.stat:
     path: "{{ awx_server_config_dir }}/SECRET_KEY"
   register: awx_secret_key_stat
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
 - name: Generate AWX secret key
@@ -74,6 +76,8 @@
     cmd: openssl rand -base64 32
   register: awx_generated_secret_key
   changed_when: false
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when:
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_secret_key_stat.stat.exists
@@ -86,15 +90,38 @@
     owner: "{{ awx_server_root_owner }}"
     group: "{{ awx_server_root_group }}"
     mode: "0644"
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when:
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_secret_key_stat.stat.exists
+  no_log: true
+
+- name: Read cluster AWX secret key
+  ansible.builtin.slurp:
+    src: "{{ awx_server_config_dir }}/SECRET_KEY"
+  register: awx_cluster_secret_key
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+  no_log: true
+
+- name: Sync cluster AWX secret key
+  ansible.builtin.copy:
+    dest: "{{ awx_server_config_dir }}/SECRET_KEY"
+    content: "{{ awx_cluster_secret_key.content | b64decode }}"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
   no_log: true
 
 - name: Check existing AWX system UUID
   ansible.builtin.stat:
     path: "{{ awx_server_config_dir }}/SYSTEM_UUID"
   register: awx_system_uuid_stat
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
 - name: Generate AWX system UUID
@@ -102,6 +129,8 @@
     cmd: python3 -c 'import uuid; print(uuid.uuid4())'
   register: awx_generated_system_uuid
   changed_when: false
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when:
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_system_uuid_stat.stat.exists
@@ -113,9 +142,28 @@
     owner: "{{ awx_server_root_owner }}"
     group: "{{ awx_server_root_group }}"
     mode: "0644"
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
   when:
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_system_uuid_stat.stat.exists
+
+- name: Read cluster AWX system UUID
+  ansible.builtin.slurp:
+    src: "{{ awx_server_config_dir }}/SYSTEM_UUID"
+  register: awx_cluster_system_uuid
+  delegate_to: "{{ groups.get('awx_server_nodes', [inventory_hostname]) | first }}"
+  run_once: true
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
+
+- name: Sync cluster AWX system UUID
+  ansible.builtin.copy:
+    dest: "{{ awx_server_config_dir }}/SYSTEM_UUID"
+    content: "{{ awx_cluster_system_uuid.content | b64decode }}"
+    owner: "{{ awx_server_root_owner }}"
+    group: "{{ awx_server_root_group }}"
+    mode: "0644"
+  when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
 - name: Render AWX settings
   ansible.builtin.template:
