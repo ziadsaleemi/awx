@@ -10,10 +10,53 @@ import {
   PageSidebarBody,
 } from '@patternfly/react-core';
 import { ExternalLinkAltIcon } from '@patternfly/react-icons';
-import { useState, type CSSProperties } from 'react';
+import { useState } from 'react';
 import { usePageNavBarClick, usePageNavSideBar } from './PageNavSidebar';
 import './PageNavigation.css';
 import { PageNavigationItem } from './PageNavigationItem';
+
+function isHidden(item: PageNavigationItem): boolean {
+  return 'hidden' in item && item.hidden === true;
+}
+
+function joinRoute(baseRoute: string, itemPath: string): string {
+  const base = baseRoute === '/' ? '' : baseRoute.replace(/\/$/, '');
+  const path = itemPath.replace(/^\//, '');
+  if (!path) {
+    return base || '/';
+  }
+  return `${base}/${path}`.replace(/\/+/g, '/');
+}
+
+function routeWithPrefix(route: string): string {
+  return `${process.env.ROUTE_PREFIX ?? ''}${route}`.replace(/\/+/g, '/');
+}
+
+function isRouteActive(currentPath: string, path: string): boolean {
+  return path !== '/' && (currentPath === path || currentPath.startsWith(`${path}/`));
+}
+
+function hasVisibleChildNavItems(item: PageNavigationItem): boolean {
+  return 'children' in item && item.children.some((child) => !isHidden(child) && !!child.label);
+}
+
+function isNavigationItemActive(
+  item: PageNavigationItem,
+  baseRoute: string,
+  currentPath: string
+): boolean {
+  const route = joinRoute(baseRoute, item.path);
+  const path = routeWithPrefix(route);
+  if (!item.href && isRouteActive(currentPath, path)) {
+    return true;
+  }
+  if ('children' in item) {
+    return item.children.some(
+      (child) => !isHidden(child) && isNavigationItemActive(child, route, currentPath)
+    );
+  }
+  return false;
+}
 
 /** Renders a sidebar navigation menu from an arroy of navigation items. */
 export function PageNavigation(props: { navigation: PageNavigationItem[]; basename?: string }) {
@@ -56,11 +99,9 @@ function PageNavigationItems(props: { items: PageNavigationItem[]; baseRoute: st
 
 function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRoute: string }) {
   const { item } = props;
-  let route = props.baseRoute + '/' + item.path;
-  route = route.replace('//', '/');
-  let path = (process.env.ROUTE_PREFIX ?? '') + route;
-  path = path.replace('//', '/');
-  const isCurrentRoute = !item.href && path !== '/' && location.pathname.startsWith(path);
+  const route = joinRoute(props.baseRoute, item.path);
+  const path = routeWithPrefix(route);
+  const isCurrentRoute = isNavigationItemActive(item, props.baseRoute, location.pathname);
   const [isExpanded, setIsExpanded] = useState(
     () =>
       isCurrentRoute ||
@@ -87,11 +128,10 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
     return <PageNavigationItems items={item.children} baseRoute={''} />;
   }
 
-  const hasChildNavItems = 'children' in item && item.children?.find((child) => child.label);
-  const subtitleStyle: CSSProperties = { fontSize: 'small', opacity: 0.5, textAlign: 'left' };
+  const hasChildNavItems = hasVisibleChildNavItems(item);
 
   if (!hasChildNavItems && 'label' in item) {
-    const isActive = item.href ? false : location.pathname.startsWith(path);
+    const isActive = item.href ? false : isRouteActive(location.pathname, path);
 
     return (
       <NavItem
@@ -106,7 +146,9 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
       >
         <Flex alignItems={{ default: 'alignItemsCenter' }}>
           {item.icon && <FlexItem style={{ marginRight: 8 }}>{item.icon}</FlexItem>}
-          <FlexItem grow={{ default: 'grow' }}>{item.label}</FlexItem>
+          <FlexItem grow={{ default: 'grow' }} className="page-navigation__label">
+            {item.label}
+          </FlexItem>
           {'badge' in item && item.badge && (
             <FlexItem>
               <Label isCompact variant="outline" color={item.badgeColor}>
@@ -122,12 +164,12 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
             </span>
           )}
         </Flex>
-        {item.subtitle && <div style={subtitleStyle}>{item.subtitle}</div>}
+        {item.subtitle && <div className="page-navigation__subtitle">{item.subtitle}</div>}
       </NavItem>
     );
   }
 
-  if (!hasChildNavItems || item.label === undefined) {
+  if (!hasChildNavItems || item.label === undefined || !('children' in item)) {
     return null;
   }
 
@@ -139,12 +181,13 @@ function PageNavigationItemComponent(props: { item: PageNavigationItem; baseRout
     <NavExpandable
       title={
         (
-          <div>
-            <div style={{ textAlign: 'left' }}>{item.label}</div>
-            {item.subtitle && <div style={subtitleStyle}>{item.subtitle}</div>}
+          <div className="page-navigation__expandable-title">
+            <div className="page-navigation__label">{item.label}</div>
+            {item.subtitle && <div className="page-navigation__subtitle">{item.subtitle}</div>}
           </div>
         ) as unknown as string
       }
+      data-cy={id}
       isExpanded={isExpanded || isCurrentRoute}
       onExpand={(_e, expanded: boolean) => setExpanded(expanded)}
     >

@@ -125,6 +125,52 @@ export function profileRoutesOnly(userRoutes: PageNavigationItem) {
   };
 }
 
+export const AwxNavigationGroup = {
+  AutomationExecution: 'awx-navigation-automation-execution',
+  AutomationDecisions: 'awx-navigation-automation-decisions',
+  AutomationContent: 'awx-navigation-automation-content',
+} as const;
+
+function hasVisibleSidebarItem(item: PageNavigationItem): boolean {
+  if ('hidden' in item && item.hidden === true) {
+    return false;
+  }
+  if ('children' in item) {
+    return item.children.some(hasVisibleSidebarItem);
+  }
+  if (item.label) {
+    return true;
+  }
+  return false;
+}
+
+function pathlessNavigationGroup(
+  id: string,
+  label: string,
+  subtitle: string,
+  children: PageNavigationItem[]
+): PageNavigationItem {
+  return {
+    id,
+    label,
+    subtitle,
+    path: '',
+    children,
+  };
+}
+
+function withNavigationDetails(
+  item: PageNavigationItem,
+  label: string,
+  subtitle: string
+): PageNavigationItem {
+  return {
+    ...item,
+    label,
+    subtitle,
+  };
+}
+
 export function useAwxNavigation() {
   const { t } = useTranslation();
   const awxInventoryRoutes = useAwxInventoryRoutes();
@@ -166,6 +212,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Infrastructure,
       label: t('Infrastructure'),
+      subtitle: t('Inventories and execution nodes'),
       path: 'infrastructure',
       icon: <ServerIcon />,
       children: activeAwxUser?.is_superuser
@@ -195,6 +242,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Analytics,
       label: t('Analytics'),
+      subtitle: t('Insights and usage'),
       path: 'analytics',
       icon: <ChartBarIcon />,
       children: [
@@ -223,6 +271,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Administration,
       label: t('Administration'),
+      subtitle: t('Activity, approvals, and jobs'),
       path: 'administration',
       icon: <CogIcon />,
       children: activeAwxUser?.is_superuser
@@ -239,6 +288,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Access,
       label: t('Access Management'),
+      subtitle: t('Identity and RBAC'),
       path: 'access',
       icon: <UsersIcon />,
       children: [
@@ -343,6 +393,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Settings,
       label: t('Settings'),
+      subtitle: t('System configuration'),
       path: 'settings',
       icon: <CogIcon />,
       children: [
@@ -519,6 +570,7 @@ export function useAwxNavigation() {
             {
               id: AwxRoute.Infrastructure,
               label: t('Infrastructure'),
+              subtitle: t('Inventories and execution nodes'),
               path: 'infrastructure',
               icon: <ServerIcon />,
               children: permissionInfrastructureChildren,
@@ -536,6 +588,7 @@ export function useAwxNavigation() {
             {
               id: AwxRoute.Administration,
               label: t('Administration'),
+              subtitle: t('Activity and approvals'),
               path: 'administration',
               icon: <CogIcon />,
               children: permissionAdministrationChildren,
@@ -555,6 +608,7 @@ export function useAwxNavigation() {
             {
               id: AwxRoute.Access,
               label: t('Access Management'),
+              subtitle: t('Identity and RBAC'),
               path: 'access',
               icon: <UsersIcon />,
               children: permissionAccessChildren,
@@ -562,22 +616,61 @@ export function useAwxNavigation() {
           ]
         : [];
 
-    return [
-      ...overview,
+    const automationExecutionChildren = [
       awxJobsRoutes,
       ...(capabilities.canViewTemplates ? [awxTemplateRoutes, awxTerraformRoutes] : []),
       ...(capabilities.canViewSchedules ? [awxSchedulesRoutes] : []),
       ...(capabilities.canViewProjects ? [awxProjectRoutes] : []),
-      ...(capabilities.canViewCatalog
-        ? [filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog)]
-        : []),
-      ...(capabilities.canViewCloud ? [awxCloudRoutes] : []),
-      ...(capabilities.canViewPolicy
-        ? [filterPolicyRoutesByPermissions(awxPolicyRoutes, capabilities.canManagePolicy)]
-        : []),
-      ...(capabilities.canViewEda ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }] : []),
       ...permissionInfrastructureItems,
       ...permissionAdministrationItems,
+    ];
+    const automationContentItems = [
+      ...(capabilities.canViewCatalog
+        ? [
+            withNavigationDetails(
+              filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog),
+              t('Automation Content'),
+              t('Service Catalog')
+            ),
+          ]
+        : []),
+      ...(capabilities.canViewCloud
+        ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
+        : []),
+    ];
+
+    const automationExecutionGroup = pathlessNavigationGroup(
+      AwxNavigationGroup.AutomationExecution,
+      t('Automation Execution'),
+      t('Automation Controller'),
+      automationExecutionChildren
+    );
+
+    return [
+      ...overview,
+      ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
+      ...automationContentItems,
+      ...(capabilities.canViewPolicy
+        ? [
+            withNavigationDetails(
+              filterPolicyRoutesByPermissions(awxPolicyRoutes, capabilities.canManagePolicy),
+              t('Policy as Code'),
+              t('OPA and Gatekeeper')
+            ),
+          ]
+        : []),
+      ...(capabilities.canViewEda
+        ? [
+            {
+              ...withNavigationDetails(
+                awxEdaRoutes,
+                t('Automation Decisions'),
+                t('Event-Driven Ansible')
+              ),
+              icon: <ProcessAutomationIcon />,
+            },
+          ]
+        : []),
       ...permissionAccessItems,
       ...(capabilities.canViewUsers ? [] : profileItems),
       {
@@ -587,22 +680,43 @@ export function useAwxNavigation() {
     ];
   }
 
+  const automationExecutionGroup = pathlessNavigationGroup(
+    AwxNavigationGroup.AutomationExecution,
+    t('Automation Execution'),
+    t('Automation Controller'),
+    [
+      awxJobsRoutes,
+      awxTemplateRoutes,
+      awxSchedulesRoutes,
+      awxProjectRoutes,
+      awxTerraformRoutes,
+      ...infrastructureItems,
+      ...administrationItems,
+    ]
+  );
   const navigationItems = [
     ...overview,
-    awxJobsRoutes,
-    awxTemplateRoutes,
-    awxSchedulesRoutes,
-    awxProjectRoutes,
-    awxTerraformRoutes,
-    awxCatalogRoutes,
-    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxCloudRoutes] : []),
-    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? [awxPolicyRoutes] : []),
+    ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
+    withNavigationDetails(awxCatalogRoutes, t('Automation Content'), t('Service Catalog')),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
-      ? [{ ...awxEdaRoutes, icon: <ProcessAutomationIcon /> }]
+      ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),
-    ...infrastructureItems,
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
+      ? [withNavigationDetails(awxPolicyRoutes, t('Policy as Code'), t('OPA and Gatekeeper'))]
+      : []),
+    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
+      ? [
+          {
+            ...withNavigationDetails(
+              awxEdaRoutes,
+              t('Automation Decisions'),
+              t('Event-Driven Ansible')
+            ),
+            icon: <ProcessAutomationIcon />,
+          },
+        ]
+      : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor ? analyticsItems : []),
-    ...administrationItems,
     ...accessItems,
     ...settingsItems,
     {

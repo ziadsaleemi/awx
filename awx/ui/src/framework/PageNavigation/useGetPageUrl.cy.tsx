@@ -62,4 +62,34 @@ describe('useGetPageUrl', () => {
     cy.getByDataCy('missing-page').click();
     cy.get('@consoleError').should('have.been.calledWith', 'Page id missing-page not found');
   });
+
+  it('keeps child URLs stable under pathless navigation groups', () => {
+    const onResult = cy.stub().as('onResult');
+
+    function SeedPathlessNavigation(props: { children: ReactNode }) {
+      const [, setNavigation] = usePageNavigationRoutesContext();
+      useEffect(() => {
+        setNavigation([
+          {
+            id: 'automation-execution',
+            label: 'Automation Execution',
+            path: '',
+            children: [{ id: 'jobs', label: 'Jobs', path: 'jobs', element: <div /> }],
+          } as PageNavigationItem,
+        ]);
+      }, [setNavigation]);
+      return <>{props.children}</>;
+    }
+
+    cy.mount(
+      <PageNavigationRoutesProvider>
+        <SeedPathlessNavigation>
+          <LookupButton id="jobs" onResult={onResult} />
+        </SeedPathlessNavigation>
+      </PageNavigationRoutesProvider>
+    );
+
+    cy.getByDataCy('jobs').click();
+    cy.get('@onResult').should('have.been.calledWith', '/jobs');
+  });
 });
