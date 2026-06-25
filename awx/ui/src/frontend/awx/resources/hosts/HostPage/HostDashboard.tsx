@@ -26,7 +26,7 @@ import {
   TextVariants,
 } from '@patternfly/react-core';
 import { CheckIcon, ServerIcon, SyncAltIcon } from '@patternfly/react-icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
@@ -48,6 +48,7 @@ const FACT_PULL_MIN_LOADING_MS = 750;
 const FACT_PULL_SUCCESS_MS = 1400;
 const FINISHED_JOB_STATUSES = new Set(['successful', 'failed', 'error', 'canceled']);
 const PSEUDO_BLOCK_DEVICE_PATTERN = /^(ram|loop|nbd)\d+$/;
+const HOST_DASHBOARD_SECTION_STYLE: CSSProperties = { padding: '16px' };
 
 type CredentialsResponse = {
   count: number;
@@ -350,22 +351,56 @@ function useHostFactSummary(facts: HostFacts) {
   }, [facts]);
 }
 
-function Stat(props: { label: string; value: string | number; tone?: 'good' | 'warn' }) {
+function DashboardGrid(props: { children: ReactNode; minColumnWidth?: string }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gap: 20,
+        gridTemplateColumns: `repeat(auto-fit, minmax(${props.minColumnWidth ?? '280px'}, 1fr))`,
+        alignItems: 'start',
+        minWidth: 0,
+      }}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+function MetricBlock(props: {
+  label: string;
+  value: string | number;
+  helper?: string | number;
+  tone?: 'good' | 'warn';
+}) {
   const color =
     props.tone === 'good'
       ? 'var(--pf-v5-global--success-color--100)'
       : props.tone === 'warn'
         ? 'var(--pf-v5-global--warning-color--100)'
-        : undefined;
+        : 'var(--pf-v5-global--primary-color--100)';
   return (
-    <StackItem>
+    <div
+      style={{
+        borderLeft: `3px solid ${color}`,
+        minWidth: 0,
+        paddingLeft: 12,
+      }}
+    >
       <TextContent>
-        <Text component={TextVariants.small}>{props.label}</Text>
-        <Text component={TextVariants.h2} style={{ marginTop: 2, color }}>
+        <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
+          {props.label}
+        </Text>
+        <Text component={TextVariants.h2} style={{ marginTop: 2, color, lineHeight: 1.1 }}>
           {props.value}
         </Text>
+        {props.helper !== undefined && (
+          <Text component={TextVariants.small} style={{ opacity: 0.78, overflowWrap: 'anywhere' }}>
+            {props.helper}
+          </Text>
+        )}
       </TextContent>
-    </StackItem>
+    </div>
   );
 }
 
@@ -419,6 +454,28 @@ function InlineRows(props: { rows: { label: string; value?: string | number }[] 
           </Flex>
         </StackItem>
       ))}
+    </Stack>
+  );
+}
+
+function DetailSection(props: {
+  title: string;
+  rows: { label: string; value?: string | number }[];
+}) {
+  return (
+    <Stack hasGutter>
+      <StackItem>
+        <Text component={TextVariants.h4} style={{ marginBottom: 0 }}>
+          {props.title}
+        </Text>
+      </StackItem>
+      <StackItem>
+        <DescriptionList isHorizontal isCompact>
+          {props.rows.map((row) => (
+            <Detail key={row.label} label={row.label} value={row.value} />
+          ))}
+        </DescriptionList>
+      </StackItem>
     </Stack>
   );
 }
@@ -553,9 +610,38 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
     );
   }
 
+  const memoryUsed =
+    summary.memoryTotal !== undefined && summary.memoryFree !== undefined
+      ? summary.memoryTotal - summary.memoryFree
+      : undefined;
+  const swapUsed =
+    summary.swapTotal !== undefined && summary.swapFree !== undefined
+      ? summary.swapTotal - summary.swapFree
+      : undefined;
+  const storageUsed = Math.max(0, summary.storageTotal - summary.storageAvailable);
+  const hostStatus = host ? (
+    <Label color={host.enabled ? 'green' : 'red'}>
+      {host.enabled ? t('Enabled') : t('Disabled')}
+    </Label>
+  ) : null;
+  const osVersion = [
+    getFactString(safeFacts, 'ansible_distribution'),
+    getFactString(safeFacts, 'ansible_distribution_version'),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const cpuTopology =
+    summary.cpuSockets || summary.cpuCores || summary.cpuThreadsPerCore
+      ? t('{{sockets}} sockets / {{cores}} cores / {{threads}} threads', {
+          sockets: summary.cpuSockets ?? 0,
+          cores: summary.cpuCores ?? 0,
+          threads: summary.cpuThreadsPerCore ?? 0,
+        })
+      : undefined;
+
   if (!summary.factCount) {
     return (
-      <PageDashboard>
+      <PageDashboard sectionStyle={HOST_DASHBOARD_SECTION_STYLE}>
         <PageDashboardCard title={t('Host dashboard')} width="full" height="md">
           <CardBody>
             {factPullAlert}
@@ -579,306 +665,344 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
   }
 
   return (
-    <PageDashboard>
-      <PageDashboardCard title={t('System summary')} subtitle={host?.name} width="full" height="sm">
-        <CardBody>
-          {factPullAlert}
-          <Flex
-            spaceItems={{ default: 'spaceItems2xl' }}
-            alignItems={{ default: 'alignItemsFlexStart' }}
-          >
-            <FlexItem grow={{ default: 'grow' }}>
-              <DescriptionList isHorizontal isCompact columnModifier={{ default: '2Col' }}>
-                <Detail
-                  label={t('Operating system')}
-                  value={getFactString(safeFacts, 'ansible_distribution')}
-                />
-                <Detail label={t('Last facts pull')} value={summary.lastFactPull} />
-                <Detail label={t('Hostname')} value={summary.hostname} />
-                <Detail label={t('FQDN')} value={summary.fqdn} />
-                <Detail
-                  label={t('Version')}
-                  value={getFactString(safeFacts, 'ansible_distribution_version')}
-                />
-                <Detail label={t('Kernel')} value={getFactString(safeFacts, 'ansible_kernel')} />
-                <Detail
-                  label={t('Architecture')}
-                  value={getFactString(safeFacts, 'ansible_architecture')}
-                />
-                <Detail
-                  label={t('Virtualization')}
-                  value={getFactString(safeFacts, 'ansible_virtualization_type')}
-                />
-                <Detail
-                  label={t('Uptime')}
-                  value={formatDuration(getNumber(safeFacts.ansible_uptime_seconds))}
-                />
-              </DescriptionList>
-            </FlexItem>
-            {host && (
-              <FlexItem>
-                <Label color={host.enabled ? 'green' : 'red'}>
-                  {host.enabled ? t('Enabled') : t('Disabled')}
-                </Label>
-              </FlexItem>
-            )}
-            <FlexItem>{pullFactsButton}</FlexItem>
-          </Flex>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Compute')} width="half" height="md">
-        <CardBody>
-          <Stack hasGutter>
-            <Flex spaceItems={{ default: 'spaceItems2xl' }}>
-              <FlexItem>
-                <Stat label={t('vCPUs')} value={summary.cpuCount ?? t('Not available')} />
-              </FlexItem>
-              <FlexItem>
-                <Stat
-                  label={t('Memory')}
-                  value={formatMb(summary.memoryTotal)}
-                  tone={summary.memoryUsedPct > 85 ? 'warn' : 'good'}
-                />
-              </FlexItem>
-            </Flex>
-            <UsageRow
-              label={t('Memory used')}
-              value={summary.memoryUsedPct}
-              description={`${formatMb((summary.memoryTotal ?? 0) - (summary.memoryFree ?? 0))} / ${formatMb(summary.memoryTotal)}`}
-            />
-            {!!summary.swapTotal && (
-              <UsageRow
-                label={t('Swap used')}
-                value={summary.swapUsedPct}
-                description={`${formatMb(summary.swapTotal - (summary.swapFree ?? 0))} / ${formatMb(summary.swapTotal)}`}
-              />
-            )}
-            <InlineRows
-              rows={[
-                { label: t('Load avg'), value: summary.loadAverage },
-                {
-                  label: t('CPU topology'),
-                  value:
-                    summary.cpuSockets || summary.cpuCores || summary.cpuThreadsPerCore
-                      ? t('{{sockets}} sockets / {{cores}} cores / {{threads}} threads', {
-                          sockets: summary.cpuSockets ?? 0,
-                          cores: summary.cpuCores ?? 0,
-                          threads: summary.cpuThreadsPerCore ?? 0,
-                        })
-                      : undefined,
-                },
-                { label: t('Machine'), value: summary.machine },
-                { label: t('Userspace'), value: summary.userspaceBits },
-              ]}
-            />
-          </Stack>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Capacity')} width="half" height="md">
-        <CardBody>
+    <PageDashboard sectionStyle={HOST_DASHBOARD_SECTION_STYLE}>
+      <PageDashboardCard
+        title={t('System summary')}
+        subtitle={host?.name}
+        width="full"
+        height="md"
+        headerControls={
           <Flex
             alignItems={{ default: 'alignItemsCenter' }}
-            spaceItems={{ default: 'spaceItems2xl' }}
+            spaceItems={{ default: 'spaceItemsMd' }}
           >
-            <FlexItem>
-              <div style={{ width: 180, height: 180 }}>
-                <ChartPie
-                  ariaDesc={t('Storage used')}
-                  ariaTitle={t('Storage used')}
-                  data={[
-                    { x: t('Used'), y: summary.storageUsedPct },
-                    { x: t('Free'), y: Math.max(0, 100 - summary.storageUsedPct) },
-                  ]}
-                  width={180}
-                  height={180}
-                  padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  colorScale={[
-                    'var(--pf-v5-global--primary-color--100)',
-                    'var(--pf-v5-global--BackgroundColor--200)',
-                  ]}
-                  allowTooltip={false}
-                />
-              </div>
-            </FlexItem>
-            <FlexItem grow={{ default: 'grow' }}>
-              <Stack hasGutter>
-                <Stat label={t('Storage used')} value={`${summary.storageUsedPct}%`} />
-                <Text component={TextVariants.small}>
-                  {formatBytes(summary.storageTotal - summary.storageAvailable)} {t('of')}{' '}
-                  {formatBytes(summary.storageTotal)}
-                </Text>
-                <Text component={TextVariants.small}>
-                  {t('{{count}} mounted filesystems', { count: summary.mounts.length })}
-                </Text>
-              </Stack>
-            </FlexItem>
+            {hostStatus && <FlexItem>{hostStatus}</FlexItem>}
+            <FlexItem>{pullFactsButton}</FlexItem>
           </Flex>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Storage')} width="full" height="md">
+        }
+      >
         <CardBody>
+          {factPullAlert}
           <Stack hasGutter>
-            {summary.mounts.slice(0, 6).map((mount) => {
-              const pct = usedPercent(mount.size_total, mount.size_available);
-              return (
-                <UsageRow
-                  key={`${mount.device ?? ''}-${mount.mount ?? ''}`}
-                  label={`${mount.mount ?? t('Unknown mount')} ${mount.device ? `(${mount.device})` : ''}`}
-                  value={pct}
-                  description={`${formatBytes((mount.size_total ?? 0) - (mount.size_available ?? 0))} / ${formatBytes(mount.size_total)}`}
+            <StackItem>
+              <DashboardGrid minColumnWidth="220px">
+                <MetricBlock
+                  label={t('Operating system')}
+                  value={osVersion || t('Not available')}
+                  helper={summary.osFamily}
                 />
-              );
-            })}
+                <MetricBlock
+                  label={t('vCPUs')}
+                  value={summary.cpuCount ?? t('Not available')}
+                  helper={
+                    summary.loadAverage
+                      ? t('Load {{load}}', { load: summary.loadAverage })
+                      : undefined
+                  }
+                />
+                <MetricBlock
+                  label={t('Memory')}
+                  value={formatMb(summary.memoryTotal)}
+                  helper={
+                    memoryUsed !== undefined
+                      ? `${formatMb(memoryUsed)} ${t('used')} (${summary.memoryUsedPct}%)`
+                      : undefined
+                  }
+                  tone={summary.memoryUsedPct > 85 ? 'warn' : 'good'}
+                />
+                <MetricBlock
+                  label={t('Primary IP')}
+                  value={summary.defaultAddress ?? t('Not available')}
+                  helper={summary.defaultInterface}
+                />
+              </DashboardGrid>
+            </StackItem>
+            <StackItem>
+              <DashboardGrid minColumnWidth="340px">
+                <DetailSection
+                  title={t('Host identity')}
+                  rows={[
+                    { label: t('Last facts pull'), value: summary.lastFactPull },
+                    { label: t('Hostname'), value: summary.hostname },
+                    { label: t('FQDN'), value: summary.fqdn },
+                    { label: t('Node name'), value: summary.nodename },
+                    { label: t('Domain'), value: summary.domain },
+                  ]}
+                />
+                <DetailSection
+                  title={t('Operating context')}
+                  rows={[
+                    { label: t('Kernel'), value: getFactString(safeFacts, 'ansible_kernel') },
+                    { label: t('Kernel build'), value: summary.kernelVersion },
+                    {
+                      label: t('Architecture'),
+                      value: getFactString(safeFacts, 'ansible_architecture'),
+                    },
+                    {
+                      label: t('Virtualization'),
+                      value: getFactString(safeFacts, 'ansible_virtualization_type'),
+                    },
+                    {
+                      label: t('Uptime'),
+                      value: formatDuration(getNumber(safeFacts.ansible_uptime_seconds)),
+                    },
+                  ]}
+                />
+              </DashboardGrid>
+            </StackItem>
           </Stack>
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Network')} width="half" height="sm">
+      <PageDashboardCard title={t('Resource utilization')} width="full" height="md">
         <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <Detail label={t('Primary address')} value={summary.defaultAddress} />
-            <Detail label={t('Primary interface')} value={summary.defaultInterface} />
-            <Detail label={t('Gateway')} value={summary.defaultGateway} />
-            <Detail label={t('Primary MAC')} value={summary.defaultMac} />
-            <Detail label={t('Interfaces')} value={summary.interfaces.length} />
-            <Detail label={t('IPv4 addresses')} value={summary.allIpv4} />
-            <Detail label={t('IPv6 addresses')} value={summary.allIpv6} />
-            <Detail label={t('DNS servers')} value={summary.dnsNameservers} />
-            <Detail label={t('DNS search')} value={summary.dnsSearch} />
-          </DescriptionList>
+          <DashboardGrid minColumnWidth="340px">
+            <Stack hasGutter>
+              <StackItem>
+                <Text component={TextVariants.h4}>{t('Compute and memory')}</Text>
+              </StackItem>
+              <StackItem>
+                <DashboardGrid minColumnWidth="160px">
+                  <MetricBlock
+                    label={t('CPU topology')}
+                    value={summary.cpuCount ?? t('Not available')}
+                    helper={cpuTopology}
+                  />
+                  <MetricBlock
+                    label={t('Userspace')}
+                    value={summary.userspaceBits ?? t('Not available')}
+                    helper={summary.machine}
+                  />
+                </DashboardGrid>
+              </StackItem>
+              <UsageRow
+                label={t('Memory used')}
+                value={summary.memoryUsedPct}
+                description={`${formatMb(memoryUsed)} / ${formatMb(summary.memoryTotal)}`}
+              />
+              {!!summary.swapTotal && (
+                <UsageRow
+                  label={t('Swap used')}
+                  value={summary.swapUsedPct}
+                  description={`${formatMb(swapUsed)} / ${formatMb(summary.swapTotal)}`}
+                />
+              )}
+            </Stack>
+            <Stack hasGutter>
+              <StackItem>
+                <Text component={TextVariants.h4}>{t('Storage capacity')}</Text>
+              </StackItem>
+              <StackItem>
+                <Flex
+                  alignItems={{ default: 'alignItemsCenter' }}
+                  spaceItems={{ default: 'spaceItemsLg' }}
+                  flexWrap={{ default: 'wrap' }}
+                >
+                  <FlexItem>
+                    <div style={{ width: 156, height: 156 }}>
+                      <ChartPie
+                        ariaDesc={t('Storage used')}
+                        ariaTitle={t('Storage used')}
+                        data={[
+                          { x: t('Used'), y: summary.storageUsedPct },
+                          { x: t('Free'), y: Math.max(0, 100 - summary.storageUsedPct) },
+                        ]}
+                        width={156}
+                        height={156}
+                        padding={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        colorScale={[
+                          'var(--pf-v5-global--primary-color--100)',
+                          'var(--pf-v5-global--BackgroundColor--200)',
+                        ]}
+                        allowTooltip={false}
+                      />
+                    </div>
+                  </FlexItem>
+                  <FlexItem grow={{ default: 'grow' }}>
+                    <MetricBlock
+                      label={t('Storage used')}
+                      value={`${summary.storageUsedPct}%`}
+                      helper={`${formatBytes(storageUsed)} ${t('of')} ${formatBytes(summary.storageTotal)}`}
+                      tone={summary.storageUsedPct > 85 ? 'warn' : 'good'}
+                    />
+                    <Text component={TextVariants.small} style={{ marginTop: 8 }}>
+                      {t('{{count}} mounted filesystems', { count: summary.mounts.length })}
+                    </Text>
+                  </FlexItem>
+                </Flex>
+              </StackItem>
+            </Stack>
+            <Stack hasGutter>
+              <StackItem>
+                <Text component={TextVariants.h4}>{t('Largest filesystems')}</Text>
+              </StackItem>
+              {summary.mounts.slice(0, 5).map((mount) => {
+                const pct = usedPercent(mount.size_total, mount.size_available);
+                return (
+                  <UsageRow
+                    key={`${mount.device ?? ''}-${mount.mount ?? ''}`}
+                    label={`${mount.mount ?? t('Unknown mount')} ${mount.device ? `(${mount.device})` : ''}`}
+                    value={pct}
+                    description={`${formatBytes((mount.size_total ?? 0) - (mount.size_available ?? 0))} / ${formatBytes(mount.size_total)}`}
+                  />
+                );
+              })}
+            </Stack>
+          </DashboardGrid>
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Runtime')} width="half" height="sm">
+      <PageDashboardCard title={t('Network and runtime')} width="full" height="md">
         <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <Detail
-              label={t('Python')}
-              value={getFactString(safeFacts, 'ansible_python_version')}
+          <DashboardGrid minColumnWidth="340px">
+            <DetailSection
+              title={t('Primary network')}
+              rows={[
+                { label: t('Primary address'), value: summary.defaultAddress },
+                { label: t('Primary interface'), value: summary.defaultInterface },
+                { label: t('Gateway'), value: summary.defaultGateway },
+                { label: t('Primary MAC'), value: summary.defaultMac },
+                { label: t('Interfaces'), value: summary.interfaces.length },
+              ]}
             />
-            <Detail
-              label={t('Package manager')}
-              value={getFactString(safeFacts, 'ansible_pkg_mgr')}
+            <DetailSection
+              title={t('Addressing and DNS')}
+              rows={[
+                { label: t('IPv4 addresses'), value: summary.allIpv4 },
+                { label: t('IPv6 addresses'), value: summary.allIpv6 },
+                { label: t('DNS servers'), value: summary.dnsNameservers },
+                { label: t('DNS search'), value: summary.dnsSearch },
+                { label: t('Reachable IPv4'), value: summary.locallyReachableIpv4 },
+              ]}
             />
-            <Detail
-              label={t('Service manager')}
-              value={getFactString(safeFacts, 'ansible_service_mgr')}
+            <DetailSection
+              title={t('Runtime')}
+              rows={[
+                { label: t('Python'), value: getFactString(safeFacts, 'ansible_python_version') },
+                { label: t('Package manager'), value: getFactString(safeFacts, 'ansible_pkg_mgr') },
+                {
+                  label: t('Service manager'),
+                  value: getFactString(safeFacts, 'ansible_service_mgr'),
+                },
+                { label: t('Release'), value: summary.distributionRelease },
+                { label: t('Fact keys'), value: summary.factCount },
+              ]}
             />
-            <Detail label={t('OS family')} value={summary.osFamily} />
-            <Detail label={t('Release')} value={summary.distributionRelease} />
-            <Detail label={t('Major version')} value={summary.distributionMajorVersion} />
-            <Detail label={t('Fact keys')} value={summary.factCount} />
-          </DescriptionList>
+          </DashboardGrid>
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Identity')} width="half" height="sm">
+      <PageDashboardCard title={t('Platform and security')} width="full" height="md">
         <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <Detail label={t('Node name')} value={summary.nodename} />
-            <Detail label={t('Domain')} value={summary.domain} />
-            <Detail label={t('User')} value={summary.userId} />
-            <Detail
-              label={t('UID / GID')}
-              value={
-                summary.userUid !== undefined || summary.userGid !== undefined
-                  ? `${summary.userUid ?? t('Not available')} / ${summary.userGid ?? t('Not available')}`
-                  : undefined
-              }
+          <DashboardGrid minColumnWidth="340px">
+            <DetailSection
+              title={t('User context')}
+              rows={[
+                { label: t('User'), value: summary.userId },
+                {
+                  label: t('UID / GID'),
+                  value:
+                    summary.userUid !== undefined || summary.userGid !== undefined
+                      ? `${summary.userUid ?? t('Not available')} / ${summary.userGid ?? t('Not available')}`
+                      : undefined,
+                },
+                { label: t('User home'), value: summary.userDir },
+                { label: t('User shell'), value: summary.userShell },
+                { label: t('Machine ID'), value: summary.machineId },
+              ]}
             />
-            <Detail label={t('User home')} value={summary.userDir} />
-            <Detail label={t('User shell')} value={summary.userShell} />
-            <Detail label={t('Machine ID')} value={summary.machineId} />
-          </DescriptionList>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Security')} width="half" height="sm">
-        <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <Detail label={t('SELinux')} value={summary.selinuxStatus} />
-            <Detail label={t('AppArmor')} value={summary.appArmorStatus} />
-            <Detail label={t('FIPS')} value={summary.fips} />
-            <Detail label={t('Chroot')} value={summary.isChroot} />
-            <Detail label={t('Capabilities enforced')} value={summary.capabilitiesEnforced} />
-            <Detail label={t('Reachable IPv4')} value={summary.locallyReachableIpv4} />
-          </DescriptionList>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Hardware')} width="half" height="sm">
-        <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <Detail label={t('System')} value={summary.system} />
-            <Detail label={t('Vendor')} value={summary.systemVendor} />
-            <Detail label={t('Product')} value={summary.productName} />
-            <Detail label={t('Product version')} value={summary.productVersion} />
-            <Detail label={t('Serial')} value={summary.productSerial} />
-            <Detail label={t('Form factor')} value={summary.formFactor} />
-            <Detail label={t('Board')} value={summary.boardName} />
-            <Detail label={t('BIOS')} value={summary.biosVersion} />
-            <Detail label={t('BIOS vendor')} value={summary.biosVendor} />
-            <Detail label={t('BIOS date')} value={summary.biosDate} />
-            <Detail label={t('Kernel build')} value={summary.kernelVersion} />
-            <Detail label={t('Virtualization role')} value={summary.virtualizationRole} />
-          </DescriptionList>
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard title={t('Network interfaces')} width="half" height="sm">
-        <CardBody>
-          {summary.interfaceDetails.length ? (
-            <InlineRows
-              rows={summary.interfaceDetails.slice(0, 6).map((networkInterface) => ({
-                label: networkInterface.name,
-                value: [
-                  networkInterface.active ? t('up') : t('down'),
-                  networkInterface.address,
-                  networkInterface.mac,
-                  networkInterface.mtu ? `mtu ${networkInterface.mtu}` : undefined,
-                  networkInterface.speed ? `${networkInterface.speed} Mbps` : undefined,
-                  networkInterface.ipv6.length
-                    ? t('{{count}} IPv6', { count: networkInterface.ipv6.length })
-                    : undefined,
-                  networkInterface.type,
-                ]
-                  .filter(Boolean)
-                  .join(' | '),
-              }))}
+            <DetailSection
+              title={t('Security')}
+              rows={[
+                { label: t('SELinux'), value: summary.selinuxStatus },
+                { label: t('AppArmor'), value: summary.appArmorStatus },
+                { label: t('FIPS'), value: summary.fips },
+                { label: t('Chroot'), value: summary.isChroot },
+                { label: t('Capabilities enforced'), value: summary.capabilitiesEnforced },
+              ]}
             />
-          ) : (
-            <Text>{t('No interface details available')}</Text>
-          )}
+            <DetailSection
+              title={t('Hardware')}
+              rows={[
+                { label: t('System'), value: summary.system },
+                { label: t('Vendor'), value: summary.systemVendor },
+                { label: t('Product'), value: summary.productName },
+                { label: t('Product version'), value: summary.productVersion },
+                { label: t('Serial'), value: summary.productSerial },
+                { label: t('Form factor'), value: summary.formFactor },
+                { label: t('Board'), value: summary.boardName },
+                { label: t('BIOS'), value: summary.biosVersion },
+                { label: t('BIOS vendor'), value: summary.biosVendor },
+                { label: t('BIOS date'), value: summary.biosDate },
+                { label: t('Virtualization role'), value: summary.virtualizationRole },
+              ]}
+            />
+          </DashboardGrid>
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Block devices')} width="full" height="sm">
+      <PageDashboardCard title={t('Storage, devices, and interfaces')} width="full" height="md">
         <CardBody>
-          {summary.devices.length ? (
-            <InlineRows
-              rows={summary.devices.slice(0, 8).map((device) => ({
-                label: device.name,
-                value: [
-                  device.size,
-                  device.partitions
-                    ? t('{{count}} partition(s)', { count: device.partitions })
-                    : t('no partitions'),
-                  device.model,
-                  device.vendor,
-                  device.rotational === '1' ? t('rotational') : t('solid state / virtual'),
-                  device.virtual === '1' ? t('virtual') : undefined,
-                  device.scheduler,
-                ]
-                  .filter(Boolean)
-                  .join(' | '),
-              }))}
-            />
-          ) : (
-            <Text>{t('No block device details available')}</Text>
-          )}
+          <DashboardGrid minColumnWidth="360px">
+            <Stack hasGutter>
+              <StackItem>
+                <Text component={TextVariants.h4}>{t('Network interfaces')}</Text>
+              </StackItem>
+              <StackItem>
+                {summary.interfaceDetails.length ? (
+                  <InlineRows
+                    rows={summary.interfaceDetails.slice(0, 6).map((networkInterface) => ({
+                      label: networkInterface.name,
+                      value: [
+                        networkInterface.active ? t('up') : t('down'),
+                        networkInterface.address,
+                        networkInterface.mac,
+                        networkInterface.mtu ? `mtu ${networkInterface.mtu}` : undefined,
+                        networkInterface.speed ? `${networkInterface.speed} Mbps` : undefined,
+                        networkInterface.ipv6.length
+                          ? t('{{count}} IPv6', { count: networkInterface.ipv6.length })
+                          : undefined,
+                        networkInterface.type,
+                      ]
+                        .filter(Boolean)
+                        .join(' | '),
+                    }))}
+                  />
+                ) : (
+                  <Text>{t('No interface details available')}</Text>
+                )}
+              </StackItem>
+            </Stack>
+            <Stack hasGutter>
+              <StackItem>
+                <Text component={TextVariants.h4}>{t('Block devices')}</Text>
+              </StackItem>
+              <StackItem>
+                {summary.devices.length ? (
+                  <InlineRows
+                    rows={summary.devices.slice(0, 8).map((device) => ({
+                      label: device.name,
+                      value: [
+                        device.size,
+                        device.partitions
+                          ? t('{{count}} partition(s)', { count: device.partitions })
+                          : t('no partitions'),
+                        device.model,
+                        device.vendor,
+                        device.rotational === '1' ? t('rotational') : t('solid state / virtual'),
+                        device.virtual === '1' ? t('virtual') : undefined,
+                        device.scheduler,
+                      ]
+                        .filter(Boolean)
+                        .join(' | '),
+                    }))}
+                  />
+                ) : (
+                  <Text>{t('No block device details available')}</Text>
+                )}
+              </StackItem>
+            </Stack>
+          </DashboardGrid>
         </CardBody>
       </PageDashboardCard>
 

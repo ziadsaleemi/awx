@@ -135,13 +135,11 @@ describe('HostDashboard', () => {
     });
 
     cy.contains(/^System summary$/).should('exist');
-    cy.contains(/^Compute$/).should('exist');
-    cy.contains(/^Storage$/).should('exist');
-    cy.contains(/^Identity$/).should('exist');
-    cy.contains(/^Security$/).should('exist');
-    cy.contains(/^Hardware$/).should('exist');
-    cy.contains(/^Network interfaces$/).should('exist');
-    cy.contains(/^Block devices$/).should('exist');
+    cy.contains(/^Resource utilization$/).should('exist');
+    cy.contains(/^Network and runtime$/).should('exist');
+    cy.contains(/^Platform and security$/).should('exist');
+    cy.contains(/^Storage, devices, and interfaces$/).should('exist');
+    cy.contains(/^Recent automation$/).should('exist');
     cy.contains('Last facts pull').should('exist');
     cy.contains('2026-06-04 05:14:34 UTC').should('exist');
     cy.contains('RedHat').should('exist');
@@ -151,6 +149,11 @@ describe('HostDashboard', () => {
     cy.contains('SeaBIOS').should('exist');
     cy.contains('QEMU HARDDISK').should('exist');
     cy.contains('8').should('exist');
+    cy.get('.page-dashboard-card')
+      .first()
+      .then(($card) => {
+        expect($card[0].getBoundingClientRect().left).to.be.at.least(16);
+      });
   });
 
   it('launches host fact collection', () => {
