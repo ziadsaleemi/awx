@@ -7032,17 +7032,24 @@ class CatalogVmwarePullResources(GenericAPIView):
             raise PermissionDenied(_('You do not have permission to use this credential.'))
 
         namespace = getattr(credential.credential_type, 'namespace', '')
-        if namespace != 'vmware':
+        if namespace not in {'vmware', 'vmware_vsphere_terraform'}:
             return Response(
-                {'credential_id': [_('Credential must be of type VMware vCenter.')]},
+                {'credential_id': [_('Credential must be of type VMware vCenter or VMware vSphere (Terraform).')]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         connection = _resolve_cloud_connection(request, 'vmware', credential_id)
-        vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
-        vcenter_user = credential.get_input('username', default='') or ''
-        vcenter_pass = credential.get_input('password', default='') or ''
-        validate_certs = credential.get_input('validate_certs', default=True)
+        if namespace == 'vmware_vsphere_terraform':
+            vcenter_host = (credential.get_input('vsphere_server', default='') or '').rstrip('/')
+            vcenter_user = credential.get_input('vsphere_user', default='') or ''
+            vcenter_pass = credential.get_input('vsphere_password', default='') or ''
+            allow_unverified_ssl = credential.get_input('vsphere_allow_unverified_ssl', default=False)
+            validate_certs = str(allow_unverified_ssl).lower() not in {'1', 'true', 'yes', 'on'}
+        else:
+            vcenter_host = (credential.get_input('host', default='') or '').rstrip('/')
+            vcenter_user = credential.get_input('username', default='') or ''
+            vcenter_pass = credential.get_input('password', default='') or ''
+            validate_certs = credential.get_input('validate_certs', default=True)
 
         if not vcenter_host:
             return Response(

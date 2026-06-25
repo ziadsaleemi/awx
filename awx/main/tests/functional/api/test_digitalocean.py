@@ -134,12 +134,12 @@ CLOUD_CONNECTOR_ENDPOINTS = [
     ),
     (
         'vmware',
-        'vmware',
+        'vmware_vsphere_terraform',
         {
-            'host': 'vcenter.example',
-            'username': 'administrator',
-            'password': 'secret',
-            'validate_certs': False,
+            'vsphere_server': 'vcenter.example',
+            'vsphere_user': 'administrator',
+            'vsphere_password': 'secret',
+            'vsphere_allow_unverified_ssl': True,
         },
         'api:catalog_cloud_vmware_pull_resources',
     ),
@@ -246,6 +246,17 @@ def _cloud_credential(namespace, inputs, organization, user):
     )
     credential.use_role.members.add(user)
     return credential
+
+
+class _FakeResponse:
+    def __init__(self, payload, status_code=200, text='OK'):
+        self.payload = payload
+        self.status_code = status_code
+        self.text = text
+        self.ok = status_code < 400
+
+    def json(self):
+        return self.payload
 
 
 # ---------------------------------------------------------------------------
@@ -907,6 +918,108 @@ def test_cloud_connector_endpoint_rejects_connection_organization_mismatch(post,
     )
 
     assert 'organization' in str(response.data)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    'namespace, inputs, auth_url, auth_user, auth_password, verify',
+    [
+        (
+            'vmware',
+            {
+                'host': 'legacy-vcenter.example',
+                'username': 'legacy-admin',
+                'password': 'legacy-secret',
+                'validate_certs': False,
+            },
+            'https://legacy-vcenter.example/rest/com/vmware/cis/session',
+            'legacy-admin',
+            'legacy-secret',
+            False,
+        ),
+        (
+            'vmware_vsphere_terraform',
+            {
+                'vsphere_server': 'vcenter.example',
+                'vsphere_user': 'administrator@vsphere.local',
+                'vsphere_password': 'secret',
+                'vsphere_allow_unverified_ssl': True,
+            },
+            'https://vcenter.example/rest/com/vmware/cis/session',
+            'administrator@vsphere.local',
+            'secret',
+            False,
+        ),
+    ],
+)
+def test_vmware_pull_resources_accepts_supported_credential_types(
+    post,
+    admin_user,
+    organization,
+    mocker,
+    namespace,
+    inputs,
+    auth_url,
+    auth_user,
+    auth_password,
+    verify,
+):
+    credential = _cloud_credential(namespace, inputs, organization, admin_user)
+    connection = CloudProviderConnection.objects.create(
+        provider_id='vmware',
+        name='Lab vCenter',
+        status='connected',
+        organization=organization,
+        credential=credential,
+        credential_name=credential.name,
+    )
+    session = mocker.Mock()
+    session.headers = {}
+    session.post.return_value = _FakeResponse({'value': 'session-token'})
+    session.get.side_effect = [
+        _FakeResponse({'value': [{'datacenter': 'dc-1', 'name': 'Datacenter'}]}),
+        _FakeResponse({'value': [{'cluster': 'cluster-1', 'name': 'Cluster', 'datacenter': 'dc-1', 'ha_enabled': True}]}),
+        _FakeResponse(
+            {
+                'value': [
+                    {
+                        'host': 'host-1',
+                        'name': 'esxi-1',
+                        'cluster': 'cluster-1',
+                        'power_state': 'POWERED_ON',
+                        'connection_state': 'CONNECTED',
+                        'cpu_count': 16,
+                        'memory_size_MiB': 65536,
+                    }
+                ]
+            }
+        ),
+        _FakeResponse({'value': [{'vm': 'vm-1', 'name': 'web-1', 'power_state': 'POWERED_ON', 'host': 'host-1'}]}),
+        _FakeResponse({'value': [{'network': 'network-1', 'name': 'VM Network', 'type': 'STANDARD_PORTGROUP'}]}),
+        _FakeResponse({'value': [{'datastore': 'datastore-1', 'name': 'datastore1', 'type': 'VMFS', 'capacity': 1024, 'free_space': 512}]}),
+    ]
+    mocker.patch('awx.api.views.requests.Session', return_value=session)
+
+    response = post(
+        reverse('api:catalog_cloud_vmware_pull_resources'),
+        {'credential_id': credential.pk, 'connection_id': connection.pk, 'organization': organization.pk},
+        admin_user,
+        expect=200,
+    )
+
+    assert session.verify is verify
+    session.post.assert_called_once_with(
+        auth_url,
+        auth=(auth_user, auth_password),
+        timeout=20,
+    )
+    assert response.data['provider'] == 'vmware'
+    assert response.data['vm_count'] == 1
+    assert response.data['host_count'] == 1
+
+    state = CloudProviderState.objects.get(provider_id='vmware', organization=organization)
+    assert state.provider_data[str(connection.pk)]['hosts'][0]['name'] == 'esxi-1'
+    assert state.provider_data[str(connection.pk)]['vms'][0]['name'] == 'web-1'
 
 
 @pytest.mark.django_db

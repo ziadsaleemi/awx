@@ -693,16 +693,35 @@ function getConnectionData(
   if (typeof rawProviderData === 'object') {
     const dataObj = rawProviderData as Record<string, unknown>;
 
-    if (entry.id in dataObj) return dataObj[entry.id] as VmwareProviderData;
+    if (entry.id in dataObj) return normalizeVmwareProviderData(dataObj[entry.id]);
 
     if (!Array.isArray(rawProviderData)) {
       if (dataObj.connectionId === entry.id || dataObj.connection_id === entry.id) {
-        return rawProviderData as VmwareProviderData;
+        return normalizeVmwareProviderData(rawProviderData);
       }
     }
   }
 
   return null;
+}
+
+function normalizeVmwareProviderData(rawData: unknown): VmwareProviderData | null {
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return null;
+  const data = rawData as Record<string, unknown>;
+  return {
+    pulledAt: String(data.pulledAt ?? data.pulled_at ?? ''),
+    connectionId: String(data.connectionId ?? data.connection_id ?? ''),
+    datacenters: Array.isArray(data.datacenters) ? (data.datacenters as VmwareDatacenter[]) : [],
+    clusters: Array.isArray(data.clusters) ? (data.clusters as VmwareCluster[]) : [],
+    hosts: Array.isArray(data.hosts) ? (data.hosts as VmwareHost[]) : [],
+    vms: Array.isArray(data.vms) ? (data.vms as VmwareVM[]) : [],
+    networks: Array.isArray(data.networks) ? (data.networks as VmwareNetwork[]) : [],
+    datastores: Array.isArray(data.datastores) ? (data.datastores as VmwareDatastore[]) : [],
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 // ─── overview tab ─────────────────────────────────────────────────────────────
@@ -826,13 +845,46 @@ export function VmwareProviderSettings() {
   const [adminSettings, setAdminSettings] = useState<VmwareAdminSettings | null>(null);
   const [selectedConnectorId, setSelectedConnectorId] = useState<string>('all');
 
+  const loadProviderState = useCallback(
+    async (entries: CloudConnectionEntry[]) => {
+      const orgKeys = new Set<string>();
+      orgKeys.add(
+        organizationId === null || organizationId === undefined ? 'global' : String(organizationId)
+      );
+      for (const entry of entries) {
+        orgKeys.add(
+          entry.organizationId === null || entry.organizationId === undefined
+            ? 'global'
+            : String(entry.organizationId)
+        );
+      }
+
+      const mergedProviderData: Record<string, unknown> = {};
+      let nextAdminSettings: VmwareAdminSettings | null = null;
+
+      for (const orgKey of orgKeys) {
+        const orgId = orgKey === 'global' ? null : Number(orgKey);
+        const state = await fetchProviderState('vmware', orgId);
+        if (isRecord(state?.provider_data)) {
+          Object.assign(mergedProviderData, state.provider_data);
+        }
+        if (nextAdminSettings === null && state?.admin_settings) {
+          nextAdminSettings = state.admin_settings as VmwareAdminSettings;
+        }
+      }
+
+      setRawProviderData(Object.keys(mergedProviderData).length > 0 ? mergedProviderData : null);
+      setAdminSettings(nextAdminSettings);
+    },
+    [organizationId]
+  );
+
   const loadData = useCallback(() => {
-    void fetchCloudConnections('vmware', organizationId).then(setConnectionEntries);
-    void fetchProviderState('vmware', organizationId).then((state) => {
-      if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
-      setAdminSettings((state?.admin_settings as VmwareAdminSettings | null) ?? null);
+    void fetchCloudConnections('vmware', organizationId).then((entries) => {
+      setConnectionEntries(entries);
+      void loadProviderState(entries);
     });
-  }, [organizationId]);
+  }, [loadProviderState, organizationId]);
 
   useEffect(() => {
     loadData();
@@ -840,8 +892,11 @@ export function VmwareProviderSettings() {
 
   const handleModalClose = useCallback(() => {
     setShowModal(false);
-    void fetchCloudConnections('vmware', organizationId).then(setConnectionEntries);
-  }, [organizationId]);
+    void fetchCloudConnections('vmware', organizationId).then((entries) => {
+      setConnectionEntries(entries);
+      void loadProviderState(entries);
+    });
+  }, [loadProviderState, organizationId]);
 
   const connectedEntries = useMemo(
     () => connectionEntries.filter((e) => e.status === 'connected'),
@@ -1009,8 +1064,7 @@ export function VmwareProviderSettings() {
     }
 
     // Reload from DB after all pulls complete
-    const state = await fetchProviderState('vmware', organizationId);
-    if (state?.provider_data !== undefined) setRawProviderData(state.provider_data);
+    await loadProviderState(connectionEntries);
 
     if (successCount > 0) {
       alertToaster.addAlert({
