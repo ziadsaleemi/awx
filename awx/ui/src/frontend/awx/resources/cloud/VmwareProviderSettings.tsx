@@ -99,40 +99,9 @@ const DarkCard = styled(Card)`
 
 // ─── sub-tabs ────────────────────────────────────────────────────────────────
 
-function VMsTab(props: {
-  vms: VmwareVM[];
-  adminSettings?: VmwareAdminSettings | null;
-  onBulkToggle?: (ids: string[], allowed: boolean) => void;
-}) {
+function VMsTab(props: { vms: VmwareVM[] }) {
   const { t } = useTranslation();
-  const { vms, adminSettings, onBulkToggle } = props;
-  const allowedIds = adminSettings?.allowedVMIds ?? null;
-
-  const toolbarActions = useMemo<IPageAction<VmwareVM>[]>(() => {
-    if (!onBulkToggle) return [];
-    return [
-      {
-        type: PageActionType.Button,
-        selection: PageActionSelection.Multiple,
-        label: t('Allow selected'),
-        onClick: (items: VmwareVM[]) =>
-          onBulkToggle(
-            items.map((vm) => vm.id),
-            true
-          ),
-      },
-      {
-        type: PageActionType.Button,
-        selection: PageActionSelection.Multiple,
-        label: t('Deny selected'),
-        onClick: (items: VmwareVM[]) =>
-          onBulkToggle(
-            items.map((vm) => vm.id),
-            false
-          ),
-      },
-    ];
-  }, [onBulkToggle, t]);
+  const { vms } = props;
 
   const tableColumns = useMemo<ITableColumn<VmwareVM>[]>(
     () => [
@@ -178,21 +147,6 @@ function VMsTab(props: {
         header: t('Disk'),
         cell: (vm) => <TextCell text={fmtBytes(vm.disk_capacity_bytes)} />,
       },
-      ...(onBulkToggle
-        ? [
-            {
-              header: t('Allowed'),
-              cell: (vm: VmwareVM) => (
-                <Switch
-                  id={`vmware-vm-allowed-${vm.id}`}
-                  isChecked={isAllowed(allowedIds, vm.id)}
-                  onChange={(_evt, checked) => onBulkToggle([vm.id], checked)}
-                  aria-label={vm.name}
-                />
-              ),
-            },
-          ]
-        : []),
       {
         header: t('Guest hostname'),
         type: 'text',
@@ -249,7 +203,7 @@ function VMsTab(props: {
         table: 'expanded',
       },
     ],
-    [allowedIds, onBulkToggle, t]
+    [t]
   );
 
   const view = useInMemoryView<VmwareVM>({
@@ -262,7 +216,6 @@ function VMsTab(props: {
     <PageTable<VmwareVM>
       id="vmware-vms-table"
       tableColumns={tableColumns}
-      toolbarActions={toolbarActions}
       errorStateTitle={t('Error loading virtual machines')}
       emptyStateTitle={t('No virtual machines found')}
       emptyStateDescription={t('Pull data from vCenter to discover virtual machines.')}
@@ -1135,7 +1088,6 @@ type VmwareAllowListField =
   | 'allowedDatacenterIds'
   | 'allowedClusterIds'
   | 'allowedHostIds'
-  | 'allowedVMIds'
   | 'allowedNetworkNames'
   | 'allowedDatastoreNames';
 
@@ -1454,17 +1406,6 @@ export function VmwareProviderSettings() {
     [activeData.hosts, updateAllowList]
   );
 
-  const onBulkToggleVM = useCallback(
-    (ids: string[], allowed: boolean) =>
-      void updateAllowList(
-        'allowedVMIds',
-        activeData.vms.map((vm) => vm.id),
-        ids,
-        allowed
-      ),
-    [activeData.vms, updateAllowList]
-  );
-
   const onBulkToggleNetwork = useCallback(
     (names: string[], allowed: boolean) =>
       void updateAllowList(
@@ -1660,13 +1601,7 @@ export function VmwareProviderSettings() {
               (activeData.vms.length > 0 ? ` (${activeData.vms.length})` : '')
             }
           >
-            <VMsTab
-              vms={activeData.vms}
-              adminSettings={canManageCloud ? adminSettings : undefined}
-              onBulkToggle={
-                canManageCloud ? (ids, allowed) => void onBulkToggleVM(ids, allowed) : undefined
-              }
-            />
+            <VMsTab vms={activeData.vms} />
           </PageTab>
           <PageTab
             label={
@@ -1750,7 +1685,7 @@ export function VmwareProviderSettings() {
             <CloudInventoryMapping
               providerId="vmware"
               providerLabel={t('VMware vSphere')}
-              organizationId={organizationId}
+              organizationId={settingsOrganizationId}
               connectionId={selectedConnectorId === 'all' ? null : selectedConnectorId}
               isDisabled={Object.keys(connectionDataMap).length === 0}
             />

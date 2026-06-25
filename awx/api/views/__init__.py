@@ -6301,6 +6301,12 @@ def _strip_ai_inventory_fences(text):
     return re.sub(r'\n?```\s*$', '', re.sub(r'^```(?:ini|ansible|yaml)?\n?', '', text or '', flags=re.IGNORECASE)).strip()
 
 
+def _truthy_request_value(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _call_cloud_inventory_ai(request, provider_id, resources, deterministic_source):
     if not getattr(settings, 'AI_ENABLED', False):
         return None, 'disabled', None, None
@@ -6411,12 +6417,16 @@ class CloudProviderInventorySuggestions(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        ai_plan, ai_status, ai_provider, ai_model = _call_cloud_inventory_ai(
-            request,
-            provider_id,
-            resources,
-            deterministic_plan['source'],
-        )
+        use_ai = _truthy_request_value(request.data.get('use_ai') or request.query_params.get('use_ai'))
+        if use_ai:
+            ai_plan, ai_status, ai_provider, ai_model = _call_cloud_inventory_ai(
+                request,
+                provider_id,
+                resources,
+                deterministic_plan['source'],
+            )
+        else:
+            ai_plan, ai_status, ai_provider, ai_model = None, 'not_requested', None, None
         suggestion = ai_plan or deterministic_plan
 
         return Response(

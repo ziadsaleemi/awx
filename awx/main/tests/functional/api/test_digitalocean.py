@@ -644,6 +644,114 @@ def test_provider_state_inventory_suggestions_scope_by_connection(post, rando, o
     )
 
 
+@pytest.mark.django_db
+def test_provider_state_inventory_suggestions_include_vmware_enriched_data(post, admin_user, organization):
+    """VMware suggestions include connection-keyed inventory, networks, datastores, and VM facts."""
+    connection = CloudProviderConnection.objects.create(
+        provider_id='vmware',
+        name='Lab vCenter',
+        status='connected',
+        organization=organization,
+    )
+    CloudProviderState.objects.create(
+        provider_id='vmware',
+        organization=organization,
+        provider_data={
+            str(connection.pk): {
+                'datacenters': [
+                    {
+                        'id': 'dc-1',
+                        'name': 'Datacenter',
+                        'cluster_count': 1,
+                        'host_count': 1,
+                        'datastore_count': 1,
+                        'network_count': 1,
+                    }
+                ],
+                'clusters': [
+                    {
+                        'id': 'cluster-1',
+                        'name': 'Cluster',
+                        'datacenter_id': 'dc-1',
+                        'ha_enabled': True,
+                        'drs_enabled': True,
+                        'host_count': 1,
+                    }
+                ],
+                'hosts': [
+                    {
+                        'id': 'host-1',
+                        'name': 'esxi-1',
+                        'cluster_id': 'cluster-1',
+                        'power_state': 'POWERED_ON',
+                        'connection_state': 'CONNECTED',
+                        'vm_count': 1,
+                    }
+                ],
+                'vms': [
+                    {
+                        'id': 'vm-1',
+                        'name': 'splunk',
+                        'power_state': 'POWERED_ON',
+                        'host_id': 'host-1',
+                        'cluster_id': 'cluster-1',
+                        'cpu_count': 4,
+                        'memory_size_mib': 8192,
+                        'guest_full_name': 'Oracle Linux 9 (64-bit)',
+                        'guest_hostname': 'splunk.corp.linoop.us',
+                        'ip_address': '192.168.111.106',
+                        'hardware_version': 'VMX_19',
+                        'disk_count': 1,
+                        'disk_capacity_bytes': 39728447488,
+                        'datastore_names': ['datastore1'],
+                        'nics_count': 1,
+                    }
+                ],
+                'networks': [
+                    {
+                        'id': 'network-1',
+                        'name': 'VM Network',
+                        'type': 'STANDARD_PORTGROUP',
+                        'datacenter_id': 'dc-1',
+                    }
+                ],
+                'datastores': [
+                    {
+                        'id': 'datastore-1',
+                        'name': 'datastore1',
+                        'type': 'VMFS',
+                        'capacity_mb': 2798848,
+                        'free_space_mb': 1909975,
+                        'accessible': True,
+                        'datacenter_id': 'dc-1',
+                    }
+                ],
+            }
+        },
+    )
+
+    url = reverse('api:catalog_cloud_provider_inventory_suggestions', kwargs={'provider_id': 'vmware'})
+    response = post(
+        f'{url}?organization={organization.pk}',
+        {'connection_id': connection.pk, 'sample_limit': 20},
+        admin_user,
+        expect=200,
+    )
+
+    assert response.data['connection_id'] == connection.pk
+    assert response.data['ai_status'] == 'not_requested'
+    assert response.data['resource_counts']['vm'] == 1
+    assert response.data['resource_counts']['network'] == 1
+    assert response.data['resource_counts']['datastore'] == 1
+    source = response.data['suggestion']['source']
+    assert 'vm_splunk' in source
+    assert 'guest_hostname=splunk.corp.linoop.us' in source
+    assert 'ip_address=192.168.111.106' in source
+    assert 'disk_capacity_bytes=39728447488' in source
+    assert 'network_VM_Network' in source
+    assert 'datastore_datastore1' in source
+
+
 # ---------------------------------------------------------------------------
 # CloudProviderConnection tests
 # ---------------------------------------------------------------------------

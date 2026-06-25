@@ -596,10 +596,12 @@ export async function suggestCloudInventory(
     organizationId?: number | null;
     connectionId?: string | number | null;
     sampleLimit?: number;
+    useAi?: boolean;
   } = {}
 ): Promise<CloudInventorySuggestionResponse> {
   const payload: Record<string, unknown> = {
-    sample_limit: options.sampleLimit ?? 75,
+    sample_limit: options.sampleLimit ?? 200,
+    use_ai: options.useAi ?? false,
   };
   if (options.organizationId !== undefined && options.organizationId !== null) {
     payload.organization = options.organizationId;

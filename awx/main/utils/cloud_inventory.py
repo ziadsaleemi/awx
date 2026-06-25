@@ -3,7 +3,6 @@ import re
 import shlex
 from collections import OrderedDict
 
-
 SENSITIVE_KEY_PARTS = ('password', 'secret', 'token', 'credential', 'private_key')
 
 
@@ -325,6 +324,10 @@ def _collect_vmware_resources(data, connection_id):
                     'cloud_provider': 'vmware',
                     'cloud_id': datacenter.get('id'),
                     'datacenter_name': datacenter.get('name'),
+                    'cluster_count': datacenter.get('cluster_count'),
+                    'host_count': datacenter.get('host_count'),
+                    'datastore_count': datacenter.get('datastore_count'),
+                    'network_count': datacenter.get('network_count'),
                     'ansible_connection': 'local',
                 },
                 connection_id,
@@ -373,6 +376,7 @@ def _collect_vmware_resources(data, connection_id):
                     'connection_state': host.get('connection_state'),
                     'cpu_count': host.get('cpu_count'),
                     'memory_size_mib': host.get('memory_size_mib'),
+                    'vm_count': host.get('vm_count'),
                     'ansible_connection': 'local',
                 },
                 connection_id,
@@ -385,6 +389,9 @@ def _collect_vmware_resources(data, connection_id):
         groups = ['vmware_vms']
         if vm.get('host_id'):
             groups.append(f'vmware_host_{vm.get("host_id")}')
+        if vm.get('cluster_id'):
+            cluster_name = clusters_by_id.get(vm.get('cluster_id')) or vm.get('cluster_id')
+            groups.append(f'vmware_cluster_{cluster_name}')
         resources.append(
             _resource(
                 'vm',
@@ -394,9 +401,72 @@ def _collect_vmware_resources(data, connection_id):
                     'cloud_provider': 'vmware',
                     'cloud_id': vm.get('id'),
                     'host_id': vm.get('host_id'),
+                    'cluster_id': vm.get('cluster_id'),
                     'power_state': vm.get('power_state'),
                     'cpu_count': vm.get('cpu_count'),
                     'memory_size_mib': vm.get('memory_size_mib'),
+                    'guest_os': vm.get('guest_os'),
+                    'guest_full_name': vm.get('guest_full_name'),
+                    'guest_hostname': vm.get('guest_hostname'),
+                    'ip_address': vm.get('ip_address'),
+                    'hardware_version': vm.get('hardware_version'),
+                    'cpu_cores_per_socket': vm.get('cpu_cores_per_socket'),
+                    'cpu_hot_add_enabled': vm.get('cpu_hot_add_enabled'),
+                    'memory_hot_add_enabled': vm.get('memory_hot_add_enabled'),
+                    'disk_count': vm.get('disk_count'),
+                    'disk_capacity_bytes': vm.get('disk_capacity_bytes'),
+                    'datastore_names': vm.get('datastore_names'),
+                    'nics_count': vm.get('nics_count'),
+                    'cdrom_count': vm.get('cdrom_count'),
+                    'ansible_connection': 'local',
+                },
+                connection_id,
+            )
+        )
+
+    for network in data.get('networks') or []:
+        if not isinstance(network, dict):
+            continue
+        groups = ['vmware_networks']
+        if network.get('datacenter_id'):
+            groups.append(f'vmware_datacenter_{network.get("datacenter_id")}')
+        resources.append(
+            _resource(
+                'network',
+                groups,
+                network.get('name') or network.get('id'),
+                {
+                    'cloud_provider': 'vmware',
+                    'cloud_id': network.get('id'),
+                    'network_name': network.get('name'),
+                    'network_type': network.get('type'),
+                    'datacenter_id': network.get('datacenter_id'),
+                    'ansible_connection': 'local',
+                },
+                connection_id,
+            )
+        )
+
+    for datastore in data.get('datastores') or []:
+        if not isinstance(datastore, dict):
+            continue
+        groups = ['vmware_datastores']
+        if datastore.get('datacenter_id'):
+            groups.append(f'vmware_datacenter_{datastore.get("datacenter_id")}')
+        resources.append(
+            _resource(
+                'datastore',
+                groups,
+                datastore.get('name') or datastore.get('id'),
+                {
+                    'cloud_provider': 'vmware',
+                    'cloud_id': datastore.get('id'),
+                    'datastore_name': datastore.get('name'),
+                    'datastore_type': datastore.get('type'),
+                    'capacity_mb': datastore.get('capacity_mb'),
+                    'free_space_mb': datastore.get('free_space_mb'),
+                    'accessible': datastore.get('accessible'),
+                    'datacenter_id': datastore.get('datacenter_id'),
                     'ansible_connection': 'local',
                 },
                 connection_id,
