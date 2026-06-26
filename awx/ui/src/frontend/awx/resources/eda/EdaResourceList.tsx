@@ -4,10 +4,14 @@ import {
   Alert,
   Button,
   ButtonVariant,
+  Checkbox,
   Form,
   FormGroup,
+  FormSelect,
+  FormSelectOption,
   Modal,
   TextArea,
+  TextInput,
 } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
@@ -58,6 +62,25 @@ export interface EdaResourceConfig {
   fields: EdaResourceField[];
   createSample?: Record<string, unknown>;
   readOnly?: boolean;
+  form?: 'project' | 'decision-environment';
+}
+
+interface EdaCredentialRecord {
+  id: number | string;
+  name?: string;
+  credential_type?: {
+    name?: string;
+    namespace?: string;
+  };
+  credential_type_name?: string;
+  kind?: string;
+}
+
+interface EdaItemsResponse<T> {
+  count: number;
+  next?: string | null;
+  previous?: string | null;
+  results: T[];
 }
 
 const SERVER_MANAGED_FIELDS = new Set([
@@ -201,7 +224,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: t('Edit JSON'),
+        label: config.form ? t('Edit') : t('Edit JSON'),
         isDisabled: !canManageEda
           ? t('You need EDA administrator permissions to edit this resource.')
           : undefined,
@@ -253,7 +276,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         {...view}
       />
       {modalState && (
-        <EdaResourceJsonModal
+        <EdaResourceModal
           config={config}
           mode={modalState.mode}
           record={modalState.record}
@@ -318,6 +341,307 @@ function useEdaResourceColumns(config: EdaResourceConfig): ITableColumn<EdaResou
       })),
     ],
     [config.fields, t]
+  );
+}
+
+function EdaResourceModal(props: {
+  config: EdaResourceConfig;
+  mode: 'create' | 'edit' | 'view';
+  record?: EdaResourceRecord;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  if (props.config.form && (props.mode === 'create' || props.mode === 'edit')) {
+    return (
+      <EdaResourceFormModal
+        config={props.config}
+        form={props.config.form}
+        mode={props.mode}
+        record={props.record}
+        onClose={props.onClose}
+        onSaved={props.onSaved}
+      />
+    );
+  }
+  return <EdaResourceJsonModal {...props} />;
+}
+
+function EdaResourceFormModal(props: {
+  config: EdaResourceConfig;
+  form: 'project' | 'decision-environment';
+  mode: 'create' | 'edit';
+  record?: EdaResourceRecord;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const { config, form, mode, record } = props;
+  const { t } = useTranslation();
+  const alertToaster = usePageAlertToaster();
+  const [name, setName] = useState(() => stringValue(record?.name));
+  const [description, setDescription] = useState(() => stringValue(record?.description));
+  const [projectUrl, setProjectUrl] = useState(() => stringValue(record?.url ?? record?.scm_url));
+  const [scmBranch, setScmBranch] = useState(() =>
+    mode === 'create' ? 'main' : stringValue(record?.scm_branch)
+  );
+  const [scmRefspec, setScmRefspec] = useState(() => stringValue(record?.scm_refspec));
+  const [verifySsl, setVerifySsl] = useState(() => booleanValue(record?.verify_ssl, true));
+  const [updateRevisionOnLaunch, setUpdateRevisionOnLaunch] = useState(() =>
+    booleanValue(record?.update_revision_on_launch, false)
+  );
+  const [scmCacheTimeout, setScmCacheTimeout] = useState(() =>
+    stringValue(record?.scm_update_cache_timeout)
+  );
+  const [imageUrl, setImageUrl] = useState(() =>
+    mode === 'create'
+      ? 'quay.io/ansible/ansible-rulebook:latest'
+      : stringValue(record?.image_url ?? record?.image ?? record?.container_image)
+  );
+  const [pullPolicy, setPullPolicy] = useState(() =>
+    form === 'decision-environment' ? stringValue(record?.pull_policy || 'always') : ''
+  );
+  const [edaCredentialId, setEdaCredentialId] = useState(() =>
+    stringValue(record?.eda_credential_id ?? nestedId(record?.eda_credential))
+  );
+  const [signatureCredentialId, setSignatureCredentialId] = useState(() =>
+    stringValue(
+      record?.signature_validation_credential_id ??
+        nestedId(record?.signature_validation_credential)
+    )
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { data: credentials, isLoading: credentialsLoading } = useGet<
+    EdaItemsResponse<EdaCredentialRecord>
+  >(awxAPI`/eda/credentials/`, { page_size: 200, order_by: 'name' }, { revalidateOnFocus: false });
+  const regularCredentials = (credentials?.results ?? []).filter(
+    (credential) => !isRuleEngineCredential(credential)
+  );
+
+  const submit = async () => {
+    if (!name.trim()) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Name is required') });
+      return;
+    }
+    if (form === 'project' && !projectUrl.trim()) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Source control URL is required') });
+      return;
+    }
+    if (form === 'decision-environment' && !imageUrl.trim()) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Image is required') });
+      return;
+    }
+
+    const payload =
+      form === 'project'
+        ? projectPayload({
+            name,
+            description,
+            projectUrl,
+            scmBranch,
+            scmRefspec,
+            verifySsl,
+            updateRevisionOnLaunch,
+            scmCacheTimeout,
+            edaCredentialId,
+            signatureCredentialId,
+            includeClears: mode === 'edit',
+          })
+        : decisionEnvironmentPayload({
+            name,
+            description,
+            imageUrl,
+            pullPolicy,
+            edaCredentialId,
+            includeClears: mode === 'edit',
+          });
+
+    setIsSubmitting(true);
+    try {
+      if (mode === 'create') {
+        await postRequest(awxAPI`/eda/${config.resource}/`, payload);
+      } else if (record?.id !== undefined && record.id !== null) {
+        await requestPatch(awxAPI`/eda/${config.resource}/${String(record.id)}/`, payload);
+      }
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('EDA resource saved'),
+        timeout: 4000,
+      });
+      await props.onSaved();
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Failed to save EDA resource'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        mode === 'create'
+          ? t('Create {{resource}}', { resource: config.title })
+          : t('Edit {{resource}}', { resource: recordName(record) })
+      }
+      isOpen
+      onClose={props.onClose}
+      variant="medium"
+      actions={[
+        <Button
+          key="save"
+          variant="primary"
+          isLoading={isSubmitting}
+          isDisabled={isSubmitting}
+          onClick={() => void submit()}
+        >
+          {t('Save')}
+        </Button>,
+        <Button key="cancel" variant="link" onClick={props.onClose}>
+          {t('Cancel')}
+        </Button>,
+      ]}
+    >
+      <Form>
+        <FormGroup label={t('Name')} fieldId={`eda-${form}-name`} isRequired>
+          <TextInput id={`eda-${form}-name`} value={name} onChange={(_, value) => setName(value)} />
+        </FormGroup>
+        <FormGroup label={t('Description')} fieldId={`eda-${form}-description`}>
+          <TextArea
+            id={`eda-${form}-description`}
+            value={description}
+            rows={3}
+            onChange={(_, value) => setDescription(value)}
+          />
+        </FormGroup>
+        {form === 'project' ? (
+          <>
+            <FormGroup label={t('Source control URL')} fieldId="eda-project-url" isRequired>
+              <TextInput
+                id="eda-project-url"
+                value={projectUrl}
+                onChange={(_, value) => setProjectUrl(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Source control branch')} fieldId="eda-project-branch">
+              <TextInput
+                id="eda-project-branch"
+                value={scmBranch}
+                onChange={(_, value) => setScmBranch(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Source control refspec')} fieldId="eda-project-refspec">
+              <TextInput
+                id="eda-project-refspec"
+                value={scmRefspec}
+                onChange={(_, value) => setScmRefspec(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Project credential')} fieldId="eda-project-credential">
+              <CredentialSelect
+                id="eda-project-credential"
+                value={edaCredentialId}
+                credentials={regularCredentials}
+                isLoading={credentialsLoading}
+                onChange={setEdaCredentialId}
+              />
+            </FormGroup>
+            <FormGroup
+              label={t('Signature validation credential')}
+              fieldId="eda-project-signature-credential"
+            >
+              <CredentialSelect
+                id="eda-project-signature-credential"
+                value={signatureCredentialId}
+                credentials={regularCredentials}
+                isLoading={credentialsLoading}
+                onChange={setSignatureCredentialId}
+              />
+            </FormGroup>
+            <FormGroup label={t('SCM update cache timeout')} fieldId="eda-project-cache-timeout">
+              <TextInput
+                id="eda-project-cache-timeout"
+                type="number"
+                min={0}
+                value={scmCacheTimeout}
+                onChange={(_, value) => setScmCacheTimeout(value)}
+              />
+            </FormGroup>
+            <Checkbox
+              id="eda-project-verify-ssl"
+              label={t('Verify SSL')}
+              isChecked={verifySsl}
+              onChange={(_, checked) => setVerifySsl(checked)}
+            />
+            <Checkbox
+              id="eda-project-update-revision"
+              label={t('Update revision on launch')}
+              isChecked={updateRevisionOnLaunch}
+              onChange={(_, checked) => setUpdateRevisionOnLaunch(checked)}
+            />
+          </>
+        ) : (
+          <>
+            <FormGroup label={t('Image')} fieldId="eda-decision-environment-image" isRequired>
+              <TextInput
+                id="eda-decision-environment-image"
+                value={imageUrl}
+                onChange={(_, value) => setImageUrl(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Pull policy')} fieldId="eda-decision-environment-pull-policy">
+              <FormSelect
+                id="eda-decision-environment-pull-policy"
+                value={pullPolicy}
+                onChange={(_, value) => setPullPolicy(value)}
+              >
+                <FormSelectOption value="always" label={t('Always')} />
+                <FormSelectOption value="missing" label={t('If missing')} />
+                <FormSelectOption value="never" label={t('Never')} />
+              </FormSelect>
+            </FormGroup>
+            <FormGroup
+              label={t('Registry credential')}
+              fieldId="eda-decision-environment-credential"
+            >
+              <CredentialSelect
+                id="eda-decision-environment-credential"
+                value={edaCredentialId}
+                credentials={regularCredentials}
+                isLoading={credentialsLoading}
+                onChange={setEdaCredentialId}
+              />
+            </FormGroup>
+          </>
+        )}
+      </Form>
+    </Modal>
+  );
+}
+
+function CredentialSelect(props: {
+  id: string;
+  value: string;
+  credentials: EdaCredentialRecord[];
+  isLoading: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FormSelect id={props.id} value={props.value} onChange={(_, value) => props.onChange(value)}>
+      <FormSelectOption
+        value=""
+        label={props.isLoading ? t('Loading credentials...') : t('None')}
+      />
+      {props.credentials.map((credential) => (
+        <FormSelectOption
+          key={String(credential.id)}
+          value={String(credential.id)}
+          label={credentialLabel(credential)}
+        />
+      ))}
+    </FormSelect>
   );
 }
 
@@ -434,6 +758,100 @@ function sanitizeEditablePayload(record: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(record).filter(([key]) => !SERVER_MANAGED_FIELDS.has(key))
   );
+}
+
+function projectPayload(values: {
+  name: string;
+  description: string;
+  projectUrl: string;
+  scmBranch: string;
+  scmRefspec: string;
+  verifySsl: boolean;
+  updateRevisionOnLaunch: boolean;
+  scmCacheTimeout: string;
+  edaCredentialId: string;
+  signatureCredentialId: string;
+  includeClears: boolean;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    description: values.description,
+    url: values.projectUrl.trim(),
+    scm_branch: values.scmBranch.trim(),
+    verify_ssl: values.verifySsl,
+    update_revision_on_launch: values.updateRevisionOnLaunch,
+  };
+  if (values.scmRefspec.trim()) payload.scm_refspec = values.scmRefspec.trim();
+  if (values.scmCacheTimeout.trim()) {
+    payload.scm_update_cache_timeout = Number(values.scmCacheTimeout);
+  }
+  if (values.edaCredentialId) {
+    payload.eda_credential_id = Number(values.edaCredentialId);
+  } else if (values.includeClears) {
+    payload.eda_credential_id = null;
+  }
+  if (values.signatureCredentialId) {
+    payload.signature_validation_credential_id = Number(values.signatureCredentialId);
+  } else if (values.includeClears) {
+    payload.signature_validation_credential_id = null;
+  }
+  return payload;
+}
+
+function decisionEnvironmentPayload(values: {
+  name: string;
+  description: string;
+  imageUrl: string;
+  pullPolicy: string;
+  edaCredentialId: string;
+  includeClears: boolean;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    description: values.description,
+    image_url: values.imageUrl.trim(),
+    pull_policy: values.pullPolicy || 'always',
+  };
+  if (values.edaCredentialId) {
+    payload.eda_credential_id = Number(values.edaCredentialId);
+  } else if (values.includeClears) {
+    payload.eda_credential_id = null;
+  }
+  return payload;
+}
+
+function stringValue(value: unknown) {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function booleanValue(value: unknown, defaultValue: boolean) {
+  return typeof value === 'boolean' ? value : defaultValue;
+}
+
+function nestedId(value: unknown) {
+  if (typeof value === 'object' && value !== null && 'id' in value) {
+    const id = (value as { id?: unknown }).id;
+    return id === undefined || id === null ? '' : String(id);
+  }
+  return '';
+}
+
+function credentialLabel(credential: EdaCredentialRecord) {
+  const name = String(credential.name ?? credential.id ?? '');
+  const type =
+    credential.credential_type?.name ?? credential.credential_type_name ?? credential.kind ?? '';
+  return type ? `${name} (${type})` : name;
+}
+
+function isRuleEngineCredential(credential: EdaCredentialRecord) {
+  const type = (
+    credential.credential_type?.name ??
+    credential.credential_type_name ??
+    credential.kind ??
+    ''
+  ).toLowerCase();
+  const namespace = (credential.credential_type?.namespace ?? '').toLowerCase();
+  return namespace === 'drools' || type.includes('rule engine');
 }
 
 function recordName(record?: EdaResourceRecord) {

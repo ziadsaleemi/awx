@@ -29,6 +29,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA projects used to discover rulebooks.'),
       emptyStateTitle: t('No EDA projects found'),
       emptyStateDescription: t('Create or sync an EDA project to load rulebooks.'),
+      form: 'project',
       createSample: {
         name: '',
         description: '',
@@ -50,6 +51,7 @@ export function useAwxEdaRoutes() {
       emptyStateDescription: t(
         'Create a decision environment image reference before launching rulebooks.'
       ),
+      form: 'decision-environment',
       createSample: {
         name: '',
         description: '',

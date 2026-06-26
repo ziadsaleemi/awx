@@ -29,6 +29,33 @@ const rulebookConfig: EdaResourceConfig = {
   ],
 };
 
+const projectConfig: EdaResourceConfig = {
+  resource: 'projects',
+  title: 'Projects',
+  description: 'Manage EDA projects used to discover rulebooks.',
+  emptyStateTitle: 'No EDA projects found',
+  emptyStateDescription: 'Create or sync an EDA project to load rulebooks.',
+  form: 'project',
+  fields: [
+    { label: 'SCM URL', keys: ['url', 'scm_url'] },
+    { label: 'Status', keys: ['import_state', 'status', 'state'], type: 'status' },
+  ],
+};
+
+const decisionEnvironmentConfig: EdaResourceConfig = {
+  resource: 'decision-environments',
+  title: 'Decision Environments',
+  description: 'Manage execution images used by EDA rulebook activations.',
+  emptyStateTitle: 'No decision environments found',
+  emptyStateDescription:
+    'Create a decision environment image reference before launching rulebooks.',
+  form: 'decision-environment',
+  fields: [
+    { label: 'Image', keys: ['image_url', 'image', 'container_image'] },
+    { label: 'Status', keys: ['status', 'state'], type: 'status' },
+  ],
+};
+
 describe('EdaActivations', () => {
   beforeEach(() => {
     cy.intercept('GET', '/api/v2/eda/status/', {
@@ -354,5 +381,104 @@ describe('EdaActivations', () => {
           expect(body.poll).to.equal(true);
         }
       );
+  });
+
+  it('creates EDA projects with structured fields instead of raw JSON', () => {
+    cy.intercept('GET', '/api/v2/eda/projects/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('projects');
+    cy.intercept('POST', '/api/v2/eda/projects/', {
+      id: 9,
+      name: 'EDA Samples',
+      url: 'https://github.com/example/eda-samples.git',
+    }).as('createProject');
+    interceptActivationStartLookups();
+
+    cy.mount(<EdaResourceList config={projectConfig} />, {
+      path: '/eda/projects',
+      initialEntries: ['/eda/projects'],
+    });
+
+    cy.verifyPageTitle('Projects');
+    cy.wait('@projects');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-project-name').type('EDA Samples');
+    cy.get('#eda-project-description').type('Sample event-driven project');
+    cy.get('#eda-project-url').type('https://github.com/example/eda-samples.git');
+    cy.get('#eda-project-branch').clear().type('main');
+    cy.get('#eda-project-refspec').type('refs/heads/main');
+    cy.get('#eda-project-credential').select('7');
+    cy.get('#eda-project-cache-timeout').type('60');
+    cy.get('#eda-project-update-revision').click();
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createProject')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('EDA Samples');
+        expect(body.description).to.equal('Sample event-driven project');
+        expect(body.url).to.equal('https://github.com/example/eda-samples.git');
+        expect(body.scm_branch).to.equal('main');
+        expect(body.scm_refspec).to.equal('refs/heads/main');
+        expect(body.eda_credential_id).to.equal(7);
+        expect(body.verify_ssl).to.equal(true);
+        expect(body.update_revision_on_launch).to.equal(true);
+        expect(body.scm_update_cache_timeout).to.equal(60);
+      });
+  });
+
+  it('edits EDA decision environments with image, pull policy, and credential fields', () => {
+    cy.intercept('GET', '/api/v2/eda/decision-environments/?order_by=name&page=1&page_size=10', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 12,
+          name: 'Rulebook runtime',
+          description: 'Old runtime',
+          image_url: 'quay.io/ansible/ansible-rulebook:latest',
+          pull_policy: 'always',
+          eda_credential_id: 7,
+        },
+      ],
+    }).as('decisionEnvironments');
+    cy.intercept('PATCH', '/api/v2/eda/decision-environments/12/', {
+      id: 12,
+      name: 'Rulebook runtime',
+      image_url: 'quay.io/example/eda:stable',
+    }).as('updateDecisionEnvironment');
+    interceptActivationStartLookups();
+
+    cy.mount(<EdaResourceList config={decisionEnvironmentConfig} />, {
+      path: '/eda/decision-environments',
+      initialEntries: ['/eda/decision-environments'],
+    });
+
+    cy.verifyPageTitle('Decision Environments');
+    cy.wait('@decisionEnvironments');
+    cy.get('[aria-label="kebab dropdown toggle"]').click();
+    cy.contains('button', /^Edit$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-decision-environment-name').should('have.value', 'Rulebook runtime');
+    cy.get('#eda-decision-environment-description').clear().type('Stable runtime');
+    cy.get('#eda-decision-environment-image').clear().type('quay.io/example/eda:stable');
+    cy.get('#eda-decision-environment-pull-policy').select('missing');
+    cy.get('#eda-decision-environment-credential').select('');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@updateDecisionEnvironment')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('Rulebook runtime');
+        expect(body.description).to.equal('Stable runtime');
+        expect(body.image_url).to.equal('quay.io/example/eda:stable');
+        expect(body.pull_policy).to.equal('missing');
+        expect(body.eda_credential_id).to.equal(null);
+      });
   });
 });
