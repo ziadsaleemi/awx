@@ -8,6 +8,7 @@ awx_vcenter_cluster: ""
 awx_vcenter_folder: ""
 awx_vcenter_template: ""
 awx_vcenter_datastore: ""
+awx_vcenter_allowed_datastore_names: []
 awx_vcenter_network: ""
 awx_vcenter_vm_prefix: awx-test
 awx_vcenter_vm_count: 1
