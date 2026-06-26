@@ -1,5 +1,6 @@
 import { EdaActivationPage } from './EdaActivationPage';
 import { EdaActivations } from './EdaActivations';
+import { EdaResourceConfig, EdaResourceList } from './EdaResourceList';
 
 const activation = {
   id: 42,
@@ -13,6 +14,19 @@ const activation = {
   related: {
     controller_activation: 'https://eda.example.test/api/eda/v1/activations/42/',
   },
+};
+
+const rulebookConfig: EdaResourceConfig = {
+  resource: 'rulebooks',
+  title: 'Rulebooks',
+  description: 'Inspect rulebooks discovered by synced EDA projects.',
+  emptyStateTitle: 'No rulebooks found',
+  emptyStateDescription: 'Sync an EDA project to discover rulebooks.',
+  readOnly: true,
+  fields: [
+    { label: 'Project', keys: ['project_name', 'project'] },
+    { label: 'Rulesets', keys: ['rulesets', 'ruleset_count'] },
+  ],
 };
 
 describe('EdaActivations', () => {
@@ -66,7 +80,7 @@ describe('EdaActivations', () => {
       initialEntries: ['/eda/activations'],
     });
 
-    cy.verifyPageTitle('EDA Activations');
+    cy.verifyPageTitle('Rulebook Activations');
     cy.contains('Restart web on alert').should('be.visible');
     cy.contains('restart-web.yml').should('be.visible');
     cy.contains('button', 'Create/start activation').click();
@@ -137,7 +151,7 @@ describe('EdaActivations', () => {
       'activeUserEdaOperator.json'
     );
 
-    cy.verifyPageTitle('EDA Activations');
+    cy.verifyPageTitle('Rulebook Activations');
     cy.contains('button', 'Create/start activation').click();
     cy.get('#eda-rulebook-name').should('be.disabled');
     cy.contains('button', /^Start$/).should('be.disabled');
@@ -186,6 +200,46 @@ describe('EdaActivations', () => {
       .its('request.body')
       .then((body: { rulebook_name: string }) => {
         expect(body.rulebook_name).to.equal('restart-web.yml');
+      });
+  });
+
+  it('starts an activation from a discovered rulebook row', () => {
+    cy.intercept('GET', '/api/v2/eda/rulebooks/?order_by=name&page=1&page_size=10', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 11,
+          name: 'codex-smoke.yml',
+          project_name: 'EDA Samples',
+          ruleset_count: 1,
+        },
+      ],
+    }).as('rulebooks');
+    cy.intercept('POST', '/api/v2/eda/activations/start/', {
+      source: 'eda_controller',
+      activation,
+      actions: ['created', 'started'],
+      events: [],
+    }).as('startFromRulebook');
+
+    cy.mount(<EdaResourceList config={rulebookConfig} />, {
+      path: '/eda/rulebooks',
+      initialEntries: ['/eda/rulebooks'],
+    });
+
+    cy.verifyPageTitle('Rulebooks');
+    cy.wait('@rulebooks');
+    cy.contains('codex-smoke.yml').should('be.visible');
+    cy.get('[aria-label="kebab dropdown toggle"]').click();
+    cy.contains('button', 'Create/start activation').click();
+    cy.wait('@startFromRulebook')
+      .its('request.body')
+      .then((body: { rulebook_name: string; rulebook_id: number; poll: boolean }) => {
+        expect(body.rulebook_name).to.equal('codex-smoke.yml');
+        expect(body.rulebook_id).to.equal(11);
+        expect(body.poll).to.equal(true);
       });
   });
 });

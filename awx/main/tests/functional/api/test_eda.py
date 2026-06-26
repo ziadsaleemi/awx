@@ -221,6 +221,47 @@ def test_eda_activation_start_retries_with_upstream_required_ids(post, admin_use
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_VERIFY_SSL=False)
+def test_eda_activation_start_accepts_upstream_fields_from_top_level(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 0, 'results': []}),
+            eda_error_response(mocker, 400, 'Rulebook is required'),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'pending', 'rulebook': {'name': 'codex-smoke.yml'}}),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'running', 'rulebook': {'name': 'codex-smoke.yml'}}),
+        ],
+    )
+
+    response = post(
+        reverse('api:eda_activation_start'),
+        {
+            'rulebook_name': 'codex-smoke.yml',
+            'rulebook_id': 11,
+            'decision_environment_id': 12,
+            'organization_id': 13,
+            'log_level': 'debug',
+            'poll': False,
+            'include_events': False,
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['activation']['id'] == 42
+    assert response.data['actions'] == ['created', 'started']
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST', 'POST', 'POST']
+    assert request_mock.call_args_list[2].kwargs['json'] == {
+        'rulebook_id': 11,
+        'decision_environment_id': 12,
+        'organization_id': 13,
+        'log_level': 'debug',
+        'name': 'codex-smoke.yml',
+        'is_enabled': False,
+    }
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
 def test_eda_activation_detail_reads_controller_activation(get, admin_user, mocker):
     request_mock = mocker.patch(
@@ -339,6 +380,7 @@ def test_eda_operator_cannot_create_or_delete_activation(post, delete, organizat
     organization.eda_operator_role.members.add(rando)
 
     post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=403)
+    post(reverse('api:eda_activation_start'), {'activation_id': '42', 'rulebook_id': 11}, user=rando, expect=403)
     delete(reverse('api:eda_activation_detail', kwargs={'pk': '42'}), user=rando, expect=403)
 
 

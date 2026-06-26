@@ -140,6 +140,38 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     [alertToaster, t, view]
   );
 
+  const startRulebookActivation = useCallback(
+    async (record: EdaResourceRecord) => {
+      const rulebookName = String(
+        record.name ?? record.rulebook_name ?? record.rulebook ?? record.id ?? ''
+      ).trim();
+      if (!rulebookName) return;
+      const payload: Record<string, unknown> = {
+        rulebook_name: rulebookName,
+        poll: true,
+        include_events: true,
+      };
+      if (record.id !== undefined && record.id !== null) {
+        payload.rulebook_id = record.id;
+      }
+      try {
+        await postRequest(awxAPI`/eda/activations/start/`, payload);
+        alertToaster.addAlert({
+          variant: 'success',
+          title: t('EDA activation start requested for "{{name}}"', { name: rulebookName }),
+          timeout: 4000,
+        });
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to start EDA activation'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, t]
+  );
+
   const toolbarActions = useMemo<IPageAction<EdaResourceRecord>[]>(
     () =>
       config.readOnly
@@ -183,6 +215,18 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       });
     }
 
+    if (config.resource === 'rulebooks') {
+      actions.push({
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        label: t('Create/start activation'),
+        isDisabled: !canManageEda
+          ? t('You need EDA administrator permissions to create activations from rulebooks.')
+          : undefined,
+        onClick: (record) => void startRulebookActivation(record),
+      });
+    }
+
     if (!config.readOnly) {
       actions.push({
         type: PageActionType.Button,
@@ -206,7 +250,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     }
 
     return actions;
-  }, [canManageEda, config.readOnly, config.resource, syncProject, t]);
+  }, [canManageEda, config.readOnly, config.resource, startRulebookActivation, syncProject, t]);
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
 

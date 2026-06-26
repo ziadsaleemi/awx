@@ -2,6 +2,7 @@ from django.db.models import Q
 from rest_framework import permissions
 
 from awx.main import models
+from awx.main.utils.eda import UPSTREAM_ACTIVATION_FIELDS
 
 EDA_VIEW_CODENAMES = ('view_edaactivation', 'execute_edaactivation', 'change_edaactivation')
 EDA_OPERATE_CODENAMES = ('execute_edaactivation', 'change_edaactivation')
@@ -64,8 +65,14 @@ class EDAActivationAdminPermission(permissions.BasePermission):
 class EDAActivationStartPermission(permissions.BasePermission):
     def has_permission(self, request, view):
         data = request.data if isinstance(request.data, dict) else {}
+        extra_data = data.get('extra_data') if isinstance(data.get('extra_data'), dict) else {}
         activation_id = str(data.get('activation_id') or data.get('id') or '').strip()
         rulebook_name = str(data.get('rulebook_name') or data.get('name') or '').strip()
-        if activation_id and not rulebook_name:
+        has_create_fields = bool(rulebook_name)
+        for key in UPSTREAM_ACTIVATION_FIELDS:
+            if (key in data and data[key] not in (None, '')) or (key in extra_data and extra_data[key] not in (None, '')):
+                has_create_fields = True
+                break
+        if activation_id and not has_create_fields:
             return user_can_operate_eda_activations(request.user)
         return user_can_admin_eda_activations(request.user)

@@ -17,7 +17,14 @@ from awx.api.views.eda_permissions import (
 from awx.api.versioning import reverse
 from awx.main import models
 from awx.main.access import get_user_queryset
-from awx.main.utils.eda import EDA_RESOURCE_API_PATHS, EDAControllerClient, EDAControllerError, configured_url, connection_status
+from awx.main.utils.eda import (
+    EDA_RESOURCE_API_PATHS,
+    EDAControllerClient,
+    EDAControllerError,
+    UPSTREAM_ACTIVATION_FIELDS,
+    configured_url,
+    connection_status,
+)
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
 _EDA_READ_ONLY_RESOURCES = {'rule-audit', 'rulebooks'}
@@ -358,16 +365,21 @@ class EDAActivationStartView(APIView):
         activation_id = str(data.get('activation_id') or data.get('id') or '').strip()
         event_source = str(data.get('event_source') or '').strip()
         extra_data = data.get('extra_data') if isinstance(data.get('extra_data'), dict) else {}
+        extra_data = dict(extra_data)
+        for key in UPSTREAM_ACTIVATION_FIELDS:
+            if key in data and data[key] not in (None, ''):
+                extra_data.setdefault(key, data[key])
+        rulebook_id = str(extra_data.get('rulebook_id') or '').strip()
         poll = bool(data.get('poll', True))
         include_events = bool(data.get('include_events', True))
 
-        if not rulebook_name and not activation_id:
-            return Response({'detail': _('Provide rulebook_name or activation_id.')}, status=http_status.HTTP_400_BAD_REQUEST)
+        if not rulebook_name and not activation_id and not rulebook_id:
+            return Response({'detail': _('Provide rulebook_name, rulebook_id, or activation_id.')}, status=http_status.HTTP_400_BAD_REQUEST)
 
         client = EDAControllerClient()
         try:
             result = client.ensure_activation_started(
-                rulebook_name or activation_id,
+                rulebook_name or rulebook_id or activation_id,
                 activation_id=activation_id,
                 event_source=event_source,
                 extra_data=extra_data,
