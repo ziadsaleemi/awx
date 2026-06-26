@@ -96,8 +96,12 @@ require_clean_git() {
   upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
   [[ -n "$upstream" ]] || fail "branch has no upstream"
   [[ "$(git rev-parse HEAD)" == "$(git rev-parse "$upstream")" ]] || fail "HEAD does not match $upstream"
-  git rev-parse "$version" >/dev/null 2>&1 && fail "local tag $version already exists"
-  git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null 2>&1 && fail "remote tag $version already exists"
+  if git rev-parse "$version" >/dev/null 2>&1; then
+    fail "local tag $version already exists"
+  fi
+  if git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null 2>&1; then
+    fail "remote tag $version already exists"
+  fi
 }
 
 require_release_files() {
