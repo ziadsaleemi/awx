@@ -84,6 +84,39 @@ ansible-playbook -i inventories/example.ini playbooks/restore.yml \
   -e awx_restore_path=/var/backups/awx/awx-20260625T010101Z
 ```
 
+## EDA Live Smoke
+
+After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke
+wrapper from the repository root. It checks AWX root/static assets, authenticated
+API access, EDA Controller status, EDA resource list endpoints, anonymous access
+denial, and optional RBAC/project/activation flows.
+
+```bash
+export AWX_PASSWORD='change-me'
+python3 tools/awx-deploy/scripts/smoke_eda.py \
+  --url http://awx.example.com \
+  --username admin
+```
+
+To prove multiple deployment paths in one run:
+
+```bash
+export AWX_PASSWORD='change-me'
+export AWX_URLS='http://direct.example.com http://k3s.example.com http://lb.example.com'
+python3 tools/awx-deploy/scripts/smoke_eda.py
+```
+
+Optional checks:
+
+- `--rbac-username` / `--rbac-password` verifies an EDA operator or non-admin
+  user has the expected read status and cannot mutate EDA resources by default.
+- `--project-url` creates a temporary EDA project, syncs it, polls import state,
+  and deletes it.
+- `--rulebook-id` launches a temporary activation, reads detail/logs, and
+  deletes it. Add `--decision-environment-id`, `--organization-id`, and
+  `--eda-credential-id` when the selected rulebook needs them.
+- `--json-output /path/to/report.json` writes machine-readable evidence.
+
 ## vCenter Lab
 
 Set credentials only in environment variables. The Ansible control node must
