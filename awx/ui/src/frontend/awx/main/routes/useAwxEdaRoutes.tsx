@@ -128,6 +128,7 @@ export function useAwxEdaRoutes() {
       emptyStateDescription: t(
         'Create or sync an EDA organization before assigning teams and resources.'
       ),
+      form: 'organization',
       createSample: { name: '', description: '' },
       fields: [
         { label: t('Description'), keys: ['description'] },
@@ -140,6 +141,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA teams and their organization membership.'),
       emptyStateTitle: t('No EDA teams found'),
       emptyStateDescription: t('Create an EDA team to group users for EDA role assignments.'),
+      form: 'team',
       createSample: { name: '', description: '', organization_id: null },
       fields: [
         { label: t('Organization'), keys: ['organization_name', 'organization'] },
@@ -152,6 +154,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA users on the connected EDA Controller.'),
       emptyStateTitle: t('No EDA users found'),
       emptyStateDescription: t('Create or sync users before assigning EDA roles.'),
+      form: 'user',
       createSample: {
         username: '',
         first_name: '',
@@ -173,6 +176,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA role definitions and inspect built-in EDA permissions.'),
       emptyStateTitle: t('No EDA roles found'),
       emptyStateDescription: t('Create a custom EDA role or verify the EDA Controller connection.'),
+      form: 'role-definition',
       createSample: { name: '', description: '', permissions: [] },
       fields: [
         { label: t('Content type'), keys: ['content_type', 'content_type_model'] },
@@ -186,6 +190,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA role assignments granted directly to users.'),
       emptyStateTitle: t('No EDA user role assignments found'),
       emptyStateDescription: t('Assign an EDA role to a user to grant access.'),
+      form: 'user-role-assignment',
       nameSort: 'id',
       createSample: { user: null, role_definition: null, content_type: '', object_id: null },
       fields: [
@@ -200,6 +205,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA role assignments granted to teams.'),
       emptyStateTitle: t('No EDA team role assignments found'),
       emptyStateDescription: t('Assign an EDA role to a team to grant access.'),
+      form: 'team-role-assignment',
       nameSort: 'id',
       createSample: { team: null, role_definition: null, content_type: '', object_id: null },
       fields: [

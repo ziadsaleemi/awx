@@ -95,6 +95,77 @@ const credentialTypeConfig: EdaResourceConfig = {
   ],
 };
 
+const organizationConfig: EdaResourceConfig = {
+  resource: 'organizations',
+  title: 'Organizations',
+  description: 'Manage EDA organizations available on the connected EDA Controller.',
+  emptyStateTitle: 'No EDA organizations found',
+  emptyStateDescription: 'Create or sync an EDA organization before assigning teams and resources.',
+  form: 'organization',
+  fields: [{ label: 'Description', keys: ['description'] }],
+};
+
+const teamConfig: EdaResourceConfig = {
+  resource: 'teams',
+  title: 'Teams',
+  description: 'Manage EDA teams and their organization membership.',
+  emptyStateTitle: 'No EDA teams found',
+  emptyStateDescription: 'Create an EDA team to group users for EDA role assignments.',
+  form: 'team',
+  fields: [{ label: 'Organization', keys: ['organization_name', 'organization'] }],
+};
+
+const userConfig: EdaResourceConfig = {
+  resource: 'users',
+  title: 'Users',
+  description: 'Manage EDA users on the connected EDA Controller.',
+  emptyStateTitle: 'No EDA users found',
+  emptyStateDescription: 'Create or sync users before assigning EDA roles.',
+  form: 'user',
+  fields: [
+    { label: 'Username', keys: ['username'] },
+    { label: 'Email', keys: ['email'] },
+  ],
+};
+
+const roleDefinitionConfig: EdaResourceConfig = {
+  resource: 'role-definitions',
+  title: 'Roles',
+  description: 'Manage EDA role definitions and inspect built-in EDA permissions.',
+  emptyStateTitle: 'No EDA roles found',
+  emptyStateDescription: 'Create a custom EDA role or verify the EDA Controller connection.',
+  form: 'role-definition',
+  fields: [{ label: 'Content type', keys: ['content_type', 'content_type_model'] }],
+};
+
+const userRoleAssignmentConfig: EdaResourceConfig = {
+  resource: 'user-role-assignments',
+  title: 'User Role Assignments',
+  description: 'Manage EDA role assignments granted directly to users.',
+  emptyStateTitle: 'No EDA user role assignments found',
+  emptyStateDescription: 'Assign an EDA role to a user to grant access.',
+  form: 'user-role-assignment',
+  nameSort: 'id',
+  fields: [
+    { label: 'User', keys: ['user', 'username'] },
+    { label: 'Role', keys: ['role_definition', 'role_definition_name'] },
+  ],
+};
+
+const teamRoleAssignmentConfig: EdaResourceConfig = {
+  resource: 'team-role-assignments',
+  title: 'Team Role Assignments',
+  description: 'Manage EDA role assignments granted to teams.',
+  emptyStateTitle: 'No EDA team role assignments found',
+  emptyStateDescription: 'Assign an EDA role to a team to grant access.',
+  form: 'team-role-assignment',
+  nameSort: 'id',
+  fields: [
+    { label: 'Team', keys: ['team', 'team_name'] },
+    { label: 'Role', keys: ['role_definition', 'role_definition_name'] },
+  ],
+};
+
 describe('EdaActivations', () => {
   beforeEach(() => {
     cy.intercept('GET', '/api/v2/eda/status/', {
@@ -741,6 +812,260 @@ describe('EdaActivations', () => {
             sasl_plain_password: '{{sasl_plain_password}}',
             security_mechanism: '{{security_mechanism}}',
           },
+        });
+      });
+  });
+
+  it('creates EDA organizations with structured fields instead of raw JSON', () => {
+    cy.intercept('GET', '/api/v2/eda/organizations/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('organizations');
+    cy.intercept('POST', '/api/v2/eda/organizations/', {
+      id: 51,
+      name: 'Operations',
+    }).as('createOrganization');
+
+    cy.mount(<EdaResourceList config={organizationConfig} />, {
+      path: '/eda/access/organizations',
+      initialEntries: ['/eda/access/organizations'],
+    });
+
+    cy.verifyPageTitle('Organizations');
+    cy.wait('@organizations');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-organization-name').type('Operations');
+    cy.get('#eda-organization-description').type('Operations automation');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createOrganization')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          name: 'Operations',
+          description: 'Operations automation',
+        });
+      });
+  });
+
+  it('creates EDA teams with an organization selector', () => {
+    cy.intercept('GET', '/api/v2/eda/teams/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('teams');
+    cy.intercept('GET', '/api/v2/eda/organizations/?page_size=200&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 1, name: 'Default' }],
+    }).as('organizationLookup');
+    cy.intercept('POST', '/api/v2/eda/teams/', { id: 52, name: 'EDA Operators' }).as('createTeam');
+
+    cy.mount(<EdaResourceList config={teamConfig} />, {
+      path: '/eda/access/teams',
+      initialEntries: ['/eda/access/teams'],
+    });
+
+    cy.verifyPageTitle('Teams');
+    cy.wait('@teams');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.wait('@organizationLookup');
+    cy.get('#eda-team-name').type('EDA Operators');
+    cy.get('#eda-team-description').type('Operators for event-driven automation');
+    cy.get('#eda-team-organization').select('1');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createTeam')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          name: 'EDA Operators',
+          description: 'Operators for event-driven automation',
+          organization_id: 1,
+        });
+      });
+  });
+
+  it('creates EDA users with profile and privilege fields', () => {
+    cy.intercept('GET', '/api/v2/eda/users/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('users');
+    cy.intercept('POST', '/api/v2/eda/users/', { id: 53, username: 'eda-admin' }).as('createUser');
+
+    cy.mount(<EdaResourceList config={userConfig} />, {
+      path: '/eda/access/users',
+      initialEntries: ['/eda/access/users'],
+    });
+
+    cy.verifyPageTitle('Users');
+    cy.wait('@users');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-user-username').type('eda-admin');
+    cy.get('#eda-user-first-name').type('EDA');
+    cy.get('#eda-user-last-name').type('Admin');
+    cy.get('#eda-user-email').type('eda-admin@example.test');
+    cy.get('#eda-user-password').type('Welcome123!');
+    cy.get('#eda-user-superuser').click();
+    cy.get('#eda-user-staff').click();
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createUser')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          username: 'eda-admin',
+          first_name: 'EDA',
+          last_name: 'Admin',
+          email: 'eda-admin@example.test',
+          password: 'Welcome123!',
+          is_superuser: true,
+          is_staff: true,
+        });
+      });
+  });
+
+  it('creates EDA roles with permission fields', () => {
+    cy.intercept('GET', '/api/v2/eda/role-definitions/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('roles');
+    cy.intercept('POST', '/api/v2/eda/role-definitions/', { id: 54, name: 'Activation Admin' }).as(
+      'createRole'
+    );
+
+    cy.mount(<EdaResourceList config={roleDefinitionConfig} />, {
+      path: '/eda/access/roles',
+      initialEntries: ['/eda/access/roles'],
+    });
+
+    cy.verifyPageTitle('Roles');
+    cy.wait('@roles');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-role-definition-name').type('Activation Admin');
+    cy.get('#eda-role-definition-description').type('Can administer EDA activations');
+    cy.get('#eda-role-definition-content-type').type('activation');
+    cy.get('#eda-role-definition-permissions').type('view_activation, change_activation');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createRole')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          name: 'Activation Admin',
+          description: 'Can administer EDA activations',
+          content_type: 'activation',
+          permissions: ['view_activation', 'change_activation'],
+        });
+      });
+  });
+
+  it('creates EDA user role assignments with user and role selectors', () => {
+    cy.intercept('GET', /\/api\/v2\/eda\/user-role-assignments\/\?.*/, {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('assignments');
+    cy.intercept('GET', '/api/v2/eda/users/?page_size=200&order_by=username', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 53, username: 'eda-admin', email: 'eda-admin@example.test' }],
+    }).as('userLookup');
+    cy.intercept('GET', '/api/v2/eda/role-definitions/?page_size=200&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 54, name: 'Activation Admin' }],
+    }).as('roleLookup');
+    cy.intercept('POST', '/api/v2/eda/user-role-assignments/', { id: 55 }).as(
+      'createUserAssignment'
+    );
+
+    cy.mount(<EdaResourceList config={userRoleAssignmentConfig} />, {
+      path: '/eda/access/user-role-assignments',
+      initialEntries: ['/eda/access/user-role-assignments'],
+    });
+
+    cy.verifyPageTitle('User Role Assignments');
+    cy.wait('@assignments');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.wait(['@userLookup', '@roleLookup']);
+    cy.get('#eda-user-role-assignment-user').select('53');
+    cy.get('#eda-user-role-assignment-user-role-definition').select('54');
+    cy.get('#eda-user-role-assignment-user-content-type').type('activation');
+    cy.get('#eda-user-role-assignment-user-object-id').type('99');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createUserAssignment')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          user: 53,
+          role_definition: 54,
+          content_type: 'activation',
+          object_id: 99,
+        });
+      });
+  });
+
+  it('creates EDA team role assignments with team and role selectors', () => {
+    cy.intercept('GET', /\/api\/v2\/eda\/team-role-assignments\/\?.*/, {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('assignments');
+    cy.intercept('GET', '/api/v2/eda/teams/?page_size=200&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 52, name: 'EDA Operators' }],
+    }).as('teamLookup');
+    cy.intercept('GET', '/api/v2/eda/role-definitions/?page_size=200&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 54, name: 'Activation Admin' }],
+    }).as('roleLookup');
+    cy.intercept('POST', '/api/v2/eda/team-role-assignments/', { id: 56 }).as(
+      'createTeamAssignment'
+    );
+
+    cy.mount(<EdaResourceList config={teamRoleAssignmentConfig} />, {
+      path: '/eda/access/team-role-assignments',
+      initialEntries: ['/eda/access/team-role-assignments'],
+    });
+
+    cy.verifyPageTitle('Team Role Assignments');
+    cy.wait('@assignments');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.wait(['@teamLookup', '@roleLookup']);
+    cy.get('#eda-team-role-assignment-team').select('52');
+    cy.get('#eda-team-role-assignment-team-role-definition').select('54');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createTeamAssignment')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          team: 52,
+          role_definition: 54,
         });
       });
   });

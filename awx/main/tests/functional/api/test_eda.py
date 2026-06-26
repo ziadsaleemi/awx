@@ -747,6 +747,21 @@ def test_eda_operator_can_read_but_not_mutate_generic_resources(get, post, organ
 
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_operator_can_read_but_not_mutate_access_resources(get, post, organization, rando, mocker):
+    organization.eda_operator_role.members.add(rando)
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 0, 'next': None, 'previous': None, 'results': []}),
+    )
+
+    get(reverse('api:eda_resource_list', kwargs={'resource': 'teams'}), user=rando, expect=200)
+    post(reverse('api:eda_resource_list', kwargs={'resource': 'teams'}), {'name': 'EDA operators'}, user=rando, expect=403)
+
+    request_mock.assert_called_once()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_controller_discovered_resources_are_read_only(post, patch, delete, admin_user):
     for resource in ('rule-audit', 'rulebooks'):
         post(reverse('api:eda_resource_list', kwargs={'resource': resource}), {'name': 'audit'}, user=admin_user, expect=405)

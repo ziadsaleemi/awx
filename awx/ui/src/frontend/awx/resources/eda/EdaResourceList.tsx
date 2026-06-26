@@ -72,7 +72,13 @@ type EdaResourceFormType =
   | 'decision-environment'
   | 'event-stream'
   | 'credential'
-  | 'credential-type';
+  | 'credential-type'
+  | 'organization'
+  | 'team'
+  | 'user'
+  | 'role-definition'
+  | 'user-role-assignment'
+  | 'team-role-assignment';
 
 interface EdaCredentialRecord {
   id: number | string;
@@ -505,6 +511,35 @@ function EdaResourceFormModal(props: {
   const [credentialTypeInjectorsText, setCredentialTypeInjectorsText] = useState(() =>
     JSON.stringify(record?.injectors ?? {}, null, 2)
   );
+  const [username, setUsername] = useState(() => stringValue(record?.username));
+  const [firstName, setFirstName] = useState(() => stringValue(record?.first_name));
+  const [lastName, setLastName] = useState(() => stringValue(record?.last_name));
+  const [email, setEmail] = useState(() => stringValue(record?.email));
+  const [password, setPassword] = useState('');
+  const [isSuperuser, setIsSuperuser] = useState(() => booleanValue(record?.is_superuser, false));
+  const [isStaff, setIsStaff] = useState(() => booleanValue(record?.is_staff, false));
+  const [organizationId, setOrganizationId] = useState(() =>
+    stringValue(record?.organization_id ?? nestedId(record?.organization))
+  );
+  const [roleContentType, setRoleContentType] = useState(() => stringValue(record?.content_type));
+  const [rolePermissions, setRolePermissions] = useState(() =>
+    permissionsText(record?.permissions)
+  );
+  const [roleDefinitionId, setRoleDefinitionId] = useState(() =>
+    stringValue(record?.role_definition_id ?? nestedId(record?.role_definition))
+  );
+  const [roleAssignmentUserId, setRoleAssignmentUserId] = useState(() =>
+    stringValue(record?.user_id ?? nestedId(record?.user) ?? record?.user)
+  );
+  const [roleAssignmentTeamId, setRoleAssignmentTeamId] = useState(() =>
+    stringValue(record?.team_id ?? nestedId(record?.team) ?? record?.team)
+  );
+  const [roleAssignmentContentType, setRoleAssignmentContentType] = useState(() =>
+    stringValue(record?.content_type)
+  );
+  const [roleAssignmentObjectId, setRoleAssignmentObjectId] = useState(() =>
+    stringValue(record?.object_id)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { data: credentials, isLoading: credentialsLoading } = useGet<
     EdaItemsResponse<EdaCredentialRecord>
@@ -522,6 +557,32 @@ function EdaResourceFormModal(props: {
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
+  const { data: organizations, isLoading: organizationsLoading } = useGet<
+    EdaItemsResponse<EdaResourceRecord>
+  >(
+    form === 'team' ? awxAPI`/eda/organizations/` : undefined,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
+  const { data: users, isLoading: usersLoading } = useGet<EdaItemsResponse<EdaResourceRecord>>(
+    form === 'user-role-assignment' ? awxAPI`/eda/users/` : undefined,
+    { page_size: 200, order_by: 'username' },
+    { revalidateOnFocus: false }
+  );
+  const { data: teams, isLoading: teamsLoading } = useGet<EdaItemsResponse<EdaResourceRecord>>(
+    form === 'team-role-assignment' ? awxAPI`/eda/teams/` : undefined,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
+  const { data: roleDefinitions, isLoading: roleDefinitionsLoading } = useGet<
+    EdaItemsResponse<EdaResourceRecord>
+  >(
+    form === 'user-role-assignment' || form === 'team-role-assignment'
+      ? awxAPI`/eda/role-definitions/`
+      : undefined,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
   const regularCredentials = (credentials?.results ?? []).filter(
     (credential) => !isRuleEngineCredential(credential)
   );
@@ -532,10 +593,18 @@ function EdaResourceFormModal(props: {
   const requiredCredentialInputIds = selectedCredentialType?.inputs?.required ?? [];
   const isManagedCredentialType =
     form === 'credential-type' && booleanValue(record?.managed, false) && mode === 'edit';
+  const isManagedRoleDefinition =
+    form === 'role-definition' &&
+    (booleanValue(record?.managed, false) || booleanValue(record?.is_system, false)) &&
+    mode === 'edit';
 
   const submit = async () => {
-    if (!name.trim()) {
+    if (formUsesName(form) && !name.trim()) {
       alertToaster.addAlert({ variant: 'danger', title: t('Name is required') });
+      return;
+    }
+    if (form === 'user' && !username.trim()) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Username is required') });
       return;
     }
     if (form === 'project' && !projectUrl.trim()) {
@@ -558,6 +627,13 @@ function EdaResourceFormModal(props: {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Managed credential types cannot be edited'),
+      });
+      return;
+    }
+    if (isManagedRoleDefinition) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Managed EDA roles cannot be edited'),
       });
       return;
     }
@@ -604,13 +680,48 @@ function EdaResourceFormModal(props: {
           credentialInputValues,
           includeCredentialType: mode === 'create',
         });
-      } else {
+      } else if (form === 'credential-type') {
         payload = credentialTypePayload({
           name,
           description,
           fields: credentialTypeFields,
           generateInjectors,
           injectorsText: credentialTypeInjectorsText,
+        });
+      } else if (form === 'organization') {
+        payload = organizationPayload({ name, description });
+      } else if (form === 'team') {
+        payload = teamPayload({
+          name,
+          description,
+          organizationId,
+          includeClears: mode === 'edit',
+        });
+      } else if (form === 'user') {
+        payload = userPayload({
+          username,
+          firstName,
+          lastName,
+          email,
+          password,
+          isSuperuser,
+          isStaff,
+          includePassword: mode === 'create' || Boolean(password.trim()),
+        });
+      } else if (form === 'role-definition') {
+        payload = roleDefinitionPayload({
+          name,
+          description,
+          contentType: roleContentType,
+          permissions: rolePermissions,
+        });
+      } else {
+        payload = roleAssignmentPayload({
+          actorKey: form === 'user-role-assignment' ? 'user' : 'team',
+          actorId: form === 'user-role-assignment' ? roleAssignmentUserId : roleAssignmentTeamId,
+          roleDefinitionId,
+          contentType: roleAssignmentContentType,
+          objectId: roleAssignmentObjectId,
         });
       }
     } catch (err) {
@@ -661,7 +772,7 @@ function EdaResourceFormModal(props: {
           key="save"
           variant="primary"
           isLoading={isSubmitting}
-          isDisabled={isSubmitting || isManagedCredentialType}
+          isDisabled={isSubmitting || isManagedCredentialType || isManagedRoleDefinition}
           onClick={() => void submit()}
         >
           {t('Save')}
@@ -682,10 +793,26 @@ function EdaResourceFormModal(props: {
             {t('This credential type is managed by EDA and cannot be edited from AWX.')}
           </Alert>
         )}
-        <FormGroup label={t('Name')} fieldId={`eda-${form}-name`} isRequired>
-          <TextInput id={`eda-${form}-name`} value={name} onChange={(_, value) => setName(value)} />
-        </FormGroup>
-        {form !== 'event-stream' && (
+        {isManagedRoleDefinition && (
+          <Alert
+            isInline
+            variant="warning"
+            title={t('Managed EDA role')}
+            style={{ marginBottom: 16 }}
+          >
+            {t('This role is managed by EDA and cannot be edited from AWX.')}
+          </Alert>
+        )}
+        {formUsesName(form) && (
+          <FormGroup label={t('Name')} fieldId={`eda-${form}-name`} isRequired>
+            <TextInput
+              id={`eda-${form}-name`}
+              value={name}
+              onChange={(_, value) => setName(value)}
+            />
+          </FormGroup>
+        )}
+        {formShowsDescription(form) && (
           <FormGroup label={t('Description')} fieldId={`eda-${form}-description`}>
             <TextArea
               id={`eda-${form}-description`}
@@ -882,7 +1009,7 @@ function EdaResourceFormModal(props: {
               />
             ))}
           </>
-        ) : (
+        ) : form === 'credential-type' ? (
           <>
             <FormGroup label={t('Input fields')} fieldId="eda-credential-type-fields" isRequired>
               <div id="eda-credential-type-fields">
@@ -944,9 +1071,218 @@ function EdaResourceFormModal(props: {
               </FormGroup>
             )}
           </>
+        ) : form === 'organization' ? null : form === 'team' ? (
+          <FormGroup label={t('Organization')} fieldId="eda-team-organization">
+            <ResourceSelect
+              id="eda-team-organization"
+              value={organizationId}
+              records={organizations?.results ?? []}
+              isLoading={organizationsLoading}
+              loadingLabel={t('Loading organizations...')}
+              emptyLabel={t('Default organization')}
+              onChange={setOrganizationId}
+            />
+          </FormGroup>
+        ) : form === 'user' ? (
+          <>
+            <FormGroup label={t('Username')} fieldId="eda-user-username" isRequired>
+              <TextInput
+                id="eda-user-username"
+                value={username}
+                onChange={(_, value) => setUsername(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('First name')} fieldId="eda-user-first-name">
+              <TextInput
+                id="eda-user-first-name"
+                value={firstName}
+                onChange={(_, value) => setFirstName(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Last name')} fieldId="eda-user-last-name">
+              <TextInput
+                id="eda-user-last-name"
+                value={lastName}
+                onChange={(_, value) => setLastName(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Email')} fieldId="eda-user-email">
+              <TextInput
+                id="eda-user-email"
+                value={email}
+                onChange={(_, value) => setEmail(value)}
+              />
+            </FormGroup>
+            <FormGroup
+              label={mode === 'create' ? t('Password') : t('New password')}
+              fieldId="eda-user-password"
+            >
+              <TextInput
+                id="eda-user-password"
+                type="password"
+                value={password}
+                onChange={(_, value) => setPassword(value)}
+              />
+            </FormGroup>
+            <Checkbox
+              id="eda-user-superuser"
+              label={t('Superuser')}
+              isChecked={isSuperuser}
+              onChange={(_, checked) => setIsSuperuser(checked)}
+            />
+            <Checkbox
+              id="eda-user-staff"
+              label={t('Staff')}
+              isChecked={isStaff}
+              onChange={(_, checked) => setIsStaff(checked)}
+            />
+          </>
+        ) : form === 'role-definition' ? (
+          <>
+            <FormGroup label={t('Content type')} fieldId="eda-role-definition-content-type">
+              <TextInput
+                id="eda-role-definition-content-type"
+                value={roleContentType}
+                onChange={(_, value) => setRoleContentType(value)}
+              />
+            </FormGroup>
+            <FormGroup label={t('Permissions')} fieldId="eda-role-definition-permissions">
+              <TextArea
+                id="eda-role-definition-permissions"
+                value={rolePermissions}
+                rows={6}
+                placeholder={t('One permission per line or comma-separated')}
+                onChange={(_, value) => setRolePermissions(value)}
+              />
+            </FormGroup>
+          </>
+        ) : form === 'user-role-assignment' ? (
+          <RoleAssignmentFields
+            actorLabel={t('User')}
+            actorId="eda-user-role-assignment-user"
+            actorValue={roleAssignmentUserId}
+            actors={users?.results ?? []}
+            actorsLoading={usersLoading}
+            actorsLoadingLabel={t('Loading users...')}
+            actorEmptyLabel={t('Select user')}
+            roleDefinitionId={roleDefinitionId}
+            roleDefinitions={roleDefinitions?.results ?? []}
+            roleDefinitionsLoading={roleDefinitionsLoading}
+            contentType={roleAssignmentContentType}
+            objectId={roleAssignmentObjectId}
+            onActorChange={setRoleAssignmentUserId}
+            onRoleDefinitionChange={setRoleDefinitionId}
+            onContentTypeChange={setRoleAssignmentContentType}
+            onObjectIdChange={setRoleAssignmentObjectId}
+          />
+        ) : (
+          <RoleAssignmentFields
+            actorLabel={t('Team')}
+            actorId="eda-team-role-assignment-team"
+            actorValue={roleAssignmentTeamId}
+            actors={teams?.results ?? []}
+            actorsLoading={teamsLoading}
+            actorsLoadingLabel={t('Loading teams...')}
+            actorEmptyLabel={t('Select team')}
+            roleDefinitionId={roleDefinitionId}
+            roleDefinitions={roleDefinitions?.results ?? []}
+            roleDefinitionsLoading={roleDefinitionsLoading}
+            contentType={roleAssignmentContentType}
+            objectId={roleAssignmentObjectId}
+            onActorChange={setRoleAssignmentTeamId}
+            onRoleDefinitionChange={setRoleDefinitionId}
+            onContentTypeChange={setRoleAssignmentContentType}
+            onObjectIdChange={setRoleAssignmentObjectId}
+          />
         )}
       </Form>
     </Modal>
+  );
+}
+
+function ResourceSelect(props: {
+  id: string;
+  value: string;
+  records: EdaResourceRecord[];
+  isLoading: boolean;
+  loadingLabel: string;
+  emptyLabel: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <FormSelect id={props.id} value={props.value} onChange={(_, value) => props.onChange(value)}>
+      <FormSelectOption value="" label={props.isLoading ? props.loadingLabel : props.emptyLabel} />
+      {props.records.map((record) => (
+        <FormSelectOption
+          key={String(record.id)}
+          value={String(record.id)}
+          label={resourceOptionLabel(record)}
+        />
+      ))}
+    </FormSelect>
+  );
+}
+
+function RoleAssignmentFields(props: {
+  actorLabel: string;
+  actorId: string;
+  actorValue: string;
+  actors: EdaResourceRecord[];
+  actorsLoading: boolean;
+  actorsLoadingLabel: string;
+  actorEmptyLabel: string;
+  roleDefinitionId: string;
+  roleDefinitions: EdaResourceRecord[];
+  roleDefinitionsLoading: boolean;
+  contentType: string;
+  objectId: string;
+  onActorChange: (value: string) => void;
+  onRoleDefinitionChange: (value: string) => void;
+  onContentTypeChange: (value: string) => void;
+  onObjectIdChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <FormGroup label={props.actorLabel} fieldId={props.actorId} isRequired>
+        <ResourceSelect
+          id={props.actorId}
+          value={props.actorValue}
+          records={props.actors}
+          isLoading={props.actorsLoading}
+          loadingLabel={props.actorsLoadingLabel}
+          emptyLabel={props.actorEmptyLabel}
+          onChange={props.onActorChange}
+        />
+      </FormGroup>
+      <FormGroup label={t('Role')} fieldId={`${props.actorId}-role-definition`} isRequired>
+        <ResourceSelect
+          id={`${props.actorId}-role-definition`}
+          value={props.roleDefinitionId}
+          records={props.roleDefinitions}
+          isLoading={props.roleDefinitionsLoading}
+          loadingLabel={t('Loading roles...')}
+          emptyLabel={t('Select role')}
+          onChange={props.onRoleDefinitionChange}
+        />
+      </FormGroup>
+      <FormGroup label={t('Resource type')} fieldId={`${props.actorId}-content-type`}>
+        <TextInput
+          id={`${props.actorId}-content-type`}
+          value={props.contentType}
+          placeholder={t('Optional EDA content type')}
+          onChange={(_, value) => props.onContentTypeChange(value)}
+        />
+      </FormGroup>
+      <FormGroup label={t('Resource ID')} fieldId={`${props.actorId}-object-id`}>
+        <TextInput
+          id={`${props.actorId}-object-id`}
+          value={props.objectId}
+          placeholder={t('Optional resource id')}
+          onChange={(_, value) => props.onObjectIdChange(value)}
+        />
+      </FormGroup>
+    </>
   );
 }
 
@@ -1443,6 +1779,90 @@ function credentialTypePayload(values: {
   };
 }
 
+function organizationPayload(values: { name: string; description: string }) {
+  return {
+    name: values.name.trim(),
+    description: values.description,
+  };
+}
+
+function teamPayload(values: {
+  name: string;
+  description: string;
+  organizationId: string;
+  includeClears: boolean;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    description: values.description,
+  };
+  if (values.organizationId) {
+    payload.organization_id = Number(values.organizationId);
+  } else if (values.includeClears) {
+    payload.organization_id = null;
+  }
+  return payload;
+}
+
+function userPayload(values: {
+  username: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  isSuperuser: boolean;
+  isStaff: boolean;
+  includePassword: boolean;
+}) {
+  const payload: Record<string, unknown> = {
+    username: values.username.trim(),
+    first_name: values.firstName,
+    last_name: values.lastName,
+    email: values.email.trim(),
+    is_superuser: values.isSuperuser,
+    is_staff: values.isStaff,
+  };
+  if (values.includePassword) payload.password = values.password;
+  return payload;
+}
+
+function roleDefinitionPayload(values: {
+  name: string;
+  description: string;
+  contentType: string;
+  permissions: string;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    description: values.description,
+    permissions: splitList(values.permissions),
+  };
+  if (values.contentType.trim()) payload.content_type = values.contentType.trim();
+  return payload;
+}
+
+function roleAssignmentPayload(values: {
+  actorKey: 'user' | 'team';
+  actorId: string;
+  roleDefinitionId: string;
+  contentType: string;
+  objectId: string;
+}) {
+  if (!values.actorId)
+    throw new Error(`${values.actorKey === 'user' ? 'User' : 'Team'} is required.`);
+  if (!values.roleDefinitionId) throw new Error('Role is required.');
+  const payload: Record<string, unknown> = {
+    [values.actorKey]: Number(values.actorId),
+    role_definition: Number(values.roleDefinitionId),
+  };
+  if (values.contentType.trim()) payload.content_type = values.contentType.trim();
+  if (values.objectId.trim()) {
+    const objectIdNumber = Number(values.objectId);
+    payload.object_id = Number.isFinite(objectIdNumber) ? objectIdNumber : values.objectId.trim();
+  }
+  return payload;
+}
+
 function credentialTypeInputFields(fields: CredentialTypeFieldDraft[]) {
   const usedIds = new Set<string>();
   return fields.map((field) => {
@@ -1520,6 +1940,25 @@ function parseJsonObject(jsonText: string, label: string) {
   return parsed as Record<string, unknown>;
 }
 
+function splitList(text: string) {
+  return text
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function permissionsText(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item)).join('\n') : stringValue(value);
+}
+
+function formUsesName(form: EdaResourceFormType) {
+  return !['user', 'user-role-assignment', 'team-role-assignment'].includes(form);
+}
+
+function formShowsDescription(form: EdaResourceFormType) {
+  return !['event-stream', 'user', 'user-role-assignment', 'team-role-assignment'].includes(form);
+}
+
 function stringValue(value: unknown) {
   return value === undefined || value === null ? '' : String(value);
 }
@@ -1551,6 +1990,12 @@ function credentialTypeLabel(credentialType: EdaCredentialTypeRecord) {
   const name = String(credentialType.name ?? credentialType.id);
   const namespace = credentialType.namespace || credentialType.kind || '';
   return namespace ? `${name} (${namespace})` : name;
+}
+
+function resourceOptionLabel(record: EdaResourceRecord) {
+  const primary = String(record.name ?? record.username ?? record.id ?? '');
+  const secondary = String(record.email ?? record.description ?? '');
+  return secondary ? `${primary} (${secondary})` : primary;
 }
 
 function credentialInputFieldId(field: EdaCredentialInputField) {
@@ -1647,7 +2092,7 @@ function isRuleEngineCredential(credential: EdaCredentialRecord) {
 
 function recordName(record?: EdaResourceRecord) {
   if (!record) return '-';
-  return String(record.name ?? record.id ?? '-');
+  return String(record.name ?? record.username ?? record.id ?? '-');
 }
 
 function pickValue(record: EdaResourceRecord, keys: string[]) {
