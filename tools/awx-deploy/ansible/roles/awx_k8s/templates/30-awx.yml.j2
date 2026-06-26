@@ -26,7 +26,7 @@ spec:
             - /bin/bash
             - -lc
           args:
-            - mkdir -p /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/proxy /var/lib/nginx/tmp/fastcgi /var/lib/nginx/tmp/uwsgi /var/lib/nginx/tmp/scgi && chmod -R g+rwX /var/lib/nginx
+            - mkdir -p /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/proxy /var/lib/nginx/tmp/fastcgi /var/lib/nginx/tmp/uwsgi /var/lib/nginx/tmp/scgi
           volumeMounts:
             - name: nginx-state
               mountPath: /var/lib/nginx
