@@ -20,6 +20,39 @@
     fail_msg: "Refusing to use forbidden vCenter datastore '{{ awx_vcenter_datastore }}'. Select a management-local datastore such as datastore1."
   loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
 
+- name: Gather vCenter datastore inventory
+  community.vmware.vmware_datastore_info:
+    hostname: "{{ awx_vcenter_hostname }}"
+    username: "{{ awx_vcenter_username }}"
+    password: "{{ awx_vcenter_password }}"
+    validate_certs: "{{ awx_vcenter_validate_certs }}"
+    datacenter_name: "{{ awx_vcenter_datacenter }}"
+  register: awx_vcenter_datastore_inventory
+  no_log: true
+
+- name: Build vCenter datastore type map
+  ansible.builtin.set_fact:
+    awx_vcenter_datastore_type_map: >-
+      {{
+        dict(
+          (awx_vcenter_datastore_inventory.datastores | default([]) | map(attribute='name') | list)
+          | zip(awx_vcenter_datastore_inventory.datastores | default([]) | map(attribute='type') | list)
+        )
+      }}
+
+- name: Require selected vCenter datastore to exist
+  ansible.builtin.assert:
+    that:
+      - (awx_vcenter_datastore_type_map.get(awx_vcenter_datastore, '') | length) > 0
+    fail_msg: "Refusing unknown vCenter datastore '{{ awx_vcenter_datastore }}'."
+
+- name: Require approved vCenter datastore type
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_datastore_type_map.get(awx_vcenter_datastore, '') in awx_vcenter_allowed_datastore_types
+    fail_msg: "Refusing datastore '{{ awx_vcenter_datastore }}' with type '{{ awx_vcenter_datastore_type_map.get(awx_vcenter_datastore, 'unknown') }}'. Approved datastore types: {{ awx_vcenter_allowed_datastore_types | join(', ') }}."
+  when: awx_vcenter_allowed_datastore_types | default([]) | length > 0
+
 - name: Require approved vCenter datastore when configured
   ansible.builtin.assert:
     that:
@@ -112,6 +145,30 @@
   when:
     - awx_vcenter_verify_disk_backing | bool
     - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Collect cloned VM disk datastore names
+  ansible.builtin.set_fact:
+    awx_vcenter_disk_datastore_names: >-
+      {{
+        awx_vcenter_disk_backing_files | default([])
+        | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
+        | list
+        | unique
+      }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Require approved cloned VM disk datastore types
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_datastore_type_map.get(item, '') in awx_vcenter_allowed_datastore_types
+    fail_msg: "vCenter placed a cloned VM disk on datastore '{{ item }}' with type '{{ awx_vcenter_datastore_type_map.get(item, 'unknown') }}'. Approved datastore types: {{ awx_vcenter_allowed_datastore_types | join(', ') }}."
+  loop: "{{ awx_vcenter_disk_datastore_names | default([]) }}"
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_allowed_datastore_types | default([]) | length > 0
+    - awx_vcenter_disk_datastore_names | default([]) | length > 0
 
 - name: Require approved cloned VM disk backing
   ansible.builtin.assert:

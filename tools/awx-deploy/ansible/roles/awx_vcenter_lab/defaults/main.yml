@@ -19,6 +19,8 @@ awx_vcenter_wait_for_ip: true
 awx_vcenter_verify_disk_backing: true
 awx_vcenter_forbidden_datastore_terms:
   - truenas
+awx_vcenter_allowed_datastore_types:
+  - VMFS
 awx_vcenter_allowed_datastore_names: []
 awx_vcenter_inventory_path: /tmp/awx-vcenter-lab.ini
 awx_vcenter_inventory_groups:
