@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
 import { EdaActivationPage } from '../../resources/eda/EdaActivationPage';
 import { EdaActivations } from '../../resources/eda/EdaActivations';
+import { EdaRbacSync } from '../../resources/eda/EdaRbacSync';
 import { EdaResourceConfig, EdaResourceList } from '../../resources/eda/EdaResourceList';
 import { AwxRoute } from '../AwxRoutes';
 
@@ -325,6 +326,12 @@ export function useAwxEdaRoutes() {
               label: t('Roles'),
               path: 'roles',
               element: <EdaResourceList config={roles} />,
+            },
+            {
+              id: AwxRoute.EdaRbacSync,
+              label: t('Access Sync'),
+              path: 'sync',
+              element: <EdaRbacSync />,
             },
             {
               id: AwxRoute.EdaUserRoleAssignments,

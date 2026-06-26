@@ -3,6 +3,7 @@ import requests
 from django.test import override_settings
 
 from awx.api.versioning import reverse
+from awx.main import models
 
 
 def eda_response(mocker, payload):
@@ -21,6 +22,28 @@ def eda_error_response(mocker, status_code, text):
     response.content = text.encode()
     response.raise_for_status.side_effect = requests.HTTPError(response=response)
     return response
+
+
+def eda_rbac_resource_payloads(organization, user=None, *, assignments=None, teams=None):
+    users = []
+    if user:
+        users.append({'id': 50, 'username': user.username, 'email': user.email})
+    return {
+        'organizations': [{'id': 10, 'name': organization.name}],
+        'users': users,
+        'teams': teams or [],
+        'role-definitions': [
+            {'id': 1, 'name': 'Admin', 'content_type': 'shared.organization'},
+            {'id': 5, 'name': 'Operator', 'content_type': 'shared.organization'},
+            {'id': 6, 'name': 'Auditor', 'content_type': 'shared.organization'},
+        ],
+        'user-role-assignments': assignments or [],
+        'team-role-assignments': [],
+    }
+
+
+def patch_eda_rbac_resources(mocker, payloads):
+    return mocker.patch('awx.main.utils.eda_rbac.EDAControllerClient.list_resource_all', side_effect=lambda resource, **kwargs: payloads[resource])
 
 
 @pytest.mark.django_db
@@ -795,3 +818,91 @@ def test_api_root_includes_eda_status_link(get, admin_user):
     response = get(reverse('api:api_v2_root_view'), user=admin_user, expect=200)
 
     assert response.data['eda'].endswith('/api/v2/eda/status/')
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_preview_reports_missing_assignment(get, organization, rando, admin_user, mocker):
+    organization.eda_operator_role.members.add(rando)
+    patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, rando))
+
+    response = get(reverse('api:eda_rbac_sync'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['mode'] == 'observe'
+    assert response.data['summary']['desired_assignments'] == 1
+    assert response.data['summary']['missing_assignments'] == 1
+    assert response.data['summary']['extra_assignments'] == 0
+    assert response.data['missing_assignments'][0]['actor_type'] == 'user'
+    assert response.data['missing_assignments'][0]['actor_name'] == rando.username
+    assert response.data['missing_assignments'][0]['eda_role_name'] == 'Operator'
+    assert response.data['actions'] == []
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_creates_missing_assignment(post, organization, rando, admin_user, mocker):
+    organization.eda_operator_role.members.add(rando)
+    patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, rando))
+    create_resource = mocker.patch('awx.main.utils.eda_rbac.EDAControllerClient.create_resource', return_value={'id': 99})
+
+    response = post(reverse('api:eda_rbac_sync'), {'mode': 'sync'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['actions'] == 1
+    assert response.data['actions'][0]['action'] == 'create_assignment'
+    create_resource.assert_called_once_with(
+        'user-role-assignments',
+        {'user': 50, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10},
+    )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_enforce_removes_stale_awx_known_assignment(post, organization, rando, admin_user, mocker):
+    assignments = [{'id': 77, 'user': 50, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10}]
+    patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, rando, assignments=assignments))
+    delete_resource = mocker.patch('awx.main.utils.eda_rbac.EDAControllerClient.delete_resource', return_value={'status': 'deleted'})
+
+    response = post(reverse('api:eda_rbac_sync'), {'mode': 'enforce'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['desired_assignments'] == 0
+    assert response.data['summary']['extra_assignments'] == 1
+    assert response.data['summary']['actions'] == 1
+    assert response.data['extra_assignments'][0]['eda_actor_name'] == rando.username
+    delete_resource.assert_called_once_with('user-role-assignments', 77)
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_creates_missing_team_identity_and_assignment(post, organization, admin_user, mocker):
+    team = models.Team.objects.create(name='EDA operators', organization=organization)
+    team.member_role.children.add(organization.eda_operator_role)
+    patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, teams=[]))
+    create_resource = mocker.patch(
+        'awx.main.utils.eda_rbac.EDAControllerClient.create_resource',
+        side_effect=[
+            {'id': 88, 'name': team.name, 'organization_id': 10},
+            {'id': 99},
+        ],
+    )
+
+    response = post(reverse('api:eda_rbac_sync'), {'mode': 'sync'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['actions'] == 2
+    assert response.data['actions'][0]['resource'] == 'teams'
+    assert response.data['actions'][1]['resource'] == 'team-role-assignments'
+    assert create_resource.call_args_list[0].args == ('teams', {'name': team.name, 'organization_id': '10', 'description': 'Managed by AWX RBAC sync'})
+    assert create_resource.call_args_list[1].args == (
+        'team-role-assignments',
+        {'team': 88, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10},
+    )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_rejects_operator(post, organization, rando):
+    organization.eda_operator_role.members.add(rando)
+
+    response = post(reverse('api:eda_rbac_sync'), {'mode': 'sync'}, user=rando, expect=403)
+
+    assert response.status_code == 403

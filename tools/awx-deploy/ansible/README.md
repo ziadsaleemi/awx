@@ -88,8 +88,8 @@ ansible-playbook -i inventories/example.ini playbooks/restore.yml \
 
 After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke
 wrapper from the repository root. It checks AWX root/static assets, authenticated
-API access, EDA Controller status, EDA resource list endpoints, anonymous access
-denial, and optional RBAC/project/activation flows.
+API access, EDA Controller status, EDA resource list endpoints, AWX-to-EDA RBAC
+sync preview, anonymous access denial, and optional RBAC/project/activation flows.
 
 ```bash
 export AWX_PASSWORD='change-me'

@@ -1,5 +1,6 @@
 import { EdaActivationPage } from './EdaActivationPage';
 import { EdaActivations } from './EdaActivations';
+import { EdaRbacSync } from './EdaRbacSync';
 import { EdaResourceConfig, EdaResourceList } from './EdaResourceList';
 
 const activation = {
@@ -164,6 +165,46 @@ const teamRoleAssignmentConfig: EdaResourceConfig = {
     { label: 'Team', keys: ['team', 'team_name'] },
     { label: 'Role', keys: ['role_definition', 'role_definition_name'] },
   ],
+};
+
+const rbacSyncReport = {
+  source: 'eda_controller',
+  mode: 'observe',
+  summary: {
+    awx_organizations: 1,
+    desired_assignments: 1,
+    current_assignments: 1,
+    missing_assignments: 1,
+    extra_assignments: 1,
+    missing_identities: 0,
+    actions: 0,
+    errors: 0,
+  },
+  missing_identities: {
+    organizations: [],
+    users: [],
+    teams: [],
+    role_definitions: [],
+  },
+  desired_assignments: [],
+  missing_assignments: [
+    {
+      actor_type: 'user',
+      actor_name: 'eda-operator',
+      awx_organization_name: 'Default',
+      eda_role_name: 'Operator',
+    },
+  ],
+  extra_assignments: [
+    {
+      actor_type: 'user',
+      eda_actor_name: 'stale-user',
+      eda_organization_name: 'Default',
+      eda_role_name: 'Admin',
+    },
+  ],
+  actions: [],
+  errors: [],
 };
 
 describe('EdaActivations', () => {
@@ -332,6 +373,31 @@ describe('EdaActivations', () => {
     cy.contains('activation started').should('be.visible');
     cy.contains('button', /^Restart$/).click();
     cy.wait('@restartActivation');
+  });
+
+  it('renders EDA RBAC access sync drift and posts sync modes', () => {
+    cy.intercept('GET', '/api/v2/eda/rbac-sync/', rbacSyncReport).as('rbacSync');
+    cy.intercept('POST', '/api/v2/eda/rbac-sync/', (req) => {
+      req.reply({
+        ...rbacSyncReport,
+        mode: req.body.mode,
+        actions: [{ action: 'create_assignment', resource: 'user-role-assignments' }],
+      });
+    }).as('rbacSyncPost');
+
+    cy.mount(<EdaRbacSync />, {
+      path: '/eda/access/sync',
+      initialEntries: ['/eda/access/sync'],
+    });
+
+    cy.verifyPageTitle('Access Sync');
+    cy.contains('Desired assignments').should('be.visible');
+    cy.contains('user eda-operator -> Operator on Default').should('be.visible');
+    cy.contains('user stale-user -> Admin on Default').should('be.visible');
+    cy.contains('button', /^Sync missing$/).click();
+    cy.wait('@rbacSyncPost').its('request.body').should('deep.include', { mode: 'sync' });
+    cy.contains('button', /^Enforce drift$/).click();
+    cy.wait('@rbacSyncPost').its('request.body').should('deep.include', { mode: 'enforce' });
   });
 
   it('lets EDA operators operate existing activations without delete or create-by-rulebook access', () => {

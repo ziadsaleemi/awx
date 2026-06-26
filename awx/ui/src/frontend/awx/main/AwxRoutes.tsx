@@ -223,6 +223,7 @@ export enum AwxRoute {
   EdaTeams = 'awx-eda-teams',
   EdaUsers = 'awx-eda-users',
   EdaRoles = 'awx-eda-roles',
+  EdaRbacSync = 'awx-eda-rbac-sync',
   EdaUserRoleAssignments = 'awx-eda-user-role-assignments',
   EdaTeamRoleAssignments = 'awx-eda-team-role-assignments',
 

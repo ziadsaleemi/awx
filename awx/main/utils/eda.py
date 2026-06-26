@@ -251,6 +251,21 @@ class EDAControllerClient:
     def list_resource(self, resource, params=None):
         return self.get_json(self._resource_path(resource), params=params)
 
+    def list_resource_all(self, resource, params=None, page_size=200, max_pages=20):
+        params = dict(params or {})
+        params.setdefault('page_size', page_size)
+        items = []
+        for page in range(1, max_pages + 1):
+            params['page'] = page
+            payload = self.list_resource(resource, params=params)
+            page_items = _coerce_items(payload)
+            items.extend(page_items)
+            if not isinstance(payload, dict):
+                break
+            if not payload.get('next') or not page_items:
+                break
+        return {'count': len(items), 'next': None, 'previous': None, 'results': items}
+
     def get_resource(self, resource, resource_id):
         if resource_id in (None, ''):
             raise EDAControllerError('EDA resource id is required.', 'missing')

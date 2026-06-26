@@ -97,7 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--url', action='append', dest='urls', help='AWX base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.')
     parser.add_argument('--username', default=os.environ.get('AWX_USERNAME', 'admin'), help='AWX admin username. Defaults to AWX_USERNAME or admin.')
     parser.add_argument('--password', default=os.environ.get('AWX_PASSWORD'), help='AWX admin password. Defaults to AWX_PASSWORD.')
-    parser.add_argument('--verify-tls', action='store_true', default=env_bool('AWX_VERIFY_TLS', False), help='Verify HTTPS certificates. Default: disabled for lab/self-signed endpoints.')
+    parser.add_argument(
+        '--verify-tls',
+        action='store_true',
+        default=env_bool('AWX_VERIFY_TLS', False),
+        help='Verify HTTPS certificates. Default: disabled for lab/self-signed endpoints.',
+    )
     parser.add_argument('--timeout', type=float, default=float(os.environ.get('AWX_SMOKE_TIMEOUT', '20')), help='Per-request timeout in seconds.')
     parser.add_argument(
         '--user-agent',
@@ -108,10 +113,22 @@ def build_parser() -> argparse.ArgumentParser:
         help='HTTP User-Agent for smoke requests. Defaults to a browser-style value so Cloudflare/browser-integrity checks do not block the script.',
     )
     parser.add_argument('--resource', action='append', dest='resources', help='EDA resource to list. Can be passed more than once.')
-    parser.add_argument('--inspect-existing-activation', action='store_true', default=env_bool('EDA_SMOKE_INSPECT_EXISTING_ACTIVATION', False), help='After listing activations, inspect the first existing activation detail/logs. Disabled by default because existing activations can disappear during cleanup.')
-    parser.add_argument('--allow-eda-unconfigured', action='store_true', default=env_bool('EDA_ALLOW_UNCONFIGURED', False), help='Do not fail when /api/v2/eda/status/ reports unconfigured.')
+    parser.add_argument(
+        '--inspect-existing-activation',
+        action='store_true',
+        default=env_bool('EDA_SMOKE_INSPECT_EXISTING_ACTIVATION', False),
+        help='After listing activations, inspect the first existing activation detail/logs. Disabled by default because existing activations can disappear during cleanup.',
+    )
+    parser.add_argument(
+        '--allow-eda-unconfigured',
+        action='store_true',
+        default=env_bool('EDA_ALLOW_UNCONFIGURED', False),
+        help='Do not fail when /api/v2/eda/status/ reports unconfigured.',
+    )
     parser.add_argument('--json-output', default=os.environ.get('AWX_SMOKE_JSON_OUTPUT'), help='Write a JSON evidence report to this path.')
-    parser.add_argument('--project-url', default=os.environ.get('EDA_SMOKE_PROJECT_URL'), help='Optional SCM URL for a create -> sync -> delete EDA project smoke.')
+    parser.add_argument(
+        '--project-url', default=os.environ.get('EDA_SMOKE_PROJECT_URL'), help='Optional SCM URL for a create -> sync -> delete EDA project smoke.'
+    )
     parser.add_argument('--project-branch', default=os.environ.get('EDA_SMOKE_PROJECT_BRANCH', 'main'), help='Branch for the optional project smoke.')
     parser.add_argument('--project-poll-attempts', type=int, default=int(os.environ.get('EDA_SMOKE_PROJECT_POLL_ATTEMPTS', '20')))
     parser.add_argument('--project-poll-interval', type=float, default=float(os.environ.get('EDA_SMOKE_PROJECT_POLL_INTERVAL', '3')))
@@ -121,8 +138,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--eda-credential-id', action='append', dest='eda_credential_ids', default=split_env_words('EDA_SMOKE_CREDENTIAL_IDS'))
     parser.add_argument('--rbac-username', default=os.environ.get('EDA_RBAC_USERNAME'), help='Optional non-admin/operator username for RBAC smoke.')
     parser.add_argument('--rbac-password', default=os.environ.get('EDA_RBAC_PASSWORD'), help='Optional non-admin/operator password for RBAC smoke.')
-    parser.add_argument('--rbac-read-status', type=int, default=int(os.environ.get('EDA_RBAC_READ_STATUS', '200')), help='Expected EDA read status for RBAC user.')
-    parser.add_argument('--rbac-mutate-status', type=int, default=int(os.environ.get('EDA_RBAC_MUTATE_STATUS', '403')), help='Expected EDA mutation status for RBAC user.')
+    parser.add_argument(
+        '--rbac-read-status', type=int, default=int(os.environ.get('EDA_RBAC_READ_STATUS', '200')), help='Expected EDA read status for RBAC user.'
+    )
+    parser.add_argument(
+        '--rbac-mutate-status', type=int, default=int(os.environ.get('EDA_RBAC_MUTATE_STATUS', '403')), help='Expected EDA mutation status for RBAC user.'
+    )
     parser.add_argument('--skip-anonymous-check', action='store_true', default=env_bool('AWX_SMOKE_SKIP_ANONYMOUS_CHECK', False))
     return parser
 
@@ -289,6 +310,15 @@ def check_eda_resources(base_url: str, args: argparse.Namespace) -> tuple[list[C
     return checks, activation_id
 
 
+def check_eda_rbac_sync(base_url: str, args: argparse.Namespace) -> Check:
+    check, payload = check_json_endpoint(base_url, '/api/v2/eda/rbac-sync/', 'eda rbac sync preview', args)
+    summary = payload.get('summary') if isinstance(payload.get('summary'), dict) else {}
+    check.detail = (
+        f"desired={summary.get('desired_assignments', 0)} " f"missing={summary.get('missing_assignments', 0)} " f"extra={summary.get('extra_assignments', 0)}"
+    )
+    return check
+
+
 def unique_name(prefix: str) -> str:
     return f'{prefix}-{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}'
 
@@ -406,7 +436,9 @@ def check_activation_e2e(base_url: str, args: argparse.Namespace) -> list[Check]
             raise SmokeFailure('EDA activation launch response did not include an activation id.')
         checks.append(Check('eda activation launch', True, f'id={activation_id} actions={started_payload.get("actions", [])}'))
         detail_check, _ = check_json_endpoint(base_url, f'/api/v2/eda/activations/{activation_id}/', 'eda activation detail after launch', args)
-        events_check, events = check_json_endpoint(base_url, f'/api/v2/eda/activations/{activation_id}/events/?page_size=20', 'eda activation logs after launch', args)
+        events_check, events = check_json_endpoint(
+            base_url, f'/api/v2/eda/activations/{activation_id}/events/?page_size=20', 'eda activation logs after launch', args
+        )
         events_check.detail = f'count={events.get("count", 0)}'
         checks.extend([detail_check, events_check])
         return checks
@@ -492,6 +524,7 @@ def run_url(base_url: str, args: argparse.Namespace) -> list[Check]:
     checks.append(check_eda_status(base_url, args))
     resource_checks, _ = check_eda_resources(base_url, args)
     checks.extend(resource_checks)
+    checks.append(check_eda_rbac_sync(base_url, args))
     checks.extend(check_project_e2e(base_url, args))
     checks.extend(check_activation_e2e(base_url, args))
     checks.extend(check_rbac(base_url, args))

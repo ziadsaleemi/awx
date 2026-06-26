@@ -27,6 +27,7 @@ from awx.main.utils.eda import (
     configured_url,
     connection_status,
 )
+from awx.main.utils.eda_rbac import build_eda_rbac_sync_report
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
 _EDA_READ_ONLY_RESOURCES = {'rule-audit', 'rulebooks'}
@@ -41,6 +42,14 @@ def _parse_positive_int(value, default, maximum=None):
     if maximum is not None:
         parsed = min(parsed, maximum)
     return parsed
+
+
+def _parse_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def _date_to_iso(value):
@@ -319,6 +328,29 @@ class EDAProjectSyncView(APIView):
         except EDAControllerError as exc:
             return _eda_error_response(exc)
         return Response({'source': 'eda_controller', 'project': payload, 'actions': ['sync']})
+
+
+class EDARBACSyncView(APIView):
+    name = _('EDA RBAC Sync')
+    resource_purpose = 'event-driven ansible access sync'
+    permission_classes = [EDAActivationAdminPermission]
+
+    def get(self, request, format=None):
+        try:
+            report = build_eda_rbac_sync_report(request.user, mode='observe', create_missing_identities=False)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
+
+    def post(self, request, format=None):
+        data = request.data if isinstance(request.data, dict) else {}
+        mode = data.get('mode') or 'observe'
+        create_missing_identities = _parse_bool(data.get('create_missing_identities'), True)
+        try:
+            report = build_eda_rbac_sync_report(request.user, mode=mode, create_missing_identities=create_missing_identities)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
 
 
 class EDAEventStreamActivationsView(APIView):
