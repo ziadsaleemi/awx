@@ -297,6 +297,11 @@ class EDAControllerClient:
             raise EDAControllerError('EDA project id is required.', 'missing')
         return self.post_json(f'{self._resource_path("projects", project_id)}sync/', payload or {})
 
+    def list_event_stream_activations(self, event_stream_id, params=None):
+        if event_stream_id in (None, ''):
+            raise EDAControllerError('EDA event stream id is required.', 'missing')
+        return self.get_json(f'{self._resource_path("event-streams", event_stream_id)}activations/', params=params)
+
     def delete_resource(self, resource, resource_id):
         if resource_id in (None, ''):
             raise EDAControllerError('EDA resource id is required.', 'missing')

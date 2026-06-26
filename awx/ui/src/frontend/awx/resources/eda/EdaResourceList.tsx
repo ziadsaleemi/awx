@@ -10,6 +10,7 @@ import {
   FormSelect,
   FormSelectOption,
   Modal,
+  Spinner,
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
@@ -159,6 +160,8 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
   } | null>(null);
   const [deleteRecord, setDeleteRecord] = useState<EdaResourceRecord | null>(null);
   const [startRulebookRecord, setStartRulebookRecord] = useState<EdaResourceRecord | null>(null);
+  const [eventStreamActivationsRecord, setEventStreamActivationsRecord] =
+    useState<EdaResourceRecord | null>(null);
   const {
     data: status,
     error: statusError,
@@ -273,6 +276,15 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       });
     }
 
+    if (config.resource === 'event-streams') {
+      actions.push({
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        label: t('View activations'),
+        onClick: (record) => setEventStreamActivationsRecord(record),
+      });
+    }
+
     if (!config.readOnly) {
       actions.push({
         type: PageActionType.Button,
@@ -296,7 +308,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     }
 
     return actions;
-  }, [canManageEda, config.readOnly, config.resource, syncProject, t]);
+  }, [canManageEda, config.form, config.readOnly, config.resource, syncProject, t]);
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
 
@@ -367,6 +379,12 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
             setStartRulebookRecord(null);
             await view.refresh();
           }}
+        />
+      )}
+      {eventStreamActivationsRecord && (
+        <EdaEventStreamActivationsModal
+          record={eventStreamActivationsRecord}
+          onClose={() => setEventStreamActivationsRecord(null)}
         />
       )}
     </PageLayout>
@@ -953,6 +971,67 @@ function CredentialSelect(props: {
         />
       ))}
     </FormSelect>
+  );
+}
+
+function EdaEventStreamActivationsModal(props: { record: EdaResourceRecord; onClose: () => void }) {
+  const { t } = useTranslation();
+  const eventStreamId = props.record.id === undefined ? '' : String(props.record.id);
+  const { data, error, isLoading } = useGet<EdaItemsResponse<EdaResourceRecord>>(
+    eventStreamId ? awxAPI`/eda/event-streams/${eventStreamId}/activations/` : undefined,
+    { page_size: 50, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
+  const activations = data?.results ?? [];
+
+  return (
+    <Modal
+      title={t('Event stream activations')}
+      isOpen
+      onClose={props.onClose}
+      variant="large"
+      actions={[
+        <Button key="close" variant="primary" onClick={props.onClose}>
+          {t('Close')}
+        </Button>,
+      ]}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <strong>{recordName(props.record)}</strong>
+      </div>
+      {isLoading ? (
+        <Spinner size="lg" />
+      ) : error ? (
+        <Alert isInline variant="danger" title={t('Failed to load event stream activations')}>
+          {error.message}
+        </Alert>
+      ) : activations.length === 0 ? (
+        <p>{t('No activations are linked to this event stream.')}</p>
+      ) : (
+        <table className="pf-v5-c-table pf-m-grid-md" aria-label={t('Event stream activations')}>
+          <thead>
+            <tr>
+              <th>{t('Name')}</th>
+              <th>{t('Status')}</th>
+              <th>{t('Created')}</th>
+              <th>{t('Modified')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activations.map((activation) => (
+              <tr key={String(activation.id)}>
+                <td>{recordName(activation)}</td>
+                <td>
+                  <StatusCell status={String(activation.status ?? activation.state ?? '-')} />
+                </td>
+                <td>{formatDateValue(activation.created ?? activation.created_at)}</td>
+                <td>{formatDateValue(activation.modified ?? activation.modified_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
   );
 }
 
@@ -1593,4 +1672,8 @@ function formatValue(value: unknown, type?: 'status' | 'date' | 'text') {
     );
   }
   return String(value);
+}
+
+function formatDateValue(value: unknown) {
+  return formatValue(value, 'date');
 }

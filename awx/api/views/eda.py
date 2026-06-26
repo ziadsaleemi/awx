@@ -321,6 +321,26 @@ class EDAProjectSyncView(APIView):
         return Response({'source': 'eda_controller', 'project': payload, 'actions': ['sync']})
 
 
+class EDAEventStreamActivationsView(APIView):
+    name = _('EDA Event Stream Activations')
+    resource_purpose = 'event-driven ansible event stream activations'
+    permission_classes = [EDAActivationViewPermission]
+
+    def get(self, request, pk, format=None):
+        client = EDAControllerClient()
+        try:
+            payload = client.list_event_stream_activations(pk, params=_query_params(request))
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        data = _normalize_resource_payload(payload)
+        data = _rewrite_resource_page_links(request, data)
+        data['source'] = 'eda_controller'
+        data['resource'] = 'event-stream-activations'
+        data['event_stream_id'] = pk
+        data['controller_error'] = ''
+        return Response(data)
+
+
 class EDAActivationDetailView(APIView):
     name = _('EDA Activation Detail')
     resource_purpose = 'event-driven ansible activation detail'

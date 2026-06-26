@@ -527,6 +527,40 @@ def test_eda_resource_list_rewrites_relative_controller_pagination_links(get, ad
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_event_stream_activations_proxy_to_controller(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(
+            mocker,
+            {
+                'count': 2,
+                'next': '/api/eda/v1/event-streams/9/activations/?page=2&page_size=1',
+                'previous': None,
+                'results': [{'id': 42, 'name': 'Webhook activation', 'status': 'running'}],
+            },
+        ),
+    )
+
+    response = get(
+        reverse('api:eda_event_stream_activations', kwargs={'pk': '9'}),
+        {'page': '1', 'page_size': '1'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['resource'] == 'event-stream-activations'
+    assert response.data['event_stream_id'] == '9'
+    assert response.data['count'] == 2
+    assert response.data['results'][0]['name'] == 'Webhook activation'
+    assert response.data['next'].endswith('/api/v2/eda/event-streams/9/activations/?page=2&page_size=1')
+    assert request_mock.call_args.args[0] == 'GET'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/event-streams/9/activations/'
+    assert request_mock.call_args.kwargs['params'] == {'page': '1', 'page_size': '1'}
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_resource_crud_proxies_to_controller(post, patch, delete, admin_user, mocker):
     request_mock = mocker.patch(

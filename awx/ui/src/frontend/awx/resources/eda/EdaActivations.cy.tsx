@@ -590,6 +590,51 @@ describe('EdaActivations', () => {
       });
   });
 
+  it('shows activations linked to an EDA event stream', () => {
+    cy.intercept('GET', '/api/v2/eda/event-streams/?order_by=name&page=1&page_size=10', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 21,
+          name: 'Webhook intake',
+          status: 'enabled',
+          test_mode: false,
+        },
+      ],
+    }).as('eventStreams');
+    cy.intercept('GET', '/api/v2/eda/event-streams/21/activations/?page_size=50&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 42,
+          name: 'Webhook activation',
+          status: 'running',
+          created_at: '2026-06-01T12:00:00Z',
+          modified_at: '2026-06-01T12:05:00Z',
+        },
+      ],
+    }).as('eventStreamActivations');
+
+    cy.mount(<EdaResourceList config={eventStreamConfig} />, {
+      path: '/eda/event-streams',
+      initialEntries: ['/eda/event-streams'],
+    });
+
+    cy.verifyPageTitle('Event Streams');
+    cy.wait('@eventStreams');
+    cy.contains('Webhook intake').should('be.visible');
+    cy.get('[aria-label="kebab dropdown toggle"]').click();
+    cy.contains('button', 'View activations').click();
+    cy.wait('@eventStreamActivations');
+    cy.contains('Event stream activations').should('be.visible');
+    cy.contains('Webhook activation').should('be.visible');
+    cy.contains('Running').should('be.visible');
+  });
+
   it('creates EDA credentials from credential type input schemas', () => {
     cy.intercept('GET', '/api/v2/eda/credentials/?order_by=name&page=1&page_size=10', {
       count: 0,
