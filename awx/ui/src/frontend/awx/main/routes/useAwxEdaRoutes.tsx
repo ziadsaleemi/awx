@@ -162,6 +162,14 @@ export function useAwxEdaRoutes() {
           element: <EdaResourceList config={rulebooks} />,
         },
         {
+          path: 'credentials',
+          element: <Navigate to="/eda/infrastructure/credentials" replace />,
+        },
+        {
+          path: 'credential-types',
+          element: <Navigate to="/eda/infrastructure/credential-types" replace />,
+        },
+        {
           id: AwxRoute.EdaInfrastructure,
           label: t('Infrastructure'),
           path: 'infrastructure',
