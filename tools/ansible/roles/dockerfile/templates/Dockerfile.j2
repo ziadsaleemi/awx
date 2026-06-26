@@ -12,7 +12,9 @@ RUN dnf -y update && dnf module -y enable nodejs:18 && dnf module -y install nod
 
 COPY . /tmp/src/
 WORKDIR /tmp/src/
-RUN rm -rf awx/ui/build awx/ui/src/build && make ui
+RUN rm -rf awx/ui/build awx/ui/src/build awx/ui/src/node_modules && \
+    cd awx/ui/src && npm ci --include=optional && \
+    cd /tmp/src && make ui
 {% endif %}
 
 # Build container
