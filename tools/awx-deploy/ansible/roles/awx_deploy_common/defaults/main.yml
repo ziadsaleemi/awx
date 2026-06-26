@@ -67,6 +67,7 @@ awx_nginx_state_dir: "{{ awx_server_data_dir }}/nginx"
 awx_rsyslog_dir: "{{ awx_server_data_dir }}/rsyslog"
 
 awx_lb_http_port: 80
+awx_lb_extra_http_ports: []
 awx_lb_https_port: 443
 awx_lb_stats_port: 1936
 awx_lb_bind_address: "0.0.0.0"

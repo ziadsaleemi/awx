@@ -16,7 +16,10 @@ from awx.api.views.eda import (
     EDAStatusView,
 )
 
-EDA_RESOURCE_PATTERN = r'projects|rule-audit|decision-environments|event-streams|credentials|credential-types|rulebooks'
+EDA_RESOURCE_PATTERN = (
+    r'projects|rule-audit|decision-environments|event-streams|credentials|credential-types|rulebooks|'
+    r'organizations|teams|users|role-definitions|user-role-assignments|team-role-assignments'
+)
 
 eda_urls = [
     re_path(r'^status/$', EDAStatusView.as_view(), name='eda_status'),

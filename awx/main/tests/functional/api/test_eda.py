@@ -528,6 +528,35 @@ def test_eda_resource_list_rewrites_relative_controller_pagination_links(get, ad
 
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+@pytest.mark.parametrize(
+    'resource,upstream_path',
+    [
+        ('organizations', '/api/eda/v1/organizations/'),
+        ('teams', '/api/eda/v1/teams/'),
+        ('users', '/api/eda/v1/users/'),
+        ('role-definitions', '/api/eda/v1/role_definitions/'),
+        ('user-role-assignments', '/api/eda/v1/role_user_assignments/'),
+        ('team-role-assignments', '/api/eda/v1/role_team_assignments/'),
+    ],
+)
+def test_eda_access_resource_list_proxies_to_controller(get, admin_user, mocker, resource, upstream_path):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 1, 'next': None, 'previous': None, 'results': [{'id': 7, 'name': 'EDA resource'}]}),
+    )
+
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': resource}), {'page_size': '25'}, user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['resource'] == resource
+    assert response.data['count'] == 1
+    assert request_mock.call_args.args[0] == 'GET'
+    assert request_mock.call_args.args[1] == f'https://eda.example.test{upstream_path}'
+    assert request_mock.call_args.kwargs['params'] == {'page_size': '25'}
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
 def test_eda_event_stream_activations_proxy_to_controller(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.eda.requests.request',
@@ -651,6 +680,34 @@ def test_eda_decision_environment_create_defaults_organization(post, admin_user,
     assert request_mock.call_args_list[1].kwargs['json'] == {
         'name': 'Rulebook runtime',
         'image_url': 'quay.io/ansible/ansible-rulebook:latest',
+        'organization_id': 1,
+    }
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_team_create_defaults_organization(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 1, 'results': [{'id': 1, 'name': 'Default'}]}),
+            eda_response(mocker, {'id': 8, 'name': 'EDA operators'}),
+        ],
+    )
+
+    response = post(
+        reverse('api:eda_resource_list', kwargs={'resource': 'teams'}),
+        {'name': 'EDA operators'},
+        user=admin_user,
+        expect=201,
+    )
+
+    assert response.data['id'] == 8
+    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST']
+    assert request_mock.call_args_list[0].args[1] == 'https://eda.example.test/api/eda/v1/organizations/'
+    assert request_mock.call_args_list[1].args[1] == 'https://eda.example.test/api/eda/v1/teams/'
+    assert request_mock.call_args_list[1].kwargs['json'] == {
+        'name': 'EDA operators',
         'organization_id': 1,
     }
 

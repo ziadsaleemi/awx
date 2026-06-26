@@ -33,9 +33,7 @@
 - name: Add HAProxy SELinux ports
   ansible.builtin.command:
     cmd: "semanage port -a -t http_port_t -p tcp {{ item }}"
-  loop:
-    - "{{ awx_lb_http_port }}"
-    - "{{ awx_lb_stats_port }}"
+  loop: "{{ ([awx_lb_http_port, awx_lb_stats_port] + (awx_lb_extra_http_ports | default([]))) | unique }}"
   register: awx_lb_selinux_port_add
   changed_when: awx_lb_selinux_port_add.rc == 0
   failed_when: false
@@ -124,9 +122,7 @@
 - name: Check HAProxy firewalld port
   ansible.builtin.command:
     cmd: "firewall-cmd --query-port={{ item }}/tcp"
-  loop:
-    - "{{ awx_lb_http_port }}"
-    - "{{ awx_lb_stats_port }}"
+  loop: "{{ ([awx_lb_http_port, awx_lb_stats_port] + (awx_lb_extra_http_ports | default([]))) | unique }}"
   register: awx_lb_firewalld_ports
   changed_when: false
   failed_when: false
@@ -150,8 +146,9 @@
     - awx_lb_firewalld_state.stdout == "active"
     - awx_lb_firewalld_open is changed
 
-- name: Wait for HAProxy
+- name: Wait for HAProxy listener ports
   ansible.builtin.wait_for:
     host: "{{ inventory_hostname }}"
-    port: "{{ awx_lb_http_port }}"
+    port: "{{ item }}"
     timeout: 120
+  loop: "{{ ([awx_lb_http_port] + (awx_lb_extra_http_ports | default([]))) | unique }}"

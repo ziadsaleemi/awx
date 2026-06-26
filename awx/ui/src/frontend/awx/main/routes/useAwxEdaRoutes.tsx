@@ -120,6 +120,94 @@ export function useAwxEdaRoutes() {
         { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
       ],
     });
+    const organizations = resourceConfig({
+      resource: 'organizations',
+      title: t('Organizations'),
+      description: t('Manage EDA organizations available on the connected EDA Controller.'),
+      emptyStateTitle: t('No EDA organizations found'),
+      emptyStateDescription: t(
+        'Create or sync an EDA organization before assigning teams and resources.'
+      ),
+      createSample: { name: '', description: '' },
+      fields: [
+        { label: t('Description'), keys: ['description'] },
+        { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
+      ],
+    });
+    const teams = resourceConfig({
+      resource: 'teams',
+      title: t('Teams'),
+      description: t('Manage EDA teams and their organization membership.'),
+      emptyStateTitle: t('No EDA teams found'),
+      emptyStateDescription: t('Create an EDA team to group users for EDA role assignments.'),
+      createSample: { name: '', description: '', organization_id: null },
+      fields: [
+        { label: t('Organization'), keys: ['organization_name', 'organization'] },
+        { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
+      ],
+    });
+    const users = resourceConfig({
+      resource: 'users',
+      title: t('Users'),
+      description: t('Manage EDA users on the connected EDA Controller.'),
+      emptyStateTitle: t('No EDA users found'),
+      emptyStateDescription: t('Create or sync users before assigning EDA roles.'),
+      createSample: {
+        username: '',
+        first_name: '',
+        last_name: '',
+        email: '',
+        password: '',
+        is_superuser: false,
+        is_staff: false,
+      },
+      fields: [
+        { label: t('Username'), keys: ['username'] },
+        { label: t('Email'), keys: ['email'] },
+        { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
+      ],
+    });
+    const roles = resourceConfig({
+      resource: 'role-definitions',
+      title: t('Roles'),
+      description: t('Manage EDA role definitions and inspect built-in EDA permissions.'),
+      emptyStateTitle: t('No EDA roles found'),
+      emptyStateDescription: t('Create a custom EDA role or verify the EDA Controller connection.'),
+      createSample: { name: '', description: '', permissions: [] },
+      fields: [
+        { label: t('Content type'), keys: ['content_type', 'content_type_model'] },
+        { label: t('Managed'), keys: ['managed', 'is_system'] },
+        { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
+      ],
+    });
+    const userRoleAssignments = resourceConfig({
+      resource: 'user-role-assignments',
+      title: t('User Role Assignments'),
+      description: t('Manage EDA role assignments granted directly to users.'),
+      emptyStateTitle: t('No EDA user role assignments found'),
+      emptyStateDescription: t('Assign an EDA role to a user to grant access.'),
+      nameSort: 'id',
+      createSample: { user: null, role_definition: null, content_type: '', object_id: null },
+      fields: [
+        { label: t('User'), keys: ['user', 'username'] },
+        { label: t('Role'), keys: ['role_definition', 'role_definition_name'] },
+        { label: t('Resource'), keys: ['content_type', 'object_id'] },
+      ],
+    });
+    const teamRoleAssignments = resourceConfig({
+      resource: 'team-role-assignments',
+      title: t('Team Role Assignments'),
+      description: t('Manage EDA role assignments granted to teams.'),
+      emptyStateTitle: t('No EDA team role assignments found'),
+      emptyStateDescription: t('Assign an EDA role to a team to grant access.'),
+      nameSort: 'id',
+      createSample: { team: null, role_definition: null, content_type: '', object_id: null },
+      fields: [
+        { label: t('Team'), keys: ['team', 'team_name'] },
+        { label: t('Role'), keys: ['role_definition', 'role_definition_name'] },
+        { label: t('Resource'), keys: ['content_type', 'object_id'] },
+      ],
+    });
 
     return {
       id: AwxRoute.EventDriven,
@@ -200,6 +288,53 @@ export function useAwxEdaRoutes() {
             {
               path: '',
               element: <Navigate to="credentials" replace />,
+            },
+          ],
+        },
+        {
+          id: AwxRoute.EdaAccess,
+          label: t('Access'),
+          path: 'access',
+          children: [
+            {
+              id: AwxRoute.EdaOrganizations,
+              label: t('Organizations'),
+              path: 'organizations',
+              element: <EdaResourceList config={organizations} />,
+            },
+            {
+              id: AwxRoute.EdaTeams,
+              label: t('Teams'),
+              path: 'teams',
+              element: <EdaResourceList config={teams} />,
+            },
+            {
+              id: AwxRoute.EdaUsers,
+              label: t('Users'),
+              path: 'users',
+              element: <EdaResourceList config={users} />,
+            },
+            {
+              id: AwxRoute.EdaRoles,
+              label: t('Roles'),
+              path: 'roles',
+              element: <EdaResourceList config={roles} />,
+            },
+            {
+              id: AwxRoute.EdaUserRoleAssignments,
+              label: t('User Role Assignments'),
+              path: 'user-role-assignments',
+              element: <EdaResourceList config={userRoleAssignments} />,
+            },
+            {
+              id: AwxRoute.EdaTeamRoleAssignments,
+              label: t('Team Role Assignments'),
+              path: 'team-role-assignments',
+              element: <EdaResourceList config={teamRoleAssignments} />,
+            },
+            {
+              path: '',
+              element: <Navigate to="organizations" replace />,
             },
           ],
         },

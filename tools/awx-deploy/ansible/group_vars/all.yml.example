@@ -45,6 +45,7 @@ awx_receptor_container_privileged: true
 awx_instance_node_type: hybrid
 
 awx_lb_http_port: 80
+awx_lb_extra_http_ports: []
 awx_lb_https_port: 443
 awx_lb_stats_port: 1936
 

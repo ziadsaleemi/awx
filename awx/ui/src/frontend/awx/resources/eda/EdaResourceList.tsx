@@ -61,6 +61,7 @@ export interface EdaResourceConfig {
   emptyStateTitle: string;
   emptyStateDescription: string;
   fields: EdaResourceField[];
+  nameSort?: string;
   createSample?: Record<string, unknown>;
   readOnly?: boolean;
   form?: EdaResourceFormType;
@@ -398,7 +399,7 @@ function useEdaResourceColumns(config: EdaResourceConfig): ITableColumn<EdaResou
       {
         header: t('Name'),
         cell: (record) => <TextCell text={recordName(record)} />,
-        sort: 'name',
+        sort: config.nameSort ?? 'name',
         card: 'name',
         list: 'name',
       },

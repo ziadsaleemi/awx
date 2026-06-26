@@ -25,6 +25,12 @@ EDA_RESOURCE_API_PATHS = {
     'credentials': '/api/eda/v1/eda-credentials/',
     'credential-types': '/api/eda/v1/credential-types/',
     'rulebooks': DEFAULT_RULEBOOKS_PATH,
+    'organizations': DEFAULT_ORGANIZATIONS_PATH,
+    'teams': '/api/eda/v1/teams/',
+    'users': '/api/eda/v1/users/',
+    'role-definitions': '/api/eda/v1/role_definitions/',
+    'user-role-assignments': '/api/eda/v1/role_user_assignments/',
+    'team-role-assignments': '/api/eda/v1/role_team_assignments/',
 }
 UPSTREAM_ACTIVATION_FIELDS = {
     'name',
@@ -272,7 +278,11 @@ class EDAControllerClient:
             normalized.pop('image', None)
             normalized.pop('container_image', None)
 
-        if add_defaults and resource in ('projects', 'decision-environments', 'credentials', 'event-streams') and not normalized.get('organization_id'):
+        if (
+            add_defaults
+            and resource in ('projects', 'decision-environments', 'credentials', 'event-streams', 'teams')
+            and not normalized.get('organization_id')
+        ):
             organization_id = self.default_organization_id()
             if organization_id:
                 normalized['organization_id'] = organization_id

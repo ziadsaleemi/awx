@@ -218,6 +218,13 @@ export enum AwxRoute {
   EdaCredentials = 'awx-eda-credentials',
   EdaCredentialTypes = 'awx-eda-credential-types',
   EdaRulebooks = 'awx-eda-rulebooks',
+  EdaAccess = 'awx-eda-access',
+  EdaOrganizations = 'awx-eda-organizations',
+  EdaTeams = 'awx-eda-teams',
+  EdaUsers = 'awx-eda-users',
+  EdaRoles = 'awx-eda-roles',
+  EdaUserRoleAssignments = 'awx-eda-user-role-assignments',
+  EdaTeamRoleAssignments = 'awx-eda-team-role-assignments',
 
   // Access
   Access = 'awx-access',
