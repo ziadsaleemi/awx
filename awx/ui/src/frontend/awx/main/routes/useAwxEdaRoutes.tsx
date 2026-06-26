@@ -99,6 +99,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA credential type schemas and injectors.'),
       emptyStateTitle: t('No EDA credential types found'),
       emptyStateDescription: t('Create an EDA credential type to define credential inputs.'),
+      form: 'credential-type',
       createSample: { name: '', description: '', inputs: { fields: [] }, injectors: {} },
       fields: [
         { label: t('Kind'), keys: ['kind', 'managed_by'] },

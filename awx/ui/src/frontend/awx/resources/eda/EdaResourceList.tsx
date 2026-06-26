@@ -13,7 +13,7 @@ import {
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
-import { PlusCircleIcon } from '@patternfly/react-icons';
+import { PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import {
   IPageAction,
   ITableColumn,
@@ -65,7 +65,12 @@ export interface EdaResourceConfig {
   form?: EdaResourceFormType;
 }
 
-type EdaResourceFormType = 'project' | 'decision-environment' | 'event-stream' | 'credential';
+type EdaResourceFormType =
+  | 'project'
+  | 'decision-environment'
+  | 'event-stream'
+  | 'credential'
+  | 'credential-type';
 
 interface EdaCredentialRecord {
   id: number | string;
@@ -104,10 +109,24 @@ interface EdaCredentialTypeRecord {
   name?: string;
   namespace?: string;
   kind?: string;
+  description?: string;
+  managed?: boolean;
   inputs?: {
     fields?: EdaCredentialInputField[];
     required?: string[];
   };
+  injectors?: Record<string, unknown>;
+}
+
+interface CredentialTypeFieldDraft {
+  localId: string;
+  id: string;
+  label: string;
+  type: 'string' | 'boolean';
+  helpText: string;
+  secret: boolean;
+  defaultValue: string;
+  choices: string;
 }
 
 interface EdaItemsResponse<T> {
@@ -455,6 +474,18 @@ function EdaResourceFormModal(props: {
       ? (record.inputs as Record<string, unknown>)
       : {}
   );
+  const [credentialTypeFields, setCredentialTypeFields] = useState<CredentialTypeFieldDraft[]>(
+    () => {
+      const fields = credentialTypeFieldDrafts(record?.inputs);
+      return fields.length > 0 || mode === 'edit' ? fields : [newCredentialTypeFieldDraft(0)];
+    }
+  );
+  const [generateInjectors, setGenerateInjectors] = useState(() =>
+    mode === 'create' ? true : !hasObjectKeys(record?.injectors)
+  );
+  const [credentialTypeInjectorsText, setCredentialTypeInjectorsText] = useState(() =>
+    JSON.stringify(record?.injectors ?? {}, null, 2)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { data: credentials, isLoading: credentialsLoading } = useGet<
     EdaItemsResponse<EdaCredentialRecord>
@@ -480,6 +511,8 @@ function EdaResourceFormModal(props: {
   );
   const credentialInputFields = selectedCredentialType?.inputs?.fields ?? [];
   const requiredCredentialInputIds = selectedCredentialType?.inputs?.required ?? [];
+  const isManagedCredentialType =
+    form === 'credential-type' && booleanValue(record?.managed, false) && mode === 'edit';
 
   const submit = async () => {
     if (!name.trim()) {
@@ -500,6 +533,13 @@ function EdaResourceFormModal(props: {
     }
     if (form === 'credential' && !credentialTypeId) {
       alertToaster.addAlert({ variant: 'danger', title: t('Credential type is required') });
+      return;
+    }
+    if (isManagedCredentialType) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Managed credential types cannot be edited'),
+      });
       return;
     }
 
@@ -536,7 +576,7 @@ function EdaResourceFormModal(props: {
           additionalDataHeaders,
           eventStreamUuid,
         });
-      } else {
+      } else if (form === 'credential') {
         payload = credentialPayload({
           name,
           description,
@@ -544,6 +584,14 @@ function EdaResourceFormModal(props: {
           credentialInputFields,
           credentialInputValues,
           includeCredentialType: mode === 'create',
+        });
+      } else {
+        payload = credentialTypePayload({
+          name,
+          description,
+          fields: credentialTypeFields,
+          generateInjectors,
+          injectorsText: credentialTypeInjectorsText,
         });
       }
     } catch (err) {
@@ -594,7 +642,7 @@ function EdaResourceFormModal(props: {
           key="save"
           variant="primary"
           isLoading={isSubmitting}
-          isDisabled={isSubmitting}
+          isDisabled={isSubmitting || isManagedCredentialType}
           onClick={() => void submit()}
         >
           {t('Save')}
@@ -605,6 +653,16 @@ function EdaResourceFormModal(props: {
       ]}
     >
       <Form>
+        {isManagedCredentialType && (
+          <Alert
+            isInline
+            variant="warning"
+            title={t('Managed credential type')}
+            style={{ marginBottom: 16 }}
+          >
+            {t('This credential type is managed by EDA and cannot be edited from AWX.')}
+          </Alert>
+        )}
         <FormGroup label={t('Name')} fieldId={`eda-${form}-name`} isRequired>
           <TextInput id={`eda-${form}-name`} value={name} onChange={(_, value) => setName(value)} />
         </FormGroup>
@@ -758,7 +816,7 @@ function EdaResourceFormModal(props: {
               onChange={(_, checked) => setTestMode(checked)}
             />
           </>
-        ) : (
+        ) : form === 'credential' ? (
           <>
             <FormGroup label={t('Credential type')} fieldId="eda-credential-type" isRequired>
               <FormSelect
@@ -804,6 +862,68 @@ function EdaResourceFormModal(props: {
                 }
               />
             ))}
+          </>
+        ) : (
+          <>
+            <FormGroup label={t('Input fields')} fieldId="eda-credential-type-fields" isRequired>
+              <div id="eda-credential-type-fields">
+                {credentialTypeFields.map((field, index) => (
+                  <CredentialTypeFieldEditor
+                    key={field.localId}
+                    field={field}
+                    index={index}
+                    isRemovable={credentialTypeFields.length > 1}
+                    onChange={(nextField) =>
+                      setCredentialTypeFields((currentFields) =>
+                        currentFields.map((currentField) =>
+                          currentField.localId === field.localId ? nextField : currentField
+                        )
+                      )
+                    }
+                    onRemove={() =>
+                      setCredentialTypeFields((currentFields) =>
+                        currentFields.filter(
+                          (currentField) => currentField.localId !== field.localId
+                        )
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </FormGroup>
+            <Button
+              id="eda-credential-type-add-field"
+              variant="secondary"
+              icon={<PlusCircleIcon />}
+              onClick={() =>
+                setCredentialTypeFields((currentFields) => [
+                  ...currentFields,
+                  newCredentialTypeFieldDraft(nextCredentialTypeFieldIndex(currentFields)),
+                ])
+              }
+            >
+              {t('Add field')}
+            </Button>
+            <Checkbox
+              id="eda-credential-type-generate-injectors"
+              label={t('Generate extra vars from fields')}
+              isChecked={generateInjectors}
+              onChange={(_, checked) => setGenerateInjectors(checked)}
+            />
+            {!generateInjectors && (
+              <FormGroup
+                label={t('Injector configuration')}
+                fieldId="eda-credential-type-injectors"
+              >
+                <TextArea
+                  id="eda-credential-type-injectors"
+                  value={credentialTypeInjectorsText}
+                  rows={6}
+                  onChange={(_, value) => setCredentialTypeInjectorsText(value)}
+                  style={{ fontFamily: 'monospace' }}
+                />
+              </FormGroup>
+            )}
           </>
         )}
       </Form>
@@ -904,6 +1024,112 @@ function CredentialInput(props: {
         onChange={(_, value) => props.onChange(value)}
       />
     </FormGroup>
+  );
+}
+
+function CredentialTypeFieldEditor(props: {
+  field: CredentialTypeFieldDraft;
+  index: number;
+  isRemovable: boolean;
+  onChange: (field: CredentialTypeFieldDraft) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  const { field } = props;
+  const updateField = (patch: Partial<CredentialTypeFieldDraft>) =>
+    props.onChange({ ...field, ...patch });
+
+  return (
+    <div
+      style={{
+        borderTop: props.index > 0 ? '1px solid var(--pf-v5-global--BorderColor--100)' : 0,
+        marginTop: props.index > 0 ? 16 : 0,
+        paddingTop: props.index > 0 ? 16 : 0,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+        <strong>{t('Field {{number}}', { number: props.index + 1 })}</strong>
+        <Button
+          variant="plain"
+          aria-label={t('Remove field {{number}}', { number: props.index + 1 })}
+          icon={<TrashIcon />}
+          isDisabled={!props.isRemovable}
+          onClick={props.onRemove}
+        />
+      </div>
+      <FormGroup
+        label={t('Field ID')}
+        fieldId={`eda-credential-type-field-id-${field.localId}`}
+        isRequired
+      >
+        <TextInput
+          id={`eda-credential-type-field-id-${field.localId}`}
+          value={field.id}
+          onChange={(_, value) => updateField({ id: value })}
+        />
+      </FormGroup>
+      <FormGroup label={t('Label')} fieldId={`eda-credential-type-field-label-${field.localId}`}>
+        <TextInput
+          id={`eda-credential-type-field-label-${field.localId}`}
+          value={field.label}
+          onChange={(_, value) => updateField({ label: value })}
+        />
+      </FormGroup>
+      <FormGroup label={t('Type')} fieldId={`eda-credential-type-field-type-${field.localId}`}>
+        <FormSelect
+          id={`eda-credential-type-field-type-${field.localId}`}
+          value={field.type}
+          onChange={(_, value) =>
+            updateField({
+              type: value === 'boolean' ? 'boolean' : 'string',
+              secret: value === 'boolean' ? false : field.secret,
+              choices: value === 'boolean' ? '' : field.choices,
+            })
+          }
+        >
+          <FormSelectOption value="string" label={t('String')} />
+          <FormSelectOption value="boolean" label={t('Boolean')} />
+        </FormSelect>
+      </FormGroup>
+      <FormGroup label={t('Help text')} fieldId={`eda-credential-type-field-help-${field.localId}`}>
+        <TextInput
+          id={`eda-credential-type-field-help-${field.localId}`}
+          value={field.helpText}
+          onChange={(_, value) => updateField({ helpText: value })}
+        />
+      </FormGroup>
+      <FormGroup
+        label={t('Default value')}
+        fieldId={`eda-credential-type-field-default-${field.localId}`}
+      >
+        <TextInput
+          id={`eda-credential-type-field-default-${field.localId}`}
+          value={field.defaultValue}
+          onChange={(_, value) => updateField({ defaultValue: value })}
+        />
+      </FormGroup>
+      {field.type === 'string' && (
+        <>
+          <FormGroup
+            label={t('Choices')}
+            fieldId={`eda-credential-type-field-choices-${field.localId}`}
+          >
+            <TextInput
+              id={`eda-credential-type-field-choices-${field.localId}`}
+              value={field.choices}
+              placeholder={t('Comma-separated values')}
+              onChange={(_, value) => updateField({ choices: value })}
+            />
+          </FormGroup>
+          <Checkbox
+            id={`eda-credential-type-field-secret-${field.localId}`}
+            label={t('Secret')}
+            isChecked={field.secret}
+            onChange={(_, checked) => updateField({ secret: checked })}
+          />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1119,6 +1345,67 @@ function credentialPayload(values: {
   return payload;
 }
 
+function credentialTypePayload(values: {
+  name: string;
+  description: string;
+  fields: CredentialTypeFieldDraft[];
+  generateInjectors: boolean;
+  injectorsText: string;
+}) {
+  const inputFields = credentialTypeInputFields(values.fields);
+  return {
+    name: values.name.trim(),
+    description: values.description,
+    inputs: { fields: inputFields },
+    injectors: values.generateInjectors
+      ? generatedCredentialTypeInjectors(inputFields)
+      : parseJsonObject(values.injectorsText, 'Injector configuration'),
+  };
+}
+
+function credentialTypeInputFields(fields: CredentialTypeFieldDraft[]) {
+  const usedIds = new Set<string>();
+  return fields.map((field) => {
+    const id = field.id.trim();
+    if (!id) throw new Error('Credential type field ID is required.');
+    if (!/^[A-Za-z0-9_]+$/.test(id)) {
+      throw new Error(
+        `Credential type field ID "${id}" can only use letters, numbers, and underscore.`
+      );
+    }
+    if (usedIds.has(id)) throw new Error(`Credential type field ID "${id}" is duplicated.`);
+    usedIds.add(id);
+
+    const inputField: EdaCredentialInputField = {
+      id,
+      label: field.label.trim() || id,
+      type: field.type,
+    };
+    if (field.helpText.trim()) inputField.help_text = field.helpText.trim();
+    if (field.type === 'string' && field.secret) inputField.secret = true;
+    if (field.defaultValue.trim()) {
+      inputField.default =
+        field.type === 'boolean'
+          ? ['true', '1', 'yes', 'on'].includes(field.defaultValue.trim().toLowerCase())
+          : field.defaultValue.trim();
+    }
+    const choices = field.choices
+      .split(',')
+      .map((choice) => choice.trim())
+      .filter(Boolean);
+    if (field.type === 'string' && choices.length > 0) inputField.choices = choices;
+    return inputField;
+  });
+}
+
+function generatedCredentialTypeInjectors(fields: EdaCredentialInputField[]) {
+  return {
+    extra_vars: Object.fromEntries(
+      fields.map((field) => [credentialInputFieldId(field), `{{${credentialInputFieldId(field)}}}`])
+    ),
+  };
+}
+
 function credentialInputsPayload(
   fields: EdaCredentialInputField[],
   inputValues: Record<string, unknown>
@@ -1215,6 +1502,55 @@ function credentialInputDefaults(credentialType?: EdaCredentialTypeRecord) {
     if (field.default !== undefined) values[credentialInputFieldId(field)] = field.default;
   }
   return values;
+}
+
+function credentialTypeFieldDrafts(inputs: unknown): CredentialTypeFieldDraft[] {
+  if (
+    !inputs ||
+    typeof inputs !== 'object' ||
+    !Array.isArray((inputs as { fields?: unknown }).fields)
+  ) {
+    return [];
+  }
+  return ((inputs as { fields: EdaCredentialInputField[] }).fields ?? []).map((field, index) => {
+    const choices = credentialInputChoices(field).map((choice) => choice.value);
+    return {
+      localId: `field-${index}`,
+      id: credentialInputFieldId(field),
+      label: field.label ?? credentialInputFieldId(field),
+      type: field.type === 'boolean' ? 'boolean' : 'string',
+      helpText: field.help_text ?? '',
+      secret: booleanValue(field.secret, false),
+      defaultValue: field.default === undefined ? '' : String(field.default),
+      choices: choices.join(', '),
+    };
+  });
+}
+
+function newCredentialTypeFieldDraft(index: number): CredentialTypeFieldDraft {
+  return {
+    localId: `field-${index}`,
+    id: '',
+    label: '',
+    type: 'string',
+    helpText: '',
+    secret: false,
+    defaultValue: '',
+    choices: '',
+  };
+}
+
+function nextCredentialTypeFieldIndex(fields: CredentialTypeFieldDraft[]) {
+  return (
+    fields.reduce((maxIndex, field) => {
+      const index = Number(field.localId.replace(/^field-/, ''));
+      return Number.isFinite(index) ? Math.max(maxIndex, index) : maxIndex;
+    }, -1) + 1
+  );
+}
+
+function hasObjectKeys(value: unknown) {
+  return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);
 }
 
 function isRuleEngineCredential(credential: EdaCredentialRecord) {

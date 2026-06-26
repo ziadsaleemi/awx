@@ -82,6 +82,19 @@ const credentialConfig: EdaResourceConfig = {
   ],
 };
 
+const credentialTypeConfig: EdaResourceConfig = {
+  resource: 'credential-types',
+  title: 'Credential Types',
+  description: 'Manage EDA credential type schemas and injectors.',
+  emptyStateTitle: 'No EDA credential types found',
+  emptyStateDescription: 'Create an EDA credential type to define credential inputs.',
+  form: 'credential-type',
+  fields: [
+    { label: 'Kind', keys: ['kind', 'managed_by'] },
+    { label: 'Namespace', keys: ['namespace'] },
+  ],
+};
+
 describe('EdaActivations', () => {
   beforeEach(() => {
     cy.intercept('GET', '/api/v2/eda/status/', {
@@ -619,6 +632,70 @@ describe('EdaActivations', () => {
           username: 'admin',
           password: 'password',
           verify_ssl: true,
+        });
+      });
+  });
+
+  it('creates EDA credential types with fields and generated injectors', () => {
+    cy.intercept('GET', '/api/v2/eda/credential-types/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('credentialTypes');
+    cy.intercept('POST', '/api/v2/eda/credential-types/', {
+      id: 41,
+      name: 'Kafka Source',
+    }).as('createCredentialType');
+
+    cy.mount(<EdaResourceList config={credentialTypeConfig} />, {
+      path: '/eda/infrastructure/credential-types',
+      initialEntries: ['/eda/infrastructure/credential-types'],
+    });
+
+    cy.verifyPageTitle('Credential Types');
+    cy.wait('@credentialTypes');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-credential-type-name').type('Kafka Source');
+    cy.get('#eda-credential-type-description').type('Kafka source plugin secrets');
+    cy.get('#eda-credential-type-field-id-field-0').type('sasl_plain_password');
+    cy.get('#eda-credential-type-field-label-field-0').type('SASL Password');
+    cy.get('#eda-credential-type-field-help-field-0').type('Kafka SASL password');
+    cy.get('#eda-credential-type-field-secret-field-0').click();
+    cy.contains('button', /^Add field$/).click();
+    cy.get('#eda-credential-type-field-id-field-1').type('security_mechanism');
+    cy.get('#eda-credential-type-field-label-field-1').type('Security mechanism');
+    cy.get('#eda-credential-type-field-choices-field-1').type('PLAIN, SCRAM-SHA-512');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createCredentialType')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('Kafka Source');
+        expect(body.description).to.equal('Kafka source plugin secrets');
+        expect(body.inputs).to.deep.equal({
+          fields: [
+            {
+              id: 'sasl_plain_password',
+              label: 'SASL Password',
+              type: 'string',
+              help_text: 'Kafka SASL password',
+              secret: true,
+            },
+            {
+              id: 'security_mechanism',
+              label: 'Security mechanism',
+              type: 'string',
+              choices: ['PLAIN', 'SCRAM-SHA-512'],
+            },
+          ],
+        });
+        expect(body.injectors).to.deep.equal({
+          extra_vars: {
+            sasl_plain_password: '{{sasl_plain_password}}',
+            security_mechanism: '{{security_mechanism}}',
+          },
         });
       });
   });
