@@ -40,10 +40,12 @@ RUN dnf -y update && dnf install -y 'dnf-command(config-manager)' && \
     git-core \
     gettext \
     glibc-langpack-en \
+    cyrus-sasl-devel \
     libffi-devel \
     libtool-ltdl-devel \
     make \
     nss \
+    openldap-devel \
     patch \
     postgresql \
     postgresql-devel \
@@ -133,8 +135,10 @@ RUN dnf -y update && dnf install -y 'dnf-command(config-manager)' && \
     git-core \
     git-lfs \
     glibc-langpack-en \
+    cyrus-sasl-lib \
     krb5-workstation \
     nginx \
+    openldap \
     podman \
     postgresql \
     python3.12 \
