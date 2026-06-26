@@ -16,7 +16,9 @@ awx_vcenter_vm_memory_mb: 4096
 awx_vcenter_vm_disk_gb: 40
 awx_vcenter_vm_state: poweredon
 awx_vcenter_wait_for_ip: true
+awx_vcenter_verify_template_backing: true
 awx_vcenter_verify_disk_backing: true
+awx_vcenter_delete_on_invalid_backing: true
 awx_vcenter_forbidden_datastore_terms:
   - truenas
 awx_vcenter_allowed_datastore_types:

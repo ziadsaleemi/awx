@@ -105,7 +105,9 @@ allows the management datastores listed in `awx_vcenter_allowed_datastore_names`
 (default: `["datastore1", "datastore1 (1)"]`). It also verifies the actual
 cloned disk backing after vCenter completes the clone, because a clone request
 can otherwise report success while the disk lands on the wrong backing
-datastore.
+datastore. Template disk backing is verified before clone as well; if vCenter
+still creates a VM on a forbidden or unapproved datastore, the role deletes the
+bad clone by default before failing the run.
 
 By default the role writes a generated inventory to
 `/tmp/awx-vcenter-lab.ini`. Use that file as the input to `deploy-server.yml`

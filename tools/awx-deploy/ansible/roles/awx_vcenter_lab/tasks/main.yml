@@ -60,6 +60,88 @@
     fail_msg: "Refusing datastore '{{ awx_vcenter_datastore }}'. Approved management datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
   when: awx_vcenter_allowed_datastore_names | default([]) | length > 0
 
+- name: Gather source template disk backing
+  community.vmware.vmware_guest_disk_info:
+    hostname: "{{ awx_vcenter_hostname }}"
+    username: "{{ awx_vcenter_username }}"
+    password: "{{ awx_vcenter_password }}"
+    validate_certs: "{{ awx_vcenter_validate_certs }}"
+    datacenter: "{{ awx_vcenter_datacenter }}"
+    folder: "{{ awx_vcenter_folder | default(omit, true) }}"
+    name: "{{ awx_vcenter_template }}"
+  register: awx_vcenter_template_disk_info
+  no_log: true
+  when: awx_vcenter_verify_template_backing | bool
+
+- name: Collect source template disk backing
+  ansible.builtin.set_fact:
+    awx_vcenter_template_disk_backing_files: >-
+      {{
+        awx_vcenter_template_disk_info.guest_disk_info | default({})
+        | dict2items
+        | map(attribute='value.backing_filename')
+        | select('defined')
+        | list
+      }}
+    awx_vcenter_template_disk_datastore_names: >-
+      {{
+        (
+          (
+            awx_vcenter_template_disk_info.guest_disk_info | default({})
+            | dict2items
+            | map(attribute='value.backing_datastore')
+            | select('defined')
+            | list
+          )
+          +
+          (
+            awx_vcenter_template_disk_info.guest_disk_info | default({})
+            | dict2items
+            | map(attribute='value.backing_filename')
+            | select('defined')
+            | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
+            | list
+          )
+        )
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+  when: awx_vcenter_verify_template_backing | bool
+
+- name: Reject forbidden source template disk backing
+  ansible.builtin.assert:
+    that:
+      - item | lower not in ((awx_vcenter_template_disk_backing_files | default([])) | join(' ') | lower)
+      - item | lower not in ((awx_vcenter_template_disk_datastore_names | default([])) | join(' ') | lower)
+    fail_msg: "Refusing to clone from template '{{ awx_vcenter_template }}' because its disk backing references forbidden datastore term '{{ item }}'. Template backing files: {{ awx_vcenter_template_disk_backing_files | default([]) }}"
+  loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
+  when:
+    - awx_vcenter_verify_template_backing | bool
+    - awx_vcenter_template_disk_backing_files | default([]) | length > 0
+
+- name: Require approved source template datastore types
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_datastore_type_map.get(item, '') in awx_vcenter_allowed_datastore_types
+    fail_msg: "Refusing to clone from template '{{ awx_vcenter_template }}' because datastore '{{ item }}' has type '{{ awx_vcenter_datastore_type_map.get(item, 'unknown') }}'. Approved datastore types: {{ awx_vcenter_allowed_datastore_types | join(', ') }}."
+  loop: "{{ awx_vcenter_template_disk_datastore_names | default([]) }}"
+  when:
+    - awx_vcenter_verify_template_backing | bool
+    - awx_vcenter_allowed_datastore_types | default([]) | length > 0
+    - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
+
+- name: Require approved source template disk backing
+  ansible.builtin.assert:
+    that:
+      - item in awx_vcenter_allowed_datastore_names
+    fail_msg: "Refusing to clone from template '{{ awx_vcenter_template }}' because datastore '{{ item }}' is outside approved management datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
+  loop: "{{ awx_vcenter_template_disk_datastore_names | default([]) }}"
+  when:
+    - awx_vcenter_verify_template_backing | bool
+    - awx_vcenter_allowed_datastore_names | default([]) | length > 0
+    - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
+
 - name: Create AWX lab VMs from template
   community.vmware.vmware_guest:
     hostname: "{{ awx_vcenter_hostname }}"
@@ -136,25 +218,97 @@
     - awx_vcenter_verify_disk_backing | bool
     - awx_vcenter_disk_info is defined
 
-- name: Reject forbidden cloned VM disk backing
-  ansible.builtin.assert:
-    that:
-      - item | lower not in ((awx_vcenter_disk_backing_files | default([])) | join(' ') | lower)
-    fail_msg: "vCenter placed a cloned VM disk on a forbidden datastore. Disk backing files: {{ awx_vcenter_disk_backing_files | default([]) }}"
-  loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
-  when:
-    - awx_vcenter_verify_disk_backing | bool
-    - awx_vcenter_disk_backing_files | default([]) | length > 0
-
 - name: Collect cloned VM disk datastore names
   ansible.builtin.set_fact:
     awx_vcenter_disk_datastore_names: >-
       {{
-        awx_vcenter_disk_backing_files | default([])
-        | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
-        | list
+        (
+          (
+            awx_vcenter_disk_info.results | default([])
+            | map(attribute='guest_disk_info')
+            | select('defined')
+            | map('dict2items')
+            | flatten
+            | map(attribute='value.backing_datastore')
+            | select('defined')
+            | list
+          )
+          +
+          (
+            awx_vcenter_disk_backing_files | default([])
+            | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
+            | list
+          )
+        )
+        | reject('equalto', '')
         | unique
       }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Flag invalid cloned VM disk backing
+  ansible.builtin.set_fact:
+    awx_vcenter_forbidden_backing_detected: >-
+      {{
+        awx_vcenter_forbidden_datastore_terms | default([])
+        | map('lower')
+        | select('in', ((awx_vcenter_disk_backing_files | default([])) | join(' ') | lower))
+        | list
+        | length > 0
+      }}
+    awx_vcenter_unapproved_disk_datastores: >-
+      {{
+        (awx_vcenter_disk_datastore_names | default([]))
+        | difference(awx_vcenter_allowed_datastore_names | default([]))
+        | list
+      }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Mark cloned VM disk backing as invalid
+  ansible.builtin.set_fact:
+    awx_vcenter_invalid_disk_backing_detected: >-
+      {{
+        awx_vcenter_forbidden_backing_detected | default(false) | bool
+        or
+        (
+          awx_vcenter_allowed_datastore_names | default([]) | length > 0
+          and
+          awx_vcenter_unapproved_disk_datastores | default([]) | length > 0
+        )
+      }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Delete cloned lab VMs with invalid disk backing
+  community.vmware.vmware_guest:
+    hostname: "{{ awx_vcenter_hostname }}"
+    username: "{{ awx_vcenter_username }}"
+    password: "{{ awx_vcenter_password }}"
+    validate_certs: "{{ awx_vcenter_validate_certs }}"
+    datacenter: "{{ awx_vcenter_datacenter }}"
+    folder: "{{ awx_vcenter_folder | default(omit, true) }}"
+    name: "{{ item.instance.hw_name | default(awx_vcenter_vm_prefix ~ '-' ~ ('%02d' | format(item.item | int))) }}"
+    state: absent
+    force: true
+  loop: "{{ awx_vcenter_created_vms.results | default([]) }}"
+  no_log: true
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_delete_on_invalid_backing | bool
+    - awx_vcenter_invalid_disk_backing_detected | default(false) | bool
+    - awx_vcenter_created_vms is defined
+
+- name: Reject forbidden cloned VM disk backing
+  ansible.builtin.assert:
+    that:
+      - item | lower not in ((awx_vcenter_disk_backing_files | default([])) | join(' ') | lower)
+      - item | lower not in ((awx_vcenter_disk_datastore_names | default([])) | join(' ') | lower)
+    fail_msg: "vCenter placed a cloned VM disk on a forbidden datastore. Disk backing files: {{ awx_vcenter_disk_backing_files | default([]) }}"
+  loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
   when:
     - awx_vcenter_verify_disk_backing | bool
     - awx_vcenter_disk_backing_files | default([]) | length > 0
