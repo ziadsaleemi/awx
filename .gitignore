@@ -108,6 +108,9 @@ tower-backup-*
 
 # Ansible
 **/*.retry
+tools/awx-deploy/ansible/group_vars/all.yml
+tools/awx-deploy/ansible/vars/*.yml
+!tools/awx-deploy/ansible/vars/*.yml.example
 
 # Other
 .tower_cycle

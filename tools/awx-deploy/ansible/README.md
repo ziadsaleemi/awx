@@ -27,6 +27,11 @@ media, and container storage paths as AWX.
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
 
+VMware/vCenter provisioning is intentionally separate from the AWX deployment
+roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
+or collections. Use the VMware-only requirements and vars example only when
+running `playbooks/vcenter-lab.yml`.
+
 ## Quick Start: Server
 
 ```bash
@@ -85,10 +90,12 @@ Set credentials only in environment variables. The Ansible control node must
 have `community.vmware` and a working `pyVmomi` / `pyVim` import path.
 
 ```bash
+ansible-galaxy collection install -r requirements-vmware.yml
+cp vars/vcenter-lab.yml.example vars/vcenter-lab.yml
 export VCENTER_HOSTNAME=vcenter.example.com
 export VCENTER_USERNAME='administrator@example.local'
 read -rsp "vCenter password: " VCENTER_PASSWORD; export VCENTER_PASSWORD
-ansible-playbook -i localhost, playbooks/vcenter-lab.yml
+ansible-playbook -i localhost, playbooks/vcenter-lab.yml -e @vars/vcenter-lab.yml
 ```
 
 By default the role writes a generated inventory to

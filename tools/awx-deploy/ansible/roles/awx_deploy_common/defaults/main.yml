@@ -101,18 +101,3 @@ awx_k3s_disable:
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
 awx_restore_confirm: false
 awx_restore_path: ""
-
-awx_vcenter_hostname: "{{ lookup('env', 'VCENTER_HOSTNAME') }}"
-awx_vcenter_username: "{{ lookup('env', 'VCENTER_USERNAME') }}"
-awx_vcenter_password: "{{ lookup('env', 'VCENTER_PASSWORD') }}"
-awx_vcenter_validate_certs: false
-awx_vcenter_datacenter: ""
-awx_vcenter_cluster: ""
-awx_vcenter_folder: ""
-awx_vcenter_template: ""
-awx_vcenter_datastore: ""
-awx_vcenter_network: ""
-awx_vcenter_vm_prefix: awx-test
-awx_vcenter_vm_count: 1
-awx_vcenter_vm_cpus: 2
-awx_vcenter_vm_memory_mb: 4096
