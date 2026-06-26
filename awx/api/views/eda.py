@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+from urllib.parse import parse_qsl, urlencode, urlparse
+
 from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext_lazy as _
@@ -78,6 +80,23 @@ def _normalize_resource_payload(payload):
             return normalized
         return {'count': 1, 'next': None, 'previous': None, 'results': [payload]}
     return {'count': 0, 'next': None, 'previous': None, 'results': []}
+
+
+def _rewrite_resource_page_link(request, link):
+    if not link:
+        return None
+    parsed = urlparse(str(link))
+    query = parsed.query
+    if not query and '?' in str(link):
+        query = str(link).split('?', 1)[1]
+    return request.build_absolute_uri(f'{request.path}?{urlencode(parse_qsl(query, keep_blank_values=True))}')
+
+
+def _rewrite_resource_page_links(request, data):
+    normalized = dict(data)
+    normalized['next'] = _rewrite_resource_page_link(request, normalized.get('next'))
+    normalized['previous'] = _rewrite_resource_page_link(request, normalized.get('previous'))
+    return normalized
 
 
 def _resource_configured_empty(resource):
@@ -213,6 +232,7 @@ class EDAResourceListView(APIView):
             return _eda_error_response(exc)
 
         data = _normalize_resource_payload(payload)
+        data = _rewrite_resource_page_links(request, data)
         data['source'] = 'eda_controller'
         data['resource'] = resource
         data['controller_error'] = ''

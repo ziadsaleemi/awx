@@ -1,16 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Form,
-  FormGroup,
-  Modal,
-  TextArea,
-  TextInput,
-  ButtonVariant,
-} from '@patternfly/react-core';
+import { Alert, ButtonVariant } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
   IPageAction,
@@ -40,6 +30,7 @@ import {
 } from '../../interfaces/EdaActivation';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { AwxRoute } from '../../main/AwxRoutes';
+import { EdaActivationStartModal } from './EdaActivationStartModal';
 
 export function EdaActivations() {
   const { t } = useTranslation();
@@ -276,134 +267,5 @@ function useEdaActivationColumns(): ITableColumn<EdaActivation>[] {
       },
     ],
     [getPageUrl, t]
-  );
-}
-
-function EdaActivationStartModal(props: {
-  canCreateActivation: boolean;
-  onClose: () => void;
-  onStarted: () => Promise<void>;
-}) {
-  const { t } = useTranslation();
-  const alertToaster = usePageAlertToaster();
-  const postRequest = usePostRequest<Record<string, unknown>, EdaActivationActionResponse>();
-  const [rulebookName, setRulebookName] = useState('');
-  const [activationId, setActivationId] = useState('');
-  const [eventSource, setEventSource] = useState('');
-  const [extraData, setExtraData] = useState('{}');
-  const [poll, setPoll] = useState(true);
-  const [includeEvents, setIncludeEvents] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const submit = async () => {
-    let parsedExtraData: Record<string, unknown> = {};
-    try {
-      parsedExtraData = extraData.trim() ? (JSON.parse(extraData) as Record<string, unknown>) : {};
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Extra data must be valid JSON'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await postRequest(awxAPI`/eda/activations/start/`, {
-        rulebook_name: rulebookName.trim(),
-        activation_id: activationId.trim(),
-        event_source: eventSource.trim(),
-        extra_data: parsedExtraData,
-        poll,
-        include_events: includeEvents,
-      });
-      alertToaster.addAlert({
-        variant: 'success',
-        title: t('EDA activation start requested'),
-        timeout: 4000,
-      });
-      await props.onStarted();
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Failed to start EDA activation'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={t('Create/start EDA activation')}
-      isOpen
-      onClose={props.onClose}
-      variant="medium"
-      actions={[
-        <Button
-          key="start"
-          variant="primary"
-          isLoading={isSubmitting}
-          isDisabled={
-            isSubmitting ||
-            (!props.canCreateActivation && !activationId.trim()) ||
-            (props.canCreateActivation && !rulebookName.trim() && !activationId.trim())
-          }
-          onClick={() => void submit()}
-        >
-          {t('Start')}
-        </Button>,
-        <Button key="cancel" variant="link" onClick={props.onClose}>
-          {t('Cancel')}
-        </Button>,
-      ]}
-    >
-      <Form>
-        <FormGroup label={t('Rulebook name')} fieldId="eda-rulebook-name">
-          <TextInput
-            id="eda-rulebook-name"
-            value={rulebookName}
-            isDisabled={!props.canCreateActivation}
-            onChange={(_, value) => setRulebookName(value)}
-          />
-        </FormGroup>
-        <FormGroup label={t('Activation ID')} fieldId="eda-activation-id">
-          <TextInput
-            id="eda-activation-id"
-            value={activationId}
-            onChange={(_, value) => setActivationId(value)}
-          />
-        </FormGroup>
-        <FormGroup label={t('Event source')} fieldId="eda-event-source">
-          <TextInput
-            id="eda-event-source"
-            value={eventSource}
-            onChange={(_, value) => setEventSource(value)}
-          />
-        </FormGroup>
-        <FormGroup label={t('Extra data JSON')} fieldId="eda-extra-data">
-          <TextArea
-            id="eda-extra-data"
-            value={extraData}
-            onChange={(_, value) => setExtraData(value)}
-            rows={5}
-          />
-        </FormGroup>
-        <Checkbox
-          id="eda-poll"
-          label={t('Poll activation after start')}
-          isChecked={poll}
-          onChange={(_, checked) => setPoll(checked)}
-        />
-        <Checkbox
-          id="eda-include-events"
-          label={t('Load recent events after start')}
-          isChecked={includeEvents}
-          onChange={(_, checked) => setIncludeEvents(checked)}
-        />
-      </Form>
-    </Modal>
   );
 }

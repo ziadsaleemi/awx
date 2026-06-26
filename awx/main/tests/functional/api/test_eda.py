@@ -262,6 +262,53 @@ def test_eda_activation_start_accepts_upstream_fields_from_top_level(post, admin
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token', EDA_VERIFY_SSL=False)
+def test_eda_activation_start_forwards_credentials_and_persistence_fields(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'count': 0, 'results': []}),
+            eda_error_response(mocker, 400, 'Rulebook is required'),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'pending', 'rulebook': {'name': 'codex-smoke.yml'}}),
+            eda_response(mocker, {'id': 42, 'name': 'codex-smoke.yml', 'status': 'running', 'rulebook': {'name': 'codex-smoke.yml'}}),
+        ],
+    )
+
+    response = post(
+        reverse('api:eda_activation_start'),
+        {
+            'name': 'credentialed codex smoke',
+            'rulebook_name': 'codex-smoke.yml',
+            'rulebook_id': 11,
+            'decision_environment_id': 12,
+            'organization_id': 13,
+            'eda_credentials': [21],
+            'enable_persistence': True,
+            'rule_engine_credential_id': 30,
+            'log_level': 'debug',
+            'poll': False,
+            'include_events': False,
+        },
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['activation']['id'] == 42
+    assert response.data['actions'] == ['created', 'started']
+    assert request_mock.call_args_list[2].kwargs['json'] == {
+        'name': 'credentialed codex smoke',
+        'rulebook_id': 11,
+        'decision_environment_id': 12,
+        'organization_id': 13,
+        'eda_credentials': [21],
+        'enable_persistence': True,
+        'rule_engine_credential_id': 30,
+        'log_level': 'debug',
+        'is_enabled': False,
+    }
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
 def test_eda_activation_detail_reads_controller_activation(get, admin_user, mocker):
     request_mock = mocker.patch(
@@ -422,18 +469,32 @@ def test_eda_resource_list_reports_not_configured(get, admin_user):
 def test_eda_resource_list_proxies_to_controller(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.eda.requests.request',
-        return_value=eda_response(mocker, {'count': 1, 'next': None, 'previous': None, 'results': [{'id': 7, 'name': 'Ops project'}]}),
+        return_value=eda_response(
+            mocker,
+            {
+                'count': 26,
+                'next': 'https://eda.example.test/api/eda/v1/projects/?order_by=name&page=2&page_size=25',
+                'previous': None,
+                'results': [{'id': 7, 'name': 'Ops project'}],
+            },
+        ),
     )
 
-    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), {'page': '2', 'page_size': '25'}, user=admin_user, expect=200)
+    response = get(
+        reverse('api:eda_resource_list', kwargs={'resource': 'projects'}),
+        {'page': '1', 'page_size': '25', 'order_by': 'name'},
+        user=admin_user,
+        expect=200,
+    )
 
     assert response.data['source'] == 'eda_controller'
     assert response.data['resource'] == 'projects'
-    assert response.data['count'] == 1
+    assert response.data['count'] == 26
+    assert response.data['next'].endswith('/api/v2/eda/projects/?order_by=name&page=2&page_size=25')
     assert response.data['results'][0]['name'] == 'Ops project'
     assert request_mock.call_args.args[0] == 'GET'
     assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/projects/'
-    assert request_mock.call_args.kwargs['params'] == {'page': '2', 'page_size': '25'}
+    assert request_mock.call_args.kwargs['params'] == {'page': '1', 'page_size': '25', 'order_by': 'name'}
 
 
 @pytest.mark.django_db

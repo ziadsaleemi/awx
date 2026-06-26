@@ -30,6 +30,7 @@ import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxView } from '../../common/useAwxView';
 import { EdaStatus } from '../../interfaces/EdaActivation';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
+import { EdaActivationStartModal } from './EdaActivationStartModal';
 
 export interface EdaResourceRecord {
   id: number;
@@ -81,6 +82,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     record?: EdaResourceRecord;
   } | null>(null);
   const [deleteRecord, setDeleteRecord] = useState<EdaResourceRecord | null>(null);
+  const [startRulebookRecord, setStartRulebookRecord] = useState<EdaResourceRecord | null>(null);
   const {
     data: status,
     error: statusError,
@@ -140,38 +142,6 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     [alertToaster, t, view]
   );
 
-  const startRulebookActivation = useCallback(
-    async (record: EdaResourceRecord) => {
-      const rulebookName = String(
-        record.name ?? record.rulebook_name ?? record.rulebook ?? record.id ?? ''
-      ).trim();
-      if (!rulebookName) return;
-      const payload: Record<string, unknown> = {
-        rulebook_name: rulebookName,
-        poll: true,
-        include_events: true,
-      };
-      if (record.id !== undefined && record.id !== null) {
-        payload.rulebook_id = record.id;
-      }
-      try {
-        await postRequest(awxAPI`/eda/activations/start/`, payload);
-        alertToaster.addAlert({
-          variant: 'success',
-          title: t('EDA activation start requested for "{{name}}"', { name: rulebookName }),
-          timeout: 4000,
-        });
-      } catch (err) {
-        alertToaster.addAlert({
-          variant: 'danger',
-          title: t('Failed to start EDA activation'),
-          children: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    [alertToaster, t]
-  );
-
   const toolbarActions = useMemo<IPageAction<EdaResourceRecord>[]>(
     () =>
       config.readOnly
@@ -223,7 +193,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         isDisabled: !canManageEda
           ? t('You need EDA administrator permissions to create activations from rulebooks.')
           : undefined,
-        onClick: (record) => void startRulebookActivation(record),
+        onClick: (record) => setStartRulebookRecord(record),
       });
     }
 
@@ -250,7 +220,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     }
 
     return actions;
-  }, [canManageEda, config.readOnly, config.resource, startRulebookActivation, syncProject, t]);
+  }, [canManageEda, config.readOnly, config.resource, syncProject, t]);
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
 
@@ -311,6 +281,17 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         >
           {t('Delete "{{name}}"?', { name: recordName(deleteRecord) })}
         </Modal>
+      )}
+      {startRulebookRecord && (
+        <EdaActivationStartModal
+          canCreateActivation={canManageEda}
+          initialRulebook={startRulebookRecord}
+          onClose={() => setStartRulebookRecord(null)}
+          onStarted={async () => {
+            setStartRulebookRecord(null);
+            await view.refresh();
+          }}
+        />
       )}
     </PageLayout>
   );
