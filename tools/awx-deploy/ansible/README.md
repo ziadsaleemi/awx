@@ -100,12 +100,12 @@ ansible-playbook -i localhost, playbooks/vcenter-lab.yml -e @vars/vcenter-lab.ym
 
 Set `awx_vcenter_datastore` to a management-local VMFS datastore. The lab role
 rejects datastore names containing `truenas`, requires the selected datastore to
-match `awx_vcenter_allowed_datastore_types` (default: `["VMFS"]`), and verifies
-the actual cloned disk backing after vCenter completes the clone, because a
-clone request can otherwise report success while the disk lands on the wrong
-backing datastore. For stricter lab runs, set
-`awx_vcenter_allowed_datastore_names` to the exact datastore names that are
-allowed, for example `["datastore1", "datastore1 (1)"]`.
+match `awx_vcenter_allowed_datastore_types` (default: `["VMFS"]`), and only
+allows the management datastores listed in `awx_vcenter_allowed_datastore_names`
+(default: `["datastore1", "datastore1 (1)"]`). It also verifies the actual
+cloned disk backing after vCenter completes the clone, because a clone request
+can otherwise report success while the disk lands on the wrong backing
+datastore.
 
 By default the role writes a generated inventory to
 `/tmp/awx-vcenter-lab.ini`. Use that file as the input to `deploy-server.yml`

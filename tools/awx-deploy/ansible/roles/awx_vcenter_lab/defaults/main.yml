@@ -21,7 +21,9 @@ awx_vcenter_forbidden_datastore_terms:
   - truenas
 awx_vcenter_allowed_datastore_types:
   - VMFS
-awx_vcenter_allowed_datastore_names: []
+awx_vcenter_allowed_datastore_names:
+  - datastore1
+  - datastore1 (1)
 awx_vcenter_inventory_path: /tmp/awx-vcenter-lab.ini
 awx_vcenter_inventory_groups:
   - awx_database

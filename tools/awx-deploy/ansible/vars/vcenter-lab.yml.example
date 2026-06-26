@@ -10,7 +10,9 @@ awx_vcenter_template: ""
 awx_vcenter_datastore: ""
 awx_vcenter_allowed_datastore_types:
   - VMFS
-awx_vcenter_allowed_datastore_names: []
+awx_vcenter_allowed_datastore_names:
+  - datastore1
+  - datastore1 (1)
 awx_vcenter_network: ""
 awx_vcenter_vm_prefix: awx-test
 awx_vcenter_vm_count: 1
