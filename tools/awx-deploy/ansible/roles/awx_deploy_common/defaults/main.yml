@@ -31,6 +31,8 @@ awx_remote_host_headers:
   - REMOTE_ADDR
   - REMOTE_HOST
 awx_tower_url_base: ""
+awx_session_cookie_secure: ""
+awx_csrf_cookie_secure: ""
 
 awx_postgres_inventory_host: "{{ groups.get('awx_database', ['127.0.0.1']) | first }}"
 awx_postgres_host: "{{ hostvars.get(awx_postgres_inventory_host, {}).get('ansible_host', awx_postgres_inventory_host) }}"

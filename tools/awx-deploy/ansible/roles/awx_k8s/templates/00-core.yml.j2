@@ -73,6 +73,22 @@ stringData:
     CSRF_TRUSTED_ORIGINS = {{ awx_csrf_trusted_origins | to_json }}
     REMOTE_HOST_HEADERS = {{ awx_remote_host_headers | to_json }}
     PROXY_IP_ALLOWED_LIST = {{ awx_proxy_ip_allowed_list | to_json }}
+{% set effective_tower_url_base = awx_tower_url_base %}
+{% if not effective_tower_url_base %}
+{% if awx_k8s_ingress_enabled and awx_k8s_ingress_host %}
+{% set effective_tower_url_base = 'https://' ~ awx_k8s_ingress_host %}
+{% elif awx_k8s_service_type == 'NodePort' %}
+{% set effective_tower_url_base = 'http://' ~ (ansible_host | default(inventory_hostname)) ~ ':' ~ awx_k8s_node_port %}
+{% else %}
+{% set effective_tower_url_base = 'http://' ~ awx_k8s_name ~ '-web' %}
+{% endif %}
+{% endif %}
+    TOWER_URL_BASE = {{ effective_tower_url_base | to_json }}
+{% set inferred_secure_cookies = effective_tower_url_base.startswith('https://') %}
+{% set effective_session_cookie_secure = (awx_session_cookie_secure | bool) if (awx_session_cookie_secure | string | length > 0) else inferred_secure_cookies %}
+{% set effective_csrf_cookie_secure = (awx_csrf_cookie_secure | bool) if (awx_csrf_cookie_secure | string | length > 0) else inferred_secure_cookies %}
+    SESSION_COOKIE_SECURE = {{ 'True' if effective_session_cookie_secure else 'False' }}
+    CSRF_COOKIE_SECURE = {{ 'True' if effective_csrf_cookie_secure else 'False' }}
 
     BROKER_URL = "redis://{{ awx_k8s_name }}-redis:6379/0"
     CACHES = {

@@ -30,6 +30,11 @@ PROXY_IP_ALLOWED_LIST = {{ awx_proxy_ip_allowed_list | to_json }}
 {% set effective_tower_url_base = 'http://' ~ tower_host ~ ':' ~ tower_port %}
 {% endif %}
 TOWER_URL_BASE = {{ effective_tower_url_base | to_json }}
+{% set inferred_secure_cookies = effective_tower_url_base.startswith('https://') %}
+{% set effective_session_cookie_secure = (awx_session_cookie_secure | bool) if (awx_session_cookie_secure | string | length > 0) else inferred_secure_cookies %}
+{% set effective_csrf_cookie_secure = (awx_csrf_cookie_secure | bool) if (awx_csrf_cookie_secure | string | length > 0) else inferred_secure_cookies %}
+SESSION_COOKIE_SECURE = {{ 'True' if effective_session_cookie_secure else 'False' }}
+CSRF_COOKIE_SECURE = {{ 'True' if effective_csrf_cookie_secure else 'False' }}
 
 BROKER_URL = "redis://{{ awx_redis_host }}:{{ awx_redis_port }}/0"
 CACHES = {
