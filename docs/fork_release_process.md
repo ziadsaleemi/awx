@@ -22,14 +22,18 @@ Before tagging, bump these files to the target version:
 
 - `awx/ui/src/frontend/common/AboutModal.tsx`
 - `awx/ui/src/package.json`
+- `VERSION`
 - `tools/awx-deploy/ansible/roles/awx_deploy_common/defaults/main.yml`
+- `tools/awx-deploy/ansible/group_vars/all.yml.example`
 
 Commit and push that change first:
 
 ```bash
 git add awx/ui/src/frontend/common/AboutModal.tsx \
   awx/ui/src/package.json \
+  VERSION \
   tools/awx-deploy/ansible/roles/awx_deploy_common/defaults/main.yml \
+  tools/awx-deploy/ansible/group_vars/all.yml.example \
   ENHANCEMENTS.md docs/fork_release_process.md tools/scripts/release-awx.sh
 git commit --signoff -m "Prepare AWX 25.1.2 release"
 git push origin devel
