@@ -61,7 +61,6 @@ export interface EdaResourceConfig {
 
 const SERVER_MANAGED_FIELDS = new Set([
   'id',
-  'url',
   'related',
   'summary_fields',
   'created',
@@ -119,6 +118,28 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     [alertToaster, config.resource, t, view]
   );
 
+  const syncProject = useCallback(
+    async (record: EdaResourceRecord) => {
+      if (record.id === undefined || record.id === null) return;
+      try {
+        await postRequest(awxAPI`/eda/projects/${String(record.id)}/sync/`, {});
+        alertToaster.addAlert({
+          variant: 'success',
+          title: t('EDA project sync requested'),
+          timeout: 4000,
+        });
+        await view.refresh();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to sync EDA project'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, t, view]
+  );
+
   const toolbarActions = useMemo<IPageAction<EdaResourceRecord>[]>(
     () =>
       config.readOnly
@@ -140,38 +161,52 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     [canManageEda, config.readOnly, t]
   );
 
-  const rowActions = useMemo<IPageAction<EdaResourceRecord>[]>(
-    () => [
+  const rowActions = useMemo<IPageAction<EdaResourceRecord>[]>(() => {
+    const actions: IPageAction<EdaResourceRecord>[] = [
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('View JSON'),
         onClick: (record) => setModalState({ mode: 'view', record }),
       },
-      {
+    ];
+
+    if (config.resource === 'projects') {
+      actions.push({
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        label: t('Sync'),
+        isDisabled: !canManageEda
+          ? t('You need EDA administrator permissions to sync this project.')
+          : undefined,
+        onClick: (record) => void syncProject(record),
+      });
+    }
+
+    if (!config.readOnly) {
+      actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('Edit JSON'),
-        isDisabled:
-          config.readOnly || !canManageEda
-            ? t('You need EDA administrator permissions to edit this resource.')
-            : undefined,
+        isDisabled: !canManageEda
+          ? t('You need EDA administrator permissions to edit this resource.')
+          : undefined,
         onClick: (record) => setModalState({ mode: 'edit', record }),
-      },
-      {
+      });
+      actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
         label: t('Delete'),
         isDanger: true,
-        isDisabled:
-          config.readOnly || !canManageEda
-            ? t('You need EDA administrator permissions to delete this resource.')
-            : undefined,
+        isDisabled: !canManageEda
+          ? t('You need EDA administrator permissions to delete this resource.')
+          : undefined,
         onClick: (record) => setDeleteRecord(record),
-      },
-    ],
-    [canManageEda, config.readOnly, t]
-  );
+      });
+    }
+
+    return actions;
+  }, [canManageEda, config.readOnly, config.resource, syncProject, t]);
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
 

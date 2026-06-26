@@ -250,17 +250,52 @@ class EDAControllerClient:
             raise EDAControllerError('EDA resource id is required.', 'missing')
         return self.get_json(self._resource_path(resource, resource_id))
 
+    def default_organization_id(self):
+        return self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH, 'Default') or self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH)
+
+    def upstream_resource_payload(self, resource, payload=None, add_defaults=False):
+        normalized = dict(payload or {})
+        resource = str(resource or '').strip()
+
+        if resource == 'projects':
+            if not normalized.get('url') and normalized.get('scm_url'):
+                normalized['url'] = normalized.get('scm_url')
+            normalized.pop('scm_url', None)
+            normalized.pop('scm_type', None)
+            if add_defaults:
+                normalized.setdefault('verify_ssl', True)
+        elif resource == 'decision-environments':
+            if not normalized.get('image_url'):
+                image = normalized.get('image') or normalized.get('container_image')
+                if image:
+                    normalized['image_url'] = image
+            normalized.pop('image', None)
+            normalized.pop('container_image', None)
+
+        if add_defaults and resource in ('projects', 'decision-environments', 'credentials', 'event-streams') and not normalized.get('organization_id'):
+            organization_id = self.default_organization_id()
+            if organization_id:
+                normalized['organization_id'] = organization_id
+
+        return normalized
+
     def create_resource(self, resource, payload=None):
-        return self.post_json(self._resource_path(resource), payload or {})
+        return self.post_json(self._resource_path(resource), self.upstream_resource_payload(resource, payload, add_defaults=True))
 
     def update_resource(self, resource, resource_id, payload=None, method='PATCH'):
         if resource_id in (None, ''):
             raise EDAControllerError('EDA resource id is required.', 'missing')
         method = str(method or 'PATCH').upper()
         path = self._resource_path(resource, resource_id)
+        payload = self.upstream_resource_payload(resource, payload, add_defaults=False)
         if method == 'PUT':
-            return self.put_json(path, payload or {})
-        return self.patch_json(path, payload or {})
+            return self.put_json(path, payload)
+        return self.patch_json(path, payload)
+
+    def sync_project(self, project_id, payload=None):
+        if project_id in (None, ''):
+            raise EDAControllerError('EDA project id is required.', 'missing')
+        return self.post_json(f'{self._resource_path("projects", project_id)}sync/', payload or {})
 
     def delete_resource(self, resource, resource_id):
         if resource_id in (None, ''):

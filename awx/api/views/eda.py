@@ -20,7 +20,7 @@ from awx.main.access import get_user_queryset
 from awx.main.utils.eda import EDA_RESOURCE_API_PATHS, EDAControllerClient, EDAControllerError, configured_url, connection_status
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
-_EDA_READ_ONLY_RESOURCES = {'rule-audit'}
+_EDA_READ_ONLY_RESOURCES = {'rule-audit', 'rulebooks'}
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -182,7 +182,9 @@ class EDAActivationListView(APIView):
 
 
 def _eda_error_response(exc):
-    response_status = http_status.HTTP_400_BAD_REQUEST if exc.status in ('invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
+    response_status = (
+        http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
+    )
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
 
 
@@ -276,6 +278,20 @@ class EDAResourceDetailView(APIView):
         except EDAControllerError as exc:
             return _eda_error_response(exc)
         return Response(payload, status=http_status.HTTP_202_ACCEPTED)
+
+
+class EDAProjectSyncView(APIView):
+    name = _('EDA Project Sync')
+    resource_purpose = 'event-driven ansible project sync'
+    permission_classes = [EDAActivationAdminPermission]
+
+    def post(self, request, pk, format=None):
+        client = EDAControllerClient()
+        try:
+            payload = client.sync_project(pk, request.data if isinstance(request.data, dict) else {})
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response({'source': 'eda_controller', 'project': payload, 'actions': ['sync']})
 
 
 class EDAActivationDetailView(APIView):

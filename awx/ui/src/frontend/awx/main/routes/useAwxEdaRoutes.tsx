@@ -29,10 +29,16 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA projects used to discover rulebooks.'),
       emptyStateTitle: t('No EDA projects found'),
       emptyStateDescription: t('Create or sync an EDA project to load rulebooks.'),
-      createSample: { name: '', description: '', scm_type: 'git', scm_url: '' },
+      createSample: {
+        name: '',
+        description: '',
+        url: '',
+        scm_branch: 'main',
+        verify_ssl: true,
+      },
       fields: [
-        { label: t('SCM URL'), keys: ['scm_url', 'url'] },
-        { label: t('Status'), keys: ['status', 'state'], type: 'status' },
+        { label: t('SCM URL'), keys: ['url', 'scm_url'] },
+        { label: t('Status'), keys: ['import_state', 'status', 'state'], type: 'status' },
         { label: t('Modified'), keys: ['modified', 'modified_at'], type: 'date' },
       ],
     });
@@ -99,10 +105,10 @@ export function useAwxEdaRoutes() {
     const rulebooks = resourceConfig({
       resource: 'rulebooks',
       title: t('Rulebooks'),
-      description: t('Inspect and manage rulebooks discovered by EDA projects.'),
+      description: t('Inspect rulebooks discovered by synced EDA projects.'),
       emptyStateTitle: t('No rulebooks found'),
       emptyStateDescription: t('Sync an EDA project to discover rulebooks.'),
-      createSample: { name: '', project_id: null, rulesets: [] },
+      readOnly: true,
       fields: [
         { label: t('Project'), keys: ['project_name', 'project'] },
         { label: t('Rulesets'), keys: ['rulesets', 'ruleset_count'] },
