@@ -17,9 +17,10 @@ from awx.api.views.eda_permissions import (
 from awx.api.versioning import reverse
 from awx.main import models
 from awx.main.access import get_user_queryset
-from awx.main.utils.eda import EDAControllerClient, EDAControllerError, configured_url, connection_status
+from awx.main.utils.eda import EDA_RESOURCE_API_PATHS, EDAControllerClient, EDAControllerError, configured_url, connection_status
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
+_EDA_READ_ONLY_RESOURCES = {'rule-audit'}
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -46,6 +47,46 @@ def _page_link(request, page):
     query = request.GET.copy()
     query['page'] = str(page)
     return request.build_absolute_uri(f'{request.path}?{query.urlencode()}')
+
+
+def _query_params(request):
+    params = {}
+    for key, values in request.query_params.lists():
+        params[key] = values if len(values) > 1 else values[0]
+    return params
+
+
+def _normalize_resource_payload(payload):
+    if isinstance(payload, list):
+        return {'count': len(payload), 'next': None, 'previous': None, 'results': payload}
+    if isinstance(payload, dict):
+        if 'results' in payload:
+            return payload
+        if 'data' in payload and isinstance(payload['data'], list):
+            normalized = dict(payload)
+            normalized['results'] = normalized.pop('data')
+            normalized.setdefault('count', len(normalized['results']))
+            normalized.setdefault('next', None)
+            normalized.setdefault('previous', None)
+            return normalized
+        return {'count': 1, 'next': None, 'previous': None, 'results': [payload]}
+    return {'count': 0, 'next': None, 'previous': None, 'results': []}
+
+
+def _resource_configured_empty(resource):
+    return {
+        'count': 0,
+        'next': None,
+        'previous': None,
+        'source': 'not_configured',
+        'resource': resource,
+        'controller_error': '',
+        'results': [],
+    }
+
+
+def _is_known_resource(resource):
+    return resource in EDA_RESOURCE_API_PATHS
 
 
 class EDAStatusView(APIView):
@@ -143,6 +184,98 @@ class EDAActivationListView(APIView):
 def _eda_error_response(exc):
     response_status = http_status.HTTP_400_BAD_REQUEST if exc.status in ('invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+
+
+class EDAResourceListView(APIView):
+    name = _('EDA Resources')
+    resource_purpose = 'event-driven ansible resource list'
+    permission_classes = [EDAActivationViewPermission]
+
+    def get(self, request, resource, format=None):
+        if not _is_known_resource(resource):
+            return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+        if not configured_url():
+            return Response(_resource_configured_empty(resource))
+
+        client = EDAControllerClient()
+        try:
+            payload = client.list_resource(resource, params=_query_params(request))
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+
+        data = _normalize_resource_payload(payload)
+        data['source'] = 'eda_controller'
+        data['resource'] = resource
+        data['controller_error'] = ''
+        return Response(data)
+
+    def post(self, request, resource, format=None):
+        if not EDAActivationAdminPermission().has_permission(request, self):
+            return Response({'detail': _('You do not have permission to create EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
+        if resource in _EDA_READ_ONLY_RESOURCES:
+            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+        if not _is_known_resource(resource):
+            return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+
+        client = EDAControllerClient()
+        try:
+            payload = client.create_resource(resource, request.data if isinstance(request.data, dict) else {})
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(payload, status=http_status.HTTP_201_CREATED)
+
+
+class EDAResourceDetailView(APIView):
+    name = _('EDA Resource Detail')
+    resource_purpose = 'event-driven ansible resource detail'
+    permission_classes = [EDAActivationViewPermission]
+
+    def get(self, request, resource, pk, format=None):
+        if not _is_known_resource(resource):
+            return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+
+        client = EDAControllerClient()
+        try:
+            payload = client.get_resource(resource, pk)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(payload)
+
+    def put(self, request, resource, pk, format=None):
+        return self._update(request, resource, pk, method='PUT')
+
+    def patch(self, request, resource, pk, format=None):
+        return self._update(request, resource, pk, method='PATCH')
+
+    def _update(self, request, resource, pk, method='PATCH'):
+        if not EDAActivationAdminPermission().has_permission(request, self):
+            return Response({'detail': _('You do not have permission to update EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
+        if resource in _EDA_READ_ONLY_RESOURCES:
+            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+        if not _is_known_resource(resource):
+            return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+
+        client = EDAControllerClient()
+        try:
+            payload = client.update_resource(resource, pk, request.data if isinstance(request.data, dict) else {}, method=method)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(payload)
+
+    def delete(self, request, resource, pk, format=None):
+        if not EDAActivationAdminPermission().has_permission(request, self):
+            return Response({'detail': _('You do not have permission to delete EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
+        if resource in _EDA_READ_ONLY_RESOURCES:
+            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+        if not _is_known_resource(resource):
+            return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+
+        client = EDAControllerClient()
+        try:
+            payload = client.delete_resource(resource, pk)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(payload, status=http_status.HTTP_202_ACCEPTED)
 
 
 class EDAActivationDetailView(APIView):

@@ -17,6 +17,15 @@ DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH = '/api/eda/v1/activation-instances/{activ
 DEFAULT_RULEBOOKS_PATH = '/api/eda/v1/rulebooks/'
 DEFAULT_DECISION_ENVIRONMENTS_PATH = '/api/eda/v1/decision-environments/'
 DEFAULT_ORGANIZATIONS_PATH = '/api/eda/v1/organizations/'
+EDA_RESOURCE_API_PATHS = {
+    'projects': '/api/eda/v1/projects/',
+    'rule-audit': '/api/eda/v1/audit-rules/',
+    'decision-environments': '/api/eda/v1/decision-environments/',
+    'event-streams': '/api/eda/v1/event-streams/',
+    'credentials': '/api/eda/v1/eda-credentials/',
+    'credential-types': '/api/eda/v1/credential-types/',
+    'rulebooks': DEFAULT_RULEBOOKS_PATH,
+}
 UPSTREAM_ACTIVATION_FIELDS = {
     'name',
     'description',
@@ -51,6 +60,13 @@ class EDAControllerError(Exception):
 
 def configured_url():
     return (getattr(settings, 'EDA_SERVER_URL', '') or '').strip().rstrip('/')
+
+
+def resource_path(resource):
+    try:
+        return EDA_RESOURCE_API_PATHS[str(resource or '').strip()]
+    except KeyError as exc:
+        raise EDAControllerError('EDA resource is invalid.', 'invalid') from exc
 
 
 def connection_status(controller_url=None):
@@ -211,8 +227,46 @@ class EDAControllerClient:
     def post_json(self, path, payload=None):
         return self._request_json('POST', path, payload=payload or {})
 
+    def put_json(self, path, payload=None):
+        return self._request_json('PUT', path, payload=payload or {})
+
+    def patch_json(self, path, payload=None):
+        return self._request_json('PATCH', path, payload=payload or {})
+
     def delete_json(self, path):
         return self._request_json('DELETE', path)
+
+    def _resource_path(self, resource, resource_id=None):
+        base_path = resource_path(resource).rstrip('/')
+        if resource_id not in (None, ''):
+            return f'{base_path}/{resource_id}/'
+        return f'{base_path}/'
+
+    def list_resource(self, resource, params=None):
+        return self.get_json(self._resource_path(resource), params=params)
+
+    def get_resource(self, resource, resource_id):
+        if resource_id in (None, ''):
+            raise EDAControllerError('EDA resource id is required.', 'missing')
+        return self.get_json(self._resource_path(resource, resource_id))
+
+    def create_resource(self, resource, payload=None):
+        return self.post_json(self._resource_path(resource), payload or {})
+
+    def update_resource(self, resource, resource_id, payload=None, method='PATCH'):
+        if resource_id in (None, ''):
+            raise EDAControllerError('EDA resource id is required.', 'missing')
+        method = str(method or 'PATCH').upper()
+        path = self._resource_path(resource, resource_id)
+        if method == 'PUT':
+            return self.put_json(path, payload or {})
+        return self.patch_json(path, payload or {})
+
+    def delete_resource(self, resource, resource_id):
+        if resource_id in (None, ''):
+            raise EDAControllerError('EDA resource id is required.', 'missing')
+        self.delete_json(self._resource_path(resource, resource_id))
+        return {'id': resource_id, 'status': 'deleted'}
 
     def _activation_path(self, activation_id):
         return f'{self.activations_path.rstrip("/")}/{activation_id}/'

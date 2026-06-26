@@ -208,8 +208,16 @@ export enum AwxRoute {
 
   // Event-Driven Ansible
   EventDriven = 'awx-event-driven',
+  EdaRuleAudit = 'awx-eda-rule-audit',
   EdaActivations = 'awx-eda-activations',
   EdaActivationPage = 'awx-eda-activation-page',
+  EdaProjects = 'awx-eda-projects',
+  EdaDecisionEnvironments = 'awx-eda-decision-environments',
+  EdaEventStreams = 'awx-eda-event-streams',
+  EdaInfrastructure = 'awx-eda-infrastructure',
+  EdaCredentials = 'awx-eda-credentials',
+  EdaCredentialTypes = 'awx-eda-credential-types',
+  EdaRulebooks = 'awx-eda-rulebooks',
 
   // Access
   Access = 'awx-access',

@@ -9,8 +9,12 @@ from awx.api.views.eda import (
     EDAActivationEventsView,
     EDAActivationListView,
     EDAActivationStartView,
+    EDAResourceDetailView,
+    EDAResourceListView,
     EDAStatusView,
 )
+
+EDA_RESOURCE_PATTERN = r'projects|rule-audit|decision-environments|event-streams|credentials|credential-types|rulebooks'
 
 eda_urls = [
     re_path(r'^status/$', EDAStatusView.as_view(), name='eda_status'),
@@ -19,6 +23,8 @@ eda_urls = [
     re_path(r'^activations/(?P<pk>[^/]+)/(?P<action>enable|disable|restart)/$', EDAActivationActionView.as_view(), name='eda_activation_action'),
     re_path(r'^activations/(?P<pk>[^/]+)/$', EDAActivationDetailView.as_view(), name='eda_activation_detail'),
     re_path(r'^activations/$', EDAActivationListView.as_view(), name='eda_activation_list'),
+    re_path(rf'^(?P<resource>{EDA_RESOURCE_PATTERN})/(?P<pk>[^/]+)/$', EDAResourceDetailView.as_view(), name='eda_resource_detail'),
+    re_path(rf'^(?P<resource>{EDA_RESOURCE_PATTERN})/$', EDAResourceListView.as_view(), name='eda_resource_list'),
 ]
 
 

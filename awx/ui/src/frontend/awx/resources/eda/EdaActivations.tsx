@@ -185,7 +185,7 @@ export function EdaActivations() {
   return (
     <PageLayout>
       <PageHeader
-        title={t('EDA Activations')}
+        title={t('Rulebook Activations')}
         description={t(
           'Create, start, inspect, and manage Event-Driven Ansible rulebook activations.'
         )}

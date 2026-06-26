@@ -98,6 +98,11 @@ read -rsp "vCenter password: " VCENTER_PASSWORD; export VCENTER_PASSWORD
 ansible-playbook -i localhost, playbooks/vcenter-lab.yml -e @vars/vcenter-lab.yml
 ```
 
+Set `awx_vcenter_datastore` to a management-local VMFS datastore. The lab role
+rejects datastore names containing `truenas` and verifies the actual cloned disk
+backing after vCenter completes the clone, because a clone request can otherwise
+report success while the disk lands on the wrong backing datastore.
+
 By default the role writes a generated inventory to
 `/tmp/awx-vcenter-lab.ini`. Use that file as the input to `deploy-server.yml`
 after the cloned VM template has working SSH access:

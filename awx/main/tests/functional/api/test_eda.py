@@ -360,6 +360,91 @@ def test_eda_admin_can_create_and_delete_activation(post, delete, organization, 
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='')
+def test_eda_resource_list_reports_not_configured(get, admin_user):
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), user=admin_user, expect=200)
+
+    assert response.data == {
+        'count': 0,
+        'next': None,
+        'previous': None,
+        'source': 'not_configured',
+        'resource': 'projects',
+        'controller_error': '',
+        'results': [],
+    }
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_resource_list_proxies_to_controller(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 1, 'next': None, 'previous': None, 'results': [{'id': 7, 'name': 'Ops project'}]}),
+    )
+
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), {'page': '2', 'page_size': '25'}, user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['resource'] == 'projects'
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['name'] == 'Ops project'
+    assert request_mock.call_args.args[0] == 'GET'
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/projects/'
+    assert request_mock.call_args.kwargs['params'] == {'page': '2', 'page_size': '25'}
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_resource_crud_proxies_to_controller(post, patch, delete, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_response(mocker, {'id': 7, 'name': 'Ops project'}),
+            eda_response(mocker, {'id': 7, 'name': 'Renamed ops project'}),
+            eda_response(mocker, {}),
+        ],
+    )
+
+    created = post(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), {'name': 'Ops project'}, user=admin_user, expect=201)
+    updated = patch(reverse('api:eda_resource_detail', kwargs={'resource': 'projects', 'pk': '7'}), {'name': 'Renamed ops project'}, user=admin_user, expect=200)
+    deleted = delete(reverse('api:eda_resource_detail', kwargs={'resource': 'projects', 'pk': '7'}), user=admin_user, expect=202)
+
+    assert created.data['name'] == 'Ops project'
+    assert updated.data['name'] == 'Renamed ops project'
+    assert deleted.data == {'id': '7', 'status': 'deleted'}
+    assert [call.args[0] for call in request_mock.call_args_list] == ['POST', 'PATCH', 'DELETE']
+    assert request_mock.call_args_list[0].args[1] == 'https://eda.example.test/api/eda/v1/projects/'
+    assert request_mock.call_args_list[0].kwargs['json'] == {'name': 'Ops project'}
+    assert request_mock.call_args_list[1].args[1] == 'https://eda.example.test/api/eda/v1/projects/7/'
+    assert request_mock.call_args_list[1].kwargs['json'] == {'name': 'Renamed ops project'}
+    assert request_mock.call_args_list[2].args[1] == 'https://eda.example.test/api/eda/v1/projects/7/'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_operator_can_read_but_not_mutate_generic_resources(get, post, organization, rando, mocker):
+    organization.eda_operator_role.members.add(rando)
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'count': 0, 'next': None, 'previous': None, 'results': []}),
+    )
+
+    get(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), user=rando, expect=200)
+    post(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), {'name': 'Ops project'}, user=rando, expect=403)
+
+    request_mock.assert_called_once()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rule_audit_resource_is_read_only(post, patch, delete, admin_user):
+    post(reverse('api:eda_resource_list', kwargs={'resource': 'rule-audit'}), {'name': 'audit'}, user=admin_user, expect=405)
+    patch(reverse('api:eda_resource_detail', kwargs={'resource': 'rule-audit', 'pk': '1'}), {'name': 'audit'}, user=admin_user, expect=405)
+    delete(reverse('api:eda_resource_detail', kwargs={'resource': 'rule-audit', 'pk': '1'}), user=admin_user, expect=405)
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_activation_start_rejects_non_admin(post, rando):
     response = post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=rando, expect=403)
