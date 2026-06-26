@@ -56,6 +56,32 @@ const decisionEnvironmentConfig: EdaResourceConfig = {
   ],
 };
 
+const eventStreamConfig: EdaResourceConfig = {
+  resource: 'event-streams',
+  title: 'Event Streams',
+  description: 'Manage EDA event stream endpoints for inbound events.',
+  emptyStateTitle: 'No event streams found',
+  emptyStateDescription: 'Create an event stream to receive webhook or external events.',
+  form: 'event-stream',
+  fields: [
+    { label: 'Status', keys: ['status', 'state'], type: 'status' },
+    { label: 'Test mode', keys: ['test_mode', 'is_test_mode'] },
+  ],
+};
+
+const credentialConfig: EdaResourceConfig = {
+  resource: 'credentials',
+  title: 'Credentials',
+  description: 'Manage credentials used by EDA projects, rulebooks, and event streams.',
+  emptyStateTitle: 'No EDA credentials found',
+  emptyStateDescription: 'Create an EDA credential or sync credentials from the EDA Controller.',
+  form: 'credential',
+  fields: [
+    { label: 'Type', keys: ['credential_type_name', 'credential_type', 'kind'] },
+    { label: 'Organization', keys: ['organization_name', 'organization'] },
+  ],
+};
+
 describe('EdaActivations', () => {
   beforeEach(() => {
     cy.intercept('GET', '/api/v2/eda/status/', {
@@ -119,6 +145,7 @@ describe('EdaActivations', () => {
             id: 20,
             name: 'Red Hat Ansible Automation Platform',
             namespace: 'controller',
+            kind: 'cloud',
           },
         },
         {
@@ -132,6 +159,31 @@ describe('EdaActivations', () => {
         },
       ],
     }).as('activationCredentials');
+  }
+
+  function interceptCredentialTypes() {
+    cy.intercept('GET', '/api/v2/eda/credential-types/?page_size=200&order_by=name', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 20,
+          name: 'Red Hat Ansible Automation Platform',
+          namespace: 'controller',
+          kind: 'cloud',
+          inputs: {
+            fields: [
+              { id: 'host', label: 'Host', type: 'string' },
+              { id: 'username', label: 'Username', type: 'string' },
+              { id: 'password', label: 'Password', type: 'string', secret: true },
+              { id: 'verify_ssl', label: 'Verify SSL', type: 'boolean', default: true },
+            ],
+            required: ['host', 'username', 'password'],
+          },
+        },
+      ],
+    }).as('credentialTypes');
   }
 
   it('renders activations and starts a new activation', () => {
@@ -479,6 +531,95 @@ describe('EdaActivations', () => {
         expect(body.image_url).to.equal('quay.io/example/eda:stable');
         expect(body.pull_policy).to.equal('missing');
         expect(body.eda_credential_id).to.equal(null);
+      });
+  });
+
+  it('creates EDA event streams with credential and header fields', () => {
+    cy.intercept('GET', '/api/v2/eda/event-streams/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('eventStreams');
+    cy.intercept('POST', '/api/v2/eda/event-streams/', {
+      id: 21,
+      name: 'Webhook intake',
+      test_mode: true,
+    }).as('createEventStream');
+    interceptActivationStartLookups();
+
+    cy.mount(<EdaResourceList config={eventStreamConfig} />, {
+      path: '/eda/event-streams',
+      initialEntries: ['/eda/event-streams'],
+    });
+
+    cy.verifyPageTitle('Event Streams');
+    cy.wait('@eventStreams');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.get('#eda-event-stream-name').type('Webhook intake');
+    cy.get('#eda-event-stream-credential').select('7');
+    cy.get('#eda-event-stream-uuid').type('stream-uuid-1');
+    cy.get('#eda-event-stream-additional-data-headers')
+      .clear()
+      .type('{ "X-EDA-Tenant": "acme" }', { parseSpecialCharSequences: false });
+    cy.get('#eda-event-stream-test-mode').click();
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createEventStream')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('Webhook intake');
+        expect(body.eda_credential_id).to.equal(7);
+        expect(body.uuid).to.equal('stream-uuid-1');
+        expect(body.test_mode).to.equal(true);
+        expect(body.additional_data_headers).to.deep.equal({ 'X-EDA-Tenant': 'acme' });
+      });
+  });
+
+  it('creates EDA credentials from credential type input schemas', () => {
+    cy.intercept('GET', '/api/v2/eda/credentials/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('credentials');
+    cy.intercept('POST', '/api/v2/eda/credentials/', {
+      id: 31,
+      name: 'Controller API',
+    }).as('createCredential');
+    interceptCredentialTypes();
+
+    cy.mount(<EdaResourceList config={credentialConfig} />, {
+      path: '/eda/infrastructure/credentials',
+      initialEntries: ['/eda/infrastructure/credentials'],
+    });
+
+    cy.verifyPageTitle('Credentials');
+    cy.wait('@credentials');
+    cy.contains('button', /^Create$/).click();
+    cy.contains('Resource JSON').should('not.exist');
+    cy.wait('@credentialTypes');
+    cy.get('#eda-credential-name').type('Controller API');
+    cy.get('#eda-credential-description').type('AWX controller access for EDA');
+    cy.get('#eda-credential-type').select('20');
+    cy.get('#eda-credential-input-host').type('https://awx.example.test');
+    cy.get('#eda-credential-input-username').type('admin');
+    cy.get('#eda-credential-input-password').type('password');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createCredential')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('Controller API');
+        expect(body.description).to.equal('AWX controller access for EDA');
+        expect(body.credential_type_id).to.equal(20);
+        expect(body.inputs).to.deep.equal({
+          host: 'https://awx.example.test',
+          username: 'admin',
+          password: 'password',
+          verify_ssl: true,
+        });
       });
   });
 });

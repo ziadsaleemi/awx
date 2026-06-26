@@ -69,6 +69,7 @@ export function useAwxEdaRoutes() {
       description: t('Manage EDA event stream endpoints for inbound events.'),
       emptyStateTitle: t('No event streams found'),
       emptyStateDescription: t('Create an event stream to receive webhook or external events.'),
+      form: 'event-stream',
       createSample: { name: '', test_mode: false },
       fields: [
         { label: t('Status'), keys: ['status', 'state'], type: 'status' },
@@ -84,6 +85,7 @@ export function useAwxEdaRoutes() {
       emptyStateDescription: t(
         'Create an EDA credential or sync credentials from the EDA Controller.'
       ),
+      form: 'credential',
       createSample: { name: '', description: '', credential_type_id: null, inputs: {} },
       fields: [
         { label: t('Type'), keys: ['credential_type_name', 'credential_type', 'kind'] },

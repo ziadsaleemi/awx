@@ -62,18 +62,52 @@ export interface EdaResourceConfig {
   fields: EdaResourceField[];
   createSample?: Record<string, unknown>;
   readOnly?: boolean;
-  form?: 'project' | 'decision-environment';
+  form?: EdaResourceFormType;
 }
+
+type EdaResourceFormType = 'project' | 'decision-environment' | 'event-stream' | 'credential';
 
 interface EdaCredentialRecord {
   id: number | string;
   name?: string;
+  description?: string;
   credential_type?: {
+    id?: number | string;
     name?: string;
     namespace?: string;
+    kind?: string;
   };
+  credential_type_id?: number | string;
   credential_type_name?: string;
   kind?: string;
+  inputs?: Record<string, unknown>;
+  organization_id?: number | string;
+  organization?: {
+    id?: number | string;
+    name?: string;
+  };
+}
+
+interface EdaCredentialInputField {
+  id?: string;
+  label?: string;
+  type?: string;
+  secret?: boolean;
+  multiline?: boolean;
+  choices?: Array<string | { value?: string; label?: string }>;
+  default?: unknown;
+  help_text?: string;
+}
+
+interface EdaCredentialTypeRecord {
+  id: number | string;
+  name?: string;
+  namespace?: string;
+  kind?: string;
+  inputs?: {
+    fields?: EdaCredentialInputField[];
+    required?: string[];
+  };
 }
 
 interface EdaItemsResponse<T> {
@@ -368,7 +402,7 @@ function EdaResourceModal(props: {
 
 function EdaResourceFormModal(props: {
   config: EdaResourceConfig;
-  form: 'project' | 'decision-environment';
+  form: EdaResourceFormType;
   mode: 'create' | 'edit';
   record?: EdaResourceRecord;
   onClose: () => void;
@@ -408,13 +442,44 @@ function EdaResourceFormModal(props: {
         nestedId(record?.signature_validation_credential)
     )
   );
+  const [testMode, setTestMode] = useState(() => booleanValue(record?.test_mode, false));
+  const [eventStreamUuid, setEventStreamUuid] = useState(() => stringValue(record?.uuid));
+  const [additionalDataHeaders, setAdditionalDataHeaders] = useState(() =>
+    JSON.stringify(record?.additional_data_headers ?? {}, null, 2)
+  );
+  const [credentialTypeId, setCredentialTypeId] = useState(() =>
+    stringValue(record?.credential_type_id ?? nestedId(record?.credential_type))
+  );
+  const [credentialInputValues, setCredentialInputValues] = useState<Record<string, unknown>>(() =>
+    record && typeof record.inputs === 'object' && record.inputs !== null
+      ? (record.inputs as Record<string, unknown>)
+      : {}
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { data: credentials, isLoading: credentialsLoading } = useGet<
     EdaItemsResponse<EdaCredentialRecord>
-  >(awxAPI`/eda/credentials/`, { page_size: 200, order_by: 'name' }, { revalidateOnFocus: false });
+  >(
+    form === 'project' || form === 'decision-environment' || form === 'event-stream'
+      ? awxAPI`/eda/credentials/`
+      : undefined,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
+  const { data: credentialTypes, isLoading: credentialTypesLoading } = useGet<
+    EdaItemsResponse<EdaCredentialTypeRecord>
+  >(
+    form === 'credential' ? awxAPI`/eda/credential-types/` : undefined,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
   const regularCredentials = (credentials?.results ?? []).filter(
     (credential) => !isRuleEngineCredential(credential)
   );
+  const selectedCredentialType = (credentialTypes?.results ?? []).find(
+    (credentialType) => String(credentialType.id) === credentialTypeId
+  );
+  const credentialInputFields = selectedCredentialType?.inputs?.fields ?? [];
+  const requiredCredentialInputIds = selectedCredentialType?.inputs?.required ?? [];
 
   const submit = async () => {
     if (!name.trim()) {
@@ -429,30 +494,66 @@ function EdaResourceFormModal(props: {
       alertToaster.addAlert({ variant: 'danger', title: t('Image is required') });
       return;
     }
+    if (form === 'event-stream' && !edaCredentialId) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Credential is required') });
+      return;
+    }
+    if (form === 'credential' && !credentialTypeId) {
+      alertToaster.addAlert({ variant: 'danger', title: t('Credential type is required') });
+      return;
+    }
 
-    const payload =
-      form === 'project'
-        ? projectPayload({
-            name,
-            description,
-            projectUrl,
-            scmBranch,
-            scmRefspec,
-            verifySsl,
-            updateRevisionOnLaunch,
-            scmCacheTimeout,
-            edaCredentialId,
-            signatureCredentialId,
-            includeClears: mode === 'edit',
-          })
-        : decisionEnvironmentPayload({
-            name,
-            description,
-            imageUrl,
-            pullPolicy,
-            edaCredentialId,
-            includeClears: mode === 'edit',
-          });
+    let payload: Record<string, unknown>;
+    try {
+      if (form === 'project') {
+        payload = projectPayload({
+          name,
+          description,
+          projectUrl,
+          scmBranch,
+          scmRefspec,
+          verifySsl,
+          updateRevisionOnLaunch,
+          scmCacheTimeout,
+          edaCredentialId,
+          signatureCredentialId,
+          includeClears: mode === 'edit',
+        });
+      } else if (form === 'decision-environment') {
+        payload = decisionEnvironmentPayload({
+          name,
+          description,
+          imageUrl,
+          pullPolicy,
+          edaCredentialId,
+          includeClears: mode === 'edit',
+        });
+      } else if (form === 'event-stream') {
+        payload = eventStreamPayload({
+          name,
+          testMode,
+          edaCredentialId,
+          additionalDataHeaders,
+          eventStreamUuid,
+        });
+      } else {
+        payload = credentialPayload({
+          name,
+          description,
+          credentialTypeId,
+          credentialInputFields,
+          credentialInputValues,
+          includeCredentialType: mode === 'create',
+        });
+      }
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Form data is invalid'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -507,14 +608,16 @@ function EdaResourceFormModal(props: {
         <FormGroup label={t('Name')} fieldId={`eda-${form}-name`} isRequired>
           <TextInput id={`eda-${form}-name`} value={name} onChange={(_, value) => setName(value)} />
         </FormGroup>
-        <FormGroup label={t('Description')} fieldId={`eda-${form}-description`}>
-          <TextArea
-            id={`eda-${form}-description`}
-            value={description}
-            rows={3}
-            onChange={(_, value) => setDescription(value)}
-          />
-        </FormGroup>
+        {form !== 'event-stream' && (
+          <FormGroup label={t('Description')} fieldId={`eda-${form}-description`}>
+            <TextArea
+              id={`eda-${form}-description`}
+              value={description}
+              rows={3}
+              onChange={(_, value) => setDescription(value)}
+            />
+          </FormGroup>
+        )}
         {form === 'project' ? (
           <>
             <FormGroup label={t('Source control URL')} fieldId="eda-project-url" isRequired>
@@ -581,7 +684,7 @@ function EdaResourceFormModal(props: {
               onChange={(_, checked) => setUpdateRevisionOnLaunch(checked)}
             />
           </>
-        ) : (
+        ) : form === 'decision-environment' ? (
           <>
             <FormGroup label={t('Image')} fieldId="eda-decision-environment-image" isRequired>
               <TextInput
@@ -614,6 +717,94 @@ function EdaResourceFormModal(props: {
               />
             </FormGroup>
           </>
+        ) : form === 'event-stream' ? (
+          <>
+            <FormGroup
+              label={t('Event stream credential')}
+              fieldId="eda-event-stream-credential"
+              isRequired
+            >
+              <CredentialSelect
+                id="eda-event-stream-credential"
+                value={edaCredentialId}
+                credentials={regularCredentials}
+                isLoading={credentialsLoading}
+                onChange={setEdaCredentialId}
+              />
+            </FormGroup>
+            <FormGroup label={t('UUID')} fieldId="eda-event-stream-uuid">
+              <TextInput
+                id="eda-event-stream-uuid"
+                value={eventStreamUuid}
+                onChange={(_, value) => setEventStreamUuid(value)}
+              />
+            </FormGroup>
+            <FormGroup
+              label={t('Additional data headers')}
+              fieldId="eda-event-stream-additional-data-headers"
+            >
+              <TextArea
+                id="eda-event-stream-additional-data-headers"
+                value={additionalDataHeaders}
+                rows={5}
+                onChange={(_, value) => setAdditionalDataHeaders(value)}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </FormGroup>
+            <Checkbox
+              id="eda-event-stream-test-mode"
+              label={t('Test mode')}
+              isChecked={testMode}
+              onChange={(_, checked) => setTestMode(checked)}
+            />
+          </>
+        ) : (
+          <>
+            <FormGroup label={t('Credential type')} fieldId="eda-credential-type" isRequired>
+              <FormSelect
+                id="eda-credential-type"
+                value={credentialTypeId}
+                isDisabled={mode === 'edit'}
+                onChange={(_, value) => {
+                  setCredentialTypeId(value);
+                  const nextType = (credentialTypes?.results ?? []).find(
+                    (credentialType) => String(credentialType.id) === value
+                  );
+                  setCredentialInputValues(credentialInputDefaults(nextType));
+                }}
+              >
+                <FormSelectOption
+                  value=""
+                  label={
+                    credentialTypesLoading
+                      ? t('Loading credential types...')
+                      : t('Select credential type')
+                  }
+                />
+                {(credentialTypes?.results ?? []).map((credentialType) => (
+                  <FormSelectOption
+                    key={String(credentialType.id)}
+                    value={String(credentialType.id)}
+                    label={credentialTypeLabel(credentialType)}
+                  />
+                ))}
+              </FormSelect>
+            </FormGroup>
+            {credentialInputFields.map((field) => (
+              <CredentialInput
+                key={credentialInputFieldId(field)}
+                field={field}
+                isRequired={requiredCredentialInputIds.includes(credentialInputFieldId(field))}
+                value={credentialInputValues[credentialInputFieldId(field)]}
+                onChange={(value) =>
+                  setCredentialInputValues((currentValues) => ({
+                    ...currentValues,
+                    [credentialInputFieldId(field)]: value,
+                  }))
+                }
+              />
+            ))}
+          </>
         )}
       </Form>
     </Modal>
@@ -642,6 +833,77 @@ function CredentialSelect(props: {
         />
       ))}
     </FormSelect>
+  );
+}
+
+function CredentialInput(props: {
+  field: EdaCredentialInputField;
+  isRequired: boolean;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const { t } = useTranslation();
+  const field = props.field;
+  const fieldId = credentialInputFieldId(field);
+  const inputId = `eda-credential-input-${fieldId}`;
+  const label = field.label || fieldId;
+  const type = (field.type || 'string').toLowerCase();
+  const choices = credentialInputChoices(field);
+
+  if (type === 'boolean') {
+    return (
+      <FormGroup label={label} fieldId={inputId} isRequired={props.isRequired}>
+        <Checkbox
+          id={inputId}
+          label={label}
+          isChecked={booleanValue(props.value, booleanValue(field.default, false))}
+          onChange={(_, checked) => props.onChange(checked)}
+        />
+      </FormGroup>
+    );
+  }
+
+  if (choices.length > 0) {
+    return (
+      <FormGroup label={label} fieldId={inputId} isRequired={props.isRequired}>
+        <FormSelect
+          id={inputId}
+          value={stringValue(props.value)}
+          onChange={(_, value) => props.onChange(value)}
+        >
+          <FormSelectOption value="" label={t('Select {{label}}', { label })} />
+          {choices.map((choice) => (
+            <FormSelectOption key={choice.value} value={choice.value} label={choice.label} />
+          ))}
+        </FormSelect>
+      </FormGroup>
+    );
+  }
+
+  if (field.multiline || type === 'textarea') {
+    return (
+      <FormGroup label={label} fieldId={inputId} isRequired={props.isRequired}>
+        <TextArea
+          id={inputId}
+          value={stringValue(props.value)}
+          rows={4}
+          onChange={(_, value) => props.onChange(value)}
+        />
+      </FormGroup>
+    );
+  }
+
+  return (
+    <FormGroup label={label} fieldId={inputId} isRequired={props.isRequired}>
+      <TextInput
+        id={inputId}
+        type={
+          field.secret ? 'password' : type === 'integer' || type === 'number' ? 'number' : 'text'
+        }
+        value={stringValue(props.value)}
+        onChange={(_, value) => props.onChange(value)}
+      />
+    </FormGroup>
   );
 }
 
@@ -820,6 +1082,77 @@ function decisionEnvironmentPayload(values: {
   return payload;
 }
 
+function eventStreamPayload(values: {
+  name: string;
+  testMode: boolean;
+  edaCredentialId: string;
+  additionalDataHeaders: string;
+  eventStreamUuid: string;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    test_mode: values.testMode,
+    eda_credential_id: Number(values.edaCredentialId),
+    additional_data_headers: parseJsonObject(
+      values.additionalDataHeaders,
+      'Additional data headers'
+    ),
+  };
+  if (values.eventStreamUuid.trim()) payload.uuid = values.eventStreamUuid.trim();
+  return payload;
+}
+
+function credentialPayload(values: {
+  name: string;
+  description: string;
+  credentialTypeId: string;
+  credentialInputFields: EdaCredentialInputField[];
+  credentialInputValues: Record<string, unknown>;
+  includeCredentialType: boolean;
+}) {
+  const payload: Record<string, unknown> = {
+    name: values.name.trim(),
+    description: values.description,
+    inputs: credentialInputsPayload(values.credentialInputFields, values.credentialInputValues),
+  };
+  if (values.includeCredentialType) payload.credential_type_id = Number(values.credentialTypeId);
+  return payload;
+}
+
+function credentialInputsPayload(
+  fields: EdaCredentialInputField[],
+  inputValues: Record<string, unknown>
+) {
+  const inputs: Record<string, unknown> = {};
+  for (const field of fields) {
+    const fieldId = credentialInputFieldId(field);
+    const type = (field.type || 'string').toLowerCase();
+    const value = inputValues[fieldId];
+    if (type === 'boolean') {
+      inputs[fieldId] = booleanValue(value, booleanValue(field.default, false));
+      continue;
+    }
+    const text = stringValue(value);
+    if (!text.trim()) continue;
+    if (type === 'integer' || type === 'number') {
+      const numberValue = Number(text);
+      inputs[fieldId] = Number.isFinite(numberValue) ? numberValue : text.trim();
+    } else {
+      inputs[fieldId] = text;
+    }
+  }
+  return inputs;
+}
+
+function parseJsonObject(jsonText: string, label: string) {
+  if (!jsonText.trim()) return {};
+  const parsed = JSON.parse(jsonText) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
 function stringValue(value: unknown) {
   return value === undefined || value === null ? '' : String(value);
 }
@@ -839,14 +1172,56 @@ function nestedId(value: unknown) {
 function credentialLabel(credential: EdaCredentialRecord) {
   const name = String(credential.name ?? credential.id ?? '');
   const type =
-    credential.credential_type?.name ?? credential.credential_type_name ?? credential.kind ?? '';
+    credential.credential_type?.name ??
+    credential.credential_type_name ??
+    credential.credential_type?.kind ??
+    credential.kind ??
+    '';
   return type ? `${name} (${type})` : name;
+}
+
+function credentialTypeLabel(credentialType: EdaCredentialTypeRecord) {
+  const name = String(credentialType.name ?? credentialType.id);
+  const namespace = credentialType.namespace || credentialType.kind || '';
+  return namespace ? `${name} (${namespace})` : name;
+}
+
+function credentialInputFieldId(field: EdaCredentialInputField) {
+  if (field.id) return field.id;
+  if (field.label) {
+    return field.label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+  return 'value';
+}
+
+function credentialInputChoices(field: EdaCredentialInputField) {
+  return (field.choices ?? []).map((choice) =>
+    typeof choice === 'string'
+      ? { value: choice, label: choice }
+      : {
+          value: String(choice.value ?? ''),
+          label: String(choice.label ?? choice.value ?? ''),
+        }
+  );
+}
+
+function credentialInputDefaults(credentialType?: EdaCredentialTypeRecord) {
+  const values: Record<string, unknown> = {};
+  for (const field of credentialType?.inputs?.fields ?? []) {
+    if (field.default !== undefined) values[credentialInputFieldId(field)] = field.default;
+  }
+  return values;
 }
 
 function isRuleEngineCredential(credential: EdaCredentialRecord) {
   const type = (
     credential.credential_type?.name ??
     credential.credential_type_name ??
+    credential.credential_type?.kind ??
     credential.kind ??
     ''
   ).toLowerCase();

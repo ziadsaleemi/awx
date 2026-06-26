@@ -498,6 +498,35 @@ def test_eda_resource_list_proxies_to_controller(get, admin_user, mocker):
 
 
 @pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_resource_list_rewrites_relative_controller_pagination_links(get, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(
+            mocker,
+            {
+                'count': 2,
+                'next': '/api/eda/v1/credential-types/?page=2&page_size=1&order_by=name',
+                'previous': '/api/eda/v1/credential-types/?page=1&page_size=1&order_by=name',
+                'results': [{'id': 20, 'name': 'Red Hat Ansible Automation Platform'}],
+            },
+        ),
+    )
+
+    response = get(
+        reverse('api:eda_resource_list', kwargs={'resource': 'credential-types'}),
+        {'page': '1', 'page_size': '1', 'order_by': 'name'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['next'].endswith('/api/v2/eda/credential-types/?page=2&page_size=1&order_by=name')
+    assert response.data['previous'].endswith('/api/v2/eda/credential-types/?page=1&page_size=1&order_by=name')
+    assert '/api/eda/v1/' not in response.data['next']
+    assert '/api/eda/v1/' not in response.data['previous']
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_resource_crud_proxies_to_controller(post, patch, delete, admin_user, mocker):
     request_mock = mocker.patch(
