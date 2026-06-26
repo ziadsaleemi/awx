@@ -19,6 +19,17 @@ spec:
         runAsUser: 1000
         runAsGroup: 0
         fsGroup: 0
+      initContainers:
+        - name: init-nginx-state
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - mkdir -p /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/proxy /var/lib/nginx/tmp/fastcgi /var/lib/nginx/tmp/uwsgi /var/lib/nginx/tmp/scgi && chmod -R g+rwX /var/lib/nginx
+          volumeMounts:
+            - name: nginx-state
+              mountPath: /var/lib/nginx
       containers:
         - name: awx-web
           image: {{ awx_image }}:{{ awx_image_tag }}
