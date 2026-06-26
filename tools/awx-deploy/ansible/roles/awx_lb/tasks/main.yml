@@ -83,6 +83,28 @@
     mode: "0644"
   notify: Restart HAProxy
 
+- name: Create HAProxy systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/haproxy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure HAProxy restart policy
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/haproxy.service.d/awx-restart.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      Restart=always
+      RestartSec=5
+  notify:
+    - Reload systemd
+    - Restart HAProxy
+
 - name: Flush HAProxy handlers
   ansible.builtin.meta: flush_handlers
 

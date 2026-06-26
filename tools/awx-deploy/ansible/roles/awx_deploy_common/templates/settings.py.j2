@@ -22,6 +22,15 @@ CSRF_TRUSTED_ORIGINS = {{ awx_csrf_trusted_origins | to_json }}
 REMOTE_HOST_HEADERS = {{ awx_remote_host_headers | to_json }}
 PROXY_IP_ALLOWED_LIST = {{ awx_proxy_ip_allowed_list | to_json }}
 
+{% set effective_tower_url_base = awx_tower_url_base %}
+{% if not effective_tower_url_base %}
+{% set tower_inventory_host = (groups.get('awx_lb', []) | first) | default((groups.get('awx_web', []) | first) | default(inventory_hostname), true) %}
+{% set tower_host = hostvars.get(tower_inventory_host, {}).get('ansible_host', tower_inventory_host) %}
+{% set tower_port = awx_lb_http_port if groups.get('awx_lb', []) else awx_web_http_port %}
+{% set effective_tower_url_base = 'http://' ~ tower_host ~ ':' ~ tower_port %}
+{% endif %}
+TOWER_URL_BASE = {{ effective_tower_url_base | to_json }}
+
 BROKER_URL = "redis://{{ awx_redis_host }}:{{ awx_redis_port }}/0"
 CACHES = {
     "default": {

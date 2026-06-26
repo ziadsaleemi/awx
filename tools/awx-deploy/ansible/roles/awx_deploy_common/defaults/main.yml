@@ -30,6 +30,7 @@ awx_remote_host_headers:
   - HTTP_X_FORWARDED_FOR
   - REMOTE_ADDR
   - REMOTE_HOST
+awx_tower_url_base: ""
 
 awx_postgres_inventory_host: "{{ groups.get('awx_database', ['127.0.0.1']) | first }}"
 awx_postgres_host: "{{ hostvars.get(awx_postgres_inventory_host, {}).get('ansible_host', awx_postgres_inventory_host) }}"
@@ -67,6 +68,11 @@ awx_lb_http_port: 80
 awx_lb_https_port: 443
 awx_lb_stats_port: 1936
 awx_lb_bind_address: "0.0.0.0"
+awx_lb_threads: 1
+awx_lb_check_interval: 10s
+awx_lb_check_timeout: 30s
+awx_lb_check_fall: 6
+awx_lb_check_rise: 2
 
 awx_k8s_namespace: awx
 awx_k8s_name: awx

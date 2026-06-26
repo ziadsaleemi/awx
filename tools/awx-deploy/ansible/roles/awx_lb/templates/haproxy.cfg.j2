@@ -2,6 +2,7 @@ global
     log /dev/log local0
     log /dev/log local1 notice
     maxconn 4096
+    nbthread {{ awx_lb_threads }}
     daemon
 
 defaults
@@ -12,6 +13,7 @@ defaults
     timeout connect 10s
     timeout client 60s
     timeout server 120s
+    timeout check {{ awx_lb_check_timeout }}
 
 frontend awx_http
     bind {{ awx_lb_bind_address }}:{{ awx_lb_http_port }}
@@ -23,7 +25,7 @@ backend awx_web
     http-check send meth GET uri /api/v2/ping/ ver HTTP/1.1 hdr Host awx.local
     http-check expect status 200
 {% for host in groups.get('awx_web', []) %}
-    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ awx_web_http_port }} check
+    server {{ host }} {{ hostvars[host].ansible_host | default(host) }}:{{ awx_web_http_port }} check inter {{ awx_lb_check_interval }} fall {{ awx_lb_check_fall }} rise {{ awx_lb_check_rise }}
 {% endfor %}
 
 listen stats

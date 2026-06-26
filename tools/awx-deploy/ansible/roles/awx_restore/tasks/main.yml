@@ -32,7 +32,7 @@
 - name: Restore AWX configuration archive
   ansible.builtin.unarchive:
     src: "{{ awx_restore_path }}/config-{{ inventory_hostname }}.tar.gz"
-    dest: /
+    dest: "{{ awx_server_config_dir }}"
     remote_src: true
   ignore_errors: true
 
@@ -44,7 +44,7 @@
 - name: Restore AWX project/media archive
   ansible.builtin.unarchive:
     src: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
-    dest: /
+    dest: "{{ awx_server_data_dir }}"
     remote_src: true
   ignore_errors: true
   when: awx_restore_data_archive.stat.size | default(0) > 128
