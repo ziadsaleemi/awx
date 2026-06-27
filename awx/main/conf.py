@@ -214,6 +214,46 @@ register(
 )
 
 register(
+    'MODULE_EDA_ENABLED',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Enable Event-Driven Ansible module'),
+    help_text=_('Expose Event-Driven Ansible navigation and allow AWX to manage EDA resources.'),
+    category=_('Modules'),
+    category_slug='modules',
+)
+
+register(
+    'MODULE_OPA_ENABLED',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Enable OPA module'),
+    help_text=_('Expose Open Policy Agent policy management and allow AWX to call OPA APIs.'),
+    category=_('Modules'),
+    category_slug='modules',
+)
+
+register(
+    'MODULE_GATEKEEPER_ENABLED',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Enable Gatekeeper module'),
+    help_text=_('Expose Gatekeeper policy management and allow AWX to call Kubernetes Gatekeeper APIs.'),
+    category=_('Modules'),
+    category_slug='modules',
+)
+
+register(
+    'MODULE_GALAXY_NG_ENABLED',
+    field_class=fields.BooleanField,
+    default=False,
+    label=_('Enable Galaxy NG module'),
+    help_text=_('Expose Galaxy NG integration after a Galaxy NG server has been configured.'),
+    category=_('Modules'),
+    category_slug='modules',
+)
+
+register(
     'EDA_SERVER_URL',
     field_class=fields.URLField,
     default='',

@@ -131,11 +131,23 @@ DEFAULT_POLICIES = [
 ]
 
 
+def opa_module_enabled():
+    return bool(getattr(settings, 'MODULE_OPA_ENABLED', True))
+
+
+class OPAModuleAPIView(APIView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not opa_module_enabled():
+            raise PermissionDenied(_('Open Policy Agent module is disabled.'))
+
+
 class OPAPolicyEngine:
     """Thin client for the OPA REST API."""
 
     def __init__(self):
-        self.host = getattr(settings, 'OPA_HOST', '')
+        self.module_enabled = opa_module_enabled()
+        self.host = getattr(settings, 'OPA_HOST', '') if self.module_enabled else ''
         self.port = getattr(settings, 'OPA_PORT', 8181)
         self.ssl = bool(getattr(settings, 'OPA_SSL', False))
         self.timeout = getattr(settings, 'OPA_REQUEST_TIMEOUT', 1.5)
@@ -681,7 +693,7 @@ def enforce_opa_launch_policy(request, template, launch_kwargs=None, source='api
 # ---------------------------------------------------------------------------
 
 
-class OPAPolicyListView(APIView):
+class OPAPolicyListView(OPAModuleAPIView):
     """
     GET /api/v2/opa/policies/
 
@@ -710,7 +722,7 @@ class OPAPolicyListView(APIView):
         )
 
 
-class OPAPolicyModuleListView(APIView):
+class OPAPolicyModuleListView(OPAModuleAPIView):
     """
     GET /api/v2/opa/policy-modules/
     POST /api/v2/opa/policy-modules/
@@ -754,7 +766,7 @@ class OPAPolicyModuleListView(APIView):
         return _save_opa_policy_module(request, policy_id, request.data.get('policy_text'))
 
 
-class OPAPolicyModuleDetailView(APIView):
+class OPAPolicyModuleDetailView(OPAModuleAPIView):
     """
     GET /api/v2/opa/policy-modules/<policy_id>/
     PUT /api/v2/opa/policy-modules/<policy_id>/
@@ -820,7 +832,7 @@ class OPAPolicyModuleDetailView(APIView):
         )
 
 
-class OPAPolicyModuleVersionsView(APIView):
+class OPAPolicyModuleVersionsView(OPAModuleAPIView):
     """
     GET /api/v2/opa/policy-modules/<policy_id>/versions/
 
@@ -839,7 +851,7 @@ class OPAPolicyModuleVersionsView(APIView):
         return Response({'policy_id': policy_id, 'count': len(versions), 'versions': versions})
 
 
-class OPAPolicyModuleRollbackView(APIView):
+class OPAPolicyModuleRollbackView(OPAModuleAPIView):
     """
     POST /api/v2/opa/policy-modules/<policy_id>/rollback/
 
@@ -920,7 +932,7 @@ class OPAPolicyModuleRollbackView(APIView):
         )
 
 
-class OPAPolicyEvaluateView(APIView):
+class OPAPolicyEvaluateView(OPAModuleAPIView):
     """
     POST /api/v2/opa/evaluate/
 
@@ -997,7 +1009,7 @@ class OPAPolicyEvaluateView(APIView):
         )
 
 
-class OPAPolicySyncView(APIView):
+class OPAPolicySyncView(OPAModuleAPIView):
     """
     POST /api/v2/opa/policies/sync/
 

@@ -11,6 +11,7 @@ import yaml
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -27,7 +28,6 @@ from awx.api.views.ai import (
 from awx.api.views.opa import check_opa_policy
 from awx.main.models import ActivityStream
 
-
 GATEKEEPER_TEMPLATE_VERSIONS = ('v1', 'v1beta1')
 GATEKEEPER_CONFIG_PATH = '/apis/config.gatekeeper.sh/v1alpha1/configs'
 GATEKEEPER_CONSTRAINT_GROUP_PATH = '/apis/constraints.gatekeeper.sh'
@@ -37,6 +37,17 @@ GATEKEEPER_ROLLBACK_MODES = ('preview', 'dry_run', 'apply')
 GATEKEEPER_APPLY_STRATEGIES = ('update', 'server_side')
 GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
 GATEKEEPER_AI_PROMPT_LIMIT = 4000
+
+
+def gatekeeper_module_enabled():
+    return bool(getattr(settings, 'MODULE_GATEKEEPER_ENABLED', True))
+
+
+class GatekeeperModuleAPIView(APIView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not gatekeeper_module_enabled():
+            raise PermissionDenied(_('Gatekeeper module is disabled.'))
 
 
 def _gatekeeper_bool(value, default=True):
@@ -848,7 +859,7 @@ def _audit_gatekeeper_ai_author(request, prompt_summary, manifest, target, provi
     }
 
 
-class GatekeeperPolicyAuthorView(APIView):
+class GatekeeperPolicyAuthorView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/author/
 
@@ -912,7 +923,7 @@ class GatekeeperPolicyAuthorView(APIView):
         )
 
 
-class GatekeeperPolicyManagerView(APIView):
+class GatekeeperPolicyManagerView(GatekeeperModuleAPIView):
     """
     GET /api/v2/opa/gatekeeper/
 
@@ -1036,7 +1047,7 @@ class GatekeeperPolicyManagerView(APIView):
         )
 
 
-class GatekeeperPolicyApplyView(APIView):
+class GatekeeperPolicyApplyView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/apply/
 
@@ -1160,7 +1171,7 @@ class GatekeeperPolicyApplyView(APIView):
         )
 
 
-class GatekeeperPolicyDeleteView(APIView):
+class GatekeeperPolicyDeleteView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/delete/
 
@@ -1278,7 +1289,7 @@ class GatekeeperPolicyDeleteView(APIView):
         )
 
 
-class GatekeeperPolicyRollbackView(APIView):
+class GatekeeperPolicyRollbackView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/rollback/
 

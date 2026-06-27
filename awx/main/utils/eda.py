@@ -68,6 +68,10 @@ def configured_url():
     return (getattr(settings, 'EDA_SERVER_URL', '') or '').strip().rstrip('/')
 
 
+def module_enabled():
+    return bool(getattr(settings, 'MODULE_EDA_ENABLED', True))
+
+
 def resource_path(resource):
     try:
         return EDA_RESOURCE_API_PATHS[str(resource or '').strip()]
@@ -76,6 +80,8 @@ def resource_path(resource):
 
 
 def connection_status(controller_url=None):
+    if not module_enabled():
+        return 'disabled'
     controller_url = configured_url() if controller_url is None else (controller_url or '').strip().rstrip('/')
     if not controller_url:
         return 'not_configured'
@@ -196,6 +202,8 @@ class EDAControllerClient:
 
     def _request_json(self, method, path, params=None, payload=None):
         if not self.is_configured:
+            if self.status == 'disabled':
+                raise EDAControllerError('Event-Driven Ansible module is disabled.', 'disabled')
             raise EDAControllerError('EDA Controller URL is not configured.', self.status)
         try:
             response = requests.request(

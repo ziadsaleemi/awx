@@ -368,6 +368,7 @@ export enum AwxRoute {
   SettingsLogging = 'awx-settings-logging',
   SettingsCustomizeLogin = 'awx-settings-customize-login',
   SettingsTroubleshooting = 'awx-settings-troubleshooting',
+  SettingsModules = 'awx-settings-modules',
   SettingsPolicyAsCode = 'awx-settings-policy-as-code',
   SettingsAiAssistant = 'awx-settings-ai-assistant',
   SettingsEda = 'awx-settings-eda',

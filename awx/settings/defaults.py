@@ -1243,6 +1243,12 @@ INDIRECT_HOST_QUERY_FALLBACK_GIVEUP_DAYS = 3
 # Older records will be cleaned up
 INDIRECT_HOST_AUDIT_RECORD_MAX_AGE_DAYS = 7
 
+# User-facing optional module switches.
+MODULE_EDA_ENABLED = True
+MODULE_OPA_ENABLED = True
+MODULE_GATEKEEPER_ENABLED = True
+MODULE_GALAXY_NG_ENABLED = False
+
 # setting for Policy as Code feature
 FEATURE_POLICY_AS_CODE_ENABLED = False
 

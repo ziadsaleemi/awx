@@ -79,6 +79,42 @@ def test_eda_status_reports_configured_controller(get, admin_user):
 
 
 @pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=False, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_status_reports_module_disabled(get, admin_user):
+    response = get(reverse('api:eda_status'), user=admin_user, expect=200)
+
+    assert response.data['configured'] is False
+    assert response.data['status'] == 'disabled'
+    assert response.data['message'] == 'Event-Driven Ansible module is disabled.'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=False, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_resource_list_reports_module_disabled(get, admin_user):
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'projects'}), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'module_disabled'
+    assert response.data['resource'] == 'projects'
+    assert response.data['count'] == 0
+    assert response.data['results'] == []
+    assert response.data['detail'] == 'Event-Driven Ansible module is disabled.'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=False, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_activation_start_rejects_when_module_disabled(post, admin_user, mocker):
+    request_mock = mocker.patch('awx.main.utils.eda.requests.request')
+
+    response = post(reverse('api:eda_activation_start'), {'rulebook_name': 'ops'}, user=admin_user, expect=403)
+
+    assert response.data == {
+        'detail': 'Event-Driven Ansible module is disabled.',
+        'status': 'disabled',
+    }
+    request_mock.assert_not_called()
+
+
+@pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_activations_fall_back_when_controller_unreachable(get, admin_user, mocker):
     mocker.patch('awx.main.utils.eda.requests.request', side_effect=requests.Timeout)

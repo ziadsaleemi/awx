@@ -26,6 +26,7 @@ from awx.main.utils.eda import (
     UPSTREAM_ACTIVATION_FIELDS,
     configured_url,
     connection_status,
+    module_enabled,
 )
 from awx.main.utils.eda_rbac import build_eda_rbac_sync_report
 
@@ -120,6 +121,26 @@ def _resource_configured_empty(resource):
     }
 
 
+def _resource_module_disabled_empty(resource):
+    return {
+        'count': 0,
+        'next': None,
+        'previous': None,
+        'source': 'module_disabled',
+        'resource': resource,
+        'controller_error': '',
+        'results': [],
+        'detail': _('Event-Driven Ansible module is disabled.'),
+    }
+
+
+def _eda_module_disabled_response():
+    return Response(
+        {'detail': _('Event-Driven Ansible module is disabled.'), 'status': 'disabled'},
+        status=http_status.HTTP_403_FORBIDDEN,
+    )
+
+
 def _is_known_resource(resource):
     return resource in EDA_RESOURCE_API_PATHS
 
@@ -133,6 +154,12 @@ class EDAStatusView(APIView):
         client = EDAControllerClient()
         controller_url = configured_url()
         status = connection_status(controller_url)
+        messages = {
+            'configured': _('EDA Controller URL is configured.'),
+            'disabled': _('Event-Driven Ansible module is disabled.'),
+            'invalid': _('EDA Controller URL is invalid.'),
+            'not_configured': _('EDA Controller URL is not configured.'),
+        }
         return Response(
             {
                 'configured': status == 'configured',
@@ -147,7 +174,7 @@ class EDAStatusView(APIView):
                 'activation_events_api_path': client.activation_events_path,
                 'activation_poll_attempts': client.poll_attempts,
                 'activation_poll_interval': client.poll_interval,
-                'message': _('EDA Controller URL is configured.') if status == 'configured' else _('EDA Controller URL is not configured.'),
+                'message': messages.get(status, _('EDA Controller URL is not configured.')),
                 'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'eda'}, request=request),
                 'activations_url': reverse('api:eda_activation_list', request=request),
             }
@@ -165,6 +192,18 @@ class EDAActivationListView(APIView):
         controller_url = configured_url()
         controller_error = ''
 
+        if not module_enabled():
+            return Response(
+                {
+                    'count': 0,
+                    'next': None,
+                    'previous': None,
+                    'source': 'module_disabled',
+                    'controller_error': '',
+                    'results': [],
+                    'detail': _('Event-Driven Ansible module is disabled.'),
+                }
+            )
         if not controller_url:
             return Response({'count': 0, 'next': None, 'previous': None, 'source': 'not_configured', 'controller_error': '', 'results': []})
 
@@ -217,9 +256,14 @@ class EDAActivationListView(APIView):
 
 
 def _eda_error_response(exc):
-    response_status = (
-        http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_503_SERVICE_UNAVAILABLE
-    )
+    if exc.status == 'disabled':
+        response_status = http_status.HTTP_403_FORBIDDEN
+    else:
+        response_status = (
+            http_status.HTTP_400_BAD_REQUEST
+            if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing')
+            else http_status.HTTP_503_SERVICE_UNAVAILABLE
+        )
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
 
 
@@ -231,6 +275,8 @@ class EDAResourceListView(APIView):
     def get(self, request, resource, format=None):
         if not _is_known_resource(resource):
             return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
+        if not module_enabled():
+            return Response(_resource_module_disabled_empty(resource))
         if not configured_url():
             return Response(_resource_configured_empty(resource))
 
@@ -248,6 +294,8 @@ class EDAResourceListView(APIView):
         return Response(data)
 
     def post(self, request, resource, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to create EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
@@ -269,6 +317,8 @@ class EDAResourceDetailView(APIView):
     permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, resource, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         if not _is_known_resource(resource):
             return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
 
@@ -286,6 +336,8 @@ class EDAResourceDetailView(APIView):
         return self._update(request, resource, pk, method='PATCH')
 
     def _update(self, request, resource, pk, method='PATCH'):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to update EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
@@ -301,6 +353,8 @@ class EDAResourceDetailView(APIView):
         return Response(payload)
 
     def delete(self, request, resource, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to delete EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
@@ -322,6 +376,8 @@ class EDAProjectSyncView(APIView):
     permission_classes = [EDAActivationAdminPermission]
 
     def post(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         client = EDAControllerClient()
         try:
             payload = client.sync_project(pk, request.data if isinstance(request.data, dict) else {})
@@ -336,6 +392,8 @@ class EDARBACSyncView(APIView):
     permission_classes = [EDAActivationAdminPermission]
 
     def get(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         try:
             report = build_eda_rbac_sync_report(request.user, mode='observe', create_missing_identities=False)
         except EDAControllerError as exc:
@@ -343,6 +401,8 @@ class EDARBACSyncView(APIView):
         return Response(report)
 
     def post(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         data = request.data if isinstance(request.data, dict) else {}
         mode = data.get('mode') or 'observe'
         create_missing_identities = _parse_bool(data.get('create_missing_identities'), True)
@@ -359,6 +419,8 @@ class EDAEventStreamActivationsView(APIView):
     permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         client = EDAControllerClient()
         try:
             payload = client.list_event_stream_activations(pk, params=_query_params(request))
@@ -379,6 +441,8 @@ class EDAActivationDetailView(APIView):
     permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         client = EDAControllerClient()
         try:
             activation = client.get_activation(pk)
@@ -387,6 +451,8 @@ class EDAActivationDetailView(APIView):
         return Response(activation)
 
     def delete(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to delete EDA activations.')}, status=http_status.HTTP_403_FORBIDDEN)
         client = EDAControllerClient()
@@ -403,6 +469,8 @@ class EDAActivationEventsView(APIView):
     permission_classes = [EDAActivationViewPermission]
 
     def get(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         limit = _parse_positive_int(request.query_params.get('page_size') or request.query_params.get('limit'), 20, maximum=200)
         client = EDAControllerClient()
         try:
@@ -418,6 +486,8 @@ class EDAActivationActionView(APIView):
     permission_classes = [EDAActivationOperatePermission]
 
     def post(self, request, pk, action, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         client = EDAControllerClient()
         try:
             activation = client.control_activation(pk, action)
@@ -432,6 +502,8 @@ class EDAActivationStartView(APIView):
     permission_classes = [EDAActivationStartPermission]
 
     def post(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
         data = request.data if isinstance(request.data, dict) else {}
         rulebook_name = str(data.get('rulebook_name') or data.get('name') or '').strip()
         activation_id = str(data.get('activation_id') or data.get('id') or '').strip()

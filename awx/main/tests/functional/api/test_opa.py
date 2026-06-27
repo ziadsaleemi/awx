@@ -82,6 +82,23 @@ def test_opa_evaluate_disabled_fails_open(get, admin_user):
 
 
 @pytest.mark.django_db
+@override_settings(MODULE_OPA_ENABLED=False, OPA_HOST='opa.example.com')
+def test_opa_module_switch_disables_engine_and_fails_open():
+    engine = OPAPolicyEngine()
+
+    assert engine.is_available() is False
+    assert check_opa_policy('awx/job_launch/allow', {'user': {'username': 'admin'}}) is True
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_OPA_ENABLED=False, OPA_HOST='opa.example.com')
+def test_opa_module_switch_rejects_management_api(get, admin_user):
+    response = get(reverse('api:opa_policies'), user=admin_user, expect=403)
+
+    assert response.data['detail'] == 'Open Policy Agent module is disabled.'
+
+
+@pytest.mark.django_db
 def test_opa_evaluate_requires_system_admin(post, rando):
     post(
         reverse('api:opa_evaluate'),
@@ -317,6 +334,14 @@ def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user)
     }
     assert response.data['constraint_templates'] == []
     assert response.data['message'] == 'Configure the Gatekeeper Kubernetes API connection in Settings.'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GATEKEEPER_ENABLED=False, GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_module_switch_rejects_management_api(get, admin_user):
+    response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=403)
+
+    assert response.data['detail'] == 'Gatekeeper module is disabled.'
 
 
 @pytest.mark.django_db

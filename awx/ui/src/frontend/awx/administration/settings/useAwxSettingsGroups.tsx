@@ -66,6 +66,13 @@ export function useAwxSettingsGroupsBase() {
         categories: [],
       },
       {
+        id: 'modules',
+        name: t('Modules'),
+        description: t('Enable or disable optional AWX integrations.'),
+        defaultSlugs: ['modules'],
+        categories: [],
+      },
+      {
         id: 'authentication',
         name: t('Authentication Providers'),
         defaultSlugs: [

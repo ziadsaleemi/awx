@@ -27,6 +27,7 @@ import { Topology } from '../administration/topology/Topology';
 import { Reports } from '../analytics/Reports/Reports';
 import { SubscriptionUsage } from '../analytics/subscription-usage/SubscriptionUsage';
 import { useAwxActiveUser } from '../common/useAwxActiveUser';
+import { useAwxConfig } from '../common/useAwxConfig';
 import { AwxOverview } from '../overview/AwxOverview';
 import { HostMetrics } from '../views/jobs/HostMetrics';
 import { AwxRoute } from './AwxRoutes';
@@ -107,6 +108,28 @@ export function filterPolicyRoutesByPermissions(
       AwxRoute.PolicyAsCodeSmoke,
     ])
   );
+}
+
+export function filterPolicyRoutesByModules(
+  policyRoutes: PageNavigationItem,
+  opaEnabled: boolean,
+  gatekeeperEnabled: boolean
+) {
+  if (opaEnabled && gatekeeperEnabled) {
+    return policyRoutes;
+  }
+
+  const allowedIds = new Set<string>([AwxRoute.PolicyAsCodeOverview]);
+  if (gatekeeperEnabled) {
+    allowedIds.add(AwxRoute.PolicyAsCodeGatekeeper);
+  }
+  if (opaEnabled) {
+    allowedIds.add(AwxRoute.PolicyAsCodeModules);
+    allowedIds.add(AwxRoute.PolicyAsCodeTester);
+    allowedIds.add(AwxRoute.PolicyAsCodeSmoke);
+  }
+
+  return filterRouteChildrenById(policyRoutes, allowedIds);
 }
 
 export function profileRoutesOnly(userRoutes: PageNavigationItem) {
@@ -197,7 +220,17 @@ export function useAwxNavigation() {
   const awxExecutionEnvironmentsRoutes = useAwxExecutionEnvironmentRoutes();
   const awxCredentialTypesRoutes = useAwxCredentialTypesRoutes();
   const { activeAwxUser } = useAwxActiveUser();
+  const awxConfig = useAwxConfig();
   const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const moduleEdaEnabled = awxConfig?.modules?.eda?.enabled !== false;
+  const moduleOpaEnabled = awxConfig?.modules?.opa?.enabled !== false;
+  const moduleGatekeeperEnabled = awxConfig?.modules?.gatekeeper?.enabled !== false;
+  const modulePolicyEnabled = moduleOpaEnabled || moduleGatekeeperEnabled;
+  const awxPolicyRoutesForModules = filterPolicyRoutesByModules(
+    awxPolicyRoutes,
+    moduleOpaEnabled,
+    moduleGatekeeperEnabled
+  );
 
   const overview: PageNavigationItem[] = [
     {
@@ -488,6 +521,21 @@ export function useAwxNavigation() {
           ],
         },
         {
+          id: AwxRoute.SettingsModules,
+          label: t('Modules'),
+          path: 'modules',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="modules" key="modules" />,
+            },
+            {
+              path: '',
+              element: <AwxSettingsCategoryDetailsPage categoryId="modules" key="modules" />,
+            },
+          ],
+        },
+        {
           id: AwxRoute.SettingsPolicyAsCode,
           label: t('Policy Connections'),
           path: 'policy-as-code',
@@ -650,16 +698,19 @@ export function useAwxNavigation() {
       ...overview,
       ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
       ...automationContentItems,
-      ...(capabilities.canViewPolicy
+      ...(modulePolicyEnabled && capabilities.canViewPolicy
         ? [
             withNavigationDetails(
-              filterPolicyRoutesByPermissions(awxPolicyRoutes, capabilities.canManagePolicy),
+              filterPolicyRoutesByPermissions(
+                awxPolicyRoutesForModules,
+                capabilities.canManagePolicy
+              ),
               t('Policy as Code'),
               t('OPA and Gatekeeper')
             ),
           ]
         : []),
-      ...(capabilities.canViewEda
+      ...(moduleEdaEnabled && capabilities.canViewEda
         ? [
             {
               ...withNavigationDetails(
@@ -701,10 +752,16 @@ export function useAwxNavigation() {
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),
-    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
-      ? [withNavigationDetails(awxPolicyRoutes, t('Policy as Code'), t('OPA and Gatekeeper'))]
+    ...(modulePolicyEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
+      ? [
+          withNavigationDetails(
+            awxPolicyRoutesForModules,
+            t('Policy as Code'),
+            t('OPA and Gatekeeper')
+          ),
+        ]
       : []),
-    ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
+    ...(moduleEdaEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
       ? [
           {
             ...withNavigationDetails(

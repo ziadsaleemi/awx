@@ -79,6 +79,25 @@ export interface Config {
   custom_virtualenvs: unknown[];
   custom_logo?: string;
   custom_login_info?: string;
+  modules?: {
+    eda?: {
+      enabled: boolean;
+      settings_url?: string;
+    };
+    opa?: {
+      enabled: boolean;
+      settings_url?: string;
+    };
+    gatekeeper?: {
+      enabled: boolean;
+      settings_url?: string;
+    };
+    galaxy_ng?: {
+      enabled: boolean;
+      settings_url?: string;
+    };
+    settings_url?: string;
+  };
 }
 
 export interface ILicenseInfo {

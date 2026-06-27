@@ -370,6 +370,25 @@ class ApiV2ConfigView(APIView):
             become_methods=PRIVILEGE_ESCALATION_METHODS,
             custom_logo=settings.CUSTOM_LOGO,
             custom_login_info=settings.CUSTOM_LOGIN_INFO,
+            modules={
+                'eda': {
+                    'enabled': bool(getattr(settings, 'MODULE_EDA_ENABLED', True)),
+                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'eda'}, request=request),
+                },
+                'opa': {
+                    'enabled': bool(getattr(settings, 'MODULE_OPA_ENABLED', True)),
+                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'policyascode'}, request=request),
+                },
+                'gatekeeper': {
+                    'enabled': bool(getattr(settings, 'MODULE_GATEKEEPER_ENABLED', True)),
+                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'policyascode'}, request=request),
+                },
+                'galaxy_ng': {
+                    'enabled': bool(getattr(settings, 'MODULE_GALAXY_NG_ENABLED', False)),
+                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}, request=request),
+                },
+                'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}, request=request),
+            },
         )
 
         # Check superuser/auditor first

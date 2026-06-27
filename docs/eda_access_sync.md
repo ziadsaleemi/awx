@@ -72,6 +72,14 @@ curl -u admin:password \
 
 The UI route is Automation Decisions -> Access -> Access Sync.
 
+## Module switch
+
+EDA access sync requires `MODULE_EDA_ENABLED=true` in Settings -> Modules.
+When disabled, AWX keeps Settings -> Event-Driven Ansible and Settings ->
+Modules available for administrators, but hides Automation Decisions navigation
+and rejects EDA operational API calls with `403 disabled`. This lets operators
+pause the non-native integration without losing its saved connection settings.
+
 ## Upgrade contract
 
 When updating EDA from upstream git, verify:
