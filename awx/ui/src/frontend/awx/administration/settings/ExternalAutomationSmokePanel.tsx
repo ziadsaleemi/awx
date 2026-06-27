@@ -161,13 +161,15 @@ export function ExternalAutomationSmokePanel(props?: {
   includeEda?: boolean;
   includeOpa?: boolean;
   includeGatekeeper?: boolean;
+  allowPolicySelection?: boolean;
 }) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
   const includeEda = props?.includeEda ?? true;
   const includeOpa = props?.includeOpa ?? true;
   const includeGatekeeper = props?.includeGatekeeper ?? false;
-  const policySelectionEnabled = !includeEda && includeGatekeeper;
+  const policySelectionEnabled =
+    props?.allowPolicySelection ?? (!includeEda && includeOpa && includeGatekeeper);
   const proxmoxProofEnabled = includeEda;
   const [policyCheckOpa, setPolicyCheckOpa] = useState(includeOpa);
   const [policyCheckGatekeeper, setPolicyCheckGatekeeper] = useState(includeGatekeeper);
@@ -483,10 +485,10 @@ export function ExternalAutomationSmokePanel(props?: {
                       title={t('Gatekeeper Kubernetes API is not configured.')}
                     >
                       <Link
-                        to={getPageUrl(AwxRoute.SettingsPolicyAsCode)}
+                        to={getPageUrl(AwxRoute.SettingsGatekeeper)}
                         data-cy="external-automation-policy-settings-link"
                       >
-                        {t('Open Policy Connections settings')}
+                        {t('Open Gatekeeper settings')}
                       </Link>
                     </Alert>
                   </StackItem>

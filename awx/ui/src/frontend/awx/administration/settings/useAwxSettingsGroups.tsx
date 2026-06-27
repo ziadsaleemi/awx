@@ -127,7 +127,47 @@ export function useAwxSettingsGroupsBase() {
   return groupsBase;
 }
 
+function splitPolicySettingsGroup(groups: IAwxSettingsGroup[], t: (value: string) => string) {
+  const policyGroupIndex = groups.findIndex((group) => group.id === 'policyascode');
+  if (policyGroupIndex === -1) {
+    return groups;
+  }
+  const nextGroups = [...groups];
+  nextGroups.splice(
+    policyGroupIndex,
+    1,
+    {
+      id: 'opa',
+      name: t('OPA'),
+      description: t('Standalone Open Policy Agent connection and policy API settings.'),
+      defaultSlugs: ['policyascode'],
+      categories: [
+        {
+          id: 'opa',
+          name: t('OPA connection'),
+          slugs: ['policyascode'],
+        },
+      ],
+    },
+    {
+      id: 'gatekeeper',
+      name: t('Gatekeeper'),
+      description: t('Kubernetes Gatekeeper settings for k3s and Kubernetes clusters.'),
+      defaultSlugs: ['policyascode'],
+      categories: [
+        {
+          id: 'gatekeeper',
+          name: t('Gatekeeper Kubernetes'),
+          slugs: ['policyascode'],
+        },
+      ],
+    }
+  );
+  return nextGroups;
+}
+
 export function useAwxSettingsGroups() {
+  const { t } = useTranslation();
   const groupsBase = useAwxSettingsGroupsBase();
 
   const optionsResponse = useOptions<AwxSettingsOptionsResponse>(awxAPI`/settings/all/`);
@@ -193,6 +233,7 @@ export function useAwxSettingsGroups() {
       category.slugs.push(slug);
     }
     groups = groups.filter((group) => group.categories.length > 0);
+    groups = splitPolicySettingsGroup(groups, t);
     groups.forEach((group) =>
       group.categories.sort((a, b) => {
         const indexA = group.defaultSlugs?.indexOf(a.slugs[0]) ?? -1;
@@ -201,7 +242,7 @@ export function useAwxSettingsGroups() {
       })
     );
     return groups;
-  }, [groupsBase, options, optionsResponse.error, optionsResponse.isLoading]);
+  }, [groupsBase, options, optionsResponse.error, optionsResponse.isLoading, t]);
 
   return useMemo(
     () => ({

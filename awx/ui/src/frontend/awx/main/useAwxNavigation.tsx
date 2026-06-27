@@ -23,6 +23,10 @@ import {
   AwxSettingsCategoryForm,
   AwxSettingsCategoryFormRoute,
 } from '../administration/settings/AwxSettingsCategoryForm';
+import {
+  isGatekeeperSetting,
+  isOpaSetting,
+} from '../administration/settings/policySettingsFilters';
 import { Topology } from '../administration/topology/Topology';
 import { Reports } from '../analytics/Reports/Reports';
 import { SubscriptionUsage } from '../analytics/subscription-usage/SubscriptionUsage';
@@ -122,11 +126,14 @@ export function filterPolicyRoutesByModules(
   const allowedIds = new Set<string>([AwxRoute.PolicyAsCodeOverview]);
   if (gatekeeperEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeGatekeeper);
+    allowedIds.add(AwxRoute.PolicyAsCodeSmoke);
   }
   if (opaEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeModules);
     allowedIds.add(AwxRoute.PolicyAsCodeTester);
     allowedIds.add(AwxRoute.PolicyAsCodeSmoke);
+  } else {
+    allowedIds.delete(AwxRoute.PolicyAsCodeOverview);
   }
 
   return filterRouteChildrenById(policyRoutes, allowedIds);
@@ -194,6 +201,20 @@ function withNavigationDetails(
   };
 }
 
+function policyModuleSubtitle(
+  t: (value: string) => string,
+  opaEnabled: boolean,
+  gatekeeperEnabled: boolean
+) {
+  if (opaEnabled && gatekeeperEnabled) {
+    return t('OPA and Kubernetes Gatekeeper');
+  }
+  if (gatekeeperEnabled) {
+    return t('Kubernetes Gatekeeper');
+  }
+  return t('OPA policy engine');
+}
+
 export function useAwxNavigation() {
   const { t } = useTranslation();
   const awxInventoryRoutes = useAwxInventoryRoutes();
@@ -231,6 +252,7 @@ export function useAwxNavigation() {
     moduleOpaEnabled,
     moduleGatekeeperEnabled
   );
+  const policySubtitle = policyModuleSubtitle(t, moduleOpaEnabled, moduleGatekeeperEnabled);
 
   const overview: PageNavigationItem[] = [
     {
@@ -541,13 +563,72 @@ export function useAwxNavigation() {
           path: 'policy-as-code',
           children: [
             {
+              path: '',
+              element: <Navigate to="../opa" replace />,
+            },
+            {
               path: 'edit',
-              element: <AwxSettingsCategoryForm categoryId="policyascode" key="policyascode" />,
+              element: <Navigate to="../opa/edit" replace />,
+            },
+          ],
+          hidden: true,
+        },
+        {
+          id: AwxRoute.SettingsOpa,
+          label: t('OPA'),
+          path: 'opa',
+          children: [
+            {
+              path: 'edit',
+              element: (
+                <AwxSettingsCategoryForm
+                  categoryId="opa"
+                  title={t('OPA')}
+                  optionFilter={isOpaSetting}
+                  key="opa"
+                />
+              ),
             },
             {
               path: '',
               element: (
-                <AwxSettingsCategoryDetailsPage categoryId="policyascode" key="policyascode" />
+                <AwxSettingsCategoryDetailsPage
+                  categoryId="opa"
+                  title={t('OPA')}
+                  optionFilter={isOpaSetting}
+                  smokePanel="opa"
+                  key="opa"
+                />
+              ),
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsGatekeeper,
+          label: t('Gatekeeper'),
+          path: 'gatekeeper',
+          children: [
+            {
+              path: 'edit',
+              element: (
+                <AwxSettingsCategoryForm
+                  categoryId="gatekeeper"
+                  title={t('Gatekeeper Kubernetes')}
+                  optionFilter={isGatekeeperSetting}
+                  key="gatekeeper"
+                />
+              ),
+            },
+            {
+              path: '',
+              element: (
+                <AwxSettingsCategoryDetailsPage
+                  categoryId="gatekeeper"
+                  title={t('Gatekeeper Kubernetes')}
+                  optionFilter={isGatekeeperSetting}
+                  smokePanel="gatekeeper"
+                  key="gatekeeper"
+                />
               ),
             },
           ],
@@ -706,7 +787,7 @@ export function useAwxNavigation() {
                 capabilities.canManagePolicy
               ),
               t('Policy as Code'),
-              t('OPA and Gatekeeper')
+              policySubtitle
             ),
           ]
         : []),
@@ -753,13 +834,7 @@ export function useAwxNavigation() {
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),
     ...(modulePolicyEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
-      ? [
-          withNavigationDetails(
-            awxPolicyRoutesForModules,
-            t('Policy as Code'),
-            t('OPA and Gatekeeper')
-          ),
-        ]
+      ? [withNavigationDetails(awxPolicyRoutesForModules, t('Policy as Code'), policySubtitle)]
       : []),
     ...(moduleEdaEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
       ? [

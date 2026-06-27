@@ -175,7 +175,7 @@ export function OPAGuardrailsCard() {
                       style={{ color: 'var(--pf-v5-global--Color--200)' }}
                     >
                       {t(
-                        'Set OPA server hostname under Settings → Policy Connections to enforce policy guardrails on all actions.'
+                        'Set OPA server hostname under Settings → OPA to enforce policy guardrails on all actions.'
                       )}
                     </Text>
                   </TextContent>

@@ -3,6 +3,7 @@ import { buildAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { AwxRoute } from './AwxRoutes';
 import {
   filterCatalogRoutesByPermissions,
+  filterPolicyRoutesByModules,
   filterPolicyRoutesByPermissions,
   profileRoutesOnly,
 } from './useAwxNavigation';
@@ -192,6 +193,63 @@ describe('AWX navigation capabilities', () => {
     expect(childIds(filteredRoutes)).to.deep.equal([
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
+      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
+    ]);
+  });
+
+  it('keeps OPA and Gatekeeper routes separate when modules are toggled independently', () => {
+    const policyRoutes: PageNavigationItem = {
+      id: AwxRoute.PolicyAsCode,
+      label: 'Policy as Code',
+      path: 'policy-as-code',
+      children: [
+        {
+          id: AwxRoute.PolicyAsCodeOverview,
+          label: 'Overview',
+          path: 'overview',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeGatekeeper,
+          label: 'Gatekeeper',
+          path: 'gatekeeper',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeModules,
+          label: 'Policy Modules',
+          path: 'modules',
+          element: <div />,
+        },
+        {
+          id: AwxRoute.PolicyAsCodeTester,
+          label: 'Policy Tester',
+          path: 'tester',
+          element: <div />,
+        },
+        { id: AwxRoute.PolicyAsCodeSmoke, label: 'Smoke Test', path: 'smoke', element: <div /> },
+        { path: '', element: <div /> },
+      ],
+    };
+
+    expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, false))).to.deep.equal([
+      AwxRoute.PolicyAsCodeOverview,
+      AwxRoute.PolicyAsCodeModules,
+      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
+    ]);
+    expect(childIds(filterPolicyRoutesByModules(policyRoutes, false, true))).to.deep.equal([
+      AwxRoute.PolicyAsCodeGatekeeper,
+      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
+    ]);
+    expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, true))).to.deep.equal([
+      AwxRoute.PolicyAsCodeOverview,
+      AwxRoute.PolicyAsCodeGatekeeper,
+      AwxRoute.PolicyAsCodeModules,
       AwxRoute.PolicyAsCodeTester,
       AwxRoute.PolicyAsCodeSmoke,
       undefined,

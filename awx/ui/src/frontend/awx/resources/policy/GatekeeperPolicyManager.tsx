@@ -1032,10 +1032,10 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
                   <StackItem>{data.message}</StackItem>
                   <StackItem>
                     <Link
-                      to={getPageUrl(AwxRoute.SettingsPolicyAsCode)}
+                      to={getPageUrl(AwxRoute.SettingsGatekeeper)}
                       data-cy="gatekeeper-policy-settings-link"
                     >
-                      {t('Open Policy Connections settings')}
+                      {t('Open Gatekeeper settings')}
                     </Link>
                   </StackItem>
                 </Stack>

@@ -24,9 +24,14 @@ import { AwxSettingsOptionsAction } from './AwxSettingsForm';
 import { ExternalAutomationSmokePanel } from './ExternalAutomationSmokePanel';
 import { useAwxSettingsGroups, useAwxSettingsGroupsBase } from './useAwxSettingsGroups';
 
-export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
+export function AwxSettingsCategoryDetailsPage(props: {
+  categoryId: string;
+  title?: string;
+  optionFilter?: (key: string, value: AwxSettingsOptionsAction) => boolean;
+  smokePanel?: 'eda' | 'opa' | 'gatekeeper' | 'policy';
+}) {
   const { isLoading, error, groups, options } = useAwxSettingsGroups();
-  const { categoryId } = props;
+  const { categoryId, optionFilter, smokePanel: smokePanelOverride, title: titleOverride } = props;
   const group = groups.find((group) =>
     group.categories.some((category) => category.id === categoryId)
   );
@@ -42,12 +47,13 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
     if (category && options) {
       for (const [key, value] of Object.entries(options)) {
         if (category?.slugs.includes(value.category_slug)) {
+          if (optionFilter && !optionFilter(key, value)) continue;
           categoryOptions[key] = value;
         }
       }
     }
     return categoryOptions;
-  }, [category, options]);
+  }, [category, options, optionFilter]);
 
   const groupsBase = useAwxSettingsGroupsBase();
 
@@ -71,7 +77,8 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
   if (all.error) return <AwxError error={all.error} />;
   if (all.isLoading || !all.data) return <LoadingPage />;
 
-  const title = groupsBase.find((group) => group.id === categoryId)?.name;
+  const title = titleOverride ?? groupsBase.find((group) => group.id === categoryId)?.name;
+  const smokePanel = smokePanelOverride ?? (categoryId === 'eda' ? 'eda' : undefined);
 
   return (
     <PageLayout>
@@ -80,9 +87,15 @@ export function AwxSettingsCategoryDetailsPage(props: { categoryId: string }) {
         headerActions={<PageActions actions={actions} position={DropdownPosition.right} />}
       />
       <AwxSettingsCategoryDetails options={categoryOptions} data={all.data} />
-      {categoryId === 'eda' ? <ExternalAutomationSmokePanel /> : null}
-      {categoryId === 'policyascode' ? (
+      {smokePanel === 'eda' ? <ExternalAutomationSmokePanel /> : null}
+      {smokePanel === 'policy' ? (
         <ExternalAutomationSmokePanel includeEda={false} includeOpa includeGatekeeper />
+      ) : null}
+      {smokePanel === 'opa' ? (
+        <ExternalAutomationSmokePanel includeEda={false} includeOpa includeGatekeeper={false} />
+      ) : null}
+      {smokePanel === 'gatekeeper' ? (
+        <ExternalAutomationSmokePanel includeEda={false} includeOpa={false} includeGatekeeper />
       ) : null}
     </PageLayout>
   );

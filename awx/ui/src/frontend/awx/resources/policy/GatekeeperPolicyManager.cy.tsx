@@ -83,8 +83,8 @@ function SeedNavigation(props: { children: ReactNode }) {
   useEffect(() => {
     setNavigation([
       {
-        id: AwxRoute.SettingsPolicyAsCode,
-        path: 'settings/policy-as-code',
+        id: AwxRoute.SettingsGatekeeper,
+        path: 'settings/gatekeeper',
         element: <div />,
       } as PageNavigationItem,
     ]);
@@ -115,7 +115,7 @@ describe('GatekeeperPolicyManager', () => {
     cy.contains('label', 'Per page').should('exist');
   });
 
-  it('links the unconfigured Gatekeeper state to Policy Connections settings', () => {
+  it('links the unconfigured Gatekeeper state to Gatekeeper settings', () => {
     mountGatekeeper({
       ...gatekeeperResponse,
       configured: false,
@@ -139,7 +139,7 @@ describe('GatekeeperPolicyManager', () => {
 
     cy.getByDataCy('gatekeeper-policy-settings-link')
       .should('be.visible')
-      .and('have.attr', 'href', '/settings/policy-as-code');
+      .and('have.attr', 'href', '/settings/gatekeeper');
   });
 
   it('requires confirmation before live apply', () => {

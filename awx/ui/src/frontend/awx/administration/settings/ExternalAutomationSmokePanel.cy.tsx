@@ -10,8 +10,8 @@ function SeedNavigation(props: { children: ReactNode }) {
   useEffect(() => {
     setNavigation([
       {
-        id: AwxRoute.SettingsPolicyAsCode,
-        path: 'settings/policy-as-code',
+        id: AwxRoute.SettingsGatekeeper,
+        path: 'settings/gatekeeper',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -274,7 +274,7 @@ describe('ExternalAutomationSmokePanel', () => {
     cy.contains('OPA allow').should('not.exist');
   });
 
-  it('links failed Gatekeeper smoke to Policy Connections settings', () => {
+  it('links failed Gatekeeper smoke to Gatekeeper settings', () => {
     cy.intercept('POST', awxAPI`/external_automation/check/`, {
       ok: false,
       checks: {
@@ -302,7 +302,7 @@ describe('ExternalAutomationSmokePanel', () => {
     cy.contains('Gatekeeper smoke failed.').should('be.visible');
     cy.getByDataCy('external-automation-policy-settings-link')
       .should('be.visible')
-      .and('have.attr', 'href', '/settings/policy-as-code');
+      .and('have.attr', 'href', '/settings/gatekeeper');
   });
 
   it('requires at least one policy smoke check', () => {

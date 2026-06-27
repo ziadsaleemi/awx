@@ -16,9 +16,13 @@ export function AwxSettingsCategoryFormRoute() {
   return <AwxSettingsCategoryForm categoryId={categoryId ?? ''} />;
 }
 
-export function AwxSettingsCategoryForm(props: { categoryId: string }) {
+export function AwxSettingsCategoryForm(props: {
+  categoryId: string;
+  title?: string;
+  optionFilter?: (key: string, value: AwxSettingsOptionsAction) => boolean;
+}) {
   const { isLoading, error, groups, options } = useAwxSettingsGroups();
-  const { categoryId } = props;
+  const { categoryId, optionFilter, title: titleOverride } = props;
   const group = groups.find((group) =>
     group.categories.some((category) => category.id === categoryId)
   );
@@ -33,12 +37,13 @@ export function AwxSettingsCategoryForm(props: { categoryId: string }) {
       for (const [key, value] of Object.entries(options)) {
         if (awxSettingsExcludeKeys.includes(key)) continue;
         if (category?.slugs.includes(value.category_slug)) {
+          if (optionFilter && !optionFilter(key, value)) continue;
           categoryOptions[key] = value;
         }
       }
     }
     return categoryOptions;
-  }, [category, options]);
+  }, [category, options, optionFilter]);
 
   const groupsBase = useAwxSettingsGroupsBase();
 
@@ -47,7 +52,7 @@ export function AwxSettingsCategoryForm(props: { categoryId: string }) {
   if (all.error) return <AwxError error={all.error} />;
   if (all.isLoading || !all.data) return <LoadingPage />;
 
-  const title = groupsBase.find((group) => group.id === categoryId)?.name;
+  const title = titleOverride ?? groupsBase.find((group) => group.id === categoryId)?.name;
 
   return (
     <PageLayout>

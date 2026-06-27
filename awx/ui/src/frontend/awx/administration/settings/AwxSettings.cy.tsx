@@ -28,6 +28,16 @@ function SeedNavigation(props: { children: ReactNode }) {
         path: 'settings/eda',
         element: <div />,
       } as PageNavigationItem,
+      {
+        id: AwxRoute.SettingsOpa,
+        path: 'settings/opa',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.SettingsGatekeeper,
+        path: 'settings/gatekeeper',
+        element: <div />,
+      } as PageNavigationItem,
     ]);
   }, [setNavigation]);
   return <>{props.children}</>;
@@ -55,6 +65,18 @@ function interceptSettingsOptions() {
           category: 'Event-Driven Ansible',
           category_slug: 'eda',
         },
+        OPA_HOST: {
+          type: 'string',
+          label: 'OPA server hostname',
+          category: 'PolicyAsCode',
+          category_slug: 'policyascode',
+        },
+        GATEKEEPER_K8S_API_URL: {
+          type: 'string',
+          label: 'Gatekeeper Kubernetes API URL',
+          category: 'PolicyAsCode',
+          category_slug: 'policyascode',
+        },
       },
       PUT: {
         CUSTOM_LOGO: {
@@ -74,6 +96,18 @@ function interceptSettingsOptions() {
           label: 'EDA server URL',
           category: 'Event-Driven Ansible',
           category_slug: 'eda',
+        },
+        OPA_HOST: {
+          type: 'string',
+          label: 'OPA server hostname',
+          category: 'PolicyAsCode',
+          category_slug: 'policyascode',
+        },
+        GATEKEEPER_K8S_API_URL: {
+          type: 'string',
+          label: 'Gatekeeper Kubernetes API URL',
+          category: 'PolicyAsCode',
+          category_slug: 'policyascode',
         },
       },
     },
@@ -106,9 +140,15 @@ describe('AwxSettings', () => {
     cy.getByDataCy('settings-card-ui').should('be.visible');
     cy.getByDataCy('settings-card-ai-assistant').should('be.visible');
     cy.getByDataCy('settings-card-eda').should('be.visible');
+    cy.getByDataCy('settings-card-opa').should('be.visible');
+    cy.getByDataCy('settings-card-gatekeeper').should('be.visible');
     cy.contains('a', 'User Interface Settings')
       .should('be.visible')
       .and('have.attr', 'href', '/settings/user-interface');
+    cy.contains('a', 'OPA').should('be.visible').and('have.attr', 'href', '/settings/opa');
+    cy.contains('a', 'Gatekeeper')
+      .should('be.visible')
+      .and('have.attr', 'href', '/settings/gatekeeper');
   });
 
   it('keeps setting cards inside a mobile viewport', () => {

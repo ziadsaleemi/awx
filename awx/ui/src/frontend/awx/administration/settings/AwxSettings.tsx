@@ -32,6 +32,8 @@ const settingsGroupRoutes: Partial<Record<string, AwxRoute>> = {
   logging: AwxRoute.SettingsLogging,
   debug: AwxRoute.SettingsTroubleshooting,
   policyascode: AwxRoute.SettingsPolicyAsCode,
+  opa: AwxRoute.SettingsOpa,
+  gatekeeper: AwxRoute.SettingsGatekeeper,
   'ai-assistant': AwxRoute.SettingsAiAssistant,
   eda: AwxRoute.SettingsEda,
 };
