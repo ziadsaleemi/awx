@@ -1,0 +1,8 @@
+---
+- name: Deploy Gatekeeper to Kubernetes
+  hosts: all
+  gather_facts: false
+  vars:
+    awx_deploy_method: k8s
+  roles:
+    - awx_gatekeeper_k8s

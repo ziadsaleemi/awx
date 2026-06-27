@@ -148,3 +148,47 @@ awx_eda_k8s_node_port: 30855
 awx_eda_k8s_api_url: "http://{{ awx_eda_name }}-service.{{ awx_eda_namespace }}.svc.cluster.local"
 awx_eda_k8s_work_dir: "{{ awx_k8s_work_dir }}/eda"
 awx_eda_k8s_wait_for_service: true
+
+awx_opa_enabled: false
+awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
+awx_opa_module_enabled: "{{ awx_opa_enabled or awx_opa_configure_awx_settings }}"
+awx_opa_server_inventory_host: "{{ groups.get('awx_opa', []) | first | default('') }}"
+awx_opa_host: ""
+awx_opa_port: 8181
+awx_opa_ssl: false
+awx_opa_auth_type: None
+awx_opa_auth_token: "{{ lookup('env', 'OPA_AUTH_TOKEN') | default('', true) }}"
+awx_opa_auth_client_cert: "{{ lookup('env', 'OPA_AUTH_CLIENT_CERT') | default('', true) }}"
+awx_opa_auth_client_key: "{{ lookup('env', 'OPA_AUTH_CLIENT_KEY') | default('', true) }}"
+awx_opa_auth_ca_cert: "{{ lookup('env', 'OPA_AUTH_CA_CERT') | default('', true) }}"
+awx_opa_auth_custom_headers: {}
+awx_opa_request_timeout: 1.5
+awx_opa_request_retries: 2
+awx_opa_policy_bundle: ""
+awx_opa_container_image: docker.io/openpolicyagent/opa:latest
+awx_opa_container_name: awx-opa
+awx_opa_server_base_dir: /opt/opa
+awx_opa_server_data_dir: "{{ awx_opa_server_base_dir }}/policies"
+awx_opa_server_policy_file: "{{ awx_opa_server_data_dir }}/awx.rego"
+awx_opa_server_policy: ""
+awx_opa_server_http_port: "{{ awx_opa_port }}"
+awx_opa_server_addr: "0.0.0.0:{{ awx_opa_server_http_port }}"
+awx_opa_server_log_level: info
+
+awx_gatekeeper_enabled: false
+awx_gatekeeper_configure_awx_settings: "{{ awx_gatekeeper_enabled }}"
+awx_gatekeeper_module_enabled: "{{ awx_gatekeeper_enabled or awx_gatekeeper_configure_awx_settings }}"
+awx_gatekeeper_namespace: gatekeeper-system
+awx_gatekeeper_version: v3.22.2
+awx_gatekeeper_manifest_url: "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/{{ awx_gatekeeper_version }}/deploy/gatekeeper.yaml"
+awx_gatekeeper_wait_for_rollout: true
+awx_gatekeeper_controller_deployment: gatekeeper-controller-manager
+awx_gatekeeper_audit_deployment: gatekeeper-audit
+awx_gatekeeper_k8s_api_url: https://kubernetes.default.svc
+awx_gatekeeper_k8s_auth_token: "{{ lookup('env', 'GATEKEEPER_K8S_AUTH_TOKEN') | default('', true) }}"
+awx_gatekeeper_k8s_use_service_account_token: true
+awx_gatekeeper_k8s_context: in-cluster
+awx_gatekeeper_k8s_contexts: {}
+awx_gatekeeper_k8s_verify_ssl: true
+awx_gatekeeper_k8s_request_timeout: 5
+awx_gatekeeper_k8s_manage_rbac: "{{ awx_gatekeeper_configure_awx_settings }}"

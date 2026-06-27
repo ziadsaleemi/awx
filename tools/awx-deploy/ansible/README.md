@@ -10,6 +10,8 @@ Supported paths:
 - `k8s`: deploy AWX into an existing Kubernetes cluster.
 - `eda-server`: deploy EDA on a dedicated VM for server deployments.
 - `eda-k8s`: deploy EDA beside AWX in k3s or Kubernetes.
+- `opa-server`: deploy standalone OPA on a dedicated VM/container host.
+- `gatekeeper-k8s`: deploy Gatekeeper into k3s or Kubernetes.
 
 Server roles are componentized. A single host can belong to every group, or
 components can be split across multiple hosts:
@@ -34,6 +36,12 @@ pods in the same cluster through the upstream EDA Server Operator. For direct
 server deployments, EDA runs on hosts in the `awx_eda` inventory group as its
 own Docker Compose/systemd stack. See
 `docs/eda_deployment_topology.md` for the non-native AWX topology contract.
+
+Policy services are intentionally split. OPA is a standalone policy engine and
+can run on hosts in the `awx_opa` inventory group or any external OPA endpoint.
+Gatekeeper is Kubernetes-only and is deployed only in k3s/k8s paths unless a
+server AWX install is explicitly configured to manage a remote Kubernetes API.
+See `docs/policy_deployment_topology.md`.
 
 VMware/vCenter provisioning is intentionally separate from the AWX deployment
 roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
@@ -122,6 +130,44 @@ ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
   -e awx_eda_enabled=true \
   -e awx_eda_configure_awx_settings=true
 ```
+
+## Quick Start: OPA on Server VM
+
+For direct server AWX deployments, put OPA on a dedicated VM in the `awx_opa`
+inventory group:
+
+```bash
+cd tools/awx-deploy/ansible
+ansible-playbook -i inventories/example.ini playbooks/deploy-opa-server.yml
+```
+
+Then configure AWX to point at that VM and rerun the AWX server deployment or
+upgrade:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
+  -e awx_opa_enabled=true \
+  -e awx_opa_configure_awx_settings=true
+```
+
+## Quick Start: Gatekeeper on k3s/Kubernetes
+
+Gatekeeper is a Kubernetes admission controller. Enable it only for k3s/k8s
+deployments or when AWX is managing a remote cluster through an explicit API
+URL/token.
+
+```bash
+cd tools/awx-deploy/ansible
+export KUBECONFIG=/path/to/kubeconfig
+ansible-playbook -i localhost, playbooks/deploy-gatekeeper-k8s.yml
+ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
+  -e awx_gatekeeper_enabled=true \
+  -e awx_gatekeeper_configure_awx_settings=true
+```
+
+For k3s, use `playbooks/deploy-k3s.yml` with the same variables. The AWX
+service account receives Gatekeeper read/write RBAC only when
+`awx_gatekeeper_configure_awx_settings=true`.
 
 ## Backup / Restore
 

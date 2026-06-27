@@ -11,6 +11,22 @@
   ansible.builtin.set_fact:
     awx_container_engine_cmd: "{{ 'docker' if awx_container_engine == 'docker' else 'podman' }}"
 
+- name: Validate OPA settings
+  ansible.builtin.assert:
+    that:
+      - not (awx_opa_configure_awx_settings | bool) or ((awx_opa_host | length > 0) or (awx_opa_server_inventory_host | length > 0))
+      - awx_opa_auth_type in ['None', 'Token', 'Certificate']
+      - awx_opa_port | int > 0
+    fail_msg: "When awx_opa_configure_awx_settings=true, set awx_opa_host or define an [awx_opa] inventory host. awx_opa_auth_type must be None, Token, or Certificate."
+
+- name: Validate Gatekeeper settings
+  ansible.builtin.assert:
+    that:
+      - not (awx_gatekeeper_configure_awx_settings | bool) or (awx_gatekeeper_k8s_api_url | length > 0)
+      - not (awx_gatekeeper_configure_awx_settings | bool and awx_deploy_method == 'server') or ((awx_gatekeeper_k8s_auth_token | length > 0) or ((awx_gatekeeper_k8s_contexts | default({})) | length > 0))
+      - awx_gatekeeper_k8s_request_timeout | int > 0
+    fail_msg: "Gatekeeper settings require a Kubernetes API URL. Server deployments must also pass a token or named context map for the remote Kubernetes cluster."
+
 - name: Validate server secrets
   ansible.builtin.assert:
     that:

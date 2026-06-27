@@ -1,0 +1,38 @@
+---
+- name: Validate Gatekeeper deployment target
+  ansible.builtin.assert:
+    that:
+      - awx_deploy_method in ['k3s', 'k8s']
+    fail_msg: "Gatekeeper is a Kubernetes admission controller. Use awx_deploy_method=k3s or awx_deploy_method=k8s."
+
+- name: Resolve kubectl command for Gatekeeper
+  ansible.builtin.set_fact:
+    awx_gatekeeper_kubectl: >-
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness before Gatekeeper install
+  ansible.builtin.command:
+    cmd: "{{ awx_gatekeeper_kubectl }} get --raw=/readyz"
+  register: awx_gatekeeper_readyz
+  retries: 60
+  delay: 5
+  until: awx_gatekeeper_readyz.rc == 0
+  changed_when: false
+
+- name: Apply Gatekeeper release manifest
+  ansible.builtin.command:
+    cmd: "{{ awx_gatekeeper_kubectl }} apply -f {{ awx_gatekeeper_manifest_url }}"
+  register: awx_gatekeeper_apply
+  changed_when: "'created' in awx_gatekeeper_apply.stdout or 'configured' in awx_gatekeeper_apply.stdout"
+
+- name: Wait for Gatekeeper controller rollout
+  ansible.builtin.command:
+    cmd: "{{ awx_gatekeeper_kubectl }} -n {{ awx_gatekeeper_namespace }} rollout status deployment/{{ awx_gatekeeper_controller_deployment }} --timeout=300s"
+  changed_when: false
+  when: awx_gatekeeper_wait_for_rollout | bool
+
+- name: Wait for Gatekeeper audit rollout
+  ansible.builtin.command:
+    cmd: "{{ awx_gatekeeper_kubectl }} -n {{ awx_gatekeeper_namespace }} rollout status deployment/{{ awx_gatekeeper_audit_deployment }} --timeout=300s"
+  changed_when: false
+  when: awx_gatekeeper_wait_for_rollout | bool

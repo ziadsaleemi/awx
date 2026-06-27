@@ -1,0 +1,73 @@
+---
+- name: Resolve OPA container engine command
+  ansible.builtin.set_fact:
+    awx_opa_container_engine_cmd: "{{ 'docker' if awx_container_engine == 'docker' else 'podman' }}"
+
+- name: Install OPA container runtime packages
+  ansible.builtin.package:
+    name: "{{ awx_opa_server_docker_packages if awx_container_engine == 'docker' else awx_opa_server_podman_packages }}"
+    state: present
+  when: awx_opa_server_install_packages | bool
+
+- name: Enable Docker service for OPA
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when:
+    - awx_opa_server_install_packages | bool
+    - awx_container_engine == 'docker'
+
+- name: Create OPA directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ awx_opa_server_base_dir }}"
+    - "{{ awx_opa_server_data_dir }}"
+
+- name: Write managed OPA policy file
+  ansible.builtin.copy:
+    dest: "{{ awx_opa_server_policy_file }}"
+    content: "{{ awx_opa_server_policy }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: awx_opa_server_policy | length > 0
+
+- name: Remove empty managed OPA policy file
+  ansible.builtin.file:
+    path: "{{ awx_opa_server_policy_file }}"
+    state: absent
+  when: awx_opa_server_policy | length == 0
+
+- name: Render OPA systemd unit
+  ansible.builtin.template:
+    src: awx-opa.service.j2
+    dest: /etc/systemd/system/awx-opa.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart awx-opa
+
+- name: Enable OPA service
+  ansible.builtin.systemd:
+    name: awx-opa
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for OPA health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_opa_server_http_port }}/health"
+    method: GET
+    status_code: 200
+  register: awx_opa_health
+  retries: 30
+  delay: 2
+  until: awx_opa_health.status == 200
+  changed_when: false

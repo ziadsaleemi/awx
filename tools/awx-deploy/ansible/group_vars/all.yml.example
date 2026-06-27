@@ -98,3 +98,30 @@ awx_eda_server_ui_port: 8443
 awx_eda_k8s_operator_ref: main
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
+
+# Policy as Code integration.
+# OPA is standalone and can run on a dedicated VM/container host or any external
+# OPA URL. Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or
+# when a server AWX deployment is managing a remote Kubernetes API.
+awx_opa_enabled: false
+awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
+awx_opa_host: ""
+awx_opa_port: 8181
+awx_opa_ssl: false
+awx_opa_auth_type: None
+awx_opa_request_timeout: 1.5
+awx_opa_request_retries: 2
+
+# Standalone OPA VM/container path.
+awx_opa_container_image: docker.io/openpolicyagent/opa:latest
+awx_opa_server_http_port: 8181
+awx_opa_server_policy: ""
+
+# Kubernetes Gatekeeper path.
+awx_gatekeeper_enabled: false
+awx_gatekeeper_configure_awx_settings: "{{ awx_gatekeeper_enabled }}"
+awx_gatekeeper_version: v3.22.2
+awx_gatekeeper_k8s_api_url: https://kubernetes.default.svc
+awx_gatekeeper_k8s_context: in-cluster
+awx_gatekeeper_k8s_use_service_account_token: true
+awx_gatekeeper_k8s_verify_ssl: true

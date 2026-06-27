@@ -1,0 +1,15 @@
+[Unit]
+Description=AWX Open Policy Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5s
+ExecStartPre=-{{ awx_opa_container_engine_cmd }} rm -f {{ awx_opa_container_name }}
+ExecStart={{ awx_opa_container_engine_cmd }} run --rm --name {{ awx_opa_container_name }} --publish {{ awx_opa_server_http_port }}:{{ awx_opa_server_http_port }} --volume {{ awx_opa_server_data_dir }}:/policies:ro,z {{ awx_opa_container_image }} run --server --addr {{ awx_opa_server_addr }} --log-level {{ awx_opa_server_log_level }} /policies
+ExecStop={{ awx_opa_container_engine_cmd }} stop {{ awx_opa_container_name }}
+
+[Install]
+WantedBy=multi-user.target

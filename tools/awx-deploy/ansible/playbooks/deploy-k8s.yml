@@ -2,7 +2,11 @@
 - name: Deploy AWX to Kubernetes
   hosts: all
   gather_facts: false
+  vars:
+    awx_deploy_method: k8s
   roles:
     - awx_k8s
+    - role: awx_gatekeeper_k8s
+      when: awx_gatekeeper_enabled | bool
     - role: awx_eda_k8s
       when: awx_eda_enabled | bool

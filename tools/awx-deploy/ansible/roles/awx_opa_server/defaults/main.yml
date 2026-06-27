@@ -1,0 +1,16 @@
+---
+awx_container_engine: podman
+awx_opa_container_image: docker.io/openpolicyagent/opa:latest
+awx_opa_container_name: awx-opa
+awx_opa_server_base_dir: /opt/opa
+awx_opa_server_data_dir: "{{ awx_opa_server_base_dir }}/policies"
+awx_opa_server_policy_file: "{{ awx_opa_server_data_dir }}/awx.rego"
+awx_opa_server_policy: ""
+awx_opa_server_http_port: 8181
+awx_opa_server_addr: "0.0.0.0:{{ awx_opa_server_http_port }}"
+awx_opa_server_log_level: info
+awx_opa_server_install_packages: true
+awx_opa_server_podman_packages:
+  - podman
+awx_opa_server_docker_packages:
+  - docker

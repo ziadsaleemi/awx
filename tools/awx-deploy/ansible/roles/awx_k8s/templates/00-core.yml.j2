@@ -39,6 +39,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ awx_k8s_name }}
+{% if awx_gatekeeper_k8s_manage_rbac | bool %}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ awx_k8s_name }}-gatekeeper
+rules:
+  - apiGroups: ["templates.gatekeeper.sh"]
+    resources: ["constrainttemplates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["constraints.gatekeeper.sh"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["config.gatekeeper.sh"]
+    resources: ["configs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ awx_k8s_name }}-gatekeeper
+subjects:
+  - kind: ServiceAccount
+    name: {{ awx_k8s_name }}
+    namespace: {{ awx_k8s_namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ awx_k8s_name }}-gatekeeper
+{% endif %}
 ---
 apiVersion: v1
 kind: Secret
@@ -120,6 +153,40 @@ stringData:
     EDA_PASSWORD = {{ awx_eda_password | to_json }}
     EDA_VERIFY_SSL = {{ 'True' if awx_eda_verify_ssl | bool else 'False' }}
     EDA_REQUEST_TIMEOUT = {{ awx_eda_request_timeout | int }}
+{% endif %}
+    MODULE_OPA_ENABLED = {{ 'True' if awx_opa_module_enabled | bool else 'False' }}
+    MODULE_GATEKEEPER_ENABLED = {{ 'True' if awx_gatekeeper_module_enabled | bool else 'False' }}
+{% if awx_opa_configure_awx_settings | bool %}
+{% set effective_opa_host = awx_opa_host %}
+{% if not effective_opa_host and awx_opa_server_inventory_host %}
+{% set opa_host = hostvars.get(awx_opa_server_inventory_host, {}).get('ansible_host', awx_opa_server_inventory_host) %}
+{% set effective_opa_host = opa_host %}
+{% endif %}
+    OPA_HOST = {{ effective_opa_host | to_json }}
+    OPA_PORT = {{ awx_opa_port | int }}
+    OPA_SSL = {{ 'True' if awx_opa_ssl | bool else 'False' }}
+    OPA_AUTH_TYPE = {{ awx_opa_auth_type | to_json }}
+    OPA_AUTH_TOKEN = {{ awx_opa_auth_token | to_json }}
+    OPA_AUTH_CLIENT_CERT = {{ awx_opa_auth_client_cert | to_json }}
+    OPA_AUTH_CLIENT_KEY = {{ awx_opa_auth_client_key | to_json }}
+    OPA_AUTH_CA_CERT = {{ awx_opa_auth_ca_cert | to_json }}
+    OPA_AUTH_CUSTOM_HEADERS = {{ awx_opa_auth_custom_headers | to_json }}
+    OPA_REQUEST_TIMEOUT = {{ awx_opa_request_timeout | float }}
+    OPA_REQUEST_RETRIES = {{ awx_opa_request_retries | int }}
+    OPA_POLICY_BUNDLE = {{ awx_opa_policy_bundle | to_json }}
+{% endif %}
+{% if awx_gatekeeper_configure_awx_settings | bool %}
+    GATEKEEPER_K8S_API_URL = {{ awx_gatekeeper_k8s_api_url | to_json }}
+    GATEKEEPER_K8S_AUTH_TOKEN = {{ awx_gatekeeper_k8s_auth_token | to_json }}
+{% if awx_gatekeeper_k8s_use_service_account_token | bool %}
+    if not GATEKEEPER_K8S_AUTH_TOKEN and os.path.exists("/var/run/secrets/kubernetes.io/serviceaccount/token"):
+        with open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r", encoding="utf-8") as gatekeeper_token_file:
+            GATEKEEPER_K8S_AUTH_TOKEN = gatekeeper_token_file.read().strip()
+{% endif %}
+    GATEKEEPER_K8S_CONTEXT = {{ awx_gatekeeper_k8s_context | to_json }}
+    GATEKEEPER_K8S_CONTEXTS = {{ awx_gatekeeper_k8s_contexts | to_json }}
+    GATEKEEPER_K8S_VERIFY_SSL = {{ 'True' if awx_gatekeeper_k8s_verify_ssl | bool else 'False' }}
+    GATEKEEPER_K8S_REQUEST_TIMEOUT = {{ awx_gatekeeper_k8s_request_timeout | int }}
 {% endif %}
 ---
 apiVersion: v1

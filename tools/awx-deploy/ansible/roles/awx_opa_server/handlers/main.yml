@@ -1,0 +1,6 @@
+---
+- name: Restart awx-opa
+  ansible.builtin.systemd:
+    name: awx-opa
+    state: restarted
+    daemon_reload: true
