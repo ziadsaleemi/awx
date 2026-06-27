@@ -129,6 +129,7 @@ describe('HostDashboard', () => {
   });
 
   it('renders host fact cards', () => {
+    cy.viewport(1920, 1100);
     cy.mount(<HostDashboard page="host" />, {
       path: '/hosts/:id/dashboard',
       initialEntries: ['/hosts/435/dashboard'],
@@ -153,6 +154,34 @@ describe('HostDashboard', () => {
       .first()
       .then(($card) => {
         expect($card[0].getBoundingClientRect().left).to.be.at.least(16);
+      });
+
+    cy.contains('h3', 'Resource utilization')
+      .parents('.page-dashboard-card')
+      .then(($resourceCard) => {
+        cy.contains('h3', 'Network and runtime')
+          .parents('.page-dashboard-card')
+          .then(($networkCard) => {
+            const resourceRect = $resourceCard[0].getBoundingClientRect();
+            const networkRect = $networkCard[0].getBoundingClientRect();
+            expect(Math.abs(resourceRect.top - networkRect.top)).to.be.lessThan(2);
+            expect(Math.abs(resourceRect.height - networkRect.height)).to.be.lessThan(2);
+            expect(resourceRect.width).to.be.greaterThan(600);
+            expect(networkRect.width).to.be.greaterThan(600);
+          });
+      });
+
+    cy.contains('h3', 'Platform and security')
+      .parents('.page-dashboard-card')
+      .then(($platformCard) => {
+        cy.contains('h3', 'Storage, devices, and interfaces')
+          .parents('.page-dashboard-card')
+          .then(($storageCard) => {
+            const platformRect = $platformCard[0].getBoundingClientRect();
+            const storageRect = $storageCard[0].getBoundingClientRect();
+            expect(Math.abs(platformRect.top - storageRect.top)).to.be.lessThan(2);
+            expect(Math.abs(platformRect.height - storageRect.height)).to.be.lessThan(2);
+          });
       });
   });
 

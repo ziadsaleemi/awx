@@ -1,5 +1,6 @@
 """Gatekeeper Policy Manager style API for AWX."""
 
+import ast
 import difflib
 import hashlib
 import json
@@ -60,8 +61,43 @@ def _gatekeeper_bool(value, default=True):
     return bool(value)
 
 
+def _safe_gatekeeper_legacy_literal(value):
+    def convert(node):
+        if isinstance(node, ast.Expression):
+            return convert(node.body)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Dict):
+            return {convert(key): convert(val) for key, val in zip(node.keys, node.values)}
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return [convert(item) for item in node.elts]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            operand = convert(node.operand)
+            return -operand if isinstance(operand, (int, float)) else None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'OrderedDict' and len(node.args) == 1 and not node.keywords:
+            ordered_value = convert(node.args[0])
+            if isinstance(ordered_value, dict):
+                return ordered_value
+            if isinstance(ordered_value, list):
+                return dict(ordered_value)
+        raise ValueError('Unsupported Gatekeeper context literal')
+
+    return convert(ast.parse(value, mode='eval'))
+
+
 def _gatekeeper_context_map():
     configured = getattr(settings, 'GATEKEEPER_K8S_CONTEXTS', {}) or {}
+    if isinstance(configured, str):
+        configured = configured.strip()
+        if not configured or configured.startswith('$encrypted$'):
+            return {}
+        try:
+            configured = json.loads(configured)
+        except (TypeError, ValueError):
+            try:
+                configured = _safe_gatekeeper_legacy_literal(configured)
+            except (SyntaxError, ValueError, TypeError):
+                return {}
     if not isinstance(configured, dict):
         return {}
 
@@ -231,7 +267,13 @@ class GatekeeperKubernetesClient:
         return data.get('items') or []
 
     def list_constraint_resources(self):
-        discovery = self.get(GATEKEEPER_CONSTRAINT_GROUP_PATH)
+        try:
+            discovery = self.get(GATEKEEPER_CONSTRAINT_GROUP_PATH)
+        except requests.HTTPError as exc:
+            response = getattr(exc, 'response', None)
+            if response is not None and response.status_code == 404:
+                return [], []
+            raise
         preferred = ((discovery.get('preferredVersion') or {}).get('version') or '').strip()
         versions = [preferred] if preferred else []
         versions.extend(

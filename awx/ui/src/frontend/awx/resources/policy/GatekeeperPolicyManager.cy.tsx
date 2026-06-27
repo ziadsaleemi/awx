@@ -104,6 +104,7 @@ function mountGatekeeper(response = gatekeeperResponse) {
 
 describe('GatekeeperPolicyManager', () => {
   it('uses full-width policy layout with aligned violation filters', () => {
+    cy.viewport(1920, 1100);
     mountGatekeeper();
 
     cy.get('[data-cy="gatekeeper-policy-manager"]')
@@ -113,6 +114,21 @@ describe('GatekeeperPolicyManager', () => {
     cy.get('#gatekeeper-violation-search').should('exist');
     cy.contains('label', 'Sort').should('exist');
     cy.contains('label', 'Per page').should('exist');
+
+    cy.contains('.pf-v5-c-card__title', 'Cluster')
+      .parents('.pf-v5-c-card')
+      .then(($clusterCard) => {
+        cy.contains('.pf-v5-c-card__title', 'Inventory')
+          .parents('.pf-v5-c-card')
+          .then(($inventoryCard) => {
+            const clusterRect = $clusterCard[0].getBoundingClientRect();
+            const inventoryRect = $inventoryCard[0].getBoundingClientRect();
+            expect(Math.abs(clusterRect.top - inventoryRect.top)).to.be.lessThan(2);
+            expect(Math.abs(clusterRect.height - inventoryRect.height)).to.be.lessThan(2);
+            expect(clusterRect.width).to.be.greaterThan(600);
+            expect(inventoryRect.width).to.be.greaterThan(600);
+          });
+      });
   });
 
   it('links the unconfigured Gatekeeper state to Gatekeeper settings', () => {

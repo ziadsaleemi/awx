@@ -62,6 +62,24 @@ Gatekeeper settings into AWX:
 - `GATEKEEPER_K8S_VERIFY_SSL`
 - `GATEKEEPER_K8S_REQUEST_TIMEOUT`
 
+`GATEKEEPER_K8S_CONTEXTS` is stored through the AWX settings API as encrypted
+JSON text, for example:
+
+```json
+{
+  "prod": {
+    "server_url": "https://kube.example.com:6443",
+    "auth_token": "$TOKEN",
+    "verify_ssl": false,
+    "request_timeout": 5
+  }
+}
+```
+
+File-based deployments may still render a native Python dictionary. AWX also
+accepts legacy `OrderedDict` text produced by earlier builds so upgraded
+controllers do not lose named Gatekeeper contexts.
+
 For k3s/k8s, the default Gatekeeper API URL is:
 
 ```text
@@ -84,6 +102,9 @@ and rollback flows.
   `awx_gatekeeper_manifest_url` and rerunning `deploy-gatekeeper-k8s.yml` or the
   k3s/k8s AWX playbook with `awx_gatekeeper_enabled=true`.
 - Run policy smoke after either side changes.
+- A Gatekeeper cluster with no `ConstraintTemplate` objects is still considered
+  available. Empty `/apis/constraints.gatekeeper.sh` discovery responses should
+  report zero constraints, not an unreachable policy service.
 
 ## Verification
 

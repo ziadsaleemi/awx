@@ -169,6 +169,12 @@ For k3s, use `playbooks/deploy-k3s.yml` with the same variables. The AWX
 service account receives Gatekeeper read/write RBAC only when
 `awx_gatekeeper_configure_awx_settings=true`.
 
+When multiple Gatekeeper contexts are configured through the AWX settings API,
+`GATEKEEPER_K8S_CONTEXTS` is encrypted JSON text keyed by context name. The
+deploy roles may still render a native Python dictionary in file-based settings,
+and AWX keeps reading legacy `OrderedDict` text from earlier builds during
+upgrades.
+
 ## Backup / Restore
 
 ```bash

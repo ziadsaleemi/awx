@@ -534,14 +534,16 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
 @override_settings(
     GATEKEEPER_K8S_API_URL='https://kube.default.test',
     GATEKEEPER_K8S_CONTEXT='default',
-    GATEKEEPER_K8S_CONTEXTS={
-        'prod': {
-            'server_url': 'https://kube.prod.test',
-            'auth_token': 'prod-token',
-            'verify_ssl': False,
-            'request_timeout': 9,
+    GATEKEEPER_K8S_CONTEXTS=json.dumps(
+        {
+            'prod': {
+                'server_url': 'https://kube.prod.test',
+                'auth_token': 'prod-token',
+                'verify_ssl': False,
+                'request_timeout': 9,
+            }
         }
-    },
+    ),
 )
 def test_gatekeeper_policy_manager_selects_named_context(get, admin_user):
     with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get:
@@ -576,6 +578,84 @@ def test_gatekeeper_policy_manager_selects_named_context(get, admin_user):
         verify=False,
         timeout=9.0,
     )
+
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.default.test',
+    GATEKEEPER_K8S_CONTEXT='default',
+    GATEKEEPER_K8S_CONTEXTS={
+        'prod': {
+            'server_url': 'https://kube.prod.test',
+            'auth_token': 'prod-token',
+            'verify_ssl': False,
+            'request_timeout': 9,
+        }
+    },
+)
+def test_gatekeeper_policy_manager_accepts_file_based_context_dict(get, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get:
+        response = get(reverse('api:opa_gatekeeper') + '?context=prod', user=admin_user, expect=200)
+
+    assert response.data['cluster']['server_url'] == 'https://kube.prod.test'
+    assert response.data['contexts'][1]['source'] == 'context_map'
+    requests_get.assert_any_call(
+        'https://kube.prod.test/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer prod-token'},
+        verify=False,
+        timeout=9.0,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.default.test',
+    GATEKEEPER_K8S_CONTEXT='default',
+    GATEKEEPER_K8S_CONTEXTS=(
+        "{'prod': OrderedDict({'server_url': 'https://kube.prod.test', "
+        "'auth_token': 'prod-token', 'verify_ssl': False, 'request_timeout': 9})}"
+    ),
+)
+def test_gatekeeper_policy_manager_accepts_legacy_ordereddict_context_text(get, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get:
+        response = get(reverse('api:opa_gatekeeper') + '?context=prod', user=admin_user, expect=200)
+
+    assert response.data['cluster']['server_url'] == 'https://kube.prod.test'
+    assert response.data['contexts'][1]['source'] == 'context_map'
+    requests_get.assert_any_call(
+        'https://kube.prod.test/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer prod-token'},
+        verify=False,
+        timeout=9.0,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_AUTH_TOKEN='secret-token',
+    GATEKEEPER_K8S_CONTEXT='prod',
+    GATEKEEPER_K8S_VERIFY_SSL=False,
+)
+def test_gatekeeper_policy_manager_treats_missing_constraint_group_as_empty(get, admin_user):
+    responses = [
+        _json_response({'items': []}),
+        _json_error_response({'message': 'not found'}, status_code=404),
+        _json_response({'items': []}),
+    ]
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=responses):
+        response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
+
+    assert response.data['configured'] is True
+    assert response.data['counts'] == {
+        'constraint_templates': 0,
+        'constraints': 0,
+        'violations': 0,
+        'filtered_violations': 0,
+        'configs': 0,
+    }
+    assert response.data['errors'] == []
 
 
 @pytest.mark.django_db

@@ -419,13 +419,15 @@ function Detail(props: { label: string; value?: string | number }) {
 function UsageRow(props: { label: string; value: number; description?: string }) {
   return (
     <StackItem>
-      <Flex alignItems={{ default: 'alignItemsCenter' }}>
-        <FlexItem grow={{ default: 'grow' }}>
+      <Flex alignItems={{ default: 'alignItemsCenter' }} flexWrap={{ default: 'wrap' }}>
+        <FlexItem grow={{ default: 'grow' }} style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12, marginBottom: 4 }}>{props.label}</div>
         </FlexItem>
         {props.description && (
-          <FlexItem>
-            <Text component={TextVariants.small}>{props.description}</Text>
+          <FlexItem style={{ minWidth: 0 }}>
+            <Text component={TextVariants.small} style={{ overflowWrap: 'anywhere' }}>
+              {props.description}
+            </Text>
           </FlexItem>
         )}
       </Flex>
@@ -440,13 +442,13 @@ function InlineRows(props: { rows: { label: string; value?: string | number }[] 
     <Stack hasGutter>
       {props.rows.map((row) => (
         <StackItem key={row.label}>
-          <Flex spaceItems={{ default: 'spaceItemsMd' }}>
+          <Flex spaceItems={{ default: 'spaceItemsMd' }} flexWrap={{ default: 'nowrap' }}>
             <FlexItem style={{ minWidth: 120 }}>
               <Text component={TextVariants.small} style={{ fontWeight: 600 }}>
                 {row.label}
               </Text>
             </FlexItem>
-            <FlexItem grow={{ default: 'grow' }}>
+            <FlexItem grow={{ default: 'grow' }} style={{ minWidth: 0 }}>
               <Text component={TextVariants.small} style={{ overflowWrap: 'anywhere' }}>
                 {row.value || t('Not available')}
               </Text>
@@ -754,7 +756,12 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Resource utilization')} width="full" height="md">
+      <PageDashboardCard
+        title={t('Resource utilization')}
+        width="half"
+        height="lg"
+        style={{ minWidth: 0 }}
+      >
         <CardBody>
           <DashboardGrid minColumnWidth="340px">
             <Stack hasGutter>
@@ -852,7 +859,12 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Network and runtime')} width="full" height="md">
+      <PageDashboardCard
+        title={t('Network and runtime')}
+        width="half"
+        height="lg"
+        style={{ minWidth: 0 }}
+      >
         <CardBody>
           <DashboardGrid minColumnWidth="340px">
             <DetailSection
@@ -892,7 +904,12 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Platform and security')} width="full" height="md">
+      <PageDashboardCard
+        title={t('Platform and security')}
+        width="half"
+        height="lg"
+        style={{ minWidth: 0 }}
+      >
         <CardBody>
           <DashboardGrid minColumnWidth="340px">
             <DetailSection
@@ -941,7 +958,12 @@ export function HostDashboard(props: { page: 'host' | 'inventory' }) {
         </CardBody>
       </PageDashboardCard>
 
-      <PageDashboardCard title={t('Storage, devices, and interfaces')} width="full" height="md">
+      <PageDashboardCard
+        title={t('Storage, devices, and interfaces')}
+        width="half"
+        height="lg"
+        style={{ minWidth: 0 }}
+      >
         <CardBody>
           <DashboardGrid minColumnWidth="360px">
             <Stack hasGutter>

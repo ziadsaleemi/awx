@@ -1529,9 +1529,9 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
             </Card>
           </StackItem>
           <StackItem>
-            <Grid hasGutter>
+            <Grid hasGutter style={{ alignItems: 'stretch' }}>
               <GridItem sm={12} xl={6}>
-                <Card isFlat>
+                <Card isFlat style={{ height: '100%' }}>
                   <CardHeader>
                     <CardTitle>{t('Cluster')}</CardTitle>
                   </CardHeader>
@@ -1560,7 +1560,7 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
                 </Card>
               </GridItem>
               <GridItem sm={12} xl={6}>
-                <Card isFlat>
+                <Card isFlat style={{ height: '100%' }}>
                   <CardHeader>
                     <CardTitle>{t('Inventory')}</CardTitle>
                   </CardHeader>
