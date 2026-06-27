@@ -264,7 +264,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: t('View JSON'),
+        label: t('View data'),
         onClick: (record) => setModalState({ mode: 'view', record }),
       },
     ];
@@ -306,7 +306,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: config.form ? t('Edit') : t('Edit JSON'),
+        label: config.form ? t('Edit') : t('Edit data'),
         isDisabled: !canManageEda
           ? t('You need EDA administrator permissions to edit this resource.')
           : undefined,
@@ -1239,6 +1239,8 @@ function EdaStructuredDataEditor(props: {
   helperText?: string;
   value: string;
   language: StructuredDataEditorLanguage;
+  isReadOnly?: boolean;
+  minHeight?: number;
   onChange: (value: string) => void;
   onLanguageChange: (language: StructuredDataEditorLanguage) => void;
 }) {
@@ -1275,8 +1277,9 @@ function EdaStructuredDataEditor(props: {
         value={props.value}
         onChange={props.onChange}
         setError={setEditorError}
+        isReadOnly={props.isReadOnly}
         className="pf-v5-c-form-control"
-        minHeight={150}
+        minHeight={props.minHeight ?? 150}
       />
       {(props.helperText || editorError) && (
         <FormHelperText>
@@ -1633,8 +1636,13 @@ function EdaResourceJsonModal(props: {
   const { config, mode, record } = props;
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
-  const [jsonText, setJsonText] = useState(() =>
-    JSON.stringify(initialPayload(config, mode, record), null, 2)
+  const settings = usePageSettings();
+  const defaultStructuredLanguage = structuredDataEditorLanguage(settings.dataEditorFormat);
+  const [resourceDataLanguage, setResourceDataLanguage] = useState<StructuredDataEditorLanguage>(
+    () => defaultStructuredLanguage
+  );
+  const [resourceDataText, setResourceDataText] = useState(() =>
+    structuredDataEditorText(initialPayload(config, mode, record), defaultStructuredLanguage)
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isReadOnly = mode === 'view';
@@ -1643,11 +1651,11 @@ function EdaResourceJsonModal(props: {
     if (isReadOnly) return;
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(jsonText || '{}') as Record<string, unknown>;
+      parsed = parseStructuredDataObject(resourceDataText, 'Resource data');
     } catch (err) {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('JSON is invalid'),
+        title: t('Resource data is invalid'),
         children: err instanceof Error ? err.message : String(err),
       });
       return;
@@ -1707,16 +1715,21 @@ function EdaResourceJsonModal(props: {
       ].filter(Boolean)}
     >
       <Form>
-        <FormGroup label={t('Resource JSON')} fieldId="eda-resource-json">
-          <TextArea
-            id="eda-resource-json"
-            value={jsonText}
-            onChange={(_, value) => setJsonText(value)}
-            rows={18}
-            readOnly={isReadOnly}
-            style={{ fontFamily: 'monospace' }}
-          />
-        </FormGroup>
+        <EdaStructuredDataEditor
+          id="eda-resource-data"
+          label={t('Resource data')}
+          helperText={
+            isReadOnly
+              ? t('View this resource as YAML or JSON.')
+              : t('Edit this resource as YAML or JSON. Server-managed fields are excluded.')
+          }
+          value={resourceDataText}
+          language={resourceDataLanguage}
+          isReadOnly={isReadOnly}
+          minHeight={360}
+          onChange={setResourceDataText}
+          onLanguageChange={setResourceDataLanguage}
+        />
       </Form>
     </Modal>
   );

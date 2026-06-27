@@ -167,6 +167,16 @@ const teamRoleAssignmentConfig: EdaResourceConfig = {
   ],
 };
 
+const fallbackDataConfig: EdaResourceConfig = {
+  resource: 'custom-resources',
+  title: 'Custom Resources',
+  description: 'Manage unstructured EDA resources.',
+  emptyStateTitle: 'No custom resources found',
+  emptyStateDescription: 'Create a custom EDA resource.',
+  createSample: {},
+  fields: [{ label: 'Description', keys: ['description'] }],
+};
+
 const rbacSyncReport = {
   source: 'eda_controller',
   mode: 'observe',
@@ -583,6 +593,63 @@ describe('EdaActivations', () => {
           expect(body.poll).to.equal(true);
         }
       );
+  });
+
+  it('uses YAML and JSON editor views for fallback EDA resource data', () => {
+    cy.intercept('GET', '/api/v2/eda/custom-resources/?order_by=name&page=1&page_size=10', {
+      count: 1,
+      next: null,
+      previous: null,
+      results: [
+        {
+          id: 77,
+          name: 'Unstructured resource',
+          description: 'Fallback data',
+          settings: { enabled: true },
+        },
+      ],
+    }).as('customResources');
+    cy.intercept('POST', '/api/v2/eda/custom-resources/', {
+      id: 78,
+      name: 'Created fallback',
+    }).as('createCustomResource');
+
+    cy.mount(<EdaResourceList config={fallbackDataConfig} />, {
+      path: '/eda/custom-resources',
+      initialEntries: ['/eda/custom-resources'],
+    });
+
+    cy.verifyPageTitle('Custom Resources');
+    cy.wait('@customResources');
+    cy.get('[aria-label="kebab dropdown toggle"]').click();
+    cy.contains('button', 'View data').click();
+    cy.contains('Resource data').should('be.visible');
+    cy.contains('settings:').should('be.visible');
+    cy.get('[aria-label="Toggle to JSON"]').click();
+    cy.contains('"settings"').should('be.visible');
+    cy.contains('button', /^Close$/).click();
+
+    cy.contains('button', /^Create$/).click();
+    cy.get('[data-cy="eda-resource-data"]').click();
+    cy.get('[data-cy="eda-resource-data"] textarea')
+      .first()
+      .type(
+        'name: Created fallback{enter}description: Added from YAML{enter}settings:{enter}  enabled: true',
+        { force: true }
+      );
+    cy.get('[aria-label="Toggle to JSON"]').click();
+    cy.contains('"Created fallback"').should('be.visible');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createCustomResource')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body).to.deep.equal({
+          name: 'Created fallback',
+          description: 'Added from YAML',
+          settings: { enabled: true },
+        });
+      });
   });
 
   it('creates EDA projects with structured fields instead of raw JSON', () => {
