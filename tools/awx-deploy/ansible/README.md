@@ -136,8 +136,9 @@ ansible-playbook -i inventories/example.ini playbooks/restore.yml \
 
 After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke
 wrapper from the repository root. It checks AWX root/static assets, authenticated
-API access, EDA Controller status, EDA resource list endpoints, AWX-to-EDA RBAC
-sync preview, anonymous access denial, and optional RBAC/project/activation flows.
+API access, EDA Controller status, live EDA Controller-backed resource list
+endpoints, AWX-to-EDA RBAC sync preview, anonymous access denial, and optional
+RBAC/project/activation flows.
 
 ```bash
 export AWX_PASSWORD='change-me'
@@ -145,6 +146,10 @@ python3 tools/awx-deploy/scripts/smoke_eda.py \
   --url http://awx.example.com \
   --username admin
 ```
+
+In local development, point `--url` at the frontend dev server, for example
+`http://localhost:4012`, so the root/static asset check exercises the UI bundle
+as well as proxied API calls.
 
 To prove multiple deployment paths in one run:
 
@@ -159,11 +164,18 @@ Optional checks:
 - `--rbac-username` / `--rbac-password` verifies an EDA operator or non-admin
   user has the expected read status and cannot mutate EDA resources by default.
 - `--project-url` creates a temporary EDA project, syncs it, polls import state,
-  and deletes it.
+  discovers the imported rulebooks, and deletes it.
+- `--start-project-rulebook` extends `--project-url` into full E2E proof by
+  launching a rulebook discovered from that temporary project, reading
+  detail/events, and cleaning up the activation before deleting the project. Use
+  `--project-rulebook-name` to select a known-safe rulebook.
 - `--rulebook-id` launches a temporary activation, reads detail/logs, and
   deletes it. Add `--decision-environment-id`, `--organization-id`, and
   `--eda-credential-id` when the selected rulebook needs them.
-- `--json-output /path/to/report.json` writes machine-readable evidence.
+- `--allow-non-controller-source` permits non-live/mock resource responses. By
+  default, EDA resource list checks must report `source=eda_controller`.
+- `--json-output /path/to/report.json` writes machine-readable evidence with
+  per-URL and total duration fields for upgrade comparisons.
 
 ## vCenter Lab
 

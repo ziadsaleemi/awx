@@ -73,7 +73,11 @@ python3 tools/awx-deploy/scripts/smoke_eda.py \
 ```
 
 Use project and activation options for full E2E proof when a live EDA Controller
-has reachable SCM, decision environment, organization, and rulebook IDs.
+has reachable SCM, decision environment, organization, and rulebook IDs. Add
+`--start-project-rulebook --project-rulebook-name <safe-rulebook.yml>` to prove
+create project -> sync -> discover imported rulebook -> launch activation ->
+inspect events -> cleanup activation -> delete project through AWX. Smoke JSON
+evidence includes per-URL and total durations for upgrade/failback comparisons.
 
 ## Safety Rules
 

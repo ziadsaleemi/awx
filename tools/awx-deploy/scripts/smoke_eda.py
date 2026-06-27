@@ -132,10 +132,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--project-branch', default=os.environ.get('EDA_SMOKE_PROJECT_BRANCH', 'main'), help='Branch for the optional project smoke.')
     parser.add_argument('--project-poll-attempts', type=int, default=int(os.environ.get('EDA_SMOKE_PROJECT_POLL_ATTEMPTS', '20')))
     parser.add_argument('--project-poll-interval', type=float, default=float(os.environ.get('EDA_SMOKE_PROJECT_POLL_INTERVAL', '3')))
+    parser.add_argument(
+        '--start-project-rulebook',
+        action='store_true',
+        default=env_bool('EDA_SMOKE_START_PROJECT_RULEBOOK', False),
+        help='After the optional project sync, discover a rulebook from that temporary project, launch it, inspect detail/events, and clean it up.',
+    )
+    parser.add_argument(
+        '--project-rulebook-name',
+        default=os.environ.get('EDA_SMOKE_PROJECT_RULEBOOK_NAME'),
+        help='Rulebook name to launch from the temporary project when --start-project-rulebook is enabled. Defaults to the first discovered rulebook.',
+    )
     parser.add_argument('--rulebook-id', default=os.environ.get('EDA_SMOKE_RULEBOOK_ID'), help='Optional rulebook id for create/start activation smoke.')
     parser.add_argument('--decision-environment-id', default=os.environ.get('EDA_SMOKE_DECISION_ENVIRONMENT_ID'))
     parser.add_argument('--organization-id', default=os.environ.get('EDA_SMOKE_ORGANIZATION_ID'))
     parser.add_argument('--eda-credential-id', action='append', dest='eda_credential_ids', default=split_env_words('EDA_SMOKE_CREDENTIAL_IDS'))
+    parser.add_argument(
+        '--require-controller-source',
+        dest='require_controller_source',
+        action='store_true',
+        default=env_bool('EDA_SMOKE_REQUIRE_CONTROLLER_SOURCE', True),
+        help='Require EDA list endpoints to report source=eda_controller. Default true.',
+    )
+    parser.add_argument(
+        '--allow-non-controller-source',
+        dest='require_controller_source',
+        action='store_false',
+        help='Allow EDA list endpoints that do not report source=eda_controller.',
+    )
     parser.add_argument('--rbac-username', default=os.environ.get('EDA_RBAC_USERNAME'), help='Optional non-admin/operator username for RBAC smoke.')
     parser.add_argument('--rbac-password', default=os.environ.get('EDA_RBAC_PASSWORD'), help='Optional non-admin/operator password for RBAC smoke.')
     parser.add_argument(
@@ -294,7 +318,10 @@ def check_eda_resources(base_url: str, args: argparse.Namespace) -> tuple[list[C
         results = payload.get('results')
         if not isinstance(results, list):
             raise SmokeFailure(f'EDA resource {resource} did not return a results list.')
-        check.detail = f'count={payload.get("count", len(results))} source={payload.get("source", "-")}'
+        source = str(payload.get('source') or '')
+        if args.require_controller_source and source != 'eda_controller':
+            raise SmokeFailure(f'EDA resource {resource} reported source={source or "-"}, expected eda_controller.')
+        check.detail = f'count={payload.get("count", len(results))} source={source or "-"}'
         checks.append(check)
         if resource == 'activations' and results:
             raw_id = results[0].get('id') if isinstance(results[0], dict) else None
@@ -321,6 +348,102 @@ def check_eda_rbac_sync(base_url: str, args: argparse.Namespace) -> Check:
 
 def unique_name(prefix: str) -> str:
     return f'{prefix}-{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}'
+
+
+def rulebook_name(rulebook: dict[str, Any]) -> str:
+    return str(rulebook.get('name') or rulebook.get('rulebook_name') or rulebook.get('id') or '').strip()
+
+
+def discover_project_rulebook(base_url: str, args: argparse.Namespace, project_id: Any) -> tuple[Check, dict[str, Any]]:
+    path = f'/api/v2/eda/rulebooks/?page_size=200&project_id={urllib.parse.quote(str(project_id))}'
+    check, payload = check_json_endpoint(base_url, path, 'eda project rulebook discovery', args)
+    results = payload.get('results')
+    if not isinstance(results, list):
+        raise SmokeFailure('EDA project rulebook discovery did not return a results list.')
+    source = str(payload.get('source') or '')
+    if args.require_controller_source and source != 'eda_controller':
+        raise SmokeFailure(f'EDA project rulebook discovery reported source={source or "-"}, expected eda_controller.')
+    project_rulebooks = [item for item in results if isinstance(item, dict) and str(item.get('project_id') or '') == str(project_id)]
+    if not project_rulebooks:
+        raise SmokeFailure(f'EDA project {project_id} did not expose discovered rulebooks after sync.')
+    wanted = str(args.project_rulebook_name or '').strip()
+    selected: dict[str, Any] | None = None
+    if wanted:
+        for rulebook in project_rulebooks:
+            if rulebook_name(rulebook) == wanted:
+                selected = rulebook
+                break
+        if selected is None:
+            names = ', '.join(rulebook_name(rulebook) for rulebook in project_rulebooks[:10])
+            raise SmokeFailure(f'EDA project {project_id} did not include rulebook {wanted!r}. Available: {names}')
+    else:
+        selected = project_rulebooks[0]
+    name = rulebook_name(selected)
+    check.detail = f'count={len(project_rulebooks)} selected={name or selected.get("id")}'
+    check.data = {'project_id': project_id, 'selected_rulebook_id': selected.get('id'), 'selected_rulebook_name': name}
+    return check, selected
+
+
+def launch_activation_by_rulebook(
+    base_url: str,
+    args: argparse.Namespace,
+    rulebook_id: Any,
+    *,
+    label_prefix: str = 'eda activation',
+    name_prefix: str = 'awx-eda-smoke-activation',
+) -> list[Check]:
+    name = unique_name(name_prefix)
+    payload: dict[str, Any] = {'name': name, 'rulebook_id': int(rulebook_id), 'poll': True, 'include_events': True}
+    if args.decision_environment_id:
+        payload['decision_environment_id'] = int(args.decision_environment_id)
+    if args.organization_id:
+        payload['organization_id'] = int(args.organization_id)
+    if args.eda_credential_ids:
+        payload['eda_credentials'] = [int(value) for value in args.eda_credential_ids]
+    activation_id: Any = None
+    checks: list[Check] = []
+    try:
+        started = request(
+            base_url,
+            '/api/v2/eda/activations/start/',
+            username=args.username,
+            password=args.password,
+            method='POST',
+            payload=payload,
+            verify_tls=args.verify_tls,
+            timeout=args.timeout,
+            user_agent=args.user_agent,
+        )
+        expect_status(f'{label_prefix} launch', started, 200)
+        started_payload = started.json()
+        activation = started_payload.get('activation') if isinstance(started_payload.get('activation'), dict) else {}
+        activation_id = activation.get('id')
+        if activation_id in (None, ''):
+            raise SmokeFailure(f'{label_prefix} launch response did not include an activation id.')
+        checks.append(Check(f'{label_prefix} launch', True, f'id={activation_id} actions={started_payload.get("actions", [])}'))
+        detail_check, _ = check_json_endpoint(base_url, f'/api/v2/eda/activations/{activation_id}/', f'{label_prefix} detail after launch', args)
+        events_check, events = check_json_endpoint(
+            base_url, f'/api/v2/eda/activations/{activation_id}/events/?page_size=20', f'{label_prefix} events after launch', args
+        )
+        events_check.detail = f'count={events.get("count", 0)}'
+        checks.extend([detail_check, events_check])
+        return checks
+    finally:
+        if activation_id not in (None, ''):
+            deleted = request(
+                base_url,
+                f'/api/v2/eda/activations/{activation_id}/',
+                username=args.username,
+                password=args.password,
+                method='DELETE',
+                verify_tls=args.verify_tls,
+                timeout=args.timeout,
+                user_agent=args.user_agent,
+            )
+            if deleted.status in {200, 202, 204, 404}:
+                checks.append(Check(f'{label_prefix} cleanup', True, f'HTTP {deleted.status}'))
+            else:
+                checks.append(Check(f'{label_prefix} cleanup', False, f'HTTP {deleted.status}: {deleted.text[:200]}'))
 
 
 def check_project_e2e(base_url: str, args: argparse.Namespace) -> list[Check]:
@@ -384,6 +507,18 @@ def check_project_e2e(base_url: str, args: argparse.Namespace) -> list[Check]:
             time.sleep(max(args.project_poll_interval, 0))
         else:
             raise SmokeFailure(f'EDA project sync did not complete; last state={last_state or "-"}')
+        discovery_check, selected_rulebook = discover_project_rulebook(base_url, args, project_id)
+        checks.append(discovery_check)
+        if args.start_project_rulebook:
+            checks.extend(
+                launch_activation_by_rulebook(
+                    base_url,
+                    args,
+                    selected_rulebook.get('id'),
+                    label_prefix='eda project activation',
+                    name_prefix='awx-eda-smoke-project-activation',
+                )
+            )
         return checks
     finally:
         if project_id not in (None, ''):
@@ -406,58 +541,7 @@ def check_project_e2e(base_url: str, args: argparse.Namespace) -> list[Check]:
 def check_activation_e2e(base_url: str, args: argparse.Namespace) -> list[Check]:
     if not args.rulebook_id:
         return [Check('eda activation e2e', True, 'skipped; set --rulebook-id to launch/delete')]
-    name = unique_name('awx-eda-smoke-activation')
-    payload: dict[str, Any] = {'name': name, 'rulebook_id': int(args.rulebook_id), 'poll': True, 'include_events': True}
-    if args.decision_environment_id:
-        payload['decision_environment_id'] = int(args.decision_environment_id)
-    if args.organization_id:
-        payload['organization_id'] = int(args.organization_id)
-    if args.eda_credential_ids:
-        payload['eda_credentials'] = [int(value) for value in args.eda_credential_ids]
-    activation_id: Any = None
-    checks: list[Check] = []
-    try:
-        started = request(
-            base_url,
-            '/api/v2/eda/activations/start/',
-            username=args.username,
-            password=args.password,
-            method='POST',
-            payload=payload,
-            verify_tls=args.verify_tls,
-            timeout=args.timeout,
-            user_agent=args.user_agent,
-        )
-        expect_status('eda activation launch', started, 200)
-        started_payload = started.json()
-        activation = started_payload.get('activation') if isinstance(started_payload.get('activation'), dict) else {}
-        activation_id = activation.get('id')
-        if activation_id in (None, ''):
-            raise SmokeFailure('EDA activation launch response did not include an activation id.')
-        checks.append(Check('eda activation launch', True, f'id={activation_id} actions={started_payload.get("actions", [])}'))
-        detail_check, _ = check_json_endpoint(base_url, f'/api/v2/eda/activations/{activation_id}/', 'eda activation detail after launch', args)
-        events_check, events = check_json_endpoint(
-            base_url, f'/api/v2/eda/activations/{activation_id}/events/?page_size=20', 'eda activation logs after launch', args
-        )
-        events_check.detail = f'count={events.get("count", 0)}'
-        checks.extend([detail_check, events_check])
-        return checks
-    finally:
-        if activation_id not in (None, ''):
-            deleted = request(
-                base_url,
-                f'/api/v2/eda/activations/{activation_id}/',
-                username=args.username,
-                password=args.password,
-                method='DELETE',
-                verify_tls=args.verify_tls,
-                timeout=args.timeout,
-                user_agent=args.user_agent,
-            )
-            if deleted.status in {200, 202, 204, 404}:
-                checks.append(Check('eda activation cleanup', True, f'HTTP {deleted.status}'))
-            else:
-                checks.append(Check('eda activation cleanup', False, f'HTTP {deleted.status}: {deleted.text[:200]}'))
+    return launch_activation_by_rulebook(base_url, args, args.rulebook_id)
 
 
 def check_rbac(base_url: str, args: argparse.Namespace) -> list[Check]:
@@ -546,9 +630,12 @@ def main() -> int:
     report: dict[str, Any] = {
         'generated_at': datetime.now(timezone.utc).isoformat(),
         'urls': {},
+        'url_durations_ms': {},
     }
     failed = False
+    started_at = time.perf_counter()
     for url in urls:
+        url_started_at = time.perf_counter()
         report['urls'][url] = []
         try:
             checks = run_url(url, args)
@@ -561,6 +648,9 @@ def main() -> int:
                 failed = True
             emit_check(url, check)
             report['urls'][url].append({'label': check.label, 'ok': check.ok, 'detail': check.detail, 'data': check.data})
+        report['url_durations_ms'][url] = int((time.perf_counter() - url_started_at) * 1000)
+    report['duration_ms'] = int((time.perf_counter() - started_at) * 1000)
+    report['completed_at'] = datetime.now(timezone.utc).isoformat()
     if args.json_output:
         with open(args.json_output, 'w', encoding='utf-8') as stream:
             json.dump(report, stream, indent=2, sort_keys=True)
