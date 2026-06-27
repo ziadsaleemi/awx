@@ -41,10 +41,9 @@ export function useAwxPolicyRoutes() {
           element: <PolicyAsCode view="tester" />,
         },
         {
-          id: AwxRoute.PolicyAsCodeSmoke,
-          label: t('Smoke Test'),
           path: 'smoke',
-          element: <PolicyAsCode view="smoke" />,
+          element: <Navigate to="/settings/troubleshooting" replace />,
+          hidden: true,
         },
         {
           path: '',

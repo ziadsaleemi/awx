@@ -109,7 +109,6 @@ export function filterPolicyRoutesByPermissions(
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
       AwxRoute.PolicyAsCodeTester,
-      AwxRoute.PolicyAsCodeSmoke,
     ])
   );
 }
@@ -126,12 +125,10 @@ export function filterPolicyRoutesByModules(
   const allowedIds = new Set<string>([AwxRoute.PolicyAsCodeOverview]);
   if (gatekeeperEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeGatekeeper);
-    allowedIds.add(AwxRoute.PolicyAsCodeSmoke);
   }
   if (opaEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeModules);
     allowedIds.add(AwxRoute.PolicyAsCodeTester);
-    allowedIds.add(AwxRoute.PolicyAsCodeSmoke);
   } else {
     allowedIds.delete(AwxRoute.PolicyAsCodeOverview);
   }
@@ -538,7 +535,13 @@ export function useAwxNavigation() {
             },
             {
               path: '',
-              element: <AwxSettingsCategoryDetailsPage categoryId="debug" key="debug" />,
+              element: (
+                <AwxSettingsCategoryDetailsPage
+                  categoryId="debug"
+                  smokePanel="policy"
+                  key="debug"
+                />
+              ),
             },
           ],
         },

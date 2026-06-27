@@ -1,14 +1,13 @@
 import { PageHeader, PageLayout } from '../../../../framework';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
-import { ExternalAutomationSmokePanel } from '../../administration/settings/ExternalAutomationSmokePanel';
 import { OPAPolicyManagementPanel } from '../../administration/settings/OPAPolicyManagementPanel';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxConfig } from '../../common/useAwxConfig';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
 
-type PolicyAsCodeView = 'overview' | 'gatekeeper' | 'modules' | 'tester' | 'smoke';
+type PolicyAsCodeView = 'overview' | 'gatekeeper' | 'modules' | 'tester';
 
 export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   const { t } = useTranslation();
@@ -27,9 +26,7 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
         ? t('Gatekeeper')
         : view === 'tester'
           ? t('Policy Tester')
-          : view === 'smoke'
-            ? t('Policy Smoke Test')
-            : t('Policy as Code');
+          : t('Policy as Code');
 
   if (view === 'modules' && activeAwxUser && !capabilities.isLoading && !canManagePolicy) {
     return <Navigate to="../overview" replace />;
@@ -40,10 +37,6 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   if (view === 'gatekeeper' && !moduleGatekeeperEnabled) {
     return <Navigate to={moduleOpaEnabled ? '../overview' : '../../overview'} replace />;
   }
-  if (view === 'smoke' && !moduleOpaEnabled && !moduleGatekeeperEnabled) {
-    return <Navigate to="../../overview" replace />;
-  }
-
   return (
     <PageLayout>
       <PageHeader title={title} />
@@ -56,13 +49,6 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
       ) : null}
       {view === 'tester' ? (
         <OPAPolicyManagementPanel sections={['tester']} canManagePolicy={canManagePolicy} />
-      ) : null}
-      {view === 'smoke' ? (
-        <ExternalAutomationSmokePanel
-          includeEda={false}
-          includeOpa={moduleOpaEnabled}
-          includeGatekeeper={moduleGatekeeperEnabled}
-        />
       ) : null}
     </PageLayout>
   );

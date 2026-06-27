@@ -183,7 +183,7 @@ describe('AWX navigation capabilities', () => {
           path: 'tester',
           element: <div />,
         },
-        { id: AwxRoute.PolicyAsCodeSmoke, label: 'Smoke Test', path: 'smoke', element: <div /> },
+        { path: 'smoke', element: <div />, hidden: true },
         { path: '', element: <div /> },
       ],
     };
@@ -194,7 +194,7 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
       AwxRoute.PolicyAsCodeTester,
-      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
       undefined,
     ]);
   });
@@ -229,7 +229,7 @@ describe('AWX navigation capabilities', () => {
           path: 'tester',
           element: <div />,
         },
-        { id: AwxRoute.PolicyAsCodeSmoke, label: 'Smoke Test', path: 'smoke', element: <div /> },
+        { path: 'smoke', element: <div />, hidden: true },
         { path: '', element: <div /> },
       ],
     };
@@ -238,12 +238,12 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeModules,
       AwxRoute.PolicyAsCodeTester,
-      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
       undefined,
     ]);
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, false, true))).to.deep.equal([
       AwxRoute.PolicyAsCodeGatekeeper,
-      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
       undefined,
     ]);
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, true))).to.deep.equal([
@@ -251,7 +251,7 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.PolicyAsCodeGatekeeper,
       AwxRoute.PolicyAsCodeModules,
       AwxRoute.PolicyAsCodeTester,
-      AwxRoute.PolicyAsCodeSmoke,
+      undefined,
       undefined,
     ]);
   });
