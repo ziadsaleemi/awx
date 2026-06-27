@@ -1,0 +1,27 @@
+---
+awx_deploy_method: k8s
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_namespace: awx
+awx_k8s_name: awx
+awx_k8s_work_dir: /tmp/awx-k8s
+
+awx_eda_enabled: false
+awx_eda_namespace: eda
+awx_eda_name: awx-eda
+awx_eda_admin_user: admin
+awx_eda_admin_password: "{{ lookup('env', 'EDA_ADMIN_PASSWORD') | default(lookup('env', 'AWX_ADMIN_PASSWORD'), true) }}"
+awx_eda_verify_ssl: false
+awx_eda_allow_local_resource_management: true
+awx_eda_automation_server_url: ""
+awx_eda_event_stream_base_url: ""
+
+awx_eda_k8s_operator_ref: main
+awx_eda_k8s_operator_kustomize_url: "github.com/ansible/eda-server-operator/config/default?ref={{ awx_eda_k8s_operator_ref }}"
+awx_eda_k8s_operator_image: quay.io/ansible/eda-server-operator
+awx_eda_k8s_operator_image_tag: ""
+awx_eda_k8s_operator_deployment: eda-server-operator-controller-manager
+awx_eda_k8s_service_type: ClusterIP
+awx_eda_k8s_node_port: 30855
+awx_eda_k8s_work_dir: "{{ awx_k8s_work_dir }}/eda"
+awx_eda_k8s_wait_for_service: true

@@ -9,6 +9,7 @@
     cmd: "{{ awx_container_engine_cmd }} pull {{ awx_image }}:{{ awx_image_tag }}"
   changed_when: "'Downloaded newer image' in awx_upgrade_pull.stdout or 'Pull complete' in awx_upgrade_pull.stdout"
   register: awx_upgrade_pull
+  when: not awx_skip_image_pull | bool
 
 - name: Re-run receptor role on receptor nodes
   ansible.builtin.include_role:

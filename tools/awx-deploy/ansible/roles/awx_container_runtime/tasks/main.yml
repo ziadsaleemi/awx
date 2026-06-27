@@ -36,6 +36,7 @@
         groups.get('awx_web', [])
       ) | unique
     )
+    and not awx_skip_image_pull | bool
 
 - name: Pull PostgreSQL image
   ansible.builtin.command:

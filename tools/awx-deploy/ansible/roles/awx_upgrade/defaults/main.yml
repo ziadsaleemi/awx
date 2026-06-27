@@ -1,2 +1,3 @@
 ---
+awx_skip_image_pull: false
 awx_upgrade_skip_backup: false

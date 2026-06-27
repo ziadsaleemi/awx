@@ -107,7 +107,7 @@ OPA_POLICY_BUNDLE = {{ awx_opa_policy_bundle | to_json }}
 GATEKEEPER_K8S_API_URL = {{ awx_gatekeeper_k8s_api_url | to_json }}
 GATEKEEPER_K8S_AUTH_TOKEN = {{ awx_gatekeeper_k8s_auth_token | to_json }}
 GATEKEEPER_K8S_CONTEXT = {{ awx_gatekeeper_k8s_context | to_json }}
-GATEKEEPER_K8S_CONTEXTS = {{ awx_gatekeeper_k8s_contexts | to_json }}
+GATEKEEPER_K8S_CONTEXTS = {{ (awx_gatekeeper_k8s_contexts | to_json) | to_json }}
 GATEKEEPER_K8S_VERIFY_SSL = {{ 'True' if awx_gatekeeper_k8s_verify_ssl | bool else 'False' }}
 GATEKEEPER_K8S_REQUEST_TIMEOUT = {{ awx_gatekeeper_k8s_request_timeout | int }}
 {% endif %}
