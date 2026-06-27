@@ -22,6 +22,7 @@ export function DataEditor(props: {
   isReadOnly?: boolean;
   className?: string;
   lineNumbers?: boolean;
+  minHeight?: number;
 }) {
   const id = useID(props);
   const { language, value, onChange, setError, isReadOnly } = props;
@@ -33,12 +34,17 @@ export function DataEditor(props: {
   const innerDivEl = useRef<HTMLDivElement>(null);
 
   // When content changes, we need to update the height of the outer div to match the content
-  const updateEditorHeight = useCallback((value: string) => {
-    if (!outerDivEl.current) return;
-    outerDivEl.current.style.minHeight = `${EditorLineHeight + EditorPadding}` + 'px';
-    const visibleLines = value.split('\n').length;
-    outerDivEl.current.style.height = `${visibleLines * EditorLineHeight + EditorPadding}` + 'px';
-  }, []);
+  const updateEditorHeight = useCallback(
+    (value: string) => {
+      if (!outerDivEl.current) return;
+      const minHeight = props.minHeight ?? EditorLineHeight + EditorPadding;
+      outerDivEl.current.style.minHeight = `${minHeight}px`;
+      const visibleLines = value.split('\n').length;
+      const editorHeight = visibleLines * EditorLineHeight + EditorPadding;
+      outerDivEl.current.style.height = `${Math.max(editorHeight, minHeight)}px`;
+    },
+    [props.minHeight]
+  );
 
   // Create editor
   const editorRef = useRef<{ editor?: monaco.editor.IStandaloneCodeEditor }>({});
@@ -84,8 +90,7 @@ export function DataEditor(props: {
   useEffect(() => {
     const editor = editorRef?.current?.editor;
     if (!editor) return;
-    if (editor.getValue() === value) return;
-    editor.setValue(value);
+    if (editor.getValue() !== value) editor.setValue(value);
     updateEditorHeight(value);
   }, [value, updateEditorHeight]);
 

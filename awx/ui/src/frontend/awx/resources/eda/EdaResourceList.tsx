@@ -7,8 +7,11 @@ import {
   Checkbox,
   Form,
   FormGroup,
+  FormHelperText,
   FormSelect,
   FormSelectOption,
+  HelperText,
+  HelperTextItem,
   Modal,
   Spinner,
   TextArea,
@@ -18,6 +21,8 @@ import { PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import {
   IPageAction,
   ITableColumn,
+  DataEditorActions,
+  objectToString,
   PageActionSelection,
   PageActionType,
   PageHeader,
@@ -25,7 +30,10 @@ import {
   PageTable,
   TextCell,
   usePageAlertToaster,
+  usePageSettings,
+  valueToObject,
 } from '../../../../framework';
+import { DataEditor, DataEditorLanguages } from '../../../../framework/components/DataEditor';
 import { postRequest, requestDelete, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { StatusCell } from '../../../common/Status';
@@ -79,6 +87,8 @@ type EdaResourceFormType =
   | 'role-definition'
   | 'user-role-assignment'
   | 'team-role-assignment';
+
+type StructuredDataEditorLanguage = Extract<DataEditorLanguages, 'json' | 'yaml'>;
 
 interface EdaCredentialRecord {
   id: number | string;
@@ -455,6 +465,8 @@ function EdaResourceFormModal(props: {
   const { config, form, mode, record } = props;
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
+  const settings = usePageSettings();
+  const defaultStructuredLanguage = structuredDataEditorLanguage(settings.dataEditorFormat);
   const [name, setName] = useState(() => stringValue(record?.name));
   const [description, setDescription] = useState(() => stringValue(record?.description));
   const [projectUrl, setProjectUrl] = useState(() => stringValue(record?.url ?? record?.scm_url));
@@ -488,8 +500,10 @@ function EdaResourceFormModal(props: {
   );
   const [testMode, setTestMode] = useState(() => booleanValue(record?.test_mode, false));
   const [eventStreamUuid, setEventStreamUuid] = useState(() => stringValue(record?.uuid));
+  const [additionalDataHeadersLanguage, setAdditionalDataHeadersLanguage] =
+    useState<StructuredDataEditorLanguage>(() => defaultStructuredLanguage);
   const [additionalDataHeaders, setAdditionalDataHeaders] = useState(() =>
-    JSON.stringify(record?.additional_data_headers ?? {}, null, 2)
+    structuredDataEditorText(record?.additional_data_headers, defaultStructuredLanguage)
   );
   const [credentialTypeId, setCredentialTypeId] = useState(() =>
     stringValue(record?.credential_type_id ?? nestedId(record?.credential_type))
@@ -508,8 +522,10 @@ function EdaResourceFormModal(props: {
   const [generateInjectors, setGenerateInjectors] = useState(() =>
     mode === 'create' ? true : !hasObjectKeys(record?.injectors)
   );
+  const [credentialTypeInjectorsLanguage, setCredentialTypeInjectorsLanguage] =
+    useState<StructuredDataEditorLanguage>(() => defaultStructuredLanguage);
   const [credentialTypeInjectorsText, setCredentialTypeInjectorsText] = useState(() =>
-    JSON.stringify(record?.injectors ?? {}, null, 2)
+    structuredDataEditorText(record?.injectors, defaultStructuredLanguage)
   );
   const [username, setUsername] = useState(() => stringValue(record?.username));
   const [firstName, setFirstName] = useState(() => stringValue(record?.first_name));
@@ -943,18 +959,15 @@ function EdaResourceFormModal(props: {
                 onChange={(_, value) => setEventStreamUuid(value)}
               />
             </FormGroup>
-            <FormGroup
+            <EdaStructuredDataEditor
+              id="eda-event-stream-additional-data-headers"
               label={t('Additional data headers')}
-              fieldId="eda-event-stream-additional-data-headers"
-            >
-              <TextArea
-                id="eda-event-stream-additional-data-headers"
-                value={additionalDataHeaders}
-                rows={5}
-                onChange={(_, value) => setAdditionalDataHeaders(value)}
-                style={{ fontFamily: 'monospace' }}
-              />
-            </FormGroup>
+              helperText={t('Optional request headers to capture as additional event data.')}
+              value={additionalDataHeaders}
+              language={additionalDataHeadersLanguage}
+              onChange={setAdditionalDataHeaders}
+              onLanguageChange={setAdditionalDataHeadersLanguage}
+            />
             <Checkbox
               id="eda-event-stream-test-mode"
               label={t('Test mode')}
@@ -1057,18 +1070,15 @@ function EdaResourceFormModal(props: {
               onChange={(_, checked) => setGenerateInjectors(checked)}
             />
             {!generateInjectors && (
-              <FormGroup
+              <EdaStructuredDataEditor
+                id="eda-credential-type-injectors"
                 label={t('Injector configuration')}
-                fieldId="eda-credential-type-injectors"
-              >
-                <TextArea
-                  id="eda-credential-type-injectors"
-                  value={credentialTypeInjectorsText}
-                  rows={6}
-                  onChange={(_, value) => setCredentialTypeInjectorsText(value)}
-                  style={{ fontFamily: 'monospace' }}
-                />
-              </FormGroup>
+                helperText={t('Map credential inputs into values EDA injects at runtime.')}
+                value={credentialTypeInjectorsText}
+                language={credentialTypeInjectorsLanguage}
+                onChange={setCredentialTypeInjectorsText}
+                onLanguageChange={setCredentialTypeInjectorsLanguage}
+              />
             )}
           </>
         ) : form === 'organization' ? null : form === 'team' ? (
@@ -1220,6 +1230,70 @@ function ResourceSelect(props: {
         />
       ))}
     </FormSelect>
+  );
+}
+
+function EdaStructuredDataEditor(props: {
+  id: string;
+  label: string;
+  helperText?: string;
+  value: string;
+  language: StructuredDataEditorLanguage;
+  onChange: (value: string) => void;
+  onLanguageChange: (language: StructuredDataEditorLanguage) => void;
+}) {
+  const [editorError, setEditorError] = useState<string | undefined>();
+
+  const switchLanguage = (nextLanguageValue: DataEditorLanguages) => {
+    const nextLanguage = structuredDataEditorLanguage(nextLanguageValue);
+    if (nextLanguage === props.language) return;
+    try {
+      const objectValue = parseStructuredDataObject(props.value, props.label);
+      props.onChange(objectToString(objectValue, nextLanguage));
+      props.onLanguageChange(nextLanguage);
+      setEditorError(undefined);
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <FormGroup label={props.label} fieldId={props.id}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <DataEditorActions
+          handleCopy={false}
+          handleDownload={false}
+          handleUpload={false}
+          language={props.language}
+          setLanguage={switchLanguage}
+        />
+      </div>
+      <DataEditor
+        id={props.id}
+        name={props.id}
+        language={props.language}
+        value={props.value}
+        onChange={props.onChange}
+        setError={setEditorError}
+        className="pf-v5-c-form-control"
+        minHeight={150}
+      />
+      {(props.helperText || editorError) && (
+        <FormHelperText>
+          <HelperText>
+            {editorError ? (
+              editorError.split('\n').map((message, index) => (
+                <HelperTextItem key={`${message}-${index}`} variant="error">
+                  {message}
+                </HelperTextItem>
+              ))
+            ) : (
+              <HelperTextItem>{props.helperText}</HelperTextItem>
+            )}
+          </HelperText>
+        </FormHelperText>
+      )}
+    </FormGroup>
   );
 }
 
@@ -1735,7 +1809,7 @@ function eventStreamPayload(values: {
     name: values.name.trim(),
     test_mode: values.testMode,
     eda_credential_id: Number(values.edaCredentialId),
-    additional_data_headers: parseJsonObject(
+    additional_data_headers: parseStructuredDataObject(
       values.additionalDataHeaders,
       'Additional data headers'
     ),
@@ -1775,7 +1849,7 @@ function credentialTypePayload(values: {
     inputs: { fields: inputFields },
     injectors: values.generateInjectors
       ? generatedCredentialTypeInjectors(inputFields)
-      : parseJsonObject(values.injectorsText, 'Injector configuration'),
+      : parseStructuredDataObject(values.injectorsText, 'Injector configuration'),
   };
 }
 
@@ -1931,11 +2005,26 @@ function credentialInputsPayload(
   return inputs;
 }
 
-function parseJsonObject(jsonText: string, label: string) {
-  if (!jsonText.trim()) return {};
-  const parsed = JSON.parse(jsonText) as unknown;
+function structuredDataEditorLanguage(
+  language: DataEditorLanguages | undefined
+): StructuredDataEditorLanguage {
+  return language === 'json' ? 'json' : 'yaml';
+}
+
+function structuredDataEditorText(value: unknown, language: StructuredDataEditorLanguage) {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return objectToString({}, language);
+  return objectToString(value as Record<string, unknown>, language);
+}
+
+function parseStructuredDataObject(dataText: string, label: string) {
+  if (!dataText.trim()) return {};
+  const parsed = valueToObject(dataText);
+  if (parsed instanceof Error) {
+    throw new Error(`${label} is invalid: ${parsed.message}`);
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON object.`);
+    throw new Error(`${label} must be a JSON or YAML object.`);
   }
   return parsed as Record<string, unknown>;
 }

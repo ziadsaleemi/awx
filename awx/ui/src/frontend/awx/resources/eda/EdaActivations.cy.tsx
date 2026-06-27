@@ -710,9 +710,12 @@ describe('EdaActivations', () => {
     cy.get('#eda-event-stream-name').type('Webhook intake');
     cy.get('#eda-event-stream-credential').select('7');
     cy.get('#eda-event-stream-uuid').type('stream-uuid-1');
-    cy.get('#eda-event-stream-additional-data-headers')
-      .clear()
-      .type('{ "X-EDA-Tenant": "acme" }', { parseSpecialCharSequences: false });
+    cy.get('[data-cy="eda-event-stream-additional-data-headers"]').click();
+    cy.get('[data-cy="eda-event-stream-additional-data-headers"] textarea')
+      .first()
+      .type('X-EDA-Tenant: acme', { force: true });
+    cy.get('[aria-label="Toggle to JSON"]').click();
+    cy.contains('"X-EDA-Tenant": "acme"').should('be.visible');
     cy.get('#eda-event-stream-test-mode').click();
     cy.contains('button', /^Save$/).click();
 
@@ -877,6 +880,53 @@ describe('EdaActivations', () => {
           extra_vars: {
             sasl_plain_password: '{{sasl_plain_password}}',
             security_mechanism: '{{security_mechanism}}',
+          },
+        });
+      });
+  });
+
+  it('creates EDA credential types with YAML injector configuration', () => {
+    cy.intercept('GET', '/api/v2/eda/credential-types/?order_by=name&page=1&page_size=10', {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('credentialTypes');
+    cy.intercept('POST', '/api/v2/eda/credential-types/', {
+      id: 42,
+      name: 'Webhook Source',
+    }).as('createCredentialType');
+
+    cy.mount(<EdaResourceList config={credentialTypeConfig} />, {
+      path: '/eda/infrastructure/credential-types',
+      initialEntries: ['/eda/infrastructure/credential-types'],
+    });
+
+    cy.verifyPageTitle('Credential Types');
+    cy.wait('@credentialTypes');
+    cy.contains('button', /^Create$/).click();
+    cy.get('#eda-credential-type-name').type('Webhook Source');
+    cy.get('#eda-credential-type-field-id-field-0').type('token');
+    cy.get('#eda-credential-type-field-label-field-0').type('Token');
+    cy.get('#eda-credential-type-generate-injectors').click();
+    cy.get('[data-cy="eda-credential-type-injectors"]').click();
+    cy.get('[data-cy="eda-credential-type-injectors"] textarea')
+      .first()
+      .type('extra_vars:{enter}  token: injected-token', { force: true });
+    cy.get('[aria-label="Toggle to JSON"]').click();
+    cy.contains('"injected-token"').should('be.visible');
+    cy.contains('button', /^Save$/).click();
+
+    cy.wait('@createCredentialType')
+      .its('request.body')
+      .then((body: Record<string, unknown>) => {
+        expect(body.name).to.equal('Webhook Source');
+        expect(body.inputs).to.deep.equal({
+          fields: [{ id: 'token', label: 'Token', type: 'string' }],
+        });
+        expect(body.injectors).to.deep.equal({
+          extra_vars: {
+            token: 'injected-token',
           },
         });
       });
