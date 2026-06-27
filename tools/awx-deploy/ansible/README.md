@@ -8,6 +8,8 @@ Supported paths:
 - `server`: containerized services on VMs, managed by systemd.
 - `k3s`: install k3s, then deploy AWX into the cluster.
 - `k8s`: deploy AWX into an existing Kubernetes cluster.
+- `eda-server`: deploy EDA on a dedicated VM for server deployments.
+- `eda-k8s`: deploy EDA beside AWX in k3s or Kubernetes.
 
 Server roles are componentized. A single host can belong to every group, or
 components can be split across multiple hosts:
@@ -26,6 +28,12 @@ media, and container storage paths as AWX.
 
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
+
+EDA is intentionally a separate workload. For k3s/k8s, EDA runs as separate
+pods in the same cluster through the upstream EDA Server Operator. For direct
+server deployments, EDA runs on hosts in the `awx_eda` inventory group as its
+own Docker Compose/systemd stack. See
+`docs/eda_deployment_topology.md` for the non-native AWX topology contract.
 
 VMware/vCenter provisioning is intentionally separate from the AWX deployment
 roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
@@ -73,6 +81,46 @@ To install k3s without deploying AWX, use:
 
 ```bash
 ansible-playbook -i inventories/example.ini playbooks/install-k3s.yml
+```
+
+To deploy EDA alongside AWX on k3s, enable EDA:
+
+```bash
+export EDA_ADMIN_PASSWORD='change-me'
+ansible-playbook -i inventories/example.ini playbooks/deploy-k3s.yml \
+  -e awx_eda_enabled=true \
+  -e awx_eda_configure_awx_settings=true
+```
+
+## Quick Start: EDA on Server VM
+
+For direct server AWX deployments, put EDA on a dedicated VM in the `awx_eda`
+inventory group:
+
+```bash
+cd tools/awx-deploy/ansible
+export EDA_ADMIN_PASSWORD='change-me'
+ansible-playbook -i inventories/example.ini playbooks/deploy-eda-server.yml
+```
+
+Then configure AWX to point at that VM and rerun the AWX server deployment or
+upgrade:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
+  -e awx_eda_configure_awx_settings=true
+```
+
+## Quick Start: EDA on Existing Kubernetes
+
+```bash
+cd tools/awx-deploy/ansible
+export KUBECONFIG=/path/to/kubeconfig
+export EDA_ADMIN_PASSWORD='change-me'
+ansible-playbook -i localhost, playbooks/deploy-eda-k8s.yml
+ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
+  -e awx_eda_enabled=true \
+  -e awx_eda_configure_awx_settings=true
 ```
 
 ## Backup / Restore

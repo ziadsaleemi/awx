@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: awx_eda_server
+  author: AWX
+  description: Deploy Event-Driven Ansible Server on a dedicated VM for AWX server deployments.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

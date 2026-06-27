@@ -102,3 +102,49 @@ awx_k3s_disable:
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
 awx_restore_confirm: false
 awx_restore_path: ""
+
+awx_eda_enabled: false
+awx_eda_configure_awx_settings: "{{ awx_eda_enabled }}"
+awx_eda_namespace: eda
+awx_eda_name: awx-eda
+awx_eda_admin_user: admin
+awx_eda_admin_password: "{{ lookup('env', 'EDA_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
+awx_eda_server_url: ""
+awx_eda_username: "{{ awx_eda_admin_user }}"
+awx_eda_password: "{{ awx_eda_admin_password }}"
+awx_eda_verify_ssl: false
+awx_eda_request_timeout: 30
+awx_eda_allow_local_resource_management: true
+awx_eda_automation_server_url: ""
+awx_eda_event_stream_base_url: ""
+
+awx_eda_server_repo_url: https://github.com/ansible/eda-server.git
+awx_eda_server_repo_version: main
+awx_eda_server_base_dir: /opt/eda-server
+awx_eda_server_repo_dir: "{{ awx_eda_server_base_dir }}/src"
+awx_eda_server_env_file: "{{ awx_eda_server_base_dir }}/eda.env"
+awx_eda_server_compose_project: eda
+awx_eda_server_compose_file: tools/docker/docker-compose-stage.yaml
+awx_eda_server_compose_command: /usr/bin/docker compose
+awx_eda_server_install_packages: true
+awx_eda_server_packages:
+  - git
+  - docker
+  - docker-compose-plugin
+awx_eda_server_api_port: 8000
+awx_eda_server_ui_port: 8443
+awx_eda_server_health_path: /_healthz
+awx_eda_server_wait_for_health: true
+awx_eda_server_image_url: ""
+awx_eda_server_ui_image: ""
+
+awx_eda_k8s_operator_ref: main
+awx_eda_k8s_operator_kustomize_url: "github.com/ansible/eda-server-operator/config/default?ref={{ awx_eda_k8s_operator_ref }}"
+awx_eda_k8s_operator_image: quay.io/ansible/eda-server-operator
+awx_eda_k8s_operator_image_tag: ""
+awx_eda_k8s_operator_deployment: eda-server-operator-controller-manager
+awx_eda_k8s_service_type: ClusterIP
+awx_eda_k8s_node_port: 30855
+awx_eda_k8s_api_url: "http://{{ awx_eda_name }}-service.{{ awx_eda_namespace }}.svc.cluster.local"
+awx_eda_k8s_work_dir: "{{ awx_k8s_work_dir }}/eda"
+awx_eda_k8s_wait_for_service: true

@@ -1,0 +1,72 @@
+---
+- name: Install EDA server host packages
+  ansible.builtin.package:
+    name: "{{ awx_eda_server_packages }}"
+    state: present
+  when: awx_eda_server_install_packages | bool
+
+- name: Enable Docker for EDA compose
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: "'docker' in awx_eda_server_compose_command"
+
+- name: Create EDA server directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ awx_eda_server_base_dir }}"
+    - "{{ awx_eda_server_repo_dir | dirname }}"
+
+- name: Clone EDA server repository
+  ansible.builtin.git:
+    repo: "{{ awx_eda_server_repo_url }}"
+    dest: "{{ awx_eda_server_repo_dir }}"
+    version: "{{ awx_eda_server_repo_version }}"
+    update: true
+    force: false
+
+- name: Render EDA server environment
+  ansible.builtin.template:
+    src: eda.env.j2
+    dest: "{{ awx_eda_server_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render EDA server systemd service
+  ansible.builtin.template:
+    src: awx-eda.service.j2
+    dest: /etc/systemd/system/awx-eda.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: awx_eda_server_unit
+
+- name: Reload systemd for EDA server
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: awx_eda_server_unit is changed
+
+- name: Start EDA server
+  ansible.builtin.service:
+    name: awx-eda
+    state: restarted
+    enabled: true
+
+- name: Wait for EDA server health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_eda_server_api_port }}{{ awx_eda_server_health_path }}"
+    method: GET
+    status_code: 200
+  register: awx_eda_server_health
+  until: awx_eda_server_health.status == 200
+  retries: 60
+  delay: 10
+  when: awx_eda_server_wait_for_health | bool

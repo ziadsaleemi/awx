@@ -1,0 +1,6 @@
+---
+- name: Deploy EDA alongside AWX on Kubernetes
+  hosts: all
+  gather_facts: false
+  roles:
+    - awx_eda_k8s

@@ -67,3 +67,17 @@ AWX_ISOLATION_SHOW_PATHS = [
 
 GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{"name": "AWX EE (latest)", "image": "{{ awx_ee_image }}"}]
 CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_ee_image }}"
+
+{% if awx_eda_configure_awx_settings | bool %}
+{% set effective_eda_server_url = awx_eda_server_url %}
+{% if not effective_eda_server_url and groups.get('awx_eda', []) %}
+{% set eda_inventory_host = (groups.get('awx_eda', []) | first) %}
+{% set eda_host = hostvars.get(eda_inventory_host, {}).get('ansible_host', eda_inventory_host) %}
+{% set effective_eda_server_url = 'http://' ~ eda_host ~ ':' ~ awx_eda_server_api_port %}
+{% endif %}
+EDA_SERVER_URL = {{ effective_eda_server_url | to_json }}
+EDA_USERNAME = {{ awx_eda_username | to_json }}
+EDA_PASSWORD = {{ awx_eda_password | to_json }}
+EDA_VERIFY_SSL = {{ 'True' if awx_eda_verify_ssl | bool else 'False' }}
+EDA_REQUEST_TIMEOUT = {{ awx_eda_request_timeout | int }}
+{% endif %}

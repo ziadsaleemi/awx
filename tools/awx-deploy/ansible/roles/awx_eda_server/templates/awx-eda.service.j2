@@ -1,0 +1,18 @@
+[Unit]
+Description=AWX Event-Driven Ansible Server
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ awx_eda_server_repo_dir }}
+EnvironmentFile={{ awx_eda_server_env_file }}
+ExecStart={{ awx_eda_server_compose_command }} --env-file {{ awx_eda_server_env_file }} -p {{ awx_eda_server_compose_project }} -f {{ awx_eda_server_compose_file }} up --remove-orphans
+ExecStop={{ awx_eda_server_compose_command }} --env-file {{ awx_eda_server_env_file }} -p {{ awx_eda_server_compose_project }} -f {{ awx_eda_server_compose_file }} down
+Restart=always
+RestartSec=15
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

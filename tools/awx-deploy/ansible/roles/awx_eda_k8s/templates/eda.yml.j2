@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ awx_eda_name }}-admin-password
+  namespace: {{ awx_eda_namespace }}
+type: Opaque
+stringData:
+  password: {{ awx_eda_admin_password | quote }}
+---
+apiVersion: eda.ansible.com/v1alpha1
+kind: EDA
+metadata:
+  name: {{ awx_eda_name }}
+  namespace: {{ awx_eda_namespace }}
+spec:
+{% set effective_automation_server_url = awx_eda_automation_server_url %}
+{% if not effective_automation_server_url %}
+{% set effective_automation_server_url = 'http://' ~ awx_k8s_name ~ '-web.' ~ awx_k8s_namespace ~ '.svc.cluster.local' %}
+{% endif %}
+  automation_server_url: {{ effective_automation_server_url | quote }}
+  admin_user: {{ awx_eda_admin_user | quote }}
+  admin_password_secret: {{ awx_eda_name }}-admin-password
+  service_type: {{ awx_eda_k8s_service_type | quote }}
+{% if awx_eda_k8s_service_type == 'NodePort' and (awx_eda_k8s_node_port | int) > 0 %}
+  nodeport_port: {{ awx_eda_k8s_node_port | int }}
+{% endif %}
+  extra_settings:
+    - setting: EDA_ALLOW_LOCAL_RESOURCE_MANAGEMENT
+      value: {{ 'true' if awx_eda_allow_local_resource_management | bool else 'false' }}
+    - setting: EDA_CONTROLLER_SSL_VERIFY
+      value: {{ 'true' if awx_eda_verify_ssl | bool else 'false' }}
+{% if awx_eda_event_stream_base_url | length > 0 %}
+    - setting: EDA_EVENT_STREAM_BASE_URL
+      value: {{ awx_eda_event_stream_base_url | quote }}
+{% endif %}

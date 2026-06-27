@@ -73,3 +73,28 @@ awx_k3s_disable:
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short }}"
 awx_restore_confirm: false
 awx_restore_path: ""
+
+# Event-Driven Ansible deployment integration.
+# For k3s/k8s, enabling this deploys EDA in Kubernetes beside AWX and configures
+# AWX to talk to the in-cluster EDA service.
+# For server deployments, deploy EDA on hosts in [awx_eda], then set
+# awx_eda_configure_awx_settings=true so AWX points to that EDA VM.
+awx_eda_enabled: false
+awx_eda_configure_awx_settings: "{{ awx_eda_enabled }}"
+awx_eda_namespace: eda
+awx_eda_name: awx-eda
+awx_eda_admin_user: admin
+awx_eda_admin_password: "{{ lookup('env', 'EDA_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
+awx_eda_server_url: ""
+awx_eda_verify_ssl: false
+
+# Server/VM EDA path.
+awx_eda_server_repo_url: https://github.com/ansible/eda-server.git
+awx_eda_server_repo_version: main
+awx_eda_server_api_port: 8000
+awx_eda_server_ui_port: 8443
+
+# k3s/k8s EDA path.
+awx_eda_k8s_operator_ref: main
+awx_eda_k8s_service_type: ClusterIP
+awx_eda_k8s_node_port: 30855

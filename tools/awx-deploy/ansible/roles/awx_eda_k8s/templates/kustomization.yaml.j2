@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: {{ awx_eda_namespace }}
+resources:
+  - {{ awx_eda_k8s_operator_kustomize_url }}
+{% if awx_eda_k8s_operator_image_tag | length > 0 %}
+images:
+  - name: {{ awx_eda_k8s_operator_image }}
+    newTag: {{ awx_eda_k8s_operator_image_tag }}
+{% endif %}
