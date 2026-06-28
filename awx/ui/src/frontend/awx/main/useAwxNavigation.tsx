@@ -103,14 +103,33 @@ export function filterPolicyRoutesByPermissions(
   if (canManagePolicy) {
     return policyRoutes;
   }
-  return filterRouteChildrenById(
+  const filteredRoutes = filterRouteChildrenById(
     policyRoutes,
     new Set([
       AwxRoute.PolicyAsCodeOverview,
+      AwxRoute.PolicyAsCodeOpa,
       AwxRoute.PolicyAsCodeGatekeeper,
-      AwxRoute.PolicyAsCodeTester,
     ])
   );
+  if (!hasChildren(filteredRoutes)) {
+    return filteredRoutes;
+  }
+  return {
+    ...filteredRoutes,
+    children: filteredRoutes.children.map((child) =>
+      child.id === AwxRoute.PolicyAsCodeOpa
+        ? filterRouteChildrenById(
+            child,
+            new Set([
+              AwxRoute.PolicyAsCodeOpaOverview,
+              AwxRoute.PolicyAsCodeOpaDecisions,
+              AwxRoute.PolicyAsCodeOpaViolations,
+              AwxRoute.PolicyAsCodeOpaTester,
+            ])
+          )
+        : child
+    ),
+  };
 }
 
 export function filterPolicyRoutesByModules(
@@ -127,8 +146,7 @@ export function filterPolicyRoutesByModules(
     allowedIds.add(AwxRoute.PolicyAsCodeGatekeeper);
   }
   if (opaEnabled) {
-    allowedIds.add(AwxRoute.PolicyAsCodeModules);
-    allowedIds.add(AwxRoute.PolicyAsCodeTester);
+    allowedIds.add(AwxRoute.PolicyAsCodeOpa);
   } else {
     allowedIds.delete(AwxRoute.PolicyAsCodeOverview);
   }

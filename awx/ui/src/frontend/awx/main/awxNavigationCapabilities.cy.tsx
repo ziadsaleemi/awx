@@ -15,6 +15,17 @@ function childIds(route: PageNavigationItem) {
   return route.children.map((child) => child.id);
 }
 
+function nestedChildIds(route: PageNavigationItem, id: AwxRoute) {
+  if (!('children' in route)) {
+    return [];
+  }
+  const child = route.children.find((item) => item.id === id);
+  if (!child || !('children' in child)) {
+    return [];
+  }
+  return child.children.map((item) => item.id);
+}
+
 describe('AWX navigation capabilities', () => {
   it('maps catalog-user permissions to catalog-only navigation capability', () => {
     const capabilities = buildAwxNavigationCapabilities([
@@ -172,16 +183,18 @@ describe('AWX navigation capabilities', () => {
           element: <div />,
         },
         {
-          id: AwxRoute.PolicyAsCodeModules,
-          label: 'Policy Modules',
-          path: 'modules',
-          element: <div />,
-        },
-        {
-          id: AwxRoute.PolicyAsCodeTester,
-          label: 'Policy Tester',
-          path: 'tester',
-          element: <div />,
+          id: AwxRoute.PolicyAsCodeOpa,
+          label: 'OPA',
+          path: 'opa',
+          children: [
+            { id: AwxRoute.PolicyAsCodeOpaOverview, path: 'overview', element: <div /> },
+            { id: AwxRoute.PolicyAsCodeOpaModules, path: 'modules', element: <div /> },
+            { id: AwxRoute.PolicyAsCodeOpaDecisions, path: 'decisions', element: <div /> },
+            { id: AwxRoute.PolicyAsCodeOpaViolations, path: 'violations', element: <div /> },
+            { id: AwxRoute.PolicyAsCodeOpaProjectSync, path: 'project-sync', element: <div /> },
+            { id: AwxRoute.PolicyAsCodeOpaTester, path: 'tester', element: <div /> },
+            { path: '', element: <div /> },
+          ],
         },
         { path: 'smoke', element: <div />, hidden: true },
         { path: '', element: <div /> },
@@ -193,8 +206,15 @@ describe('AWX navigation capabilities', () => {
     expect(childIds(filteredRoutes)).to.deep.equal([
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
-      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeOpa,
       undefined,
+      undefined,
+    ]);
+    expect(nestedChildIds(filteredRoutes, AwxRoute.PolicyAsCodeOpa)).to.deep.equal([
+      AwxRoute.PolicyAsCodeOpaOverview,
+      AwxRoute.PolicyAsCodeOpaDecisions,
+      AwxRoute.PolicyAsCodeOpaViolations,
+      AwxRoute.PolicyAsCodeOpaTester,
       undefined,
     ]);
   });
@@ -218,15 +238,9 @@ describe('AWX navigation capabilities', () => {
           element: <div />,
         },
         {
-          id: AwxRoute.PolicyAsCodeModules,
-          label: 'Policy Modules',
-          path: 'modules',
-          element: <div />,
-        },
-        {
-          id: AwxRoute.PolicyAsCodeTester,
-          label: 'Policy Tester',
-          path: 'tester',
+          id: AwxRoute.PolicyAsCodeOpa,
+          label: 'OPA',
+          path: 'opa',
           element: <div />,
         },
         { path: 'smoke', element: <div />, hidden: true },
@@ -236,8 +250,7 @@ describe('AWX navigation capabilities', () => {
 
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, false))).to.deep.equal([
       AwxRoute.PolicyAsCodeOverview,
-      AwxRoute.PolicyAsCodeModules,
-      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeOpa,
       undefined,
       undefined,
     ]);
@@ -249,8 +262,7 @@ describe('AWX navigation capabilities', () => {
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, true))).to.deep.equal([
       AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
-      AwxRoute.PolicyAsCodeModules,
-      AwxRoute.PolicyAsCodeTester,
+      AwxRoute.PolicyAsCodeOpa,
       undefined,
       undefined,
     ]);

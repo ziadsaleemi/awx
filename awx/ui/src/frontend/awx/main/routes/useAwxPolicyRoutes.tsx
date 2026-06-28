@@ -23,6 +23,54 @@ export function useAwxPolicyRoutes() {
           element: <PolicyAsCode view="overview" />,
         },
         {
+          id: AwxRoute.PolicyAsCodeOpa,
+          label: t('OPA'),
+          path: 'opa',
+          children: [
+            {
+              id: AwxRoute.PolicyAsCodeOpaOverview,
+              label: t('Overview'),
+              path: 'overview',
+              element: <PolicyAsCode view="opa-overview" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeOpaModules,
+              label: t('Policy Modules'),
+              path: 'modules',
+              element: <PolicyAsCode view="opa-modules" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeOpaDecisions,
+              label: t('Decisions'),
+              path: 'decisions',
+              element: <PolicyAsCode view="opa-decisions" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeOpaViolations,
+              label: t('Violations'),
+              path: 'violations',
+              element: <PolicyAsCode view="opa-violations" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeOpaProjectSync,
+              label: t('Project Sync'),
+              path: 'project-sync',
+              element: <PolicyAsCode view="opa-project-sync" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeOpaTester,
+              label: t('Policy Tester'),
+              path: 'tester',
+              element: <PolicyAsCode view="opa-tester" />,
+            },
+            {
+              path: '',
+              element: <Navigate to="overview" replace />,
+              hidden: true,
+            },
+          ],
+        },
+        {
           id: AwxRoute.PolicyAsCodeGatekeeper,
           label: t('Gatekeeper'),
           path: 'gatekeeper',
@@ -74,13 +122,15 @@ export function useAwxPolicyRoutes() {
           id: AwxRoute.PolicyAsCodeModules,
           label: t('Policy Modules'),
           path: 'modules',
-          element: <PolicyAsCode view="modules" />,
+          element: <Navigate to="../opa/modules" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.PolicyAsCodeTester,
           label: t('Policy Tester'),
           path: 'tester',
-          element: <PolicyAsCode view="tester" />,
+          element: <Navigate to="../opa/tester" replace />,
+          hidden: true,
         },
         {
           path: 'smoke',

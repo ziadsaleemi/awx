@@ -347,8 +347,8 @@ export function PolicyAsCodeOverview(props: {
         subtitle={t('Standalone policy decisions before AWX launches and AI actions')}
         width="half"
         height="sm"
-        linkText={t('Open modules')}
-        to={pageUrl(AwxRoute.PolicyAsCodeModules, '/policy-as-code/modules')}
+        linkText={t('Open OPA')}
+        to={pageUrl(AwxRoute.PolicyAsCodeOpaOverview, '/policy-as-code/opa/overview')}
       >
         <CardBody>
           {opaStatus.isLoading ? (
@@ -478,11 +478,16 @@ export function PolicyAsCodeOverview(props: {
               )}
             />
             <QuickLink
-              to={pageUrl(AwxRoute.PolicyAsCodeTester, '/policy-as-code/tester')}
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaTester, '/policy-as-code/opa/tester')}
               label={t('Policy tester')}
               description={t(
                 'Send sample inputs to live OPA decision paths before enabling rollout changes.'
               )}
+            />
+            <QuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaProjectSync, '/policy-as-code/opa/project-sync')}
+              label={t('OPA project sync')}
+              description={t('Pull Rego modules from AWX Project checkouts and sync them to OPA.')}
             />
             <QuickLink
               to={pageUrl(AwxRoute.ActivityStream, '/activity-stream')}

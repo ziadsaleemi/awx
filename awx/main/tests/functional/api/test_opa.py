@@ -1707,6 +1707,148 @@ def test_opa_policy_module_rollback_restores_audited_raw_rego(post, admin_user):
 
 
 @pytest.mark.django_db
+@override_settings(OPA_HOST='')
+def test_opa_policy_module_project_sync_reads_awx_project_checkout_and_dry_runs(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='OPA Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/opa.git',
+        local_path='_opa_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'opa'
+    project_dir.mkdir(parents=True)
+    rego = 'package awx.project\n\nallow if { input.user.is_superuser }\n'
+    (project_dir / 'job_launch.rego').write_text(rego, encoding='utf-8')
+
+    with mock.patch('awx.api.views.opa.requests.put') as requests_put:
+        response = post(
+            reverse('api:opa_policy_module_project_sync'),
+            data={
+                'mode': 'dry_run',
+                'project': project.pk,
+                'path': 'opa/**/*.rego',
+                'policy_id_prefix': 'awx/project-sync',
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    requests_put.assert_not_called()
+    assert response.data['dry_run'] is True
+    assert response.data['project']['id'] == project.pk
+    assert response.data['policy_id_prefix'] == 'awx/project-sync'
+    assert response.data['counts'] == {'files': 1, 'modules': 1, 'created': 1, 'updated': 0, 'unchanged': 0}
+    result = response.data['results'][0]
+    assert result['file_path'] == 'opa/job_launch.rego'
+    assert result['policy_id'] == 'awx/project-sync/opa/job_launch'
+    assert result['after']['package'] == 'awx.project'
+    audit = ActivityStream.objects.get(pk=result['audit']['activity_stream_id'])
+    assert audit.object1 == 'opa_policy_module'
+    changes = json.loads(audit.changes)
+    assert changes['source'] == 'opa_project_sync'
+    assert changes['dry_run'] is True
+    assert changes['project_source']['file_path'] == 'opa/job_launch.rego'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_project_sync_applies_rego_modules_to_opa(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='OPA Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/opa.git',
+        local_path='_opa_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'opa'
+    project_dir.mkdir(parents=True)
+    rego = 'package awx.project\n\nallow if { input.user.is_superuser }\n'
+    (project_dir / 'job_launch.rego').write_text(rego, encoding='utf-8')
+
+    get_response = _json_error_response({'message': 'not found'}, status_code=404)
+    put_response = _json_response({'result': {}})
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.put', return_value=put_response
+    ) as requests_put:
+        response = post(
+            reverse('api:opa_policy_module_project_sync'),
+            data={
+                'mode': 'apply',
+                'project': project.pk,
+                'path': 'opa/**/*.rego',
+                'policy_id_prefix': 'awx/project-sync',
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is True
+    assert response.data['persisted'] is True
+    result = response.data['results'][0]
+    assert result['changed'] is True
+    assert result['persisted'] is True
+    requests_put.assert_called_once()
+    assert requests_put.call_args.args[0] == 'http://opa.example.com:8181/v1/policies/awx/project-sync/opa/job_launch'
+    assert requests_put.call_args.kwargs['data'] == rego
+    audit = ActivityStream.objects.get(pk=result['audit']['activity_stream_id'])
+    assert audit.object2 == 'awx/project-sync/opa/job_launch'
+    assert '"source": "opa_project_sync"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='')
+def test_opa_policy_module_project_sync_rejects_path_traversal(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='OPA Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/opa.git',
+        local_path='_opa_policy_repo',
+    )
+    project.save(skip_update=True)
+    (tmp_path / project.local_path).mkdir(parents=True)
+
+    response = post(
+        reverse('api:opa_policy_module_project_sync'),
+        data={'mode': 'preview', 'project': project.pk, 'path': '../outside.rego'},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['detail'] == 'Project Rego paths must be relative and cannot include parent directory traversal.'
+
+
+@pytest.mark.django_db
+def test_opa_activity_returns_recent_decisions_and_denials(get, admin_user):
+    ActivityStream.objects.create(
+        operation='update',
+        object1='gatekeeper_resource',
+        object2='namespace/default',
+        changes=json.dumps({'source': 'gatekeeper_apply', 'opa_allowed': False, 'error': 'Denied by OPA policy guardrail.'}),
+        actor=admin_user,
+    )
+    ActivityStream.objects.create(
+        operation='update',
+        object1='opa_policy_module',
+        object2='awx/managed',
+        changes=json.dumps({'source': 'opa_policy_modules', 'policy_id': 'awx/managed'}),
+        actor=admin_user,
+    )
+
+    response = get(reverse('api:opa_activity'), user=admin_user, expect=200)
+
+    assert response.data['count'] == 2
+    assert response.data['denial_count'] == 1
+    assert response.data['denials'][0]['is_denial'] is True
+
+
+@pytest.mark.django_db
 @override_settings(
     OPA_HOST='opa.example.com',
     OPA_PORT=8181,

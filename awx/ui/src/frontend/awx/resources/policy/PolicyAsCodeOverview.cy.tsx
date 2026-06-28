@@ -25,13 +25,18 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       },
       {
-        id: AwxRoute.PolicyAsCodeModules,
-        path: 'policy-as-code/modules',
+        id: AwxRoute.PolicyAsCodeOpaOverview,
+        path: 'policy-as-code/opa/overview',
         element: <div />,
       },
       {
-        id: AwxRoute.PolicyAsCodeTester,
-        path: 'policy-as-code/tester',
+        id: AwxRoute.PolicyAsCodeOpaTester,
+        path: 'policy-as-code/opa/tester',
+        element: <div />,
+      },
+      {
+        id: AwxRoute.PolicyAsCodeOpaProjectSync,
+        path: 'policy-as-code/opa/project-sync',
         element: <div />,
       },
       {

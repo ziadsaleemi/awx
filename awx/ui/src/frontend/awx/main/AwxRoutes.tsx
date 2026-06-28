@@ -201,6 +201,13 @@ export enum AwxRoute {
   // Policy as Code
   PolicyAsCode = 'awx-policy-as-code',
   PolicyAsCodeOverview = 'awx-policy-as-code-overview',
+  PolicyAsCodeOpa = 'awx-policy-as-code-opa',
+  PolicyAsCodeOpaOverview = 'awx-policy-as-code-opa-overview',
+  PolicyAsCodeOpaModules = 'awx-policy-as-code-opa-modules',
+  PolicyAsCodeOpaDecisions = 'awx-policy-as-code-opa-decisions',
+  PolicyAsCodeOpaViolations = 'awx-policy-as-code-opa-violations',
+  PolicyAsCodeOpaProjectSync = 'awx-policy-as-code-opa-project-sync',
+  PolicyAsCodeOpaTester = 'awx-policy-as-code-opa-tester',
   PolicyAsCodeGatekeeper = 'awx-policy-as-code-gatekeeper',
   PolicyAsCodeGatekeeperOverview = 'awx-policy-as-code-gatekeeper-overview',
   PolicyAsCodeGatekeeperChanges = 'awx-policy-as-code-gatekeeper-changes',
