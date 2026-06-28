@@ -166,33 +166,45 @@ function StatusLabel(props: {
 
 function MetricTile(props: { label: string; value: string | number; detail?: string }) {
   return (
-    <GalleryItem>
-      <div
-        style={{
-          border: '1px solid var(--pf-v5-global--BorderColor--100)',
-          minHeight: 104,
-          padding: 16,
-        }}
-      >
-        <Stack hasGutter>
-          <StackItem>
-            <Title headingLevel="h3" size="2xl">
-              {props.value}
-            </Title>
-          </StackItem>
-          <StackItem>
-            <TextContent>
-              <Text component={TextVariants.small}>{props.label}</Text>
-              {props.detail ? (
-                <Text component={TextVariants.small} style={{ opacity: 0.75 }}>
-                  {props.detail}
-                </Text>
-              ) : null}
-            </TextContent>
-          </StackItem>
-        </Stack>
-      </div>
-    </GalleryItem>
+    <div
+      data-cy="policy-metric-tile"
+      style={{
+        border: '1px solid var(--pf-v5-global--BorderColor--100)',
+        minHeight: 120,
+        minWidth: 0,
+        padding: 16,
+        width: '100%',
+      }}
+    >
+      <Stack hasGutter>
+        <StackItem>
+          <Title
+            headingLevel="h3"
+            size="2xl"
+            style={{
+              lineHeight: 1.15,
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+            }}
+          >
+            {props.value}
+          </Title>
+        </StackItem>
+        <StackItem>
+          <TextContent>
+            <Text component={TextVariants.small}>{props.label}</Text>
+            {props.detail ? (
+              <Text
+                component={TextVariants.small}
+                style={{ opacity: 0.75, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+              >
+                {props.detail}
+              </Text>
+            ) : null}
+          </TextContent>
+        </StackItem>
+      </Stack>
+    </div>
   );
 }
 
@@ -259,7 +271,7 @@ export function PolicyAsCodeOverview(props: {
         title={t('Policy control plane')}
         subtitle={t('OPA guardrails, Gatekeeper inventory, governed changes, and audit evidence')}
         width="full"
-        height="xs"
+        height="sm"
         headerControls={
           <Flex
             spaceItems={{ default: 'spaceItemsSm' }}
@@ -288,7 +300,14 @@ export function PolicyAsCodeOverview(props: {
         }
       >
         <CardBody>
-          <Gallery hasGutter minWidths={{ default: '180px' }}>
+          <div
+            style={{
+              display: 'grid',
+              gap: 16,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+              maxWidth: '100%',
+            }}
+          >
             <MetricTile
               label={t('OPA decision paths')}
               value={opaStatus.data?.policies.length ?? 0}
@@ -337,7 +356,7 @@ export function PolicyAsCodeOverview(props: {
                 constraints: gatekeeperCounts?.constraints ?? 0,
               })}
             />
-          </Gallery>
+          </div>
         </CardBody>
       </PageDashboardCard>
 

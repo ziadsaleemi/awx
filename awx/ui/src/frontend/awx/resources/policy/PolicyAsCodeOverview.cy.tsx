@@ -141,6 +141,17 @@ describe('PolicyAsCodeOverview', () => {
 
     cy.wait(['@opaStatus', '@gatekeeperStatus']);
     cy.getByDataCy('policy-control-plane').should('be.visible');
+    cy.getByDataCy('policy-control-plane').then(($card) => {
+      const card = $card[0];
+      expect(card.scrollWidth).to.be.at.most(card.clientWidth + 1);
+    });
+    cy.getByDataCy('policy-control-plane')
+      .find('[data-cy="policy-metric-tile"]')
+      .should('have.length', 5)
+      .each(($tile) => {
+        const tile = $tile[0];
+        expect(tile.scrollWidth).to.be.at.most(tile.clientWidth + 1);
+      });
     cy.contains('OPA enabled').should('be.visible');
     cy.contains('Gatekeeper connected').should('be.visible');
     cy.contains('2.0 KB').should('be.visible');
