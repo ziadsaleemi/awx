@@ -531,6 +531,46 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
 
 
 @pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_policy_manager_deduplicates_constraints_across_served_versions(get, admin_user):
+    constraint = {
+        'apiVersion': 'constraints.gatekeeper.sh/v1beta1',
+        'kind': 'K8sRequiredLabels',
+        'metadata': {'name': 'require-owner', 'uid': 'constraint-uid-1'},
+        'spec': {'enforcementAction': 'dryrun', 'parameters': {'labels': ['owner']}},
+        'status': {
+            'totalViolations': 1,
+            'violations': [
+                {
+                    'message': 'missing owner label',
+                    'kind': 'Namespace',
+                    'name': 'default',
+                    'version': 'v1',
+                }
+            ],
+        },
+    }
+    responses = [
+        _json_response({'items': []}),
+        _json_response({'preferredVersion': {'version': 'v1'}, 'versions': [{'version': 'v1'}, {'version': 'v1beta1'}]}),
+        _json_response({'resources': [{'name': 'k8srequiredlabels', 'kind': 'K8sRequiredLabels', 'verbs': ['get', 'list']}]}),
+        _json_response({'items': [constraint]}),
+        _json_response({'resources': [{'name': 'k8srequiredlabels', 'kind': 'K8sRequiredLabels', 'verbs': ['get', 'list']}]}),
+        _json_response({'items': [constraint]}),
+        _json_response({'items': []}),
+    ]
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=responses):
+        response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
+
+    assert response.data['counts']['constraints'] == 1
+    assert response.data['counts']['violations'] == 1
+    assert len(response.data['constraints']) == 1
+    assert len(response.data['violations']) == 1
+    assert response.data['constraints'][0]['name'] == 'require-owner'
+
+
+@pytest.mark.django_db
 @override_settings(
     GATEKEEPER_K8S_API_URL='https://kube.default.test',
     GATEKEEPER_K8S_CONTEXT='default',
@@ -612,8 +652,7 @@ def test_gatekeeper_policy_manager_accepts_file_based_context_dict(get, admin_us
     GATEKEEPER_K8S_API_URL='https://kube.default.test',
     GATEKEEPER_K8S_CONTEXT='default',
     GATEKEEPER_K8S_CONTEXTS=(
-        "{'prod': OrderedDict({'server_url': 'https://kube.prod.test', "
-        "'auth_token': 'prod-token', 'verify_ssl': False, 'request_timeout': 9})}"
+        "{'prod': OrderedDict({'server_url': 'https://kube.prod.test', " "'auth_token': 'prod-token', 'verify_ssl': False, 'request_timeout': 9})}"
     ),
 )
 def test_gatekeeper_policy_manager_accepts_legacy_ordereddict_context_text(get, admin_user):

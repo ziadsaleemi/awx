@@ -281,6 +281,7 @@ class GatekeeperKubernetesClient:
         )
 
         constraints = []
+        seen_constraints = set()
         errors = []
         for version in versions:
             resources = self.get(f'{GATEKEEPER_CONSTRAINT_GROUP_PATH}/{version}').get('resources') or []
@@ -295,6 +296,17 @@ class GatekeeperKubernetesClient:
                     errors.append(_gatekeeper_error('constraints', exc, resource=name, version=version))
                     continue
                 for item in data.get('items') or []:
+                    metadata = item.get('metadata') or {}
+                    key = metadata.get('uid') or '|'.join(
+                        [
+                            item.get('kind') or kind,
+                            metadata.get('namespace') or '',
+                            metadata.get('name') or '',
+                        ]
+                    )
+                    if key in seen_constraints:
+                        continue
+                    seen_constraints.add(key)
                     item['_gatekeeper_resource'] = name
                     item['_gatekeeper_version'] = version
                     constraints.append(item)
