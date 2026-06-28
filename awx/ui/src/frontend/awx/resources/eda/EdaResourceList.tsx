@@ -428,7 +428,7 @@ function useEdaResourceColumns(config: EdaResourceConfig): ITableColumn<EdaResou
         },
       })),
     ],
-    [config.fields, t]
+    [config.fields, config.nameSort, t]
   );
 }
 

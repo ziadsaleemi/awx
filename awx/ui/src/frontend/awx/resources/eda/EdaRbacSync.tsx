@@ -111,7 +111,7 @@ export function EdaRbacSync() {
           : undefined,
         timeout: 5000,
       });
-      await refresh();
+      refresh();
     } catch (err) {
       alertToaster.addAlert({
         variant: 'danger',

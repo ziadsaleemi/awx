@@ -142,6 +142,51 @@ def test_check_external_automation_can_check_proxmox(mocker):
     assert session.get.call_args_list[1].args[0] == 'https://proxmox.example.test:8006/api2/json/cluster/resources'
 
 
+def test_check_external_automation_can_check_gatekeeper_context(mocker):
+    client = mocker.Mock()
+    client.context_error = ''
+    client.server_url = 'https://kube.example.test'
+    client.context = 'prod'
+    client.verify_ssl = False
+    client.is_configured.return_value = True
+    client.context_options.return_value = [
+        {
+            'name': 'prod',
+            'selected': True,
+            'configured': True,
+            'server_url': 'https://kube.example.test',
+            'verify_ssl': False,
+            'source': 'settings',
+        }
+    ]
+    client.list_constraint_templates.return_value = ('v1', [{'metadata': {'name': 'required-labels'}}])
+    client.list_constraint_resources.return_value = ([{'metadata': {'name': 'require-team'}, 'status': {'violations': [{'message': 'missing team'}]}}], [])
+    client.list_configs.return_value = [{'metadata': {'name': 'config'}}]
+    client_cls = mocker.patch('awx.main.management.commands.check_external_automation.GatekeeperKubernetesClient', return_value=client)
+
+    output = StringIO()
+    call_command(
+        'check_external_automation',
+        '--json',
+        '--skip-eda',
+        '--skip-opa',
+        '--check-gatekeeper',
+        '--gatekeeper-context=prod',
+        stdout=output,
+    )
+    payload = json.loads(output.getvalue())
+
+    client_cls.assert_called_once_with('prod')
+    assert payload['ok'] is True
+    assert payload['checks']['gatekeeper']['status'] == 'available'
+    assert payload['checks']['gatekeeper']['counts'] == {
+        'constraint_templates': 1,
+        'constraints': 1,
+        'violations': 1,
+        'configs': 1,
+    }
+
+
 @override_settings(
     EDA_SERVER_URL='',
     OPA_HOST='opa.example.test',

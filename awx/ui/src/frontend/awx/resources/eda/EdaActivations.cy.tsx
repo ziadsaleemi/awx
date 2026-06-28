@@ -3,6 +3,10 @@ import { EdaActivations } from './EdaActivations';
 import { EdaRbacSync } from './EdaRbacSync';
 import { EdaResourceConfig, EdaResourceList } from './EdaResourceList';
 
+type EdaRbacSyncRequestBody = {
+  mode?: string;
+};
+
 const activation = {
   id: 42,
   name: 'Restart web on alert',
@@ -402,9 +406,10 @@ describe('EdaActivations', () => {
   it('renders EDA RBAC access sync drift and posts sync modes', () => {
     cy.intercept('GET', '/api/v2/eda/rbac-sync/', rbacSyncReport).as('rbacSync');
     cy.intercept('POST', '/api/v2/eda/rbac-sync/', (req) => {
+      const body = req.body as EdaRbacSyncRequestBody;
       req.reply({
         ...rbacSyncReport,
-        mode: req.body.mode,
+        mode: body.mode,
         actions: [{ action: 'create_assignment', resource: 'user-role-assignments' }],
       });
     }).as('rbacSyncPost');

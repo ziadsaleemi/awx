@@ -44,6 +44,7 @@ class Command(BaseCommand):
             help='Install a temporary deny policy, verify denied evaluation, then delete it.',
         )
         parser.add_argument('--opa-deny-policy-id', default=OPA_DENY_SMOKE_POLICY_ID, help='Temporary OPA policy id used with --opa-deny-smoke.')
+        parser.add_argument('--check-gatekeeper', action='store_true', help='Check the Gatekeeper Kubernetes API connection.')
         parser.add_argument('--skip-gatekeeper', action='store_true', help='Skip Gatekeeper Kubernetes API check.')
         parser.add_argument('--gatekeeper-context', default='', help='Optional configured Gatekeeper Kubernetes context to check.')
         parser.add_argument('--check-proxmox', action='store_true', help='Check a Proxmox VE API endpoint.')
@@ -74,7 +75,7 @@ class Command(BaseCommand):
             opa_policy_id=options['opa_policy_id'],
             opa_deny_smoke=options['opa_deny_smoke'],
             opa_deny_policy_id=options['opa_deny_policy_id'],
-            include_gatekeeper=not options['skip_gatekeeper'],
+            include_gatekeeper=(options['check_gatekeeper'] or bool(options['gatekeeper_context'])) and not options['skip_gatekeeper'],
             gatekeeper_context=options['gatekeeper_context'],
             include_proxmox=options['check_proxmox'],
             proxmox_api_url=options['proxmox_api_url'],

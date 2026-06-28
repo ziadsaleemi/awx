@@ -117,7 +117,7 @@ awx-manage check_external_automation --json --skip-eda --skip-gatekeeper --sync-
 Minimum Gatekeeper proof from an AWX host/container:
 
 ```bash
-awx-manage check_external_automation --json --skip-eda --skip-opa --gatekeeper-context in-cluster --fail-on-unavailable
+awx-manage check_external_automation --json --skip-eda --skip-opa --check-gatekeeper --gatekeeper-context in-cluster --fail-on-unavailable
 ```
 
 For full UI proof, run the same checks from Settings -> OPA, Settings ->
