@@ -1,0 +1,7 @@
+---
+- name: Restore AWX Kubernetes deployment
+  hosts: awx_k3s_servers:awx_existing_k8s
+  gather_facts: true
+  become: true
+  roles:
+    - awx_k8s_restore

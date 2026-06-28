@@ -1,0 +1,6 @@
+---
+awx_failback_image_tag: ""
+awx_failback_restore_path: ""
+awx_failback_preserve_k8s_service: true
+awx_k8s_restore_confirm: true
+awx_k8s_restore_start_after_restore: true

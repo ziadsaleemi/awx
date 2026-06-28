@@ -1,0 +1,20 @@
+---
+awx_server_backup_dir: /var/backups/awx
+awx_restore_confirm: false
+awx_restore_path: ""
+awx_k8s_restore_path: "{{ awx_restore_path }}"
+awx_k8s_restore_confirm: "{{ awx_restore_confirm }}"
+awx_k8s_restore_start_after_restore: true
+awx_k8s_restore_data: true
+awx_k8s_namespace: awx
+awx_k8s_name: awx
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_web_replicas: 2
+awx_k8s_task_replicas: 2
+awx_image: docker.io/ziadsaleemi/awx
+awx_image_tag: latest
+awx_postgres_user: awx
+awx_postgres_database: awx
+awx_postgres_container: postgres
+awx_k8s_restore_helper_pod: "{{ awx_k8s_name }}-restore-helper"

@@ -73,6 +73,10 @@ awx_k3s_disable:
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short }}"
 awx_restore_confirm: false
 awx_restore_path: ""
+awx_k8s_backup_dir: "{{ awx_server_backup_dir }}"
+awx_k8s_backup_collect_projects: true
+awx_k8s_restore_start_after_restore: true
+awx_k8s_restore_data: true
 
 # Event-Driven Ansible deployment integration.
 # For k3s/k8s, enabling this deploys EDA in Kubernetes beside AWX and configures

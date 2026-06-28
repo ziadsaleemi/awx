@@ -1,0 +1,15 @@
+---
+awx_server_backup_dir: /var/backups/awx
+awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
+awx_k8s_backup_dir: "{{ awx_server_backup_dir }}"
+awx_k8s_backup_name: "{{ awx_backup_name }}"
+awx_k8s_backup_path: "{{ awx_k8s_backup_dir }}/{{ awx_k8s_backup_name }}"
+awx_k8s_backup_collect_projects: true
+awx_k8s_namespace: awx
+awx_k8s_name: awx
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_postgres_user: awx
+awx_postgres_database: awx
+awx_postgres_container: postgres
+awx_k8s_web_container: awx-web

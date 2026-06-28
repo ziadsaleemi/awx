@@ -184,6 +184,30 @@ ansible-playbook -i inventories/example.ini playbooks/restore.yml \
   -e awx_restore_path=/var/backups/awx/awx-20260625T010101Z
 ```
 
+For k3s or Kubernetes deployments, use the Kubernetes-native lifecycle
+playbooks. They dump PostgreSQL through the `awx-postgres` pod, export AWX
+secrets/config maps/resource inventory, and archive projects/media from the
+projects PVC through a temporary helper pod.
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/backup-k8s.yml \
+  -e awx_backup_name=awx-k8s-20260625T010101Z
+
+ansible-playbook -i inventories/example.ini playbooks/restore-k8s.yml \
+  -e awx_k8s_restore_confirm=true \
+  -e awx_k8s_restore_path=/var/backups/awx/awx-k8s-20260625T010101Z
+
+ansible-playbook -i inventories/example.ini playbooks/failback-k8s.yml \
+  -e awx_failback_restore_path=/var/backups/awx/awx-k8s-20260625T010101Z \
+  -e awx_failback_image_tag=25.1.4
+```
+
+Use the server lifecycle playbooks for direct or multi-node server deployments,
+and the Kubernetes lifecycle playbooks for k3s/existing-k8s. For vCenter
+snapshot rollback drills, snapshot the current state first, revert to the
+chosen snapshot, smoke-test the old state, then run the matching deploy or
+upgrade playbook to fail forward and smoke-test again.
+
 ## EDA Live Smoke
 
 After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke

@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: awx_k8s_backup
+  author: AWX
+  description: Backup AWX from a k3s or Kubernetes deployment.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+dependencies: []

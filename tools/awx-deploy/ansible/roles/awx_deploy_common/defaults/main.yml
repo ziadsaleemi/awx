@@ -103,6 +103,14 @@ awx_k3s_disable:
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
 awx_restore_confirm: false
 awx_restore_path: ""
+awx_k8s_backup_dir: "{{ awx_server_backup_dir }}"
+awx_k8s_backup_name: "{{ awx_backup_name }}"
+awx_k8s_backup_collect_projects: true
+awx_k8s_restore_path: "{{ awx_restore_path }}"
+awx_k8s_restore_confirm: "{{ awx_restore_confirm }}"
+awx_k8s_restore_start_after_restore: true
+awx_k8s_restore_data: true
+awx_k8s_restore_helper_pod: "{{ awx_k8s_name }}-restore-helper"
 
 awx_eda_enabled: false
 awx_eda_configure_awx_settings: "{{ awx_eda_enabled }}"

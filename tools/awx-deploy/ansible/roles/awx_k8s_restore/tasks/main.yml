@@ -1,0 +1,205 @@
+---
+- name: Validate Kubernetes restore confirmation
+  ansible.builtin.assert:
+    that:
+      - awx_k8s_restore_confirm | bool
+      - awx_k8s_restore_path | length > 0
+    fail_msg: "Kubernetes restore is destructive. Set awx_k8s_restore_confirm=true and awx_k8s_restore_path."
+
+- name: Resolve kubectl command for AWX Kubernetes restore
+  ansible.builtin.set_fact:
+    awx_k8s_restore_kubectl: >-
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Validate AWX Kubernetes database backup file
+  ansible.builtin.stat:
+    path: "{{ awx_k8s_restore_path }}/awx.sql"
+  register: awx_k8s_restore_sql_stat
+
+- name: Fail when AWX Kubernetes database backup is missing
+  ansible.builtin.assert:
+    that:
+      - awx_k8s_restore_sql_stat.stat.exists
+    fail_msg: "Database backup not found at {{ awx_k8s_restore_path }}/awx.sql."
+
+- name: Wait for Kubernetes API readiness before restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} get --raw=/readyz"
+  register: awx_k8s_restore_readyz
+  retries: 60
+  delay: 5
+  until: awx_k8s_restore_readyz.rc == 0
+  changed_when: false
+
+- name: Scale AWX application deployments down before Kubernetes restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} scale deployment/{{ item }} --replicas=0"
+  loop:
+    - "{{ awx_k8s_name }}-web"
+    - "{{ awx_k8s_name }}-task"
+  register: awx_k8s_restore_scale_down
+  changed_when: "'scaled' in awx_k8s_restore_scale_down.stdout"
+  failed_when: false
+
+- name: Check backed up AWX Kubernetes secrets file
+  ansible.builtin.stat:
+    path: "{{ awx_k8s_restore_path }}/k8s-secrets.yml"
+  register: awx_k8s_restore_secrets_stat
+
+- name: Apply backed up AWX Kubernetes secrets
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} apply -f {{ awx_k8s_restore_path }}/k8s-secrets.yml"
+  register: awx_k8s_restore_apply_secrets
+  changed_when: "'created' in awx_k8s_restore_apply_secrets.stdout or 'configured' in awx_k8s_restore_apply_secrets.stdout"
+  when: awx_k8s_restore_secrets_stat.stat.exists
+
+- name: Check backed up AWX Kubernetes config maps file
+  ansible.builtin.stat:
+    path: "{{ awx_k8s_restore_path }}/k8s-configmaps.yml"
+  register: awx_k8s_restore_configmaps_stat
+
+- name: Apply backed up AWX Kubernetes config maps
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} apply -f {{ awx_k8s_restore_path }}/k8s-configmaps.yml"
+  register: awx_k8s_restore_apply_configmaps
+  changed_when: "'created' in awx_k8s_restore_apply_configmaps.stdout or 'configured' in awx_k8s_restore_apply_configmaps.stdout"
+  when: awx_k8s_restore_configmaps_stat.stat.exists
+
+- name: Wait for AWX PostgreSQL deployment before restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-postgres --timeout=300s"
+  changed_when: false
+
+- name: Resolve AWX PostgreSQL pod for restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_k8s_name }}-postgres -o jsonpath='{.items[0].metadata.name}'"
+  register: awx_k8s_restore_postgres_pod
+  changed_when: false
+
+- name: Terminate AWX PostgreSQL connections before restore
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }}
+      exec {{ awx_k8s_restore_postgres_pod.stdout }} -c {{ awx_postgres_container }}
+      -- psql -v ON_ERROR_STOP=1 -U {{ awx_postgres_user }} -d {{ awx_postgres_database }}
+      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{{ awx_postgres_database }}' AND pid <> pg_backend_pid();"
+  changed_when: true
+
+- name: Restore AWX PostgreSQL database into Kubernetes
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_k8s_restore_path }}/awx.sql |
+      {{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }}
+      exec -i {{ awx_k8s_restore_postgres_pod.stdout }} -c {{ awx_postgres_container }}
+      -- psql -v ON_ERROR_STOP=1 -U {{ awx_postgres_user }} -d {{ awx_postgres_database }}
+    executable: /bin/bash
+  changed_when: true
+
+- name: Check AWX Kubernetes project/media backup archive
+  ansible.builtin.stat:
+    path: "{{ awx_k8s_restore_path }}/data.tar.gz"
+  register: awx_k8s_restore_data_archive
+  when: awx_k8s_restore_data | bool
+
+- name: Remove stale AWX Kubernetes restore helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} delete pod {{ awx_k8s_restore_helper_pod }} --ignore-not-found=true"
+  register: awx_k8s_restore_delete_helper
+  changed_when: "'deleted' in awx_k8s_restore_delete_helper.stdout"
+  when:
+    - awx_k8s_restore_data | bool
+    - awx_k8s_restore_data_archive.stat.size | default(0) > 128
+
+- name: Create AWX Kubernetes restore helper pod
+  ansible.builtin.shell:
+    cmd: |
+      cat <<'EOF' | {{ awx_k8s_restore_kubectl }} apply -f -
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: {{ awx_k8s_restore_helper_pod }}
+        namespace: {{ awx_k8s_namespace }}
+      spec:
+        restartPolicy: Never
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 0
+          fsGroup: 0
+        containers:
+          - name: helper
+            image: {{ awx_image }}:{{ awx_image_tag }}
+            command: ["/bin/bash", "-lc", "sleep 3600"]
+            volumeMounts:
+              - name: projects
+                mountPath: /var/lib/awx/projects
+                subPath: projects
+              - name: projects
+                mountPath: /var/lib/awx/public/media
+                subPath: media
+        volumes:
+          - name: projects
+            persistentVolumeClaim:
+              claimName: {{ awx_k8s_name }}-projects
+      EOF
+    executable: /bin/bash
+  register: awx_k8s_restore_create_helper
+  changed_when: "'created' in awx_k8s_restore_create_helper.stdout or 'configured' in awx_k8s_restore_create_helper.stdout"
+  when:
+    - awx_k8s_restore_data | bool
+    - awx_k8s_restore_data_archive.stat.size | default(0) > 128
+
+- name: Wait for AWX Kubernetes restore helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} wait --for=condition=Ready pod/{{ awx_k8s_restore_helper_pod }} --timeout=180s"
+  changed_when: false
+  when:
+    - awx_k8s_restore_data | bool
+    - awx_k8s_restore_data_archive.stat.size | default(0) > 128
+
+- name: Restore AWX Kubernetes projects and media PVC data
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_k8s_restore_path }}/data.tar.gz |
+      {{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }}
+      exec -i {{ awx_k8s_restore_helper_pod }} -c helper
+      -- bash -lc 'find /var/lib/awx/projects /var/lib/awx/public/media -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar --no-overwrite-dir --no-same-owner --no-same-permissions --touch -C /var/lib/awx -xzf -'
+    executable: /bin/bash
+  changed_when: true
+  when:
+    - awx_k8s_restore_data | bool
+    - awx_k8s_restore_data_archive.stat.size | default(0) > 128
+
+- name: Remove AWX Kubernetes restore helper pod after data restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} delete pod {{ awx_k8s_restore_helper_pod }} --ignore-not-found=true"
+  register: awx_k8s_restore_cleanup_helper
+  changed_when: "'deleted' in awx_k8s_restore_cleanup_helper.stdout"
+  when:
+    - awx_k8s_restore_data | bool
+    - awx_k8s_restore_data_archive.stat.size | default(0) > 128
+
+- name: Scale AWX application deployments up after Kubernetes restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} scale deployment/{{ item.name }} --replicas={{ item.replicas }}"
+  loop:
+    - name: "{{ awx_k8s_name }}-web"
+      replicas: "{{ awx_k8s_web_replicas }}"
+    - name: "{{ awx_k8s_name }}-task"
+      replicas: "{{ awx_k8s_task_replicas }}"
+  register: awx_k8s_restore_scale_up
+  changed_when: "'scaled' in awx_k8s_restore_scale_up.stdout"
+  when: awx_k8s_restore_start_after_restore | bool
+
+- name: Wait for AWX web deployment after Kubernetes restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-web --timeout=300s"
+  changed_when: false
+  when: awx_k8s_restore_start_after_restore | bool
+
+- name: Wait for AWX task deployment after Kubernetes restore
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-task --timeout=300s"
+  changed_when: false
+  when: awx_k8s_restore_start_after_restore | bool

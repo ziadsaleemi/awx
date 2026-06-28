@@ -13,17 +13,33 @@
   until: awx_k8s_readyz.rc == 0
   changed_when: false
 
+- name: Read existing Kubernetes secret key when not provided
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} get secret {{ awx_k8s_name }}-secret -o jsonpath='{.data.SECRET_KEY}'"
+  register: awx_k8s_existing_secret_key
+  changed_when: false
+  failed_when: false
+  when: (awx_secret_key | default('')) | length == 0
+  no_log: true
+
 - name: Generate Kubernetes secret key when not provided
   ansible.builtin.command:
     cmd: openssl rand -base64 32
   register: awx_k8s_generated_secret_key
   changed_when: false
-  when: (awx_secret_key | default('')) | length == 0
+  when:
+    - (awx_secret_key | default('')) | length == 0
+    - (awx_k8s_existing_secret_key.stdout | default('')) | length == 0
   no_log: true
 
 - name: Set Kubernetes secret key fact
   ansible.builtin.set_fact:
-    awx_k8s_effective_secret_key: "{{ awx_secret_key | default('') if (awx_secret_key | default('')) | length > 0 else awx_k8s_generated_secret_key.stdout }}"
+    awx_k8s_effective_secret_key: >-
+      {{ awx_secret_key | default('')
+        if (awx_secret_key | default('')) | length > 0
+        else (awx_k8s_existing_secret_key.stdout | b64decode
+          if (awx_k8s_existing_secret_key.stdout | default('')) | length > 0
+          else awx_k8s_generated_secret_key.stdout) }}
   no_log: true
 
 - name: Create Kubernetes manifest workspace
