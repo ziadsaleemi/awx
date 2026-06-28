@@ -18,10 +18,13 @@ The first implementation manages organization-scoped EDA role assignments.
 
 | AWX role source | EDA role target |
 | --- | --- |
-| Organization Admin | Admin |
-| EDA Administrator | Admin |
-| EDA Operator | Operator |
-| Organization Auditor | Auditor |
+| Organization Admin | Organization Admin |
+| EDA Administrator | Organization Admin |
+| EDA Operator | Organization Operator |
+| Organization Auditor | Organization Auditor |
+
+The sync layer also accepts older short EDA role names (`Admin`, `Operator`,
+and `Auditor`) as aliases during lookup so older EDA deployments keep working.
 
 The sync layer matches objects by stable human identifiers:
 
@@ -38,7 +41,10 @@ The sync layer matches objects by stable human identifiers:
 
 `sync`
 : Creates missing EDA organizations, users, teams, and missing role
-  assignments. It does not remove extra EDA assignments.
+  assignments. It does not remove extra EDA assignments. Missing EDA users
+  created by AWX receive a generated random password so the current EDA API can
+  create the identity; operators should reset credentials in EDA if direct EDA
+  login is required for that user.
 
 `enforce`
 : Performs `sync`, then removes extra EDA assignments inside the AWX-managed

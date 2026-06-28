@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import secrets
 from dataclasses import dataclass
 
 from django.db.models import Q
@@ -18,25 +19,29 @@ AWX_TO_EDA_ORG_ROLE_MAPPINGS = (
     {
         'awx_role_field': 'admin_role',
         'awx_role_label': 'Organization Admin',
-        'eda_role_name': 'Admin',
+        'eda_role_name': 'Organization Admin',
+        'eda_role_aliases': ('Admin',),
         'actor_source': 'awx_organization_admin',
     },
     {
         'awx_role_field': 'eda_admin_role',
         'awx_role_label': 'EDA Administrator',
-        'eda_role_name': 'Admin',
+        'eda_role_name': 'Organization Admin',
+        'eda_role_aliases': ('Admin',),
         'actor_source': 'awx_eda_admin',
     },
     {
         'awx_role_field': 'eda_operator_role',
         'awx_role_label': 'EDA Operator',
-        'eda_role_name': 'Operator',
+        'eda_role_name': 'Organization Operator',
+        'eda_role_aliases': ('Operator',),
         'actor_source': 'awx_eda_operator',
     },
     {
         'awx_role_field': 'auditor_role',
         'awx_role_label': 'Organization Auditor',
-        'eda_role_name': 'Auditor',
+        'eda_role_name': 'Organization Auditor',
+        'eda_role_aliases': ('Auditor', 'Organization Viewer'),
         'actor_source': 'awx_organization_auditor',
     },
 )
@@ -220,6 +225,20 @@ def _append_missing_identity(report, identity_type, name, **extra):
         report['missing_identities'][identity_type].append(row)
 
 
+def _mapped_eda_role_names(mapping):
+    names = [mapping['eda_role_name']]
+    names.extend(mapping.get('eda_role_aliases') or [])
+    return names
+
+
+def _mapped_eda_role(indexes, mapping):
+    for role_name in _mapped_eda_role_names(mapping):
+        role = indexes['roles_by_name'].get(_normalized_text(role_name))
+        if role:
+            return role
+    return None
+
+
 def _create_missing_organization(client, report, org, indexes):
     payload = {'name': org.name, 'description': org.description or 'Managed by AWX RBAC sync'}
     try:
@@ -237,6 +256,7 @@ def _create_missing_organization(client, report, org, indexes):
 def _create_missing_user(client, report, user, indexes):
     payload = {
         'username': user.username,
+        'password': secrets.token_urlsafe(32),
         'first_name': user.first_name or '',
         'last_name': user.last_name or '',
         'email': user.email or '',
@@ -294,7 +314,7 @@ def _desired_assignments_for_organization(client, report, org, indexes, *, mode,
 
     for mapping in AWX_TO_EDA_ORG_ROLE_MAPPINGS:
         role = getattr(org, mapping['awx_role_field'], None)
-        eda_role = indexes['roles_by_name'].get(_normalized_text(mapping['eda_role_name']))
+        eda_role = _mapped_eda_role(indexes, mapping)
         if not eda_role:
             _append_missing_identity(
                 report,
@@ -302,6 +322,7 @@ def _desired_assignments_for_organization(client, report, org, indexes, *, mode,
                 mapping['eda_role_name'],
                 content_type=EDA_ORGANIZATION_CONTENT_TYPE,
                 awx_role_field=mapping['awx_role_field'],
+                aliases=list(mapping.get('eda_role_aliases') or []),
             )
             continue
         eda_role_id = str(_item_id(eda_role) or '')
@@ -489,11 +510,11 @@ def build_eda_rbac_sync_report(user, *, mode='observe', create_missing_identitie
         for org in organizations
         if indexes['organizations_by_name'].get(_normalized_text(org.name))
     }
-    managed_role_ids = {
-        str(_item_id(indexes['roles_by_name'].get(_normalized_text(mapping['eda_role_name']))) or '')
-        for mapping in AWX_TO_EDA_ORG_ROLE_MAPPINGS
-        if indexes['roles_by_name'].get(_normalized_text(mapping['eda_role_name']))
-    }
+    managed_role_ids = set()
+    for mapping in AWX_TO_EDA_ORG_ROLE_MAPPINGS:
+        eda_role = _mapped_eda_role(indexes, mapping)
+        if eda_role:
+            managed_role_ids.add(str(_item_id(eda_role) or ''))
     managed_actor_ids = _managed_actor_ids(indexes, organizations)
     extras = _managed_extra_assignments(current, desired, indexes, managed_org_ids, managed_role_ids, managed_actor_ids)
     report['extra_assignments'] = extras

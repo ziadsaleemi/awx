@@ -24,18 +24,19 @@ def eda_error_response(mocker, status_code, text):
     return response
 
 
-def eda_rbac_resource_payloads(organization, user=None, *, assignments=None, teams=None):
-    users = []
-    if user:
-        users.append({'id': 50, 'username': user.username, 'email': user.email})
+def eda_rbac_resource_payloads(organization, user=None, *, assignments=None, teams=None, users=None):
+    if users is None:
+        users = []
+        if user:
+            users.append({'id': 50, 'username': user.username, 'email': user.email})
     return {
         'organizations': [{'id': 10, 'name': organization.name}],
         'users': users,
         'teams': teams or [],
         'role-definitions': [
-            {'id': 1, 'name': 'Admin', 'content_type': 'shared.organization'},
-            {'id': 5, 'name': 'Operator', 'content_type': 'shared.organization'},
-            {'id': 6, 'name': 'Auditor', 'content_type': 'shared.organization'},
+            {'id': 1, 'name': 'Organization Admin', 'content_type': 'shared.organization'},
+            {'id': 5, 'name': 'Organization Operator', 'content_type': 'shared.organization'},
+            {'id': 6, 'name': 'Organization Auditor', 'content_type': 'shared.organization'},
         ],
         'user-role-assignments': assignments or [],
         'team-role-assignments': [],
@@ -871,7 +872,7 @@ def test_eda_rbac_sync_preview_reports_missing_assignment(get, organization, ran
     assert response.data['summary']['extra_assignments'] == 0
     assert response.data['missing_assignments'][0]['actor_type'] == 'user'
     assert response.data['missing_assignments'][0]['actor_name'] == rando.username
-    assert response.data['missing_assignments'][0]['eda_role_name'] == 'Operator'
+    assert response.data['missing_assignments'][0]['eda_role_name'] == 'Organization Operator'
     assert response.data['actions'] == []
 
 
@@ -890,6 +891,68 @@ def test_eda_rbac_sync_creates_missing_assignment(post, organization, rando, adm
         'user-role-assignments',
         {'user': 50, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10},
     )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_creates_missing_user_with_generated_password(post, organization, rando, admin_user, mocker):
+    organization.eda_operator_role.members.add(rando)
+    patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, users=[]))
+    create_resource = mocker.patch(
+        'awx.main.utils.eda_rbac.EDAControllerClient.create_resource',
+        side_effect=[
+            {'id': 50, 'username': rando.username, 'email': rando.email},
+            {'id': 99},
+        ],
+    )
+
+    response = post(reverse('api:eda_rbac_sync'), {'mode': 'sync'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['actions'] == 2
+    assert response.data['actions'][0]['resource'] == 'users'
+    assert response.data['actions'][1]['resource'] == 'user-role-assignments'
+    user_payload = create_resource.call_args_list[0].args[1]
+    assert create_resource.call_args_list[0].args[0] == 'users'
+    assert user_payload['username'] == rando.username
+    assert isinstance(user_payload['password'], str)
+    assert len(user_payload['password']) >= 32
+    assert create_resource.call_args_list[1].args == (
+        'user-role-assignments',
+        {'user': 50, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10},
+    )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_supports_legacy_short_organization_role_names(get, organization, rando, admin_user, mocker):
+    organization.eda_operator_role.members.add(rando)
+    payloads = eda_rbac_resource_payloads(organization, rando)
+    payloads['role-definitions'] = [{'id': 5, 'name': 'Operator', 'content_type': 'shared.organization'}]
+    patch_eda_rbac_resources(mocker, payloads)
+
+    response = get(reverse('api:eda_rbac_sync'), user=admin_user, expect=200)
+
+    assert response.data['summary']['desired_assignments'] == 1
+    assert response.data['missing_identities']['role_definitions'] == [
+        {
+            'name': 'Organization Admin',
+            'content_type': 'shared.organization',
+            'awx_role_field': 'admin_role',
+            'aliases': ['Admin'],
+        },
+        {
+            'name': 'Organization Admin',
+            'content_type': 'shared.organization',
+            'awx_role_field': 'eda_admin_role',
+            'aliases': ['Admin'],
+        },
+        {
+            'name': 'Organization Auditor',
+            'content_type': 'shared.organization',
+            'awx_role_field': 'auditor_role',
+            'aliases': ['Auditor', 'Organization Viewer'],
+        },
+    ]
 
 
 @pytest.mark.django_db
