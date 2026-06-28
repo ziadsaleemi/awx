@@ -6,8 +6,28 @@ import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxConfig } from '../../common/useAwxConfig';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
+import type { GatekeeperPolicyManagerView } from './GatekeeperPolicyManager';
 
-type PolicyAsCodeView = 'overview' | 'gatekeeper' | 'modules' | 'tester';
+type PolicyAsCodeView =
+  | 'overview'
+  | 'gatekeeper-overview'
+  | 'gatekeeper-changes'
+  | 'gatekeeper-templates'
+  | 'gatekeeper-constraints'
+  | 'gatekeeper-violations'
+  | 'gatekeeper-configs'
+  | 'modules'
+  | 'tester';
+
+function gatekeeperView(view: PolicyAsCodeView): GatekeeperPolicyManagerView | undefined {
+  if (view === 'gatekeeper-overview') return 'overview';
+  if (view === 'gatekeeper-changes') return 'changes';
+  if (view === 'gatekeeper-templates') return 'templates';
+  if (view === 'gatekeeper-constraints') return 'constraints';
+  if (view === 'gatekeeper-violations') return 'violations';
+  if (view === 'gatekeeper-configs') return 'configs';
+  return undefined;
+}
 
 export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   const { t } = useTranslation();
@@ -22,11 +42,21 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   const title =
     view === 'modules'
       ? t('Policy Modules')
-      : view === 'gatekeeper'
-        ? t('Gatekeeper')
-        : view === 'tester'
-          ? t('Policy Tester')
-          : t('Policy as Code');
+      : view === 'gatekeeper-changes'
+        ? t('Gatekeeper Governed Changes')
+        : view === 'gatekeeper-templates'
+          ? t('Gatekeeper ConstraintTemplates')
+          : view === 'gatekeeper-constraints'
+            ? t('Gatekeeper Constraints')
+            : view === 'gatekeeper-violations'
+              ? t('Gatekeeper Violations')
+              : view === 'gatekeeper-configs'
+                ? t('Gatekeeper Configurations')
+                : gatekeeperView(view)
+                  ? t('Gatekeeper')
+                  : view === 'tester'
+                    ? t('Policy Tester')
+                    : t('Policy as Code');
 
   if (view === 'modules' && activeAwxUser && !capabilities.isLoading && !canManagePolicy) {
     return <Navigate to="../overview" replace />;
@@ -34,16 +64,19 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   if ((view === 'overview' || view === 'modules' || view === 'tester') && !moduleOpaEnabled) {
     return <Navigate to={moduleGatekeeperEnabled ? '../gatekeeper' : '../../overview'} replace />;
   }
-  if (view === 'gatekeeper' && !moduleGatekeeperEnabled) {
-    return <Navigate to={moduleOpaEnabled ? '../overview' : '../../overview'} replace />;
+  if (gatekeeperView(view) && !moduleGatekeeperEnabled) {
+    return <Navigate to={moduleOpaEnabled ? '/policy-as-code/overview' : '/overview'} replace />;
   }
+  const gatekeeperPolicyView = gatekeeperView(view);
   return (
     <PageLayout>
       <PageHeader title={title} />
       {view === 'overview' ? (
         <OPAPolicyManagementPanel sections={['status']} canManagePolicy={canManagePolicy} />
       ) : null}
-      {view === 'gatekeeper' ? <GatekeeperPolicyManager canManagePolicy={canManagePolicy} /> : null}
+      {gatekeeperPolicyView ? (
+        <GatekeeperPolicyManager view={gatekeeperPolicyView} canManagePolicy={canManagePolicy} />
+      ) : null}
       {view === 'modules' ? (
         <OPAPolicyManagementPanel sections={['modules']} canManagePolicy={canManagePolicy} />
       ) : null}

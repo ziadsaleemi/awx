@@ -202,6 +202,12 @@ export enum AwxRoute {
   PolicyAsCode = 'awx-policy-as-code',
   PolicyAsCodeOverview = 'awx-policy-as-code-overview',
   PolicyAsCodeGatekeeper = 'awx-policy-as-code-gatekeeper',
+  PolicyAsCodeGatekeeperOverview = 'awx-policy-as-code-gatekeeper-overview',
+  PolicyAsCodeGatekeeperChanges = 'awx-policy-as-code-gatekeeper-changes',
+  PolicyAsCodeGatekeeperTemplates = 'awx-policy-as-code-gatekeeper-templates',
+  PolicyAsCodeGatekeeperConstraints = 'awx-policy-as-code-gatekeeper-constraints',
+  PolicyAsCodeGatekeeperViolations = 'awx-policy-as-code-gatekeeper-violations',
+  PolicyAsCodeGatekeeperConfigs = 'awx-policy-as-code-gatekeeper-configs',
   PolicyAsCodeModules = 'awx-policy-as-code-modules',
   PolicyAsCodeTester = 'awx-policy-as-code-tester',
 

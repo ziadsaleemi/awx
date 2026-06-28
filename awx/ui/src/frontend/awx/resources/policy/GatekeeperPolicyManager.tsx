@@ -48,6 +48,14 @@ import { PagePagination } from '../../../../framework/PageTable/PagePagination';
 
 type UnknownRecord = Record<string, unknown>;
 
+export type GatekeeperPolicyManagerView =
+  | 'overview'
+  | 'changes'
+  | 'templates'
+  | 'constraints'
+  | 'violations'
+  | 'configs';
+
 interface GatekeeperTarget {
   api_version: string;
   kind: string;
@@ -654,9 +662,13 @@ function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
   );
 }
 
-export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
+export function GatekeeperPolicyManager(props?: {
+  canManagePolicy?: boolean;
+  view?: GatekeeperPolicyManagerView;
+}) {
   const { t } = useTranslation();
   const canManagePolicy = props?.canManagePolicy ?? true;
+  const view = props?.view ?? 'overview';
   const getPageUrl = useGetPageUrl();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamString = searchParams.toString();
@@ -1013,6 +1025,13 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
         ? t('Rollback plan')
         : t('Manifest textarea resource');
 
+  const showOverview = view === 'overview';
+  const showChanges = view === 'changes';
+  const showTemplates = view === 'templates';
+  const showConstraints = view === 'constraints';
+  const showViolations = view === 'violations';
+  const showConfigs = view === 'configs';
+
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
   return (
@@ -1100,559 +1119,708 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
               </GridItem>
             </Grid>
           </StackItem>
-          <StackItem>
-            <Card isFlat>
-              <CardHeader>
-                <CardTitle>{t('Governed changes')}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <Stack hasGutter>
-                  {!data.configured ? (
-                    <StackItem>
-                      <Alert
-                        isInline
-                        variant="warning"
-                        title={t('Configure Gatekeeper before dry-run or apply.')}
-                      />
-                    </StackItem>
-                  ) : null}
-                  {canManagePolicy ? (
-                    <>
+          {showChanges ? (
+            <StackItem>
+              <Card isFlat>
+                <CardHeader>
+                  <CardTitle>{t('Governed changes')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    {!data.configured ? (
                       <StackItem>
-                        <FormGroup
-                          label={t('AI authoring prompt')}
-                          fieldId="gatekeeper-author-prompt"
-                        >
-                          <TextArea
-                            id="gatekeeper-author-prompt"
-                            value={authorPrompt}
-                            rows={3}
-                            onChange={(_event, value) => setAuthorPrompt(value)}
-                            aria-label={t('Gatekeeper AI authoring prompt')}
-                          />
-                        </FormGroup>
+                        <Alert
+                          isInline
+                          variant="warning"
+                          title={t('Configure Gatekeeper before dry-run or apply.')}
+                        />
                       </StackItem>
+                    ) : null}
+                    {canManagePolicy ? (
+                      <>
+                        <StackItem>
+                          <FormGroup
+                            label={t('AI authoring prompt')}
+                            fieldId="gatekeeper-author-prompt"
+                          >
+                            <TextArea
+                              id="gatekeeper-author-prompt"
+                              value={authorPrompt}
+                              rows={3}
+                              onChange={(_event, value) => setAuthorPrompt(value)}
+                              aria-label={t('Gatekeeper AI authoring prompt')}
+                            />
+                          </FormGroup>
+                        </StackItem>
+                        <StackItem>
+                          <Button
+                            variant="secondary"
+                            onClick={() => void handleAuthorManifest()}
+                            isLoading={authorLoading}
+                            isDisabled={authorLoading || !authorPrompt.trim()}
+                          >
+                            {t('Generate manifest')}
+                          </Button>
+                        </StackItem>
+                      </>
+                    ) : null}
+                    {authorError ? (
                       <StackItem>
+                        <Alert variant="danger" isInline title={authorError} />
+                      </StackItem>
+                    ) : null}
+                    {authorResult ? (
+                      <StackItem>
+                        <Alert
+                          variant="success"
+                          isInline
+                          title={t('Generated {{kind}}/{{name}} with {{provider}}.', {
+                            kind: String(authorResult.manifest_json.kind ?? ''),
+                            name: String(
+                              (authorResult.manifest_json.metadata as UnknownRecord | undefined)
+                                ?.name ?? ''
+                            ),
+                            provider: authorResult.provider,
+                          })}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <GatekeeperAuditLink
+                          audit={authorResult.audit}
+                          dataCy="gatekeeper-author-audit-link"
+                          getPageUrl={getPageUrl}
+                        />
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <Grid hasGutter>
+                        <GridItem sm={12} md={6} xl={3}>
+                          <FormGroup label={t('Apply mode')} fieldId="gatekeeper-apply-mode">
+                            <FormSelect
+                              id="gatekeeper-apply-mode"
+                              value={applyMode}
+                              onChange={(_event, value) => setApplyMode(String(value))}
+                            >
+                              <FormSelectOption value="preview" label={t('Preview')} />
+                              <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                              {canManagePolicy ? (
+                                <FormSelectOption value="apply" label={t('Apply')} />
+                              ) : null}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={3}>
+                          <FormGroup label={t('Strategy')} fieldId="gatekeeper-apply-strategy">
+                            <FormSelect
+                              id="gatekeeper-apply-strategy"
+                              value={applyStrategy}
+                              onChange={(_event, value) => setApplyStrategy(String(value))}
+                            >
+                              <FormSelectOption value="update" label={t('Update')} />
+                              <FormSelectOption
+                                value="server_side"
+                                label={t('Server-side apply')}
+                              />
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={4}>
+                          <FormGroup label={t('Field manager')} fieldId="gatekeeper-field-manager">
+                            <TextInput
+                              id="gatekeeper-field-manager"
+                              value={fieldManager}
+                              onChange={(_event, value) => setFieldManager(value)}
+                              isDisabled={applyStrategy !== 'server_side'}
+                            />
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={2}>
+                          <FormGroup label={t('Conflicts')} fieldId="gatekeeper-force-conflicts">
+                            <Checkbox
+                              id="gatekeeper-force-conflicts"
+                              label={t('Force')}
+                              isChecked={forceConflicts}
+                              onChange={(_event, checked) => setForceConflicts(checked)}
+                              isDisabled={applyStrategy !== 'server_side'}
+                            />
+                          </FormGroup>
+                        </GridItem>
+                      </Grid>
+                    </StackItem>
+                    <StackItem>
+                      <FormGroup label={t('Manifest')} fieldId="gatekeeper-apply-manifest">
+                        <TextArea
+                          id="gatekeeper-apply-manifest"
+                          value={applyManifest}
+                          rows={12}
+                          onChange={(_event, value) => setApplyManifest(value)}
+                          aria-label={t('Gatekeeper manifest')}
+                          style={{ fontFamily: 'monospace' }}
+                        />
+                      </FormGroup>
+                    </StackItem>
+                    {applyMode === 'apply' ? (
+                      <StackItem>
+                        <Alert
+                          isInline
+                          variant="warning"
+                          title={t(
+                            'Apply persists the manifest if RBAC, OPA, and Kubernetes admission allow it.'
+                          )}
+                        />
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <Button
+                        variant={applyMode === 'apply' ? 'danger' : 'primary'}
+                        onClick={() =>
+                          applyMode === 'apply'
+                            ? setConfirmLiveAction('apply')
+                            : void handleApplyManifest()
+                        }
+                        isLoading={applyLoading}
+                        isDisabled={applyLoading || !data.configured || !applyManifest.trim()}
+                        data-cy="gatekeeper-apply-button"
+                      >
+                        {applyMode === 'preview'
+                          ? t('Preview')
+                          : applyMode === 'dry_run'
+                            ? t('Dry-run')
+                            : t('Apply')}
+                      </Button>
+                    </StackItem>
+                    {applyError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={applyError} />
+                      </StackItem>
+                    ) : null}
+                    {applyResult ? (
+                      <StackItem>
+                        <Alert
+                          variant={
+                            applyResult.persisted || applyResult.dry_run ? 'success' : 'info'
+                          }
+                          isInline
+                          title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                            mode: applyResult.mode,
+                            operation: applyResult.operation,
+                            kind: String(applyResult.target.kind ?? ''),
+                            name: String(applyResult.target.name ?? ''),
+                          })}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <GatekeeperAuditLink
+                          audit={applyResult.audit}
+                          dataCy="gatekeeper-apply-audit-link"
+                          getPageUrl={getPageUrl}
+                        />
+                        <CodeBlock>
+                          <CodeBlockCode>{jsonPreview(applyResult)}</CodeBlockCode>
+                        </CodeBlock>
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <Grid hasGutter>
+                        <GridItem sm={12} md={4} xl={3}>
+                          <FormGroup label={t('Delete mode')} fieldId="gatekeeper-delete-mode">
+                            <FormSelect
+                              id="gatekeeper-delete-mode"
+                              value={deleteMode}
+                              onChange={(_event, value) => setDeleteMode(String(value))}
+                            >
+                              <FormSelectOption value="preview" label={t('Preview')} />
+                              <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                              {canManagePolicy ? (
+                                <FormSelectOption value="delete" label={t('Delete')} />
+                              ) : null}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={8} xl={9}>
+                          <FormGroup label={t('Delete target')} fieldId="gatekeeper-delete-target">
+                            <Stack hasGutter>
+                              <StackItem>
+                                {deleteTarget
+                                  ? t('Selected resource: {{target}}', {
+                                      target: gatekeeperTargetDisplay(deleteTarget),
+                                    })
+                                  : t('Manifest textarea resource')}
+                              </StackItem>
+                              <StackItem>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => {
+                                    setDeleteTarget(selectedDeleteTarget);
+                                    setDeleteResult(null);
+                                  }}
+                                  isDisabled={!selectedDeleteTarget}
+                                >
+                                  {t('Use selected resource')}
+                                </Button>{' '}
+                                <Button
+                                  variant="link"
+                                  isInline
+                                  onClick={() => {
+                                    setDeleteTarget(undefined);
+                                    setDeleteResult(null);
+                                  }}
+                                  isDisabled={!deleteTarget}
+                                >
+                                  {t('Use manifest instead')}
+                                </Button>
+                              </StackItem>
+                            </Stack>
+                          </FormGroup>
+                        </GridItem>
+                      </Grid>
+                    </StackItem>
+                    <StackItem>
+                      <Button
+                        variant={deleteMode === 'delete' ? 'danger' : 'secondary'}
+                        onClick={() =>
+                          deleteMode === 'delete'
+                            ? setConfirmLiveAction('delete')
+                            : void handleDeleteManifest()
+                        }
+                        isLoading={deleteLoading}
+                        isDisabled={
+                          deleteLoading ||
+                          !data.configured ||
+                          (!deleteTarget && !applyManifest.trim())
+                        }
+                        data-cy="gatekeeper-delete-button"
+                      >
+                        {deleteMode === 'preview'
+                          ? t('Preview delete')
+                          : deleteMode === 'dry_run'
+                            ? t('Dry-run delete')
+                            : t('Delete')}
+                      </Button>
+                    </StackItem>
+                    {deleteError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={deleteError} />
+                      </StackItem>
+                    ) : null}
+                    {deleteResult ? (
+                      <StackItem>
+                        <Alert
+                          variant={
+                            deleteResult.persisted || deleteResult.dry_run ? 'success' : 'info'
+                          }
+                          isInline
+                          title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                            mode: deleteResult.mode,
+                            operation: deleteResult.operation,
+                            kind: String(deleteResult.target.kind ?? ''),
+                            name: String(deleteResult.target.name ?? ''),
+                          })}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <GatekeeperAuditLink
+                          audit={deleteResult.audit}
+                          dataCy="gatekeeper-delete-audit-link"
+                          getPageUrl={getPageUrl}
+                        />
+                        <CodeBlock>
+                          <CodeBlockCode>{jsonPreview(deleteResult)}</CodeBlockCode>
+                        </CodeBlock>
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <Grid hasGutter>
+                        <GridItem sm={12} md={4} xl={3}>
+                          <FormGroup label={t('Rollback mode')} fieldId="gatekeeper-rollback-mode">
+                            <FormSelect
+                              id="gatekeeper-rollback-mode"
+                              value={rollbackMode}
+                              onChange={(_event, value) => setRollbackMode(String(value))}
+                            >
+                              <FormSelectOption value="preview" label={t('Preview')} />
+                              <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                              {canManagePolicy ? (
+                                <FormSelectOption value="apply" label={t('Apply')} />
+                              ) : null}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                      </Grid>
+                    </StackItem>
+                    <StackItem>
+                      <FormGroup label={t('Rollback plan')} fieldId="gatekeeper-rollback-plan">
+                        <TextArea
+                          id="gatekeeper-rollback-plan"
+                          value={rollbackPlan}
+                          rows={8}
+                          onChange={(_event, value) => setRollbackPlan(value)}
+                          aria-label={t('Gatekeeper rollback plan')}
+                          style={{ fontFamily: 'monospace' }}
+                        />
+                      </FormGroup>
+                    </StackItem>
+                    <StackItem>
+                      <Button
+                        variant={rollbackMode === 'apply' ? 'danger' : 'secondary'}
+                        onClick={() =>
+                          rollbackMode === 'apply'
+                            ? setConfirmLiveAction('rollback')
+                            : void handleRollback()
+                        }
+                        isLoading={rollbackLoading}
+                        isDisabled={rollbackLoading || !data.configured || !rollbackPlan.trim()}
+                        data-cy="gatekeeper-rollback-button"
+                      >
+                        {rollbackMode === 'preview'
+                          ? t('Preview rollback')
+                          : rollbackMode === 'dry_run'
+                            ? t('Dry-run rollback')
+                            : t('Apply rollback')}
+                      </Button>
+                    </StackItem>
+                    {rollbackError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={rollbackError} />
+                      </StackItem>
+                    ) : null}
+                    {rollbackResult ? (
+                      <StackItem>
+                        <Alert
+                          variant={
+                            rollbackResult.persisted || rollbackResult.dry_run ? 'success' : 'info'
+                          }
+                          isInline
+                          title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
+                            mode: rollbackResult.mode,
+                            operation: rollbackResult.operation,
+                            kind: String(rollbackResult.target.kind ?? ''),
+                            name: String(rollbackResult.target.name ?? ''),
+                          })}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <GatekeeperAuditLink
+                          audit={rollbackResult.audit}
+                          dataCy="gatekeeper-rollback-audit-link"
+                          getPageUrl={getPageUrl}
+                        />
+                        <CodeBlock>
+                          <CodeBlockCode>{jsonPreview(rollbackResult)}</CodeBlockCode>
+                        </CodeBlock>
+                      </StackItem>
+                    ) : null}
+                  </Stack>
+                  {confirmLiveAction ? (
+                    <Modal
+                      titleIconVariant="danger"
+                      title={gatekeeperLiveActionTitle(t, confirmLiveAction)}
+                      variant={ModalVariant.small}
+                      description={gatekeeperLiveActionDescription(t, confirmLiveAction)}
+                      isOpen
+                      onClose={() => setConfirmLiveAction(null)}
+                      data-cy="gatekeeper-live-action-confirm-dialog"
+                      actions={[
                         <Button
-                          variant="secondary"
-                          onClick={() => void handleAuthorManifest()}
-                          isLoading={authorLoading}
-                          isDisabled={authorLoading || !authorPrompt.trim()}
+                          key="confirm"
+                          variant="danger"
+                          onClick={() => void handleConfirmLiveAction()}
+                          data-cy="gatekeeper-live-action-confirm-button"
+                          aria-label={t('Confirm Gatekeeper live action')}
                         >
-                          {t('Generate manifest')}
-                        </Button>
-                      </StackItem>
-                    </>
-                  ) : null}
-                  {authorError ? (
-                    <StackItem>
-                      <Alert variant="danger" isInline title={authorError} />
-                    </StackItem>
-                  ) : null}
-                  {authorResult ? (
-                    <StackItem>
-                      <Alert
-                        variant="success"
-                        isInline
-                        title={t('Generated {{kind}}/{{name}} with {{provider}}.', {
-                          kind: String(authorResult.manifest_json.kind ?? ''),
-                          name: String(
-                            (authorResult.manifest_json.metadata as UnknownRecord | undefined)
-                              ?.name ?? ''
-                          ),
-                          provider: authorResult.provider,
-                        })}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <GatekeeperAuditLink
-                        audit={authorResult.audit}
-                        dataCy="gatekeeper-author-audit-link"
-                        getPageUrl={getPageUrl}
-                      />
-                    </StackItem>
-                  ) : null}
-                  <StackItem>
-                    <Grid hasGutter>
-                      <GridItem sm={12} md={6} xl={3}>
-                        <FormGroup label={t('Apply mode')} fieldId="gatekeeper-apply-mode">
-                          <FormSelect
-                            id="gatekeeper-apply-mode"
-                            value={applyMode}
-                            onChange={(_event, value) => setApplyMode(String(value))}
-                          >
-                            <FormSelectOption value="preview" label={t('Preview')} />
-                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            {canManagePolicy ? (
-                              <FormSelectOption value="apply" label={t('Apply')} />
-                            ) : null}
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={6} xl={3}>
-                        <FormGroup label={t('Strategy')} fieldId="gatekeeper-apply-strategy">
-                          <FormSelect
-                            id="gatekeeper-apply-strategy"
-                            value={applyStrategy}
-                            onChange={(_event, value) => setApplyStrategy(String(value))}
-                          >
-                            <FormSelectOption value="update" label={t('Update')} />
-                            <FormSelectOption value="server_side" label={t('Server-side apply')} />
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={6} xl={4}>
-                        <FormGroup label={t('Field manager')} fieldId="gatekeeper-field-manager">
-                          <TextInput
-                            id="gatekeeper-field-manager"
-                            value={fieldManager}
-                            onChange={(_event, value) => setFieldManager(value)}
-                            isDisabled={applyStrategy !== 'server_side'}
-                          />
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={6} xl={2}>
-                        <FormGroup label={t('Conflicts')} fieldId="gatekeeper-force-conflicts">
-                          <Checkbox
-                            id="gatekeeper-force-conflicts"
-                            label={t('Force')}
-                            isChecked={forceConflicts}
-                            onChange={(_event, checked) => setForceConflicts(checked)}
-                            isDisabled={applyStrategy !== 'server_side'}
-                          />
-                        </FormGroup>
-                      </GridItem>
-                    </Grid>
-                  </StackItem>
-                  <StackItem>
-                    <FormGroup label={t('Manifest')} fieldId="gatekeeper-apply-manifest">
-                      <TextArea
-                        id="gatekeeper-apply-manifest"
-                        value={applyManifest}
-                        rows={12}
-                        onChange={(_event, value) => setApplyManifest(value)}
-                        aria-label={t('Gatekeeper manifest')}
-                        style={{ fontFamily: 'monospace' }}
-                      />
-                    </FormGroup>
-                  </StackItem>
-                  {applyMode === 'apply' ? (
-                    <StackItem>
-                      <Alert
-                        isInline
-                        variant="warning"
-                        title={t(
-                          'Apply persists the manifest if RBAC, OPA, and Kubernetes admission allow it.'
-                        )}
-                      />
-                    </StackItem>
-                  ) : null}
-                  <StackItem>
-                    <Button
-                      variant={applyMode === 'apply' ? 'danger' : 'primary'}
-                      onClick={() =>
-                        applyMode === 'apply'
-                          ? setConfirmLiveAction('apply')
-                          : void handleApplyManifest()
-                      }
-                      isLoading={applyLoading}
-                      isDisabled={applyLoading || !data.configured || !applyManifest.trim()}
-                      data-cy="gatekeeper-apply-button"
+                          {t('Confirm')}
+                        </Button>,
+                        <Button
+                          key="cancel"
+                          variant="link"
+                          onClick={() => setConfirmLiveAction(null)}
+                          data-cy="gatekeeper-live-action-cancel-button"
+                        >
+                          {t('Cancel')}
+                        </Button>,
+                      ]}
                     >
-                      {applyMode === 'preview'
-                        ? t('Preview')
-                        : applyMode === 'dry_run'
-                          ? t('Dry-run')
-                          : t('Apply')}
-                    </Button>
-                  </StackItem>
-                  {applyError ? (
-                    <StackItem>
-                      <Alert variant="danger" isInline title={applyError} />
-                    </StackItem>
-                  ) : null}
-                  {applyResult ? (
-                    <StackItem>
-                      <Alert
-                        variant={applyResult.persisted || applyResult.dry_run ? 'success' : 'info'}
-                        isInline
-                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
-                          mode: applyResult.mode,
-                          operation: applyResult.operation,
-                          kind: String(applyResult.target.kind ?? ''),
-                          name: String(applyResult.target.name ?? ''),
-                        })}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <GatekeeperAuditLink
-                        audit={applyResult.audit}
-                        dataCy="gatekeeper-apply-audit-link"
-                        getPageUrl={getPageUrl}
-                      />
-                      <CodeBlock>
-                        <CodeBlockCode>{jsonPreview(applyResult)}</CodeBlockCode>
-                      </CodeBlock>
-                    </StackItem>
-                  ) : null}
-                  <StackItem>
-                    <Grid hasGutter>
-                      <GridItem sm={12} md={4} xl={3}>
-                        <FormGroup label={t('Delete mode')} fieldId="gatekeeper-delete-mode">
-                          <FormSelect
-                            id="gatekeeper-delete-mode"
-                            value={deleteMode}
-                            onChange={(_event, value) => setDeleteMode(String(value))}
-                          >
-                            <FormSelectOption value="preview" label={t('Preview')} />
-                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            {canManagePolicy ? (
-                              <FormSelectOption value="delete" label={t('Delete')} />
-                            ) : null}
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={8} xl={9}>
-                        <FormGroup label={t('Delete target')} fieldId="gatekeeper-delete-target">
-                          <Stack hasGutter>
-                            <StackItem>
-                              {deleteTarget
-                                ? t('Selected resource: {{target}}', {
-                                    target: gatekeeperTargetDisplay(deleteTarget),
-                                  })
-                                : t('Manifest textarea resource')}
-                            </StackItem>
-                            <StackItem>
-                              <Button
-                                variant="secondary"
-                                onClick={() => {
-                                  setDeleteTarget(selectedDeleteTarget);
-                                  setDeleteResult(null);
-                                }}
-                                isDisabled={!selectedDeleteTarget}
-                              >
-                                {t('Use selected resource')}
-                              </Button>{' '}
-                              <Button
-                                variant="link"
-                                isInline
-                                onClick={() => {
-                                  setDeleteTarget(undefined);
-                                  setDeleteResult(null);
-                                }}
-                                isDisabled={!deleteTarget}
-                              >
-                                {t('Use manifest instead')}
-                              </Button>
-                            </StackItem>
-                          </Stack>
-                        </FormGroup>
-                      </GridItem>
-                    </Grid>
-                  </StackItem>
-                  <StackItem>
-                    <Button
-                      variant={deleteMode === 'delete' ? 'danger' : 'secondary'}
-                      onClick={() =>
-                        deleteMode === 'delete'
-                          ? setConfirmLiveAction('delete')
-                          : void handleDeleteManifest()
-                      }
-                      isLoading={deleteLoading}
-                      isDisabled={
-                        deleteLoading ||
-                        !data.configured ||
-                        (!deleteTarget && !applyManifest.trim())
-                      }
-                      data-cy="gatekeeper-delete-button"
-                    >
-                      {deleteMode === 'preview'
-                        ? t('Preview delete')
-                        : deleteMode === 'dry_run'
-                          ? t('Dry-run delete')
-                          : t('Delete')}
-                    </Button>
-                  </StackItem>
-                  {deleteError ? (
-                    <StackItem>
-                      <Alert variant="danger" isInline title={deleteError} />
-                    </StackItem>
-                  ) : null}
-                  {deleteResult ? (
-                    <StackItem>
-                      <Alert
-                        variant={
-                          deleteResult.persisted || deleteResult.dry_run ? 'success' : 'info'
-                        }
-                        isInline
-                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
-                          mode: deleteResult.mode,
-                          operation: deleteResult.operation,
-                          kind: String(deleteResult.target.kind ?? ''),
-                          name: String(deleteResult.target.name ?? ''),
-                        })}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <GatekeeperAuditLink
-                        audit={deleteResult.audit}
-                        dataCy="gatekeeper-delete-audit-link"
-                        getPageUrl={getPageUrl}
-                      />
-                      <CodeBlock>
-                        <CodeBlockCode>{jsonPreview(deleteResult)}</CodeBlockCode>
-                      </CodeBlock>
-                    </StackItem>
-                  ) : null}
-                  <StackItem>
-                    <Grid hasGutter>
-                      <GridItem sm={12} md={4} xl={3}>
-                        <FormGroup label={t('Rollback mode')} fieldId="gatekeeper-rollback-mode">
-                          <FormSelect
-                            id="gatekeeper-rollback-mode"
-                            value={rollbackMode}
-                            onChange={(_event, value) => setRollbackMode(String(value))}
-                          >
-                            <FormSelectOption value="preview" label={t('Preview')} />
-                            <FormSelectOption value="dry_run" label={t('Dry-run')} />
-                            {canManagePolicy ? (
-                              <FormSelectOption value="apply" label={t('Apply')} />
-                            ) : null}
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                    </Grid>
-                  </StackItem>
-                  <StackItem>
-                    <FormGroup label={t('Rollback plan')} fieldId="gatekeeper-rollback-plan">
-                      <TextArea
-                        id="gatekeeper-rollback-plan"
-                        value={rollbackPlan}
-                        rows={8}
-                        onChange={(_event, value) => setRollbackPlan(value)}
-                        aria-label={t('Gatekeeper rollback plan')}
-                        style={{ fontFamily: 'monospace' }}
-                      />
-                    </FormGroup>
-                  </StackItem>
-                  <StackItem>
-                    <Button
-                      variant={rollbackMode === 'apply' ? 'danger' : 'secondary'}
-                      onClick={() =>
-                        rollbackMode === 'apply'
-                          ? setConfirmLiveAction('rollback')
-                          : void handleRollback()
-                      }
-                      isLoading={rollbackLoading}
-                      isDisabled={rollbackLoading || !data.configured || !rollbackPlan.trim()}
-                      data-cy="gatekeeper-rollback-button"
-                    >
-                      {rollbackMode === 'preview'
-                        ? t('Preview rollback')
-                        : rollbackMode === 'dry_run'
-                          ? t('Dry-run rollback')
-                          : t('Apply rollback')}
-                    </Button>
-                  </StackItem>
-                  {rollbackError ? (
-                    <StackItem>
-                      <Alert variant="danger" isInline title={rollbackError} />
-                    </StackItem>
-                  ) : null}
-                  {rollbackResult ? (
-                    <StackItem>
-                      <Alert
-                        variant={
-                          rollbackResult.persisted || rollbackResult.dry_run ? 'success' : 'info'
-                        }
-                        isInline
-                        title={t('{{mode}} {{operation}} for {{kind}}/{{name}}.', {
-                          mode: rollbackResult.mode,
-                          operation: rollbackResult.operation,
-                          kind: String(rollbackResult.target.kind ?? ''),
-                          name: String(rollbackResult.target.name ?? ''),
-                        })}
-                        style={{ marginBottom: 12 }}
-                      />
-                      <GatekeeperAuditLink
-                        audit={rollbackResult.audit}
-                        dataCy="gatekeeper-rollback-audit-link"
-                        getPageUrl={getPageUrl}
-                      />
-                      <CodeBlock>
-                        <CodeBlockCode>{jsonPreview(rollbackResult)}</CodeBlockCode>
-                      </CodeBlock>
-                    </StackItem>
-                  ) : null}
-                </Stack>
-                {confirmLiveAction ? (
-                  <Modal
-                    titleIconVariant="danger"
-                    title={gatekeeperLiveActionTitle(t, confirmLiveAction)}
-                    variant={ModalVariant.small}
-                    description={gatekeeperLiveActionDescription(t, confirmLiveAction)}
-                    isOpen
-                    onClose={() => setConfirmLiveAction(null)}
-                    data-cy="gatekeeper-live-action-confirm-dialog"
-                    actions={[
-                      <Button
-                        key="confirm"
-                        variant="danger"
-                        onClick={() => void handleConfirmLiveAction()}
-                        data-cy="gatekeeper-live-action-confirm-button"
-                        aria-label={t('Confirm Gatekeeper live action')}
-                      >
-                        {t('Confirm')}
-                      </Button>,
-                      <Button
-                        key="cancel"
-                        variant="link"
-                        onClick={() => setConfirmLiveAction(null)}
-                        data-cy="gatekeeper-live-action-cancel-button"
-                      >
-                        {t('Cancel')}
-                      </Button>,
-                    ]}
-                  >
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {activeContext || t('Default')}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Target')}</DescriptionListTerm>
-                        <DescriptionListDescription>{confirmLiveTarget}</DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
-                  </Modal>
-                ) : null}
-              </CardBody>
-            </Card>
-          </StackItem>
-          <StackItem>
-            <Grid hasGutter style={{ alignItems: 'stretch' }}>
-              <GridItem sm={12} xl={6}>
-                <Card isFlat style={{ height: '100%' }}>
-                  <CardHeader>
-                    <CardTitle>{t('Cluster')}</CardTitle>
-                  </CardHeader>
-                  <CardBody>
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Kubernetes API')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.cluster.server_url || t('Not configured')}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.cluster.context || t('Default')}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('TLS verify')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.cluster.verify_ssl ? t('Enabled') : t('Disabled')}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
-                  </CardBody>
-                </Card>
-              </GridItem>
-              <GridItem sm={12} xl={6}>
-                <Card isFlat style={{ height: '100%' }}>
-                  <CardHeader>
-                    <CardTitle>{t('Inventory')}</CardTitle>
-                  </CardHeader>
-                  <CardBody>
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Templates')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.counts.constraint_templates}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Constraints')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.counts.constraints}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Violations')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.counts.violations}
-                          {data.counts.filtered_violations !== data.counts.violations
-                            ? t(' ({{count}} filtered)', {
-                                count: data.counts.filtered_violations,
-                              })
-                            : null}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Config CRDs')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {data.counts.configs}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
-                  </CardBody>
-                </Card>
-              </GridItem>
-            </Grid>
-          </StackItem>
-          <StackItem>
-            <Card isFlat>
-              <CardHeader>
-                <CardTitle>{t('ConstraintTemplates')}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <Stack hasGutter>
-                  {data.constraint_templates.length === 0 ? (
-                    <StackItem>{t('No ConstraintTemplates found.')}</StackItem>
-                  ) : null}
-                  {data.constraint_templates.map((template) => (
-                    <StackItem key={template.name}>
                       <DescriptionList isHorizontal isCompact>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>
-                            <Button
-                              variant="link"
-                              isInline
-                              onClick={() =>
-                                selectGatekeeperDetail({ type: 'template', name: template.name })
-                              }
-                            >
-                              {template.name}
-                            </Button>
-                          </DescriptionListTerm>
+                          <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
                           <DescriptionListDescription>
-                            <StatusLabel
-                              ok={template.created}
-                              okText={template.kind || t('Created')}
-                              failText={t('Not created')}
-                            />{' '}
-                            <Label color="blue">
-                              {t('{{count}} constraints', { count: template.constraint_count })}
-                            </Label>
+                            {activeContext || t('Default')}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>{t('Targets')}</DescriptionListTerm>
+                          <DescriptionListTerm>{t('Target')}</DescriptionListTerm>
                           <DescriptionListDescription>
-                            {template.targets
-                              .map((target) => target.target || t('Unknown'))
-                              .join(', ') || t('None')}
+                            {confirmLiveTarget}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
                       </DescriptionList>
-                    </StackItem>
-                  ))}
-                </Stack>
-              </CardBody>
-            </Card>
-          </StackItem>
-          {selectedTemplate ? (
+                    </Modal>
+                  ) : null}
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
+          {showOverview ? (
+            <StackItem>
+              <Grid hasGutter style={{ alignItems: 'stretch' }}>
+                <GridItem sm={12} xl={6}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Cluster')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <DescriptionList isHorizontal isCompact>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Kubernetes API')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.cluster.server_url || t('Not configured')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.cluster.context || t('Default')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('TLS verify')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.cluster.verify_ssl ? t('Enabled') : t('Disabled')}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </DescriptionList>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} xl={6}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Inventory')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <DescriptionList isHorizontal isCompact>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Templates')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.counts.constraint_templates}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Constraints')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.counts.constraints}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Violations')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.counts.violations}
+                            {data.counts.filtered_violations !== data.counts.violations
+                              ? t(' ({{count}} filtered)', {
+                                  count: data.counts.filtered_violations,
+                                })
+                              : null}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Config CRDs')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {data.counts.configs}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      </DescriptionList>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+              </Grid>
+            </StackItem>
+          ) : null}
+          {showOverview ? (
+            <StackItem>
+              <Grid hasGutter style={{ alignItems: 'stretch' }} data-cy="gatekeeper-awx-workflow">
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Governed Changes')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            'Author, preview, dry-run, apply, delete, and roll back Gatekeeper manifests through AWX RBAC, OPA guardrails, and Activity Stream audit.'
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to="/policy-as-code/gatekeeper/changes">
+                            {t('Open governed changes')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('ConstraintTemplates')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            '{{count}} templates define the policy kinds that can be assigned to Kubernetes resources.',
+                            { count: data.counts.constraint_templates }
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to="/policy-as-code/gatekeeper/templates">
+                            {t('Review templates')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Constraints')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            '{{count}} constraints apply policy templates to namespaces, pods, and other Kubernetes resources.',
+                            { count: data.counts.constraints }
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to="/policy-as-code/gatekeeper/constraints">
+                            {t('Review constraints')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Violations')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            '{{count}} current violations show where Kubernetes resources are out of policy for this AWX-visible context.',
+                            { count: data.counts.violations }
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to="/policy-as-code/gatekeeper/violations">
+                            {t('Triage violations')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('Configurations')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            '{{count}} Gatekeeper config resources control synced Kubernetes data and readiness behavior.',
+                            { count: data.counts.configs }
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to="/policy-as-code/gatekeeper/configurations">
+                            {t('Review configurations')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+                <GridItem sm={12} md={6} xl={4}>
+                  <Card isFlat style={{ height: '100%' }}>
+                    <CardHeader>
+                      <CardTitle>{t('AWX Audit Path')}</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Stack hasGutter>
+                        <StackItem>
+                          {t(
+                            'Changes made here are intended to flow through AWX permissions, optional AI drafting, OPA approval, Kubernetes admission, rollback plans, and Activity Stream evidence.'
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Link to={getPageUrl(AwxRoute.ActivityStream)}>
+                            {t('Open Activity Stream')}
+                          </Link>
+                        </StackItem>
+                      </Stack>
+                    </CardBody>
+                  </Card>
+                </GridItem>
+              </Grid>
+            </StackItem>
+          ) : null}
+          {showTemplates ? (
+            <StackItem>
+              <Card isFlat>
+                <CardHeader>
+                  <CardTitle>{t('ConstraintTemplates')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    {data.constraint_templates.length === 0 ? (
+                      <StackItem>{t('No ConstraintTemplates found.')}</StackItem>
+                    ) : null}
+                    {data.constraint_templates.map((template) => (
+                      <StackItem key={template.name}>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              <Button
+                                variant="link"
+                                isInline
+                                onClick={() =>
+                                  selectGatekeeperDetail({ type: 'template', name: template.name })
+                                }
+                              >
+                                {template.name}
+                              </Button>
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <StatusLabel
+                                ok={template.created}
+                                okText={template.kind || t('Created')}
+                                failText={t('Not created')}
+                              />{' '}
+                              <Label color="blue">
+                                {t('{{count}} constraints', { count: template.constraint_count })}
+                              </Label>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Targets')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {template.targets
+                                .map((target) => target.target || t('Unknown'))
+                                .join(', ') || t('None')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </StackItem>
+                    ))}
+                  </Stack>
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
+          {showTemplates && selectedTemplate ? (
             <StackItem>
               <GatekeeperTemplateDetail
                 template={selectedTemplate}
@@ -1662,309 +1830,317 @@ export function GatekeeperPolicyManager(props?: { canManagePolicy?: boolean }) {
               />
             </StackItem>
           ) : null}
-          <StackItem>
-            <Card isFlat>
-              <CardHeader>
-                <CardTitle>{t('Constraints')}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <Stack hasGutter>
-                  {data.constraints.length === 0 ? (
-                    <StackItem>{t('No Constraints found.')}</StackItem>
-                  ) : null}
-                  {data.constraints.map((constraint) => (
-                    <StackItem key={`${constraint.kind}/${constraint.name}`}>
-                      <DescriptionList isHorizontal isCompact>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>
-                            <Button
-                              variant="link"
-                              isInline
-                              onClick={() =>
-                                selectGatekeeperDetail({
-                                  type: 'constraint',
-                                  kind: constraint.kind,
-                                  name: constraint.name,
-                                })
-                              }
-                            >
-                              {constraint.kind}/{constraint.name}
-                            </Button>
-                          </DescriptionListTerm>
-                          <DescriptionListDescription>
-                            <EnforcementLabel action={constraint.enforcement_action} />{' '}
-                            <Label
-                              color={constraint.total_violations > 0 ? 'red' : 'green'}
-                              icon={
-                                constraint.total_violations > 0 ? (
-                                  <ExclamationTriangleIcon />
-                                ) : (
-                                  <CheckCircleIcon />
-                                )
-                              }
-                            >
-                              {t('{{count}} violations', { count: constraint.total_violations })}
-                            </Label>
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>{t('Audit')}</DescriptionListTerm>
-                          <DescriptionListDescription>
-                            {constraint.audit_timestamp || t('Not reported')}
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                      </DescriptionList>
-                    </StackItem>
-                  ))}
-                </Stack>
-              </CardBody>
-            </Card>
-          </StackItem>
-          {selectedConstraint ? (
+          {showConstraints ? (
+            <StackItem>
+              <Card isFlat>
+                <CardHeader>
+                  <CardTitle>{t('Constraints')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    {data.constraints.length === 0 ? (
+                      <StackItem>{t('No Constraints found.')}</StackItem>
+                    ) : null}
+                    {data.constraints.map((constraint) => (
+                      <StackItem key={`${constraint.kind}/${constraint.name}`}>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              <Button
+                                variant="link"
+                                isInline
+                                onClick={() =>
+                                  selectGatekeeperDetail({
+                                    type: 'constraint',
+                                    kind: constraint.kind,
+                                    name: constraint.name,
+                                  })
+                                }
+                              >
+                                {constraint.kind}/{constraint.name}
+                              </Button>
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <EnforcementLabel action={constraint.enforcement_action} />{' '}
+                              <Label
+                                color={constraint.total_violations > 0 ? 'red' : 'green'}
+                                icon={
+                                  constraint.total_violations > 0 ? (
+                                    <ExclamationTriangleIcon />
+                                  ) : (
+                                    <CheckCircleIcon />
+                                  )
+                                }
+                              >
+                                {t('{{count}} violations', { count: constraint.total_violations })}
+                              </Label>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Audit')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {constraint.audit_timestamp || t('Not reported')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </StackItem>
+                    ))}
+                  </Stack>
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
+          {(showConstraints || showTemplates) && selectedConstraint ? (
             <StackItem>
               <GatekeeperConstraintDetail constraint={selectedConstraint} />
             </StackItem>
           ) : null}
-          <StackItem>
-            <Card isFlat>
-              <CardHeader>
-                <CardTitle>{t('Violations')}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <Stack hasGutter>
-                  <StackItem>
-                    <Grid hasGutter>
-                      <GridItem sm={12} lg={6}>
-                        <FormGroup label={t('Search')} fieldId="gatekeeper-violation-search">
-                          <SearchInput
-                            id="gatekeeper-violation-search"
-                            placeholder={t('Search violations')}
-                            value={violationFilter}
-                            onChange={(_event, value) => {
-                              setViolationFilter(value);
-                              setViolationPage(1);
-                              syncGatekeeperRoute(
-                                {
-                                  detail: selectedDetail,
-                                  violationSearch: value,
-                                  violationPage: 1,
-                                },
-                                true
-                              );
-                            }}
-                            onClear={() => {
-                              setViolationFilter('');
-                              setViolationPage(1);
-                              syncGatekeeperRoute(
-                                { detail: selectedDetail, violationSearch: '', violationPage: 1 },
-                                true
-                              );
-                            }}
-                          />
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={6} lg={3}>
-                        <FormGroup label={t('Sort')} fieldId="gatekeeper-violation-sort">
-                          <FormSelect
-                            id="gatekeeper-violation-sort"
-                            value={violationSort}
-                            onChange={(_event, value) => {
-                              const nextSort = String(value);
-                              setViolationSort(nextSort);
-                              setViolationPage(1);
-                              syncGatekeeperRoute(
-                                {
-                                  detail: selectedDetail,
-                                  violationSort: nextSort,
-                                  violationPage: 1,
-                                },
-                                true
-                              );
-                            }}
-                          >
-                            <FormSelectOption value="constraint" label={t('Constraint')} />
-                            <FormSelectOption value="resource" label={t('Resource')} />
-                            <FormSelectOption value="namespace" label={t('Namespace')} />
-                            <FormSelectOption value="enforcement" label={t('Enforcement')} />
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                      <GridItem sm={12} md={6} lg={3}>
-                        <FormGroup label={t('Per page')} fieldId="gatekeeper-violation-limit">
-                          <FormSelect
-                            id="gatekeeper-violation-limit"
-                            value={violationLimit}
-                            onChange={(_event, value) => {
-                              const nextLimit = String(value);
-                              setViolationLimit(nextLimit);
-                              setViolationPage(1);
-                              syncGatekeeperRoute(
-                                {
-                                  detail: selectedDetail,
-                                  violationLimit: nextLimit,
-                                  violationPage: 1,
-                                },
-                                true
-                              );
-                            }}
-                          >
-                            {[25, 50, 100, 200].map((limit) => (
-                              <FormSelectOption
-                                key={limit}
-                                value={String(limit)}
-                                label={String(limit)}
-                              />
-                            ))}
-                          </FormSelect>
-                        </FormGroup>
-                      </GridItem>
-                    </Grid>
-                  </StackItem>
-                  <StackItem>
-                    {t(
-                      'Page {{page}} of {{totalPages}} - {{returned}} of {{filtered}} matching violations shown.',
-                      {
-                        page: data.violation_query.page,
-                        totalPages: data.violation_query.total_pages,
+          {showViolations ? (
+            <StackItem>
+              <Card isFlat>
+                <CardHeader>
+                  <CardTitle>{t('Violations')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    <StackItem>
+                      <Grid hasGutter>
+                        <GridItem sm={12} lg={6}>
+                          <FormGroup label={t('Search')} fieldId="gatekeeper-violation-search">
+                            <SearchInput
+                              id="gatekeeper-violation-search"
+                              placeholder={t('Search violations')}
+                              value={violationFilter}
+                              onChange={(_event, value) => {
+                                setViolationFilter(value);
+                                setViolationPage(1);
+                                syncGatekeeperRoute(
+                                  {
+                                    detail: selectedDetail,
+                                    violationSearch: value,
+                                    violationPage: 1,
+                                  },
+                                  true
+                                );
+                              }}
+                              onClear={() => {
+                                setViolationFilter('');
+                                setViolationPage(1);
+                                syncGatekeeperRoute(
+                                  { detail: selectedDetail, violationSearch: '', violationPage: 1 },
+                                  true
+                                );
+                              }}
+                            />
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} lg={3}>
+                          <FormGroup label={t('Sort')} fieldId="gatekeeper-violation-sort">
+                            <FormSelect
+                              id="gatekeeper-violation-sort"
+                              value={violationSort}
+                              onChange={(_event, value) => {
+                                const nextSort = String(value);
+                                setViolationSort(nextSort);
+                                setViolationPage(1);
+                                syncGatekeeperRoute(
+                                  {
+                                    detail: selectedDetail,
+                                    violationSort: nextSort,
+                                    violationPage: 1,
+                                  },
+                                  true
+                                );
+                              }}
+                            >
+                              <FormSelectOption value="constraint" label={t('Constraint')} />
+                              <FormSelectOption value="resource" label={t('Resource')} />
+                              <FormSelectOption value="namespace" label={t('Namespace')} />
+                              <FormSelectOption value="enforcement" label={t('Enforcement')} />
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} lg={3}>
+                          <FormGroup label={t('Per page')} fieldId="gatekeeper-violation-limit">
+                            <FormSelect
+                              id="gatekeeper-violation-limit"
+                              value={violationLimit}
+                              onChange={(_event, value) => {
+                                const nextLimit = String(value);
+                                setViolationLimit(nextLimit);
+                                setViolationPage(1);
+                                syncGatekeeperRoute(
+                                  {
+                                    detail: selectedDetail,
+                                    violationLimit: nextLimit,
+                                    violationPage: 1,
+                                  },
+                                  true
+                                );
+                              }}
+                            >
+                              {[25, 50, 100, 200].map((limit) => (
+                                <FormSelectOption
+                                  key={limit}
+                                  value={String(limit)}
+                                  label={String(limit)}
+                                />
+                              ))}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                      </Grid>
+                    </StackItem>
+                    <StackItem>
+                      {t(
+                        'Page {{page}} of {{totalPages}} - {{returned}} of {{filtered}} matching violations shown.',
+                        {
+                          page: data.violation_query.page,
+                          totalPages: data.violation_query.total_pages,
+                          returned: data.violation_query.returned,
+                          filtered: data.counts.filtered_violations,
+                        }
+                      )}
+                    </StackItem>
+                    <StackItem>
+                      <PagePagination
+                        itemCount={data.counts.filtered_violations}
+                        page={data.violation_query.page}
+                        perPage={data.violation_query.limit}
+                        setPage={(page) => {
+                          setViolationPage(page);
+                          syncGatekeeperRoute({
+                            detail: selectedDetail,
+                            violationPage: page,
+                          });
+                        }}
+                        setPerPage={(perPage) => {
+                          const nextLimit = String(perPage);
+                          setViolationLimit(nextLimit);
+                          setViolationPage(1);
+                          syncGatekeeperRoute(
+                            {
+                              detail: selectedDetail,
+                              violationLimit: nextLimit,
+                              violationPage: 1,
+                            },
+                            true
+                          );
+                        }}
+                        perPageOptions={[25, 50, 100, 200].map((limit) => ({
+                          title: String(limit),
+                          value: limit,
+                        }))}
+                      />
+                    </StackItem>
+                    <StackItem>
+                      {t('{{start}}-{{end}} of {{filtered}} matching violations.', {
+                        start:
+                          data.counts.filtered_violations === 0
+                            ? 0
+                            : data.violation_query.offset + 1,
+                        end: data.violation_query.offset + data.violation_query.returned,
                         returned: data.violation_query.returned,
                         filtered: data.counts.filtered_violations,
-                      }
-                    )}
-                  </StackItem>
-                  <StackItem>
-                    <PagePagination
-                      itemCount={data.counts.filtered_violations}
-                      page={data.violation_query.page}
-                      perPage={data.violation_query.limit}
-                      setPage={(page) => {
-                        setViolationPage(page);
-                        syncGatekeeperRoute({
-                          detail: selectedDetail,
-                          violationPage: page,
-                        });
-                      }}
-                      setPerPage={(perPage) => {
-                        const nextLimit = String(perPage);
-                        setViolationLimit(nextLimit);
-                        setViolationPage(1);
-                        syncGatekeeperRoute(
-                          {
-                            detail: selectedDetail,
-                            violationLimit: nextLimit,
-                            violationPage: 1,
-                          },
-                          true
-                        );
-                      }}
-                      perPageOptions={[25, 50, 100, 200].map((limit) => ({
-                        title: String(limit),
-                        value: limit,
-                      }))}
-                    />
-                  </StackItem>
-                  <StackItem>
-                    {t('{{start}}-{{end}} of {{filtered}} matching violations.', {
-                      start:
-                        data.counts.filtered_violations === 0 ? 0 : data.violation_query.offset + 1,
-                      end: data.violation_query.offset + data.violation_query.returned,
-                      returned: data.violation_query.returned,
-                      filtered: data.counts.filtered_violations,
-                    })}
-                  </StackItem>
-                  {data.violations.length === 0 ? (
-                    <StackItem>{t('No violations found.')}</StackItem>
-                  ) : null}
-                  {data.violations.map((violation) => (
-                    <StackItem key={violationKey(violation)}>
-                      <DescriptionList isHorizontal isCompact>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>
-                            <Button
-                              variant="link"
-                              isInline
-                              onClick={() =>
-                                selectGatekeeperDetail({
-                                  type: 'violation',
-                                  key: violationKey(violation),
-                                })
-                              }
-                            >
-                              {violation.resource_namespace
-                                ? `${violation.resource_namespace}/${violation.resource_name}`
-                                : violation.resource_name || t('Unknown resource')}
-                            </Button>
-                          </DescriptionListTerm>
-                          <DescriptionListDescription>
-                            <EnforcementLabel action={violation.enforcement_action} />{' '}
-                            {violation.resource_kind}
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>
-                            {violation.constraint_kind}/{violation.constraint_name}
-                          </DescriptionListTerm>
-                          <DescriptionListDescription>
-                            {violation.message}
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                      </DescriptionList>
+                      })}
                     </StackItem>
-                  ))}
-                </Stack>
-              </CardBody>
-            </Card>
-          </StackItem>
-          {selectedViolation ? (
+                    {data.violations.length === 0 ? (
+                      <StackItem>{t('No violations found.')}</StackItem>
+                    ) : null}
+                    {data.violations.map((violation) => (
+                      <StackItem key={violationKey(violation)}>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              <Button
+                                variant="link"
+                                isInline
+                                onClick={() =>
+                                  selectGatekeeperDetail({
+                                    type: 'violation',
+                                    key: violationKey(violation),
+                                  })
+                                }
+                              >
+                                {violation.resource_namespace
+                                  ? `${violation.resource_namespace}/${violation.resource_name}`
+                                  : violation.resource_name || t('Unknown resource')}
+                              </Button>
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <EnforcementLabel action={violation.enforcement_action} />{' '}
+                              {violation.resource_kind}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              {violation.constraint_kind}/{violation.constraint_name}
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {violation.message}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </StackItem>
+                    ))}
+                  </Stack>
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
+          {showViolations && selectedViolation ? (
             <StackItem>
               <GatekeeperViolationDetail violation={selectedViolation} />
             </StackItem>
           ) : null}
-          <StackItem>
-            <Card isFlat>
-              <CardHeader>
-                <CardTitle>{t('Config CRDs')}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <Stack hasGutter>
-                  {data.configs.length === 0 ? (
-                    <StackItem>{t('No Config CRDs found.')}</StackItem>
-                  ) : null}
-                  {data.configs.map((config) => (
-                    <StackItem key={config.name}>
-                      <DescriptionList isHorizontal isCompact>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>
-                            <Button
-                              variant="link"
-                              isInline
-                              onClick={() =>
-                                selectGatekeeperDetail({ type: 'config', name: config.name })
-                              }
-                            >
-                              {config.name}
-                            </Button>
-                          </DescriptionListTerm>
-                          <DescriptionListDescription>
-                            {t('{{count}} synced kinds', { count: config.sync_only_count })}
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                        <DescriptionListGroup>
-                          <DescriptionListTerm>{t('Readiness stats')}</DescriptionListTerm>
-                          <DescriptionListDescription>
-                            {config.readiness_stats_enabled ? t('Enabled') : t('Disabled')}
-                          </DescriptionListDescription>
-                        </DescriptionListGroup>
-                      </DescriptionList>
-                      <CodeBlock>
-                        <CodeBlockCode>{jsonPreview(config.sync_only)}</CodeBlockCode>
-                      </CodeBlock>
-                    </StackItem>
-                  ))}
-                </Stack>
-              </CardBody>
-            </Card>
-          </StackItem>
-          {selectedConfig ? (
+          {showConfigs ? (
+            <StackItem>
+              <Card isFlat>
+                <CardHeader>
+                  <CardTitle>{t('Config CRDs')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    {data.configs.length === 0 ? (
+                      <StackItem>{t('No Config CRDs found.')}</StackItem>
+                    ) : null}
+                    {data.configs.map((config) => (
+                      <StackItem key={config.name}>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              <Button
+                                variant="link"
+                                isInline
+                                onClick={() =>
+                                  selectGatekeeperDetail({ type: 'config', name: config.name })
+                                }
+                              >
+                                {config.name}
+                              </Button>
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {t('{{count}} synced kinds', { count: config.sync_only_count })}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Readiness stats')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {config.readiness_stats_enabled ? t('Enabled') : t('Disabled')}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                        <CodeBlock>
+                          <CodeBlockCode>{jsonPreview(config.sync_only)}</CodeBlockCode>
+                        </CodeBlock>
+                      </StackItem>
+                    ))}
+                  </Stack>
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
+          {showConfigs && selectedConfig ? (
             <StackItem>
               <GatekeeperConfigDetail config={selectedConfig} />
             </StackItem>

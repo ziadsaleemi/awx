@@ -26,7 +26,44 @@ export function useAwxPolicyRoutes() {
           id: AwxRoute.PolicyAsCodeGatekeeper,
           label: t('Gatekeeper'),
           path: 'gatekeeper',
-          element: <PolicyAsCode view="gatekeeper" />,
+          children: [
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperOverview,
+              label: t('Overview'),
+              path: '',
+              element: <PolicyAsCode view="gatekeeper-overview" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperChanges,
+              label: t('Governed Changes'),
+              path: 'changes',
+              element: <PolicyAsCode view="gatekeeper-changes" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperTemplates,
+              label: t('ConstraintTemplates'),
+              path: 'templates',
+              element: <PolicyAsCode view="gatekeeper-templates" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperConstraints,
+              label: t('Constraints'),
+              path: 'constraints',
+              element: <PolicyAsCode view="gatekeeper-constraints" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperViolations,
+              label: t('Violations'),
+              path: 'violations',
+              element: <PolicyAsCode view="gatekeeper-violations" />,
+            },
+            {
+              id: AwxRoute.PolicyAsCodeGatekeeperConfigs,
+              label: t('Configurations'),
+              path: 'configurations',
+              element: <PolicyAsCode view="gatekeeper-configs" />,
+            },
+          ],
         },
         {
           id: AwxRoute.PolicyAsCodeModules,

@@ -4,6 +4,7 @@ import { usePageNavigationRoutesContext } from '../../../../framework/PageNaviga
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
+import type { GatekeeperPolicyManagerView } from './GatekeeperPolicyManager';
 
 const gatekeeperResponse = {
   configured: true,
@@ -92,28 +93,37 @@ function SeedNavigation(props: { children: ReactNode }) {
   return <>{props.children}</>;
 }
 
-function mountGatekeeper(response = gatekeeperResponse) {
+function mountGatekeeper(
+  response = gatekeeperResponse,
+  view: GatekeeperPolicyManagerView = 'overview'
+) {
   cy.intercept('GET', '/api/v2/opa/gatekeeper/**', response).as('gatekeeper');
   cy.mount(
     <SeedNavigation>
-      <GatekeeperPolicyManager />
+      <GatekeeperPolicyManager view={view} />
     </SeedNavigation>
   );
   cy.wait('@gatekeeper');
 }
 
 describe('GatekeeperPolicyManager', () => {
-  it('uses full-width policy layout with aligned violation filters', () => {
+  it('uses an AWX-oriented overview with resource workflow links', () => {
     cy.viewport(1920, 1100);
     mountGatekeeper();
 
     cy.get('[data-cy="gatekeeper-policy-manager"]')
       .should('exist')
       .and('not.have.class', 'pf-m-limit-width');
-    cy.contains('label', 'Search').should('exist');
-    cy.get('#gatekeeper-violation-search').should('exist');
-    cy.contains('label', 'Sort').should('exist');
-    cy.contains('label', 'Per page').should('exist');
+    cy.getByDataCy('gatekeeper-awx-workflow').should('be.visible');
+    cy.contains('a', 'Open governed changes')
+      .should('be.visible')
+      .and('have.attr', 'href', '/policy-as-code/gatekeeper/changes');
+    cy.contains('a', 'Review templates')
+      .should('be.visible')
+      .and('have.attr', 'href', '/policy-as-code/gatekeeper/templates');
+    cy.contains('a', 'Triage violations')
+      .should('be.visible')
+      .and('have.attr', 'href', '/policy-as-code/gatekeeper/violations');
 
     cy.contains('.pf-v5-c-card__title', 'Cluster')
       .parents('.pf-v5-c-card')
@@ -129,6 +139,20 @@ describe('GatekeeperPolicyManager', () => {
             expect(inventoryRect.width).to.be.greaterThan(600);
           });
       });
+  });
+
+  it('uses full-width policy layout with aligned violation filters', () => {
+    cy.viewport(1920, 1100);
+    mountGatekeeper(gatekeeperResponse, 'violations');
+
+    cy.get('[data-cy="gatekeeper-policy-manager"]')
+      .should('exist')
+      .and('not.have.class', 'pf-m-limit-width');
+    cy.contains('label', 'Search').should('exist');
+    cy.get('#gatekeeper-violation-search').should('exist');
+    cy.contains('label', 'Sort').should('exist');
+    cy.contains('label', 'Per page').should('exist');
+    cy.contains('.pf-v5-c-card__title', 'Governed changes').should('not.exist');
   });
 
   it('links the unconfigured Gatekeeper state to Gatekeeper settings', () => {
@@ -168,7 +192,7 @@ describe('GatekeeperPolicyManager', () => {
       req.reply(gatekeeperResult);
     }).as('applyGatekeeper');
 
-    mountGatekeeper();
+    mountGatekeeper(gatekeeperResponse, 'changes');
     cy.get('#gatekeeper-apply-mode').select('apply');
     cy.getByDataCy('gatekeeper-apply-button').click();
     cy.getByDataCy('gatekeeper-live-action-confirm-dialog').should('be.visible');
@@ -192,7 +216,7 @@ describe('GatekeeperPolicyManager', () => {
       req.reply({ ...gatekeeperResult, operation: 'delete' });
     }).as('deleteGatekeeper');
 
-    mountGatekeeper();
+    mountGatekeeper(gatekeeperResponse, 'changes');
     cy.get('#gatekeeper-delete-mode').select('delete');
     cy.getByDataCy('gatekeeper-delete-button').click();
     cy.getByDataCy('gatekeeper-live-action-confirm-dialog').should('be.visible');
@@ -216,7 +240,7 @@ describe('GatekeeperPolicyManager', () => {
       req.reply({ ...gatekeeperResult, operation: 'rollback_restore' });
     }).as('rollbackGatekeeper');
 
-    mountGatekeeper();
+    mountGatekeeper(gatekeeperResponse, 'changes');
     cy.get('#gatekeeper-rollback-mode').select('apply');
     cy.getByDataCy('gatekeeper-rollback-button').click();
     cy.getByDataCy('gatekeeper-live-action-confirm-dialog').should('be.visible');
