@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import re
+from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin
 
 import requests
@@ -27,7 +28,7 @@ from awx.api.views.ai import (
     _openai_codex_effective_default_model,
 )
 from awx.api.views.opa import check_opa_policy
-from awx.main.models import ActivityStream
+from awx.main.models import ActivityStream, Project
 
 GATEKEEPER_TEMPLATE_VERSIONS = ('v1', 'v1beta1')
 GATEKEEPER_CONFIG_PATH = '/apis/config.gatekeeper.sh/v1alpha1/configs'
@@ -40,6 +41,11 @@ GATEKEEPER_APPLY_STRATEGIES = ('update', 'server_side')
 GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
 GATEKEEPER_AI_PROMPT_LIMIT = 4000
 GATEKEEPER_REMEDIATION_TEXT_LIMIT = 2000
+GATEKEEPER_PROJECT_SYNC_DEFAULT_PATTERNS = ('gatekeeper/**/*.yml', 'gatekeeper/**/*.yaml', 'gatekeeper/**/*.json')
+GATEKEEPER_PROJECT_SYNC_ALLOWED_SUFFIXES = ('.yml', '.yaml', '.json')
+GATEKEEPER_PROJECT_SYNC_MAX_FILES = 50
+GATEKEEPER_PROJECT_SYNC_MAX_DOCS = 200
+GATEKEEPER_PROJECT_SYNC_MAX_FILE_BYTES = 512 * 1024
 
 
 def gatekeeper_module_enabled():
@@ -531,6 +537,150 @@ def _load_gatekeeper_manifest(value):
     return manifest, None
 
 
+def _project_sync_patterns(value):
+    if value in (None, ''):
+        return list(GATEKEEPER_PROJECT_SYNC_DEFAULT_PATTERNS), None
+    if isinstance(value, str):
+        raw_patterns = [part.strip() for part in re.split(r'[\n,]+', value) if part.strip()]
+    elif isinstance(value, list):
+        raw_patterns = [str(part or '').strip() for part in value if str(part or '').strip()]
+    else:
+        return None, _('path must be a string or list of strings.')
+    if not raw_patterns:
+        return None, _('path must include at least one file or glob.')
+
+    patterns = []
+    for pattern in raw_patterns:
+        pattern = pattern.replace('\\', '/')
+        while pattern.startswith('./'):
+            pattern = pattern[2:]
+        pure_path = PurePosixPath(pattern)
+        if pure_path.is_absolute() or '..' in pure_path.parts:
+            return None, _('Project manifest paths must be relative and cannot include parent directory traversal.')
+        if any(part.startswith('.') for part in pure_path.parts):
+            return None, _('Project manifest paths cannot include hidden files or directories.')
+        if not any(char in pattern for char in '*?[') and Path(pattern).suffix and Path(pattern).suffix.lower() not in GATEKEEPER_PROJECT_SYNC_ALLOWED_SUFFIXES:
+            return None, _('Project manifest files must be YAML or JSON.')
+        patterns.append(pattern)
+    return patterns, None
+
+
+def _project_for_gatekeeper_sync(user, project_id):
+    try:
+        project_id = int(project_id)
+    except (TypeError, ValueError):
+        return None, _('project is required.')
+    project = Project.accessible_objects(user, 'read_role').filter(pk=project_id).first()
+    if project is None:
+        return None, _('Project was not found or you do not have access to it.')
+    project_path = project.get_project_path()
+    if not project_path:
+        return None, _('Project has not been synced to a local checkout yet.')
+    return project, None
+
+
+def _project_source(project, requested_path):
+    return {
+        'project_id': project.pk,
+        'project_name': project.name,
+        'scm_type': project.scm_type or '',
+        'scm_url': project.scm_url or '',
+        'scm_branch': project.scm_branch or '',
+        'scm_revision': project.scm_revision or '',
+        'path': requested_path,
+    }
+
+
+def _discover_project_manifest_files(project, requested_path):
+    patterns, error = _project_sync_patterns(requested_path)
+    if error:
+        return None, error
+
+    root = Path(project.get_project_path()).resolve(strict=True)
+    discovered = []
+    seen = set()
+    for pattern in patterns:
+        candidates = sorted(root.glob(pattern)) if any(char in pattern for char in '*?[') else [root / pattern]
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError:
+                continue
+            if not str(resolved).startswith(f'{root}/') and resolved != root:
+                return None, _('Project manifest path escapes the project checkout.')
+            if resolved.is_dir():
+                for nested in sorted(resolved.rglob('*')):
+                    try:
+                        nested_resolved = nested.resolve(strict=True)
+                    except OSError:
+                        continue
+                    try:
+                        relative_parts = nested_resolved.relative_to(root).parts
+                    except ValueError:
+                        return None, _('Project manifest path escapes the project checkout.')
+                    if any(part.startswith('.') for part in relative_parts):
+                        continue
+                    if nested_resolved.is_file() and nested_resolved.suffix.lower() in GATEKEEPER_PROJECT_SYNC_ALLOWED_SUFFIXES:
+                        if str(nested_resolved).startswith(f'{root}/') and nested_resolved not in seen:
+                            discovered.append(nested_resolved)
+                            seen.add(nested_resolved)
+                            if len(discovered) > GATEKEEPER_PROJECT_SYNC_MAX_FILES:
+                                return None, _('Project manifest sync is limited to %(count)s files.') % {'count': GATEKEEPER_PROJECT_SYNC_MAX_FILES}
+                continue
+            if not resolved.is_file() or resolved.suffix.lower() not in GATEKEEPER_PROJECT_SYNC_ALLOWED_SUFFIXES:
+                continue
+            if resolved not in seen:
+                discovered.append(resolved)
+                seen.add(resolved)
+            if len(discovered) > GATEKEEPER_PROJECT_SYNC_MAX_FILES:
+                return None, _('Project manifest sync is limited to %(count)s files.') % {'count': GATEKEEPER_PROJECT_SYNC_MAX_FILES}
+    return sorted(discovered, key=lambda path: str(path.relative_to(root))), None
+
+
+def _load_project_gatekeeper_manifests(project, requested_path):
+    root = Path(project.get_project_path()).resolve(strict=True)
+    files, error = _discover_project_manifest_files(project, requested_path)
+    if error:
+        return None, error
+    if not files:
+        return None, _('No YAML or JSON manifests matched the project path.')
+
+    entries = []
+    for file_path in files:
+        relative_path = str(file_path.relative_to(root))
+        try:
+            if file_path.stat().st_size > GATEKEEPER_PROJECT_SYNC_MAX_FILE_BYTES:
+                return None, _('Project manifest file %(path)s exceeds the size limit.') % {'path': relative_path}
+            content = file_path.read_text(encoding='utf-8')
+            documents = list(yaml.safe_load_all(content))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            return None, _('Could not read project manifest file %(path)s: %(error)s') % {'path': relative_path, 'error': exc}
+
+        for index, document in enumerate(documents, start=1):
+            if document is None:
+                continue
+            manifest, manifest_error = _load_gatekeeper_manifest(document)
+            if manifest_error:
+                return None, _('Project manifest %(path)s document %(index)s is invalid: %(error)s') % {
+                    'path': relative_path,
+                    'index': index,
+                    'error': manifest_error,
+                }
+            entries.append(
+                {
+                    'file_path': relative_path,
+                    'document_index': index,
+                    'manifest': manifest,
+                    'manifest_yaml': _gatekeeper_manifest_yaml(manifest),
+                }
+            )
+            if len(entries) > GATEKEEPER_PROJECT_SYNC_MAX_DOCS:
+                return None, _('Project manifest sync is limited to %(count)s Kubernetes objects.') % {'count': GATEKEEPER_PROJECT_SYNC_MAX_DOCS}
+    if not entries:
+        return None, _('No Kubernetes objects were found in the matched project manifests.')
+    return entries, None
+
+
 def _split_api_version(api_version):
     if '/' not in api_version:
         return '', api_version
@@ -883,7 +1033,17 @@ def _gatekeeper_opa_input(request, mode, operation, target, manifest=None, sourc
 
 
 def _audit_gatekeeper_apply(
-    request, mode, operation, target, before=None, after=None, error='', opa_allowed=True, source='gatekeeper_apply', apply_options=None
+    request,
+    mode,
+    operation,
+    target,
+    before=None,
+    after=None,
+    error='',
+    opa_allowed=True,
+    source='gatekeeper_apply',
+    apply_options=None,
+    project_source=None,
 ):
     changes = {
         'triggered_by': 'gatekeeper_policy_manager',
@@ -902,6 +1062,8 @@ def _audit_gatekeeper_apply(
     }
     if apply_options:
         changes['apply_options'] = apply_options
+    if project_source:
+        changes['project_source'] = project_source
     if error:
         changes['error'] = str(error)
     activity_operation = 'delete' if 'delete' in operation else 'create' if operation == 'create' else 'update'
@@ -1452,6 +1614,201 @@ class GatekeeperPolicyRemediationView(GatekeeperModuleAPIView):
                 'audit': audit,
                 'provider': provider,
                 'model': model,
+            }
+        )
+
+
+class GatekeeperProjectSyncView(GatekeeperModuleAPIView):
+    """
+    POST /api/v2/opa/gatekeeper/project-sync/
+
+    Discover Gatekeeper manifests from an already-synced AWX Project checkout
+    and preview, dry-run, or apply them through the same governed write path.
+    """
+
+    permission_classes = [GatekeeperGovernedWritePermission]
+
+    def _project_payload(self, project):
+        return {
+            'id': project.pk,
+            'name': project.name,
+            'scm_type': project.scm_type or '',
+            'scm_url': project.scm_url or '',
+            'scm_branch': project.scm_branch or '',
+            'scm_revision': project.scm_revision or '',
+            'status': project.status or '',
+        }
+
+    def _process_manifest(self, request, client, mode, apply_options, project_source, entry):
+        manifest = entry['manifest']
+        try:
+            target = _gatekeeper_target(client, manifest)
+            before = client.get_or_none(target['object_path'])
+        except ValueError as exc:
+            return None, Response(
+                {
+                    'detail': str(exc),
+                    'file_path': entry['file_path'],
+                    'document_index': entry['document_index'],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except requests.RequestException as exc:
+            return None, _gatekeeper_http_error_response(exc)
+
+        operation = 'update' if before else 'create'
+        diff = _manifest_diff(before, manifest)
+        rollback_plan = _rollback_plan(target, before)
+        item_project_source = {
+            **project_source,
+            'file_path': entry['file_path'],
+            'document_index': entry['document_index'],
+        }
+        item = {
+            'file_path': entry['file_path'],
+            'document_index': entry['document_index'],
+            'manifest': manifest,
+            'manifest_yaml': entry['manifest_yaml'],
+            'mode': mode,
+            'operation': operation,
+            'target': _safe_gatekeeper_target(target),
+            'before_exists': before is not None,
+            'before_sha256': _json_sha256(before),
+            'after_sha256': _json_sha256(manifest),
+            'diff': diff,
+            'rollback_plan': rollback_plan,
+            'opa_allowed': None,
+            'kubernetes_response': None,
+            'audit': None,
+        }
+
+        if mode not in ('dry_run', 'apply'):
+            return item, None
+
+        opa_input = _gatekeeper_opa_input(
+            request,
+            mode,
+            operation,
+            target,
+            manifest,
+            source='gatekeeper_project_sync',
+            apply_options=apply_options,
+        )
+        opa_input['project_source'] = item_project_source
+        opa_allowed = check_opa_policy('awx/gatekeeper_resource/allow', opa_input)
+        item['opa_allowed'] = opa_allowed
+        if not opa_allowed:
+            audit = _audit_gatekeeper_apply(
+                request,
+                mode,
+                operation,
+                target,
+                before=before,
+                after=manifest,
+                error='Denied by OPA policy guardrail.',
+                opa_allowed=False,
+                source='gatekeeper_project_sync',
+                apply_options=apply_options,
+                project_source=item_project_source,
+            )
+            item['audit'] = audit
+            item['error'] = _('Denied by OPA policy guardrail.')
+            return None, Response(
+                {
+                    'detail': _('Gatekeeper project sync denied by OPA policy guardrail.'),
+                    'mode': mode,
+                    'project_source': item_project_source,
+                    'result': item,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            kubernetes_response = _gatekeeper_write_manifest(client, target, manifest, before, mode, apply_options)
+        except requests.RequestException as exc:
+            _audit_gatekeeper_apply(
+                request,
+                mode,
+                operation,
+                target,
+                before=before,
+                after=manifest,
+                error=exc,
+                opa_allowed=opa_allowed is not False,
+                source='gatekeeper_project_sync',
+                apply_options=apply_options,
+                project_source=item_project_source,
+            )
+            return None, _gatekeeper_http_error_response(exc)
+
+        audit = _audit_gatekeeper_apply(
+            request,
+            mode,
+            operation,
+            target,
+            before=before,
+            after=kubernetes_response if mode == 'apply' else manifest,
+            opa_allowed=opa_allowed is not False,
+            source='gatekeeper_project_sync',
+            apply_options=apply_options,
+            project_source=item_project_source,
+        )
+        item['kubernetes_response'] = kubernetes_response
+        item['audit'] = audit
+        return item, None
+
+    def post(self, request, *args, **kwargs):
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
+        if not client.is_configured():
+            return Response({'detail': _('Configure the Gatekeeper Kubernetes API connection in Settings.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        mode = str(request.data.get('mode') or 'preview').strip().lower()
+        if mode not in GATEKEEPER_APPLY_MODES:
+            return Response({'detail': _('mode must be preview, dry_run, or apply.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        apply_options, error = _gatekeeper_apply_options(request)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        project_id = request.data.get('project') or request.data.get('project_id')
+        project, error = _project_for_gatekeeper_sync(request.user, project_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_path = request.data.get('path') or request.data.get('manifest_path') or ''
+        entries, error = _load_project_gatekeeper_manifests(project, requested_path)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        project_source = _project_source(project, requested_path or ','.join(GATEKEEPER_PROJECT_SYNC_DEFAULT_PATTERNS))
+        results = []
+        for entry in entries:
+            result, response = self._process_manifest(request, client, mode, apply_options, project_source, entry)
+            if response is not None:
+                return response
+            results.append(result)
+
+        changed = mode == 'apply' and bool(results)
+        return Response(
+            {
+                'changed': changed,
+                'persisted': changed,
+                'dry_run': mode == 'dry_run',
+                'mode': mode,
+                'project': self._project_payload(project),
+                'project_source': project_source,
+                'apply_strategy': apply_options['strategy'],
+                'field_manager': apply_options['field_manager'],
+                'force_conflicts': apply_options['force_conflicts'],
+                'counts': {
+                    'files': len({entry['file_path'] for entry in entries}),
+                    'manifests': len(results),
+                    'created': len([result for result in results if result['operation'] == 'create']),
+                    'updated': len([result for result in results if result['operation'] == 'update']),
+                },
+                'results': results,
             }
         )
 

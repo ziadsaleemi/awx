@@ -74,6 +74,73 @@ const gatekeeperResult = {
   audit: null,
 };
 
+const awxProjectsResponse = {
+  count: 1,
+  results: [
+    {
+      id: 42,
+      name: 'Policy Repo',
+      scm_type: 'git',
+      scm_url: 'https://git.example.test/policies.git',
+      scm_branch: 'main',
+      scm_revision: 'abc123',
+      status: 'successful',
+    },
+  ],
+};
+
+const gatekeeperProjectSyncResult = {
+  changed: false,
+  persisted: false,
+  dry_run: true,
+  mode: 'dry_run',
+  project: awxProjectsResponse.results[0],
+  project_source: {
+    project_id: 42,
+    project_name: 'Policy Repo',
+    path: 'gatekeeper/**/*.yaml',
+    scm_revision: 'abc123',
+  },
+  apply_strategy: 'update',
+  field_manager: 'awx',
+  force_conflicts: false,
+  counts: {
+    files: 1,
+    manifests: 1,
+    created: 1,
+    updated: 0,
+  },
+  results: [
+    {
+      file_path: 'gatekeeper/templates.yaml',
+      document_index: 1,
+      manifest: {
+        apiVersion: 'templates.gatekeeper.sh/v1',
+        kind: 'ConstraintTemplate',
+        metadata: { name: 'k8srequiredlabels' },
+      },
+      manifest_yaml: 'apiVersion: templates.gatekeeper.sh/v1\nkind: ConstraintTemplate\n',
+      mode: 'dry_run',
+      operation: 'create',
+      target: {
+        api_version: 'templates.gatekeeper.sh/v1',
+        kind: 'ConstraintTemplate',
+        name: 'k8srequiredlabels',
+        resource: 'constrainttemplates',
+        object_path: '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+      },
+      before_exists: false,
+      before_sha256: '',
+      after_sha256: 'after123',
+      diff: '+ ConstraintTemplate',
+      rollback_plan: {},
+      opa_allowed: true,
+      kubernetes_response: {},
+      audit: null,
+    },
+  ],
+};
+
 const gatekeeperResponseWithViolation = {
   ...gatekeeperResponse,
   counts: {
@@ -153,6 +220,8 @@ interface GatekeeperRequestBody {
   mode?: string;
   human_approved?: boolean;
   remediation_plan?: unknown;
+  project?: number;
+  path?: string;
 }
 
 function SeedNavigation(props: { children: ReactNode }) {
@@ -174,6 +243,7 @@ function mountGatekeeper(
   view: GatekeeperPolicyManagerView = 'overview'
 ) {
   cy.intercept('GET', '/api/v2/opa/gatekeeper/**', response).as('gatekeeper');
+  cy.intercept('GET', '/api/v2/projects/**', awxProjectsResponse).as('projects');
   cy.mount(
     <SeedNavigation>
       <GatekeeperPolicyManager view={view} />
@@ -327,6 +397,50 @@ describe('GatekeeperPolicyManager', () => {
     cy.getByDataCy('gatekeeper-rollback-button').click();
     cy.getByDataCy('gatekeeper-live-action-confirm-button').click();
     cy.wait('@rollbackGatekeeper');
+    cy.wrap(null).then(() => expect(calls).to.equal(1));
+  });
+
+  it('syncs Gatekeeper manifests from an AWX Project checkout', () => {
+    cy.intercept('POST', awxAPI`/opa/gatekeeper/project-sync/`, (req) => {
+      const body = req.body as GatekeeperRequestBody;
+      expect(body.mode).to.equal('dry_run');
+      expect(body.project).to.equal(42);
+      expect(body.path).to.equal('gatekeeper/**/*.yaml');
+      expect(body.human_approved).to.equal(false);
+      req.reply(gatekeeperProjectSyncResult);
+    }).as('projectSyncGatekeeper');
+
+    mountGatekeeper(gatekeeperResponse, 'changes');
+    cy.getByDataCy('gatekeeper-project-sync-project').select('42');
+    cy.getByDataCy('gatekeeper-project-sync-mode').select('dry_run');
+    cy.getByDataCy('gatekeeper-project-sync-button').click();
+    cy.wait('@projectSyncGatekeeper');
+    cy.contains('dry_run 1 manifest(s) from Policy Repo.').should('be.visible');
+    cy.contains('gatekeeper/templates.yaml').should('be.visible');
+  });
+
+  it('requires confirmation before applying AWX Project manifests', () => {
+    let calls = 0;
+    cy.intercept('POST', awxAPI`/opa/gatekeeper/project-sync/`, (req) => {
+      calls += 1;
+      const body = req.body as GatekeeperRequestBody;
+      expect(body.mode).to.equal('apply');
+      expect(body.project).to.equal(42);
+      expect(body.human_approved).to.equal(true);
+      req.reply({ ...gatekeeperProjectSyncResult, mode: 'apply', changed: true, persisted: true });
+    }).as('projectSyncGatekeeperApply');
+
+    mountGatekeeper(gatekeeperResponse, 'changes');
+    cy.getByDataCy('gatekeeper-project-sync-project').select('42');
+    cy.getByDataCy('gatekeeper-project-sync-mode').select('apply');
+    cy.getByDataCy('gatekeeper-project-sync-button').click();
+    cy.getByDataCy('gatekeeper-live-action-confirm-dialog').should('be.visible');
+    cy.getByDataCy('gatekeeper-live-action-cancel-button').click();
+    cy.wrap(null).then(() => expect(calls).to.equal(0));
+
+    cy.getByDataCy('gatekeeper-project-sync-button').click();
+    cy.getByDataCy('gatekeeper-live-action-confirm-button').click();
+    cy.wait('@projectSyncGatekeeperApply');
     cy.wrap(null).then(() => expect(calls).to.equal(1));
   });
 

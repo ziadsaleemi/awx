@@ -8,7 +8,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.api.views.opa import OPAPolicyEngine, check_opa_policy, opa_response_allows
-from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Job, SystemJob, TerraformJob, WorkflowJob
+from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Job, Project, SystemJob, TerraformJob, WorkflowJob
 from awx.main.tasks.policy import OPA_AUTH_TYPES
 
 
@@ -943,6 +943,94 @@ def test_policy_operator_can_preview_gatekeeper_but_not_apply(post, organization
 
     requests_request.assert_not_called()
     post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'apply', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_project_sync_reads_awx_project_checkout_and_dry_runs(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/policies.git',
+        local_path='_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'gatekeeper'
+    project_dir.mkdir(parents=True)
+    (project_dir / 'templates.yaml').write_text(GATEKEEPER_TEMPLATE_MANIFEST, encoding='utf-8')
+
+    patched = {
+        'apiVersion': 'templates.gatekeeper.sh/v1',
+        'kind': 'ConstraintTemplate',
+        'metadata': {'name': 'k8srequiredlabels'},
+    }
+    with mock.patch('awx.api.views.gatekeeper.requests.get', return_value=_json_error_response({'message': 'not found'}, status_code=404)), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(patched)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_project_sync'),
+            data={
+                'mode': 'dry_run',
+                'project': project.pk,
+                'path': 'gatekeeper/**/*.yaml',
+                'context_name': 'default',
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['dry_run'] is True
+    assert response.data['project']['id'] == project.pk
+    assert response.data['project_source']['project_id'] == project.pk
+    assert response.data['project_source']['path'] == 'gatekeeper/**/*.yaml'
+    assert response.data['counts'] == {'files': 1, 'manifests': 1, 'created': 1, 'updated': 0}
+    result = response.data['results'][0]
+    assert result['file_path'] == 'gatekeeper/templates.yaml'
+    assert result['document_index'] == 1
+    assert result['target']['object_path'] == '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels'
+    assert result['opa_allowed'] is True
+    check_policy.assert_called_once()
+    assert check_policy.call_args.args[1]['source'] == 'gatekeeper_project_sync'
+    assert check_policy.call_args.args[1]['project_source']['file_path'] == 'gatekeeper/templates.yaml'
+    requests_request.assert_called_once_with(
+        'POST',
+        'https://kube.example.test/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+        json=result['manifest'],
+        params={'dryRun': 'All'},
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=result['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_resource'
+    assert '"source": "gatekeeper_project_sync"' in audit.changes
+    assert '"file_path": "gatekeeper/templates.yaml"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_project_sync_rejects_path_traversal(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/policies.git',
+        local_path='_policy_repo',
+    )
+    project.save(skip_update=True)
+    (tmp_path / project.local_path).mkdir(parents=True)
+
+    response = post(
+        reverse('api:opa_gatekeeper_project_sync'),
+        data={'mode': 'preview', 'project': project.pk, 'path': '../outside.yaml'},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['detail'] == 'Project manifest paths must be relative and cannot include parent directory traversal.'
 
 
 @pytest.mark.django_db

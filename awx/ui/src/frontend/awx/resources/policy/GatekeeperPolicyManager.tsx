@@ -230,6 +230,58 @@ interface GatekeeperApplyResponse {
   audit?: GatekeeperAuditRef | null;
 }
 
+interface AwxProjectSummary {
+  id: number;
+  name: string;
+  scm_type?: string;
+  scm_url?: string;
+  scm_branch?: string;
+  scm_revision?: string;
+  status?: string;
+}
+
+interface AwxProjectList {
+  count: number;
+  results: AwxProjectSummary[];
+}
+
+interface GatekeeperProjectSyncResult {
+  file_path: string;
+  document_index: number;
+  manifest: UnknownRecord;
+  manifest_yaml: string;
+  mode: string;
+  operation: string;
+  target: GatekeeperTarget;
+  before_exists: boolean;
+  before_sha256: string;
+  after_sha256: string;
+  diff: string;
+  rollback_plan: unknown;
+  opa_allowed?: boolean | null;
+  kubernetes_response?: unknown;
+  audit?: GatekeeperAuditRef | null;
+}
+
+interface GatekeeperProjectSyncResponse {
+  changed: boolean;
+  persisted: boolean;
+  dry_run: boolean;
+  mode: string;
+  project: AwxProjectSummary;
+  project_source: UnknownRecord;
+  apply_strategy: string;
+  field_manager: string;
+  force_conflicts: boolean;
+  counts: {
+    files: number;
+    manifests: number;
+    created: number;
+    updated: number;
+  };
+  results: GatekeeperProjectSyncResult[];
+}
+
 interface GatekeeperRemediationPlan {
   summary: string;
   rationale: string;
@@ -269,7 +321,7 @@ type GatekeeperDeletePayload = {
   target?: GatekeeperTarget;
 };
 
-type GatekeeperLiveAction = 'apply' | 'delete' | 'rollback' | 'remediation';
+type GatekeeperLiveAction = 'apply' | 'delete' | 'rollback' | 'remediation' | 'project_sync';
 
 interface GatekeeperAuthorResponse {
   generated: boolean;
@@ -461,6 +513,7 @@ function gatekeeperLiveActionTitle(t: (value: string) => string, action: Gatekee
   if (action === 'delete') return t('Delete Gatekeeper resource');
   if (action === 'rollback') return t('Apply Gatekeeper rollback');
   if (action === 'remediation') return t('Apply Gatekeeper remediation');
+  if (action === 'project_sync') return t('Apply project manifests');
   return t('Apply Gatekeeper manifest');
 }
 
@@ -477,6 +530,11 @@ function gatekeeperLiveActionDescription(
   if (action === 'remediation') {
     return t(
       'This applies the selected AI remediation patch to the Kubernetes API after RBAC and OPA checks.'
+    );
+  }
+  if (action === 'project_sync') {
+    return t(
+      'This reads manifests from the selected AWX Project checkout and applies them to the Kubernetes API after RBAC and OPA checks.'
     );
   }
   return t('This applies the manifest to the Kubernetes API after RBAC and OPA checks.');
@@ -775,11 +833,20 @@ export function GatekeeperPolicyManager(props?: {
   const [authorLoading, setAuthorLoading] = useState(false);
   const [authorError, setAuthorError] = useState<string | null>(null);
   const [authorResult, setAuthorResult] = useState<GatekeeperAuthorResponse | null>(null);
+  const [projectSyncMode, setProjectSyncMode] = useState('preview');
+  const [projectSyncProjectId, setProjectSyncProjectId] = useState('');
+  const [projectSyncPath, setProjectSyncPath] = useState('gatekeeper/**/*.yaml');
+  const [projectSyncLoading, setProjectSyncLoading] = useState(false);
+  const [projectSyncError, setProjectSyncError] = useState<string | null>(null);
+  const [projectSyncResult, setProjectSyncResult] = useState<GatekeeperProjectSyncResponse | null>(
+    null
+  );
   const [remediationLoading, setRemediationLoading] = useState(false);
   const [remediationError, setRemediationError] = useState<string | null>(null);
   const [remediationResult, setRemediationResult] = useState<GatekeeperRemediationResponse | null>(
     null
   );
+  const projectsUrl = awxAPI`/projects/?page_size=200&order_by=name`;
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
@@ -790,6 +857,7 @@ export function GatekeeperPolicyManager(props?: {
     params.set('violation_page', String(violationPage));
     return `${awxAPI`/opa/gatekeeper/`}?${params.toString()}`;
   }, [selectedContext, violationFilter, violationLimit, violationPage, violationSort]);
+  const { data: projectsData, error: projectsError } = useGet<AwxProjectList>(projectsUrl);
   const { data, isLoading, error, refresh } =
     useGet<GatekeeperPolicyManagerResponse>(gatekeeperUrl);
   useEffect(() => {
@@ -797,7 +865,8 @@ export function GatekeeperPolicyManager(props?: {
     if (applyMode === 'apply') setApplyMode('preview');
     if (deleteMode === 'delete') setDeleteMode('preview');
     if (rollbackMode === 'apply') setRollbackMode('preview');
-  }, [applyMode, canManagePolicy, deleteMode, rollbackMode]);
+    if (projectSyncMode === 'apply') setProjectSyncMode('preview');
+  }, [applyMode, canManagePolicy, deleteMode, projectSyncMode, rollbackMode]);
   const activeContext = selectedContext || data?.cluster.context || '';
   const syncGatekeeperRoute = (
     next: {
@@ -930,6 +999,13 @@ export function GatekeeperPolicyManager(props?: {
       selectedDetail,
     ]
   );
+  const selectedProject = useMemo(
+    () =>
+      (projectsData?.results || []).find(
+        (project) => String(project.id) === String(projectSyncProjectId)
+      ),
+    [projectSyncProjectId, projectsData?.results]
+  );
 
   const handleAuthorManifest = async () => {
     setAuthorLoading(true);
@@ -959,6 +1035,57 @@ export function GatekeeperPolicyManager(props?: {
       );
     } finally {
       setAuthorLoading(false);
+    }
+  };
+
+  const handleProjectSync = async () => {
+    if (!projectSyncProjectId) {
+      setProjectSyncError(t('Select an AWX Project before syncing Gatekeeper manifests.'));
+      return;
+    }
+    setProjectSyncLoading(true);
+    setProjectSyncError(null);
+    setProjectSyncResult(null);
+    try {
+      const response = await postRequest<
+        GatekeeperProjectSyncResponse,
+        {
+          mode: string;
+          project: number;
+          path: string;
+          human_approved: boolean;
+          apply_strategy: string;
+          field_manager: string;
+          force_conflicts: boolean;
+          context_name: string;
+        }
+      >(awxAPI`/opa/gatekeeper/project-sync/`, {
+        mode: projectSyncMode,
+        project: Number(projectSyncProjectId),
+        path: projectSyncPath,
+        human_approved: projectSyncMode === 'apply',
+        apply_strategy: applyStrategy,
+        field_manager: fieldManager,
+        force_conflicts: forceConflicts,
+        context_name: activeContext,
+      });
+      setProjectSyncResult(response);
+      const rollbackPlan = response.results.find((result) => result.rollback_plan)?.rollback_plan;
+      if (rollbackPlan) {
+        setRollbackPlan(JSON.stringify(rollbackPlan, null, 2));
+      }
+      if (response.persisted) void refresh();
+    } catch (err) {
+      setProjectSyncError(
+        requestErrorMessage(
+          err,
+          t(
+            'Gatekeeper project sync failed. Check project access, path, connection, and policy guardrails.'
+          )
+        )
+      );
+    } finally {
+      setProjectSyncLoading(false);
     }
   };
 
@@ -1134,6 +1261,8 @@ export function GatekeeperPolicyManager(props?: {
       await handleRollback();
     } else if (action === 'remediation') {
       await handleRemediateViolation('apply');
+    } else if (action === 'project_sync') {
+      await handleProjectSync();
     }
   };
 
@@ -1146,9 +1275,11 @@ export function GatekeeperPolicyManager(props?: {
         ? selectedViolation.resource_namespace
           ? `${selectedViolation.resource_kind}/${selectedViolation.resource_namespace}/${selectedViolation.resource_name}`
           : `${selectedViolation.resource_kind}/${selectedViolation.resource_name}`
-        : confirmLiveAction === 'rollback'
-          ? t('Rollback plan')
-          : t('Manifest textarea resource');
+        : confirmLiveAction === 'project_sync'
+          ? `${selectedProject?.name || t('Selected project')} / ${projectSyncPath || t('Default manifest paths')}`
+          : confirmLiveAction === 'rollback'
+            ? t('Rollback plan')
+            : t('Manifest textarea resource');
 
   const showOverview = view === 'overview';
   const showChanges = view === 'changes';
@@ -1314,6 +1445,151 @@ export function GatekeeperPolicyManager(props?: {
                           dataCy="gatekeeper-author-audit-link"
                           getPageUrl={getPageUrl}
                         />
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <div style={{ fontWeight: 600 }}>{t('Project manifests')}</div>
+                      <div>
+                        {t(
+                          'Read Gatekeeper YAML or JSON from an already-synced AWX Project checkout and run it through the same preview, dry-run, apply, OPA, and audit flow.'
+                        )}
+                      </div>
+                    </StackItem>
+                    {projectsError ? (
+                      <StackItem>
+                        <Alert
+                          variant="warning"
+                          isInline
+                          title={t('Unable to load AWX Projects.')}
+                        />
+                      </StackItem>
+                    ) : null}
+                    <StackItem>
+                      <Grid hasGutter>
+                        <GridItem sm={12} md={6} xl={3}>
+                          <FormGroup label={t('Project')} fieldId="gatekeeper-project-sync-project">
+                            <FormSelect
+                              id="gatekeeper-project-sync-project"
+                              value={projectSyncProjectId}
+                              onChange={(_event, value) => {
+                                setProjectSyncProjectId(String(value));
+                                setProjectSyncResult(null);
+                              }}
+                              data-cy="gatekeeper-project-sync-project"
+                            >
+                              <FormSelectOption value="" label={t('Select project')} />
+                              {(projectsData?.results || []).map((project) => (
+                                <FormSelectOption
+                                  key={project.id}
+                                  value={String(project.id)}
+                                  label={`${project.name}${project.scm_type ? ` (${project.scm_type})` : ''}`}
+                                />
+                              ))}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={4}>
+                          <FormGroup
+                            label={t('Manifest path or glob')}
+                            fieldId="gatekeeper-project-sync-path"
+                          >
+                            <TextInput
+                              id="gatekeeper-project-sync-path"
+                              value={projectSyncPath}
+                              onChange={(_event, value) => {
+                                setProjectSyncPath(value);
+                                setProjectSyncResult(null);
+                              }}
+                              data-cy="gatekeeper-project-sync-path"
+                            />
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={2}>
+                          <FormGroup label={t('Sync mode')} fieldId="gatekeeper-project-sync-mode">
+                            <FormSelect
+                              id="gatekeeper-project-sync-mode"
+                              value={projectSyncMode}
+                              onChange={(_event, value) => setProjectSyncMode(String(value))}
+                              data-cy="gatekeeper-project-sync-mode"
+                            >
+                              <FormSelectOption value="preview" label={t('Preview')} />
+                              <FormSelectOption value="dry_run" label={t('Dry-run')} />
+                              {canManagePolicy ? (
+                                <FormSelectOption value="apply" label={t('Apply')} />
+                              ) : null}
+                            </FormSelect>
+                          </FormGroup>
+                        </GridItem>
+                        <GridItem sm={12} md={6} xl={3} style={{ alignSelf: 'end' }}>
+                          <Button
+                            variant={projectSyncMode === 'apply' ? 'danger' : 'secondary'}
+                            onClick={() =>
+                              projectSyncMode === 'apply'
+                                ? setConfirmLiveAction('project_sync')
+                                : void handleProjectSync()
+                            }
+                            isLoading={projectSyncLoading}
+                            isDisabled={
+                              projectSyncLoading ||
+                              !data.configured ||
+                              !projectSyncProjectId ||
+                              !projectSyncPath.trim()
+                            }
+                            data-cy="gatekeeper-project-sync-button"
+                          >
+                            {projectSyncMode === 'preview'
+                              ? t('Preview project')
+                              : projectSyncMode === 'dry_run'
+                                ? t('Dry-run project')
+                                : t('Apply project')}
+                          </Button>
+                        </GridItem>
+                      </Grid>
+                    </StackItem>
+                    {projectSyncError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={projectSyncError} />
+                      </StackItem>
+                    ) : null}
+                    {projectSyncResult ? (
+                      <StackItem>
+                        <Alert
+                          variant={
+                            projectSyncResult.persisted || projectSyncResult.dry_run
+                              ? 'success'
+                              : 'info'
+                          }
+                          isInline
+                          title={t('{{mode}} {{count}} manifest(s) from {{project}}.', {
+                            mode: projectSyncResult.mode,
+                            count: projectSyncResult.counts.manifests,
+                            project: projectSyncResult.project.name,
+                          })}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <DescriptionList isHorizontal isCompact style={{ marginBottom: 12 }}>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Files')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {projectSyncResult.counts.files}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Creates')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {projectSyncResult.counts.created}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>{t('Updates')}</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {projectSyncResult.counts.updated}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                        <CodeBlock>
+                          <CodeBlockCode>{jsonPreview(projectSyncResult)}</CodeBlockCode>
+                        </CodeBlock>
                       </StackItem>
                     ) : null}
                     <StackItem>
