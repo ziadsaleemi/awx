@@ -152,8 +152,16 @@ describe('PolicyAsCodeOverview', () => {
         const tile = $tile[0];
         expect(tile.scrollWidth).to.be.at.most(tile.clientWidth + 1);
       });
-    cy.contains('OPA enabled').should('be.visible');
-    cy.contains('Gatekeeper connected').should('be.visible');
+    cy.contains('OPA enabled')
+      .parents('.pf-v5-c-label')
+      .should('have.class', 'pf-m-green')
+      .find('svg')
+      .should('exist');
+    cy.contains('Gatekeeper connected')
+      .parents('.pf-v5-c-label')
+      .should('have.class', 'pf-m-green')
+      .find('svg')
+      .should('exist');
     cy.contains('2.0 KB').should('be.visible');
     cy.contains('docker-desktop').should('be.visible');
     cy.contains('4').should('be.visible');

@@ -19,7 +19,6 @@ import {
   Title,
 } from '@patternfly/react-core';
 import {
-  CheckCircleIcon,
   ExclamationTriangleIcon,
   OutlinedClockIcon,
   SecurityIcon,
@@ -144,15 +143,10 @@ function mergePolicyActivity(
     .slice(0, 5);
 }
 
-function StatusLabel(props: {
-  enabled: boolean;
-  enabledText: string;
-  disabledText: string;
-  warning?: boolean;
-}) {
+function StatusLabel(props: { enabled: boolean; enabledText: string; disabledText: string }) {
   if (props.enabled) {
     return (
-      <Label color={props.warning ? 'orange' : 'green'} icon={<CheckCircleIcon />}>
+      <Label color="green" icon={<SecurityIcon />}>
         {props.enabledText}
       </Label>
     );
@@ -261,9 +255,6 @@ export function PolicyAsCodeOverview(props: {
     gatekeeperStatus.data?.contexts.find((context) => context.selected)?.name ||
     gatekeeperStatus.data?.cluster.context ||
     t('Default');
-  const gatekeeperWarningCount =
-    (gatekeeperStatus.data?.errors.length ?? 0) + (gatekeeperCounts?.violations ?? 0);
-
   return (
     <PageDashboard sectionStyle={{ padding: 16 }}>
       <PageDashboardCard
@@ -293,7 +284,6 @@ export function PolicyAsCodeOverview(props: {
                     ? t('Gatekeeper not configured')
                     : t('Gatekeeper disabled')
                 }
-                warning={gatekeeperWarningCount > 0}
               />
             </FlexItem>
           </Flex>
