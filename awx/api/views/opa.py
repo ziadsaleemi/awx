@@ -107,10 +107,10 @@ DEFAULT_POLICIES = [
     {
         'id': 'gatekeeper_resource',
         'path': 'awx/gatekeeper_resource/allow',
-        'description': 'Controls dry-run and apply actions for Gatekeeper ConstraintTemplates, Constraints, and Configs',
+        'description': 'Controls dry-run, apply, delete, rollback, and AI remediation actions for Gatekeeper-managed Kubernetes resources',
         'input_example': {
             'triggered_by': 'gatekeeper_policy_manager',
-            'source': 'gatekeeper_apply',
+            'source': 'gatekeeper_remediation',
             'mode': 'apply',
             'human_approved': True,
             'approval_required': True,
@@ -120,12 +120,13 @@ DEFAULT_POLICIES = [
             'destructive': True,
             'privileged': True,
             'target': {
-                'api_version': 'templates.gatekeeper.sh/v1',
-                'kind': 'ConstraintTemplate',
-                'name': 'k8srequiredlabels',
-                'resource': 'constrainttemplates',
-                'object_path': '/apis/templates.gatekeeper.sh/v1/constrainttemplates/k8srequiredlabels',
+                'api_version': 'v1',
+                'kind': 'Namespace',
+                'name': 'default',
+                'resource': 'namespaces',
+                'object_path': '/api/v1/namespaces/default',
             },
+            'patch': {'metadata': {'labels': {'owner': 'awx-remediated'}}},
         },
     },
 ]

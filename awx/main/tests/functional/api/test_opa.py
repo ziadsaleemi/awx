@@ -861,6 +861,72 @@ spec:
 """
 
 
+GATEKEEPER_NAMESPACE_VIOLATION = {
+    'constraint_kind': 'K8sRequiredLabels',
+    'constraint_name': 'require-owner',
+    'enforcement_action': 'deny',
+    'message': 'missing owner label',
+    'resource_kind': 'Namespace',
+    'resource_namespace': '',
+    'resource_name': 'payments',
+    'resource_api_version': 'v1',
+    'resource_group': '',
+    'resource_version': 'v1',
+}
+
+
+GATEKEEPER_NAMESPACE_REMEDIATION_PLAN = {
+    'summary': 'Add the required owner label to the payments namespace.',
+    'rationale': 'The require-owner constraint reports that the namespace is missing metadata.labels.owner.',
+    'risk': 'low',
+    'target': {
+        'api_version': 'v1',
+        'kind': 'Namespace',
+        'name': 'payments',
+        'namespace': '',
+    },
+    'patch_type': 'merge',
+    'patch': {
+        'metadata': {
+            'labels': {
+                'owner': 'platform',
+            }
+        }
+    },
+    'manual_steps': [],
+}
+
+
+def _gatekeeper_namespace_remediation_get(url, **kwargs):
+    if url.endswith('/api/v1'):
+        return _json_response(
+            {
+                'resources': [
+                    {
+                        'name': 'namespaces',
+                        'kind': 'Namespace',
+                        'namespaced': False,
+                        'verbs': ['get', 'list', 'patch'],
+                    }
+                ]
+            }
+        )
+    if url.endswith('/api/v1/namespaces/payments'):
+        return _json_response(
+            {
+                'apiVersion': 'v1',
+                'kind': 'Namespace',
+                'metadata': {
+                    'name': 'payments',
+                    'labels': {
+                        'kubernetes.io/metadata.name': 'payments',
+                    },
+                },
+            }
+        )
+    raise AssertionError(f'unexpected Kubernetes API GET {url}')
+
+
 @pytest.mark.django_db
 def test_gatekeeper_apply_requires_system_admin(post, rando):
     post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
@@ -877,6 +943,147 @@ def test_policy_operator_can_preview_gatekeeper_but_not_apply(post, organization
 
     requests_request.assert_not_called()
     post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'apply', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(
+    AI_ENABLED=True,
+    AI_PROVIDER='openai',
+    AI_API_KEY='api-key',
+    AI_MODEL_NAME='gpt-test',
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_REQUEST_TIMEOUT=7,
+    GATEKEEPER_K8S_VERIFY_SSL=False,
+)
+def test_gatekeeper_remediation_preview_uses_ai_and_does_not_patch_kubernetes(post, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_namespace_remediation_get) as requests_get, mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper._gatekeeper_context_for_ai', return_value={'counts': {'violations': 1}}), mock.patch(
+        'awx.api.views.gatekeeper._call_ai_provider', return_value=json.dumps(GATEKEEPER_NAMESPACE_REMEDIATION_PLAN)
+    ) as call_provider:
+        response = post(
+            reverse('api:opa_gatekeeper_remediate'),
+            data={'mode': 'preview', 'violation': GATEKEEPER_NAMESPACE_VIOLATION},
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['operation'] == 'remediate'
+    assert response.data['target']['object_path'] == '/api/v1/namespaces/payments'
+    assert response.data['plan']['can_apply'] is True
+    assert response.data['plan']['patch']['metadata']['labels']['owner'] == 'platform'
+    assert '"owner": "platform"' in response.data['diff']
+    assert response.data['provider'] == 'openai'
+    assert response.data['model'] == 'gpt-test'
+    assert response.data['audit']['activity_stream_id']
+    requests_get.assert_called()
+    requests_request.assert_not_called()
+    system_prompt = call_provider.call_args.args[4]
+    assert 'safe remediations' in system_prompt
+    assert 'metadata.labels' in system_prompt
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_remediation'
+    assert '"source": "gatekeeper_remediation"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test', GATEKEEPER_K8S_REQUEST_TIMEOUT=7, GATEKEEPER_K8S_VERIFY_SSL=False)
+def test_gatekeeper_remediation_dry_run_patches_target_with_dry_run_and_audits(post, admin_user):
+    patched = {
+        'apiVersion': 'v1',
+        'kind': 'Namespace',
+        'metadata': {'name': 'payments', 'labels': {'owner': 'platform'}},
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_namespace_remediation_get), mock.patch(
+        'awx.api.views.gatekeeper.requests.request', return_value=_json_response(patched)
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=True) as check_policy:
+        response = post(
+            reverse('api:opa_gatekeeper_remediate'),
+            data={
+                'mode': 'dry_run',
+                'violation': GATEKEEPER_NAMESPACE_VIOLATION,
+                'remediation_plan': GATEKEEPER_NAMESPACE_REMEDIATION_PLAN,
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['changed'] is False
+    assert response.data['persisted'] is False
+    assert response.data['dry_run'] is True
+    assert response.data['opa_allowed'] is True
+    assert response.data['plan']['patch']['metadata']['labels']['owner'] == 'platform'
+    check_policy.assert_called_once()
+    assert check_policy.call_args.args[0] == 'awx/gatekeeper_resource/allow'
+    assert check_policy.call_args.args[1]['source'] == 'gatekeeper_remediation'
+    assert check_policy.call_args.args[1]['patch'] == GATEKEEPER_NAMESPACE_REMEDIATION_PLAN['patch']
+    requests_request.assert_called_once_with(
+        'PATCH',
+        'https://kube.example.test/api/v1/namespaces/payments',
+        headers={'Accept': 'application/json', 'Content-Type': 'application/merge-patch+json'},
+        json=GATEKEEPER_NAMESPACE_REMEDIATION_PLAN['patch'],
+        params={'dryRun': 'All'},
+        verify=False,
+        timeout=7.0,
+    )
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_remediation'
+    assert '"mode": "dry_run"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_remediation_rejects_non_string_metadata_values(post, admin_user):
+    remediation_plan = {
+        **GATEKEEPER_NAMESPACE_REMEDIATION_PLAN,
+        'patch': {'metadata': {'labels': {'owner': 123}}},
+    }
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_namespace_remediation_get), mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request:
+        response = post(
+            reverse('api:opa_gatekeeper_remediate'),
+            data={
+                'mode': 'dry_run',
+                'violation': GATEKEEPER_NAMESPACE_VIOLATION,
+                'remediation_plan': remediation_plan,
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['detail'] == 'labels keys and values must be strings.'
+    requests_request.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_remediation_opa_denial_blocks_kubernetes_patch(post, admin_user):
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_namespace_remediation_get), mock.patch(
+        'awx.api.views.gatekeeper.requests.request'
+    ) as requests_request, mock.patch('awx.api.views.gatekeeper.check_opa_policy', return_value=False):
+        response = post(
+            reverse('api:opa_gatekeeper_remediate'),
+            data={
+                'mode': 'apply',
+                'human_approved': True,
+                'violation': GATEKEEPER_NAMESPACE_VIOLATION,
+                'remediation_plan': GATEKEEPER_NAMESPACE_REMEDIATION_PLAN,
+            },
+            user=admin_user,
+            expect=403,
+        )
+
+    assert response.data['detail'] == 'Gatekeeper remediation denied by OPA policy guardrail.'
+    assert response.data['opa_allowed'] is False
+    requests_request.assert_not_called()
+    audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
+    assert audit.object1 == 'gatekeeper_remediation'
+    assert '"opa_allowed": false' in audit.changes
 
 
 @pytest.mark.django_db

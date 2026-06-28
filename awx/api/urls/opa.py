@@ -7,6 +7,7 @@ from awx.api.views.gatekeeper import (
     GatekeeperPolicyAuthorView,
     GatekeeperPolicyDeleteView,
     GatekeeperPolicyManagerView,
+    GatekeeperPolicyRemediationView,
     GatekeeperPolicyRollbackView,
 )
 from awx.api.views.opa import (
@@ -22,6 +23,7 @@ from awx.api.views.opa import (
 opa_urls = [
     re_path(r'^gatekeeper/$', GatekeeperPolicyManagerView.as_view(), name='opa_gatekeeper'),
     re_path(r'^gatekeeper/author/$', GatekeeperPolicyAuthorView.as_view(), name='opa_gatekeeper_author'),
+    re_path(r'^gatekeeper/remediate/$', GatekeeperPolicyRemediationView.as_view(), name='opa_gatekeeper_remediate'),
     re_path(r'^gatekeeper/apply/$', GatekeeperPolicyApplyView.as_view(), name='opa_gatekeeper_apply'),
     re_path(r'^gatekeeper/delete/$', GatekeeperPolicyDeleteView.as_view(), name='opa_gatekeeper_delete'),
     re_path(r'^gatekeeper/rollback/$', GatekeeperPolicyRollbackView.as_view(), name='opa_gatekeeper_rollback'),

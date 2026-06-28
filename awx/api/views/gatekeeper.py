@@ -35,9 +35,11 @@ GATEKEEPER_CONSTRAINT_GROUP_PATH = '/apis/constraints.gatekeeper.sh'
 GATEKEEPER_APPLY_MODES = ('preview', 'dry_run', 'apply')
 GATEKEEPER_DELETE_MODES = ('preview', 'dry_run', 'delete')
 GATEKEEPER_ROLLBACK_MODES = ('preview', 'dry_run', 'apply')
+GATEKEEPER_REMEDIATION_MODES = ('preview', 'dry_run', 'apply')
 GATEKEEPER_APPLY_STRATEGIES = ('update', 'server_side')
 GATEKEEPER_FIELD_MANAGER_RE = re.compile(r'^[A-Za-z0-9_.:/-]{1,128}$')
 GATEKEEPER_AI_PROMPT_LIMIT = 4000
+GATEKEEPER_REMEDIATION_TEXT_LIMIT = 2000
 
 
 def gatekeeper_module_enabled():
@@ -246,6 +248,22 @@ class GatekeeperKubernetesClient:
             if resource.get('kind') == kind and resource.get('name') and '/' not in resource.get('name') and 'list' in (resource.get('verbs') or []):
                 return resource['name']
         raise ValueError(_('Constraint kind %(kind)s was not discovered in Gatekeeper API version %(version)s.') % {'kind': kind, 'version': version})
+
+    def api_resource(self, api_version, kind, required_verbs=('get', 'patch')):
+        group, version = _split_api_version(api_version or '')
+        if not version or not kind:
+            raise ValueError(_('Kubernetes apiVersion and kind are required.'))
+
+        discovery_path = f'/apis/{group}/{version}' if group else f'/api/{version}'
+        resources = self.get(discovery_path).get('resources') or []
+        for resource in resources:
+            verbs = resource.get('verbs') or []
+            if resource.get('kind') == kind and resource.get('name') and '/' not in resource.get('name') and all(verb in verbs for verb in required_verbs):
+                return {
+                    'name': resource['name'],
+                    'namespaced': bool(resource.get('namespaced')),
+                }
+        raise ValueError(_('Kubernetes resource %(kind)s was not discovered in apiVersion %(api_version)s.') % {'kind': kind, 'api_version': api_version})
 
     def list_constraint_templates(self):
         last_error = None
@@ -571,6 +589,178 @@ def _gatekeeper_target_from_payload(client, payload):
         return None, str(exc)
 
 
+def _kubernetes_target_from_violation(client, violation):
+    if not isinstance(violation, dict):
+        return None, _('violation must be a JSON object.')
+
+    api_version = violation.get('resource_api_version') or ''
+    if not api_version:
+        group = violation.get('resource_group') or ''
+        version = violation.get('resource_version') or ''
+        api_version = f'{group}/{version}' if group else version
+
+    kind = violation.get('resource_kind') or ''
+    name = violation.get('resource_name') or ''
+    namespace = violation.get('resource_namespace') or ''
+    if not all(isinstance(item, str) and item.strip() for item in (api_version, kind, name)):
+        return None, _('violation requires resource apiVersion, kind, and name.')
+
+    group, version = _split_api_version(api_version)
+    resource = client.api_resource(api_version, kind)
+    if resource['namespaced'] and not namespace:
+        return None, _('violation resource is namespaced but namespace is missing.')
+
+    if group:
+        collection_path = f'/apis/{group}/{version}'
+    else:
+        collection_path = f'/api/{version}'
+    if resource['namespaced']:
+        collection_path = f'{collection_path}/namespaces/{namespace}/{resource["name"]}'
+    else:
+        collection_path = f'{collection_path}/{resource["name"]}'
+
+    return (
+        {
+            'api_version': api_version,
+            'group': group,
+            'version': version,
+            'resource': resource['name'],
+            'kind': kind,
+            'name': name,
+            'namespace': namespace,
+            'collection_path': collection_path,
+            'object_path': f'{collection_path}/{name}',
+        },
+        None,
+    )
+
+
+def _string_dict(value, field_name):
+    if not isinstance(value, dict):
+        return None, _('%(field)s must be a JSON object.') % {'field': field_name}
+    normalized = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+            return None, _('%(field)s keys and values must be strings.') % {'field': field_name}
+        key = raw_key.strip()
+        if not key:
+            return None, _('%(field)s keys must be non-empty strings.') % {'field': field_name}
+        value_text = raw_value
+        if len(key) > 253 or len(value_text) > 1024:
+            return None, _('%(field)s contains a key or value that is too long.') % {'field': field_name}
+        normalized[key] = value_text
+    return normalized, None
+
+
+def _validate_remediation_target(plan_target, target):
+    if not isinstance(plan_target, dict):
+        return None
+    expected = {
+        'api_version': target['api_version'],
+        'kind': target['kind'],
+        'name': target['name'],
+        'namespace': target.get('namespace') or '',
+    }
+    for key, expected_value in expected.items():
+        if key == 'api_version':
+            raw_value = plan_target.get('api_version') or plan_target.get('apiVersion') or ''
+        else:
+            raw_value = plan_target.get(key) or ''
+        if str(raw_value or '') and str(raw_value or '') != expected_value:
+            return _('remediation target %(key)s does not match the selected violation.') % {'key': key}
+    return None
+
+
+def _normalize_remediation_plan(value, target):
+    if not isinstance(value, dict):
+        return None, _('remediation_plan must be a JSON object.')
+
+    target_error = _validate_remediation_target(value.get('target'), target)
+    if target_error:
+        return None, target_error
+
+    summary = str(value.get('summary') or '').strip()[:GATEKEEPER_REMEDIATION_TEXT_LIMIT]
+    rationale = str(value.get('rationale') or '').strip()[:GATEKEEPER_REMEDIATION_TEXT_LIMIT]
+    risk = str(value.get('risk') or 'medium').strip().lower()
+    if risk not in ('low', 'medium', 'high'):
+        risk = 'medium'
+    manual_steps = value.get('manual_steps') if isinstance(value.get('manual_steps'), list) else []
+    manual_steps = [str(step).strip()[:GATEKEEPER_REMEDIATION_TEXT_LIMIT] for step in manual_steps if str(step or '').strip()][:8]
+
+    patch = value.get('patch')
+    can_apply = False
+    normalized_patch = None
+    patch_type = str(value.get('patch_type') or 'merge').strip().lower()
+    if patch:
+        if patch_type not in ('merge', 'json_merge'):
+            return None, _('Only Kubernetes JSON merge patch remediation is supported.')
+        if not isinstance(patch, dict):
+            return None, _('remediation patch must be a JSON object.')
+        unexpected = sorted(key for key in patch if key != 'metadata')
+        if unexpected:
+            return None, _('remediation patch can only update metadata labels or annotations.')
+        metadata = patch.get('metadata')
+        if not isinstance(metadata, dict):
+            return None, _('remediation patch metadata must be a JSON object.')
+        metadata_patch = {}
+        for key in metadata:
+            if key not in ('labels', 'annotations'):
+                return None, _('remediation patch can only update metadata labels or annotations.')
+        if 'labels' in metadata:
+            labels, error = _string_dict(metadata.get('labels'), 'labels')
+            if error:
+                return None, error
+            if labels:
+                metadata_patch['labels'] = labels
+        if 'annotations' in metadata:
+            annotations, error = _string_dict(metadata.get('annotations'), 'annotations')
+            if error:
+                return None, error
+            if annotations:
+                metadata_patch['annotations'] = annotations
+        if not metadata_patch:
+            return None, _('remediation patch must include labels or annotations.')
+        normalized_patch = {'metadata': metadata_patch}
+        can_apply = True
+
+    if not summary:
+        summary = _('Review the Gatekeeper violation and update the Kubernetes resource metadata.')
+    if not rationale:
+        rationale = _('The selected resource is currently out of policy for the reported Gatekeeper constraint.')
+    if not can_apply and not manual_steps:
+        manual_steps = [_('No safe automatic metadata remediation was generated. Review the constraint and resource manually.')]
+
+    return (
+        {
+            'summary': summary,
+            'rationale': rationale,
+            'risk': risk,
+            'target': _safe_gatekeeper_target(target),
+            'patch_type': 'merge',
+            'patch': normalized_patch,
+            'manual_steps': manual_steps,
+            'can_apply': can_apply,
+        },
+        None,
+    )
+
+
+def _json_merge_patch(source, patch):
+    if not isinstance(patch, dict):
+        return patch
+    if not isinstance(source, dict):
+        source = {}
+    merged = dict(source)
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+        elif isinstance(value, dict):
+            merged[key] = _json_merge_patch(merged.get(key), value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _canonical_json(value):
     return json.dumps(value or {}, sort_keys=True, indent=2)
 
@@ -887,6 +1077,90 @@ def _gatekeeper_ai_provider_response(request, prompt, gatekeeper_context, ui_con
     return content, provider, model
 
 
+def _gatekeeper_remediation_system_prompt(user, gatekeeper_context, violation, target, before):
+    awx_context = _ai_authoring_context(user)
+    visible_before = {
+        'apiVersion': before.get('apiVersion') if isinstance(before, dict) else '',
+        'kind': before.get('kind') if isinstance(before, dict) else '',
+        'metadata': {
+            'name': ((before.get('metadata') or {}).get('name') if isinstance(before, dict) else '') or '',
+            'namespace': ((before.get('metadata') or {}).get('namespace') if isinstance(before, dict) else '') or '',
+            'labels': ((before.get('metadata') or {}).get('labels') if isinstance(before, dict) else {}) or {},
+            'annotations': ((before.get('metadata') or {}).get('annotations') if isinstance(before, dict) else {}) or {},
+        },
+    }
+    return (
+        'You propose safe remediations for Open Policy Agent Gatekeeper violations in AWX. '
+        'Return only one JSON object. No markdown fences. No prose outside JSON.\n\n'
+        'Schema:\n'
+        '{\n'
+        '  "summary": "short human explanation",\n'
+        '  "rationale": "why this fixes the violation",\n'
+        '  "risk": "low|medium|high",\n'
+        '  "target": {"api_version": "...", "kind": "...", "namespace": "...", "name": "..."},\n'
+        '  "patch_type": "merge",\n'
+        '  "patch": {"metadata": {"labels": {"key": "value"}, "annotations": {"key": "value"}}},\n'
+        '  "manual_steps": ["optional fallback steps"]\n'
+        '}\n\n'
+        'Automatic patches may only add or update metadata.labels or metadata.annotations on the exact target. '
+        'Do not include spec changes, deletes, kubectl commands, shell commands, secrets, tokens, kubeconfig content, private keys, '
+        'or placeholders that require secret values. If the violation cannot be safely remediated with metadata labels or annotations, '
+        'set "patch" to null and provide manual_steps instead. Use existing labels or annotations when possible. For missing required '
+        'label values with no better context, use "awx-remediated".\n\n'
+        f'Visible AWX context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
+        f'Visible Gatekeeper context:\n{json.dumps(_json_safe(gatekeeper_context), indent=2)}\n\n'
+        f'Selected violation:\n{json.dumps(_json_safe(violation), indent=2)}\n\n'
+        f'Selected target:\n{json.dumps(_json_safe(_safe_gatekeeper_target(target)), indent=2)}\n\n'
+        f'Current resource metadata:\n{json.dumps(_json_safe(visible_before), indent=2)}'
+    )
+
+
+def _gatekeeper_ai_remediation_response(request, violation, target, before, gatekeeper_context):
+    if not getattr(settings, 'AI_ENABLED', False):
+        raise AIProviderError(
+            _('The AI assistant is not enabled. Enable it in Settings → AI Assistant.'),
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    rate_limit = getattr(settings, 'AI_RATE_LIMIT_PER_MINUTE', 20)
+    if not _check_rate_limit(request.user.pk, rate_limit):
+        raise AIProviderError(_('Rate limit exceeded. Please wait before sending another message.'), status.HTTP_429_TOO_MANY_REQUESTS)
+
+    provider = getattr(settings, 'AI_PROVIDER', 'openai')
+    api_key = getattr(settings, 'AI_API_KEY', '')
+    if provider != 'openai_codex' and not api_key:
+        raise AIProviderError(_('AI_API_KEY is not configured. Set it in Settings → AI Assistant.'), status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    defaults = _PROVIDER_DEFAULTS.get(provider, _PROVIDER_DEFAULTS['openai'])
+    model = _openai_codex_effective_default_model() if provider == 'openai_codex' else getattr(settings, 'AI_MODEL_NAME', '') or defaults['model']
+    user_prompt = (
+        'Explain this Gatekeeper violation and propose the safest remediation plan for the exact Kubernetes resource. ' 'Return the strict JSON schema only.'
+    )
+    content = _call_ai_provider(
+        provider,
+        model,
+        [{'role': 'user', 'content': user_prompt}],
+        min(getattr(settings, 'AI_MAX_TOKENS', 2048), 2048),
+        _gatekeeper_remediation_system_prompt(request.user, gatekeeper_context, violation, target, before),
+        api_key,
+        getattr(settings, 'AI_API_URL', ''),
+    )
+    return content, provider, model
+
+
+def _load_gatekeeper_remediation_plan(value):
+    if isinstance(value, dict):
+        return value, None
+    if isinstance(value, str) and value.strip():
+        try:
+            loaded = json.loads(_strip_gatekeeper_ai_fences(value))
+        except ValueError as exc:
+            return None, _('AI generated invalid remediation JSON: %(error)s') % {'error': exc}
+        if isinstance(loaded, dict):
+            return loaded, None
+    return None, _('remediation_plan must be a JSON object.')
+
+
 def _audit_gatekeeper_ai_author(request, prompt_summary, manifest, target, provider, model, gatekeeper_context):
     changes = {
         'triggered_by': 'gatekeeper_policy_manager',
@@ -903,6 +1177,52 @@ def _audit_gatekeeper_ai_author(request, prompt_summary, manifest, target, provi
         operation='create',
         object1='gatekeeper_resource',
         object2=f"ai_author:{manifest.get('kind')}/{_object_name(manifest)}",
+        changes=json.dumps(_json_safe(changes)),
+        actor=request.user,
+    )
+    entry.user.add(request.user)
+    return {
+        'activity_stream_id': entry.pk,
+        'activity_stream_url': f'/api/v2/activity_stream/{entry.pk}/',
+    }
+
+
+def _audit_gatekeeper_remediation(
+    request,
+    mode,
+    target,
+    plan,
+    before=None,
+    after=None,
+    error='',
+    opa_allowed=True,
+    provider='',
+    model='',
+):
+    changes = {
+        'triggered_by': 'gatekeeper_policy_manager',
+        'source': 'gatekeeper_remediation',
+        'mode': mode,
+        'operation': 'remediate',
+        'target': _safe_gatekeeper_target(target),
+        'provider': provider,
+        'model': model,
+        'summary': plan.get('summary') if isinstance(plan, dict) else '',
+        'can_apply': bool((plan or {}).get('can_apply')) if isinstance(plan, dict) else False,
+        'patch_sha256': _json_sha256((plan or {}).get('patch') if isinstance(plan, dict) else None),
+        'opa_allowed': bool(opa_allowed),
+        'is_error': bool(error),
+        'before_sha256': _json_sha256(before),
+        'after_sha256': _json_sha256(after),
+        'rollback_plan': _rollback_plan(target, before),
+    }
+    if error:
+        changes['error'] = str(error)
+    operation = 'create' if mode == 'preview' else 'update'
+    entry = ActivityStream.objects.create(
+        operation=operation,
+        object1='gatekeeper_remediation',
+        object2=f"{target['kind']}/{target['name']}",
         changes=json.dumps(_json_safe(changes)),
         actor=request.user,
     )
@@ -973,6 +1293,165 @@ class GatekeeperPolicyAuthorView(GatekeeperModuleAPIView):
                     }
                 },
                 'audit': audit,
+            }
+        )
+
+
+class GatekeeperPolicyRemediationView(GatekeeperModuleAPIView):
+    """
+    POST /api/v2/opa/gatekeeper/remediate/
+
+    Explain a selected Gatekeeper violation with AI, then dry-run or apply a
+    validated metadata remediation patch with OPA gating and audit.
+    """
+
+    permission_classes = [GatekeeperGovernedWritePermission]
+
+    def post(self, request, *args, **kwargs):
+        client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        if client.context_error:
+            return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
+        if not client.is_configured():
+            return Response({'detail': _('Configure the Gatekeeper Kubernetes API connection in Settings.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        mode = str(request.data.get('mode') or 'preview').strip().lower()
+        if mode not in GATEKEEPER_REMEDIATION_MODES:
+            return Response({'detail': _('mode must be preview, dry_run, or apply.')}, status=status.HTTP_400_BAD_REQUEST)
+
+        violation = request.data.get('violation')
+        try:
+            target, error = _kubernetes_target_from_violation(client, violation)
+            if error:
+                return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+            before = client.get_or_none(target['object_path'])
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except requests.RequestException as exc:
+            return _gatekeeper_http_error_response(exc)
+
+        if before is None:
+            return Response(
+                {'detail': _('Violation target resource was not found.'), 'target': _safe_gatekeeper_target(target)}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        provider = ''
+        model = ''
+        raw_plan = request.data.get('remediation_plan')
+        if raw_plan is not None and raw_plan != '':
+            loaded_plan, error = _load_gatekeeper_remediation_plan(raw_plan)
+        else:
+            if mode != 'preview':
+                return Response({'detail': _('remediation_plan is required for dry_run or apply.')}, status=status.HTTP_400_BAD_REQUEST)
+            gatekeeper_context = _gatekeeper_context_for_ai(client)
+            try:
+                content, provider, model = _gatekeeper_ai_remediation_response(request, violation, target, before, gatekeeper_context)
+            except AIProviderError as exc:
+                return Response({'detail': exc.detail}, status=exc.status_code)
+            loaded_plan, error = _load_gatekeeper_remediation_plan(content)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan, error = _normalize_remediation_plan(loaded_plan, target)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        after = _json_merge_patch(before, plan['patch']) if plan['can_apply'] else before
+        diff = _manifest_diff(before, after) if plan['can_apply'] else ''
+        rollback_plan = _rollback_plan(target, before)
+        opa_allowed = None
+        kubernetes_response = None
+        audit = None
+
+        if mode == 'preview':
+            audit = _audit_gatekeeper_remediation(request, mode, target, plan, before=before, after=after, provider=provider, model=model)
+        else:
+            if not plan['can_apply']:
+                return Response({'detail': _('Remediation plan does not contain a safe automatic patch.'), 'plan': plan}, status=status.HTTP_400_BAD_REQUEST)
+
+            opa_input = _gatekeeper_opa_input(request, mode, 'update', target, after, source='gatekeeper_remediation')
+            opa_input['violation'] = _json_safe(violation)
+            opa_input['patch'] = plan['patch']
+            opa_allowed = check_opa_policy('awx/gatekeeper_resource/allow', opa_input)
+            if not opa_allowed:
+                audit = _audit_gatekeeper_remediation(
+                    request,
+                    mode,
+                    target,
+                    plan,
+                    before=before,
+                    after=after,
+                    error='Denied by OPA policy guardrail.',
+                    opa_allowed=False,
+                    provider=provider,
+                    model=model,
+                )
+                return Response(
+                    {
+                        'detail': _('Gatekeeper remediation denied by OPA policy guardrail.'),
+                        'mode': mode,
+                        'operation': 'remediate',
+                        'target': _safe_gatekeeper_target(target),
+                        'plan': plan,
+                        'opa_allowed': False,
+                        'audit': audit,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            try:
+                kubernetes_response = client.write(
+                    'PATCH',
+                    target['object_path'],
+                    plan['patch'],
+                    dry_run=mode == 'dry_run',
+                    content_type='application/merge-patch+json',
+                )
+            except requests.RequestException as exc:
+                _audit_gatekeeper_remediation(
+                    request,
+                    mode,
+                    target,
+                    plan,
+                    before=before,
+                    after=after,
+                    error=exc,
+                    opa_allowed=opa_allowed is not False,
+                    provider=provider,
+                    model=model,
+                )
+                return _gatekeeper_http_error_response(exc)
+
+            audit = _audit_gatekeeper_remediation(
+                request,
+                mode,
+                target,
+                plan,
+                before=before,
+                after=kubernetes_response if mode == 'apply' else after,
+                opa_allowed=opa_allowed is not False,
+                provider=provider,
+                model=model,
+            )
+
+        return Response(
+            {
+                'changed': mode == 'apply' and plan['can_apply'],
+                'persisted': mode == 'apply' and plan['can_apply'],
+                'dry_run': mode == 'dry_run',
+                'mode': mode,
+                'operation': 'remediate',
+                'target': _safe_gatekeeper_target(target),
+                'plan': plan,
+                'before_exists': True,
+                'before_sha256': _json_sha256(before),
+                'after_sha256': _json_sha256(after),
+                'diff': diff,
+                'rollback_plan': rollback_plan,
+                'opa_allowed': opa_allowed,
+                'kubernetes_response': kubernetes_response,
+                'audit': audit,
+                'provider': provider,
+                'model': model,
             }
         )
 

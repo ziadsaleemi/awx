@@ -32,6 +32,7 @@ import {
   CheckCircleIcon,
   DownloadIcon,
   ExclamationTriangleIcon,
+  MagicIcon,
   SyncAltIcon,
   TimesCircleIcon,
 } from '@patternfly/react-icons';
@@ -40,6 +41,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useGetPageUrl } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
+import { isRequestError } from '../../../common/crud/RequestError';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
@@ -47,6 +49,31 @@ import { AwxRoute } from '../../main/AwxRoutes';
 import { PagePagination } from '../../../../framework/PageTable/PagePagination';
 
 type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+  return typeof value === 'object' && value !== null ? (value as UnknownRecord) : undefined;
+}
+
+function stringField(record: UnknownRecord | undefined, key: string) {
+  const value = record?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function requestErrorMessage(error: unknown, fallback: string) {
+  if (isRequestError(error)) {
+    const body = asRecord(error.body);
+    const topLevelDetail = stringField(body, 'detail');
+    const nestedError = asRecord(body?.error);
+    const nestedDetail = asRecord(nestedError?.detail);
+    const nestedMessage =
+      stringField(nestedDetail, 'message') ||
+      stringField(nestedDetail, 'detail') ||
+      stringField(nestedError, 'detail');
+    if (topLevelDetail && nestedMessage) return `${topLevelDetail} ${nestedMessage}`;
+    return topLevelDetail || nestedMessage || error.message || fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
 
 export type GatekeeperPolicyManagerView =
   | 'overview'
@@ -203,6 +230,37 @@ interface GatekeeperApplyResponse {
   audit?: GatekeeperAuditRef | null;
 }
 
+interface GatekeeperRemediationPlan {
+  summary: string;
+  rationale: string;
+  risk: string;
+  target: GatekeeperTarget;
+  patch_type: string;
+  patch?: UnknownRecord | null;
+  manual_steps: string[];
+  can_apply: boolean;
+}
+
+interface GatekeeperRemediationResponse {
+  changed: boolean;
+  persisted: boolean;
+  dry_run: boolean;
+  mode: string;
+  operation: string;
+  target: GatekeeperTarget;
+  plan: GatekeeperRemediationPlan;
+  before_exists: boolean;
+  before_sha256: string;
+  after_sha256: string;
+  diff: string;
+  rollback_plan: unknown;
+  opa_allowed?: boolean | null;
+  kubernetes_response?: unknown;
+  audit?: GatekeeperAuditRef | null;
+  provider?: string;
+  model?: string;
+}
+
 type GatekeeperDeletePayload = {
   mode: string;
   human_approved: boolean;
@@ -211,7 +269,7 @@ type GatekeeperDeletePayload = {
   target?: GatekeeperTarget;
 };
 
-type GatekeeperLiveAction = 'apply' | 'delete' | 'rollback';
+type GatekeeperLiveAction = 'apply' | 'delete' | 'rollback' | 'remediation';
 
 interface GatekeeperAuthorResponse {
   generated: boolean;
@@ -402,6 +460,7 @@ function selectedGatekeeperTarget(
 function gatekeeperLiveActionTitle(t: (value: string) => string, action: GatekeeperLiveAction) {
   if (action === 'delete') return t('Delete Gatekeeper resource');
   if (action === 'rollback') return t('Apply Gatekeeper rollback');
+  if (action === 'remediation') return t('Apply Gatekeeper remediation');
   return t('Apply Gatekeeper manifest');
 }
 
@@ -414,6 +473,11 @@ function gatekeeperLiveActionDescription(
   }
   if (action === 'rollback') {
     return t('This applies the rollback plan to the Kubernetes API after RBAC and OPA checks.');
+  }
+  if (action === 'remediation') {
+    return t(
+      'This applies the selected AI remediation patch to the Kubernetes API after RBAC and OPA checks.'
+    );
   }
   return t('This applies the manifest to the Kubernetes API after RBAC and OPA checks.');
 }
@@ -711,6 +775,11 @@ export function GatekeeperPolicyManager(props?: {
   const [authorLoading, setAuthorLoading] = useState(false);
   const [authorError, setAuthorError] = useState<string | null>(null);
   const [authorResult, setAuthorResult] = useState<GatekeeperAuthorResponse | null>(null);
+  const [remediationLoading, setRemediationLoading] = useState(false);
+  const [remediationError, setRemediationError] = useState<string | null>(null);
+  const [remediationResult, setRemediationResult] = useState<GatekeeperRemediationResponse | null>(
+    null
+  );
   const gatekeeperUrl = useMemo(() => {
     const params = new URLSearchParams();
     const search = violationFilter.trim();
@@ -812,6 +881,11 @@ export function GatekeeperPolicyManager(props?: {
     if (selectedDetail?.type !== 'violation') return undefined;
     return data?.violations.find((violation) => violationKey(violation) === selectedDetail.key);
   }, [data?.violations, selectedDetail]);
+  const selectedViolationKey = selectedViolation ? violationKey(selectedViolation) : '';
+  useEffect(() => {
+    setRemediationError(null);
+    setRemediationResult(null);
+  }, [selectedViolationKey]);
   const selectedConfig = useMemo(() => {
     if (selectedDetail?.type !== 'config') return undefined;
     return data?.configs.find((config) => config.name === selectedDetail.name);
@@ -1004,6 +1078,51 @@ export function GatekeeperPolicyManager(props?: {
     }
   };
 
+  const handleRemediateViolation = async (mode: 'preview' | 'dry_run' | 'apply') => {
+    if (!selectedViolation) {
+      setRemediationError(t('Select a Gatekeeper violation before requesting remediation.'));
+      return;
+    }
+    if (mode !== 'preview' && !remediationResult?.plan) {
+      setRemediationError(t('Generate an AI remediation plan before dry-run or apply.'));
+      return;
+    }
+    setRemediationLoading(true);
+    setRemediationError(null);
+    try {
+      const response = await postRequest<
+        GatekeeperRemediationResponse,
+        {
+          mode: string;
+          violation: GatekeeperViolation;
+          remediation_plan?: GatekeeperRemediationPlan;
+          human_approved: boolean;
+          context_name: string;
+        }
+      >(awxAPI`/opa/gatekeeper/remediate/`, {
+        mode,
+        violation: selectedViolation,
+        remediation_plan: mode === 'preview' ? undefined : remediationResult?.plan,
+        human_approved: mode === 'apply',
+        context_name: activeContext,
+      });
+      setRemediationResult(response);
+      if (response.rollback_plan) {
+        setRollbackPlan(JSON.stringify(response.rollback_plan, null, 2));
+      }
+      if (response.persisted) void refresh();
+    } catch (err) {
+      setRemediationError(
+        requestErrorMessage(
+          err,
+          t('Gatekeeper remediation failed. Check AI settings, connection, and policy guardrails.')
+        )
+      );
+    } finally {
+      setRemediationLoading(false);
+    }
+  };
+
   const handleConfirmLiveAction = async () => {
     const action = confirmLiveAction;
     setConfirmLiveAction(null);
@@ -1013,6 +1132,8 @@ export function GatekeeperPolicyManager(props?: {
       await handleDeleteManifest();
     } else if (action === 'rollback') {
       await handleRollback();
+    } else if (action === 'remediation') {
+      await handleRemediateViolation('apply');
     }
   };
 
@@ -1021,9 +1142,13 @@ export function GatekeeperPolicyManager(props?: {
       ? deleteTarget
         ? gatekeeperTargetDisplay(deleteTarget)
         : t('Manifest textarea resource')
-      : confirmLiveAction === 'rollback'
-        ? t('Rollback plan')
-        : t('Manifest textarea resource');
+      : confirmLiveAction === 'remediation' && selectedViolation
+        ? selectedViolation.resource_namespace
+          ? `${selectedViolation.resource_kind}/${selectedViolation.resource_namespace}/${selectedViolation.resource_name}`
+          : `${selectedViolation.resource_kind}/${selectedViolation.resource_name}`
+        : confirmLiveAction === 'rollback'
+          ? t('Rollback plan')
+          : t('Manifest textarea resource');
 
   const showOverview = view === 'overview';
   const showChanges = view === 'changes';
@@ -2093,6 +2218,149 @@ export function GatekeeperPolicyManager(props?: {
               <GatekeeperViolationDetail violation={selectedViolation} />
             </StackItem>
           ) : null}
+          {showViolations && selectedViolation ? (
+            <StackItem>
+              <Card isFlat data-cy="gatekeeper-remediation-panel">
+                <CardHeader>
+                  <CardTitle>{t('AI remediation')}</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <Stack hasGutter>
+                    <StackItem>
+                      {t(
+                        'Ask AI to explain the selected violation and generate a safe metadata patch for the violating Kubernetes resource.'
+                      )}
+                    </StackItem>
+                    <StackItem>
+                      <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="secondary"
+                          icon={<MagicIcon />}
+                          onClick={() => void handleRemediateViolation('preview')}
+                          isLoading={remediationLoading}
+                          isDisabled={remediationLoading || !data.configured}
+                          data-cy="gatekeeper-remediation-suggest-button"
+                        >
+                          {t('Suggest remediation')}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => void handleRemediateViolation('dry_run')}
+                          isLoading={remediationLoading}
+                          isDisabled={
+                            remediationLoading ||
+                            !data.configured ||
+                            !remediationResult?.plan.can_apply
+                          }
+                          data-cy="gatekeeper-remediation-dry-run-button"
+                        >
+                          {t('Dry-run remediation')}
+                        </Button>
+                        {canManagePolicy ? (
+                          <Button
+                            variant="danger"
+                            onClick={() => setConfirmLiveAction('remediation')}
+                            isDisabled={
+                              remediationLoading ||
+                              !data.configured ||
+                              !remediationResult?.plan.can_apply
+                            }
+                            data-cy="gatekeeper-remediation-apply-button"
+                          >
+                            {t('Apply remediation')}
+                          </Button>
+                        ) : null}
+                      </span>
+                    </StackItem>
+                    {remediationError ? (
+                      <StackItem>
+                        <Alert variant="danger" isInline title={remediationError} />
+                      </StackItem>
+                    ) : null}
+                    {remediationResult ? (
+                      <>
+                        <StackItem>
+                          <Alert
+                            variant={
+                              remediationResult.persisted || remediationResult.dry_run
+                                ? 'success'
+                                : remediationResult.plan.can_apply
+                                  ? 'info'
+                                  : 'warning'
+                            }
+                            isInline
+                            title={remediationResult.plan.summary}
+                          >
+                            {remediationResult.plan.rationale}
+                          </Alert>
+                        </StackItem>
+                        <StackItem>
+                          <DescriptionList isHorizontal isCompact>
+                            <DescriptionListGroup>
+                              <DescriptionListTerm>{t('Target')}</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {gatekeeperTargetDisplay(remediationResult.target)}
+                              </DescriptionListDescription>
+                            </DescriptionListGroup>
+                            <DescriptionListGroup>
+                              <DescriptionListTerm>{t('Risk')}</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {remediationResult.plan.risk}
+                              </DescriptionListDescription>
+                            </DescriptionListGroup>
+                            <DescriptionListGroup>
+                              <DescriptionListTerm>{t('Automatic patch')}</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {remediationResult.plan.can_apply
+                                  ? t('Available')
+                                  : t('Not available')}
+                              </DescriptionListDescription>
+                            </DescriptionListGroup>
+                            <DescriptionListGroup>
+                              <DescriptionListTerm>{t('Mode')}</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {remediationResult.mode}
+                              </DescriptionListDescription>
+                            </DescriptionListGroup>
+                          </DescriptionList>
+                        </StackItem>
+                        <StackItem>
+                          <GatekeeperAuditLink
+                            audit={remediationResult.audit}
+                            dataCy="gatekeeper-remediation-audit-link"
+                            getPageUrl={getPageUrl}
+                          />
+                        </StackItem>
+                        {remediationResult.plan.manual_steps.length > 0 ? (
+                          <StackItem>
+                            <CodeBlock>
+                              <CodeBlockCode>
+                                {remediationResult.plan.manual_steps.join('\n')}
+                              </CodeBlockCode>
+                            </CodeBlock>
+                          </StackItem>
+                        ) : null}
+                        {remediationResult.plan.patch ? (
+                          <StackItem>
+                            <CodeBlock>
+                              <CodeBlockCode>
+                                {jsonPreview({
+                                  patch_type: remediationResult.plan.patch_type,
+                                  patch: remediationResult.plan.patch,
+                                  diff: remediationResult.diff,
+                                  opa_allowed: remediationResult.opa_allowed,
+                                })}
+                              </CodeBlockCode>
+                            </CodeBlock>
+                          </StackItem>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </Stack>
+                </CardBody>
+              </Card>
+            </StackItem>
+          ) : null}
           {showConfigs ? (
             <StackItem>
               <Card isFlat>
@@ -2144,6 +2412,49 @@ export function GatekeeperPolicyManager(props?: {
             <StackItem>
               <GatekeeperConfigDetail config={selectedConfig} />
             </StackItem>
+          ) : null}
+          {confirmLiveAction && !showChanges ? (
+            <Modal
+              titleIconVariant="danger"
+              title={gatekeeperLiveActionTitle(t, confirmLiveAction)}
+              variant={ModalVariant.small}
+              description={gatekeeperLiveActionDescription(t, confirmLiveAction)}
+              isOpen
+              onClose={() => setConfirmLiveAction(null)}
+              data-cy="gatekeeper-live-action-confirm-dialog"
+              actions={[
+                <Button
+                  key="confirm"
+                  variant="danger"
+                  onClick={() => void handleConfirmLiveAction()}
+                  data-cy="gatekeeper-live-action-confirm-button"
+                  aria-label={t('Confirm Gatekeeper live action')}
+                >
+                  {t('Confirm')}
+                </Button>,
+                <Button
+                  key="cancel"
+                  variant="link"
+                  onClick={() => setConfirmLiveAction(null)}
+                  data-cy="gatekeeper-live-action-cancel-button"
+                >
+                  {t('Cancel')}
+                </Button>,
+              ]}
+            >
+              <DescriptionList isHorizontal isCompact>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {activeContext || t('Default')}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>{t('Target')}</DescriptionListTerm>
+                  <DescriptionListDescription>{confirmLiveTarget}</DescriptionListDescription>
+                </DescriptionListGroup>
+              </DescriptionList>
+            </Modal>
           ) : null}
         </Stack>
       )}

@@ -74,9 +74,85 @@ const gatekeeperResult = {
   audit: null,
 };
 
+const gatekeeperResponseWithViolation = {
+  ...gatekeeperResponse,
+  counts: {
+    ...gatekeeperResponse.counts,
+    constraints: 1,
+    violations: 1,
+    filtered_violations: 1,
+  },
+  violation_query: {
+    ...gatekeeperResponse.violation_query,
+    returned: 1,
+  },
+  violations: [
+    {
+      constraint_kind: 'K8sRequiredLabels',
+      constraint_name: 'require-owner',
+      enforcement_action: 'deny',
+      message: 'missing owner label',
+      resource_kind: 'Namespace',
+      resource_namespace: '',
+      resource_name: 'payments',
+      resource_api_version: 'v1',
+      resource_group: '',
+      resource_version: 'v1',
+    },
+  ],
+};
+
+const gatekeeperRemediationResult = {
+  changed: false,
+  persisted: false,
+  dry_run: false,
+  mode: 'preview',
+  operation: 'remediate',
+  target: {
+    api_version: 'v1',
+    kind: 'Namespace',
+    name: 'payments',
+    resource: 'namespaces',
+    object_path: '/api/v1/namespaces/payments',
+  },
+  plan: {
+    summary: 'Add the required owner label to the payments namespace.',
+    rationale: 'The namespace is missing metadata.labels.owner.',
+    risk: 'low',
+    target: {
+      api_version: 'v1',
+      kind: 'Namespace',
+      name: 'payments',
+      resource: 'namespaces',
+      object_path: '/api/v1/namespaces/payments',
+    },
+    patch_type: 'merge',
+    patch: {
+      metadata: {
+        labels: {
+          owner: 'platform',
+        },
+      },
+    },
+    manual_steps: [],
+    can_apply: true,
+  },
+  before_exists: true,
+  before_sha256: 'before123',
+  after_sha256: 'after123',
+  diff: '+ owner: platform',
+  rollback_plan: {},
+  opa_allowed: null,
+  kubernetes_response: null,
+  audit: null,
+  provider: 'openai',
+  model: 'gpt-test',
+};
+
 interface GatekeeperRequestBody {
   mode?: string;
   human_approved?: boolean;
+  remediation_plan?: unknown;
 }
 
 function SeedNavigation(props: { children: ReactNode }) {
@@ -94,7 +170,7 @@ function SeedNavigation(props: { children: ReactNode }) {
 }
 
 function mountGatekeeper(
-  response = gatekeeperResponse,
+  response: object = gatekeeperResponse,
   view: GatekeeperPolicyManagerView = 'overview'
 ) {
   cy.intercept('GET', '/api/v2/opa/gatekeeper/**', response).as('gatekeeper');
@@ -252,5 +328,42 @@ describe('GatekeeperPolicyManager', () => {
     cy.getByDataCy('gatekeeper-live-action-confirm-button').click();
     cy.wait('@rollbackGatekeeper');
     cy.wrap(null).then(() => expect(calls).to.equal(1));
+  });
+
+  it('suggests and confirms AI remediation for a selected violation', () => {
+    let calls = 0;
+    cy.intercept('POST', awxAPI`/opa/gatekeeper/remediate/`, (req) => {
+      calls += 1;
+      const body = req.body as GatekeeperRequestBody;
+      if (calls === 1) {
+        expect(body.mode).to.equal('preview');
+        expect(body.remediation_plan).to.equal(undefined);
+        req.reply(gatekeeperRemediationResult);
+      } else {
+        expect(body.mode).to.equal('apply');
+        expect(body.human_approved).to.equal(true);
+        expect(body.remediation_plan).to.deep.equal(gatekeeperRemediationResult.plan);
+        req.reply({
+          ...gatekeeperRemediationResult,
+          mode: 'apply',
+          changed: true,
+          persisted: true,
+        });
+      }
+    }).as('remediateGatekeeper');
+
+    mountGatekeeper(gatekeeperResponseWithViolation, 'violations');
+    cy.contains('button', 'payments').click();
+    cy.getByDataCy('gatekeeper-remediation-panel').should('be.visible');
+    cy.getByDataCy('gatekeeper-remediation-suggest-button').click();
+    cy.wait('@remediateGatekeeper');
+    cy.contains('Add the required owner label to the payments namespace.').should('be.visible');
+    cy.contains('owner').should('be.visible');
+
+    cy.getByDataCy('gatekeeper-remediation-apply-button').click();
+    cy.getByDataCy('gatekeeper-live-action-confirm-dialog').should('be.visible');
+    cy.getByDataCy('gatekeeper-live-action-confirm-button').click();
+    cy.wait('@remediateGatekeeper');
+    cy.wrap(null).then(() => expect(calls).to.equal(2));
   });
 });
