@@ -30,7 +30,7 @@ export function useAwxPolicyRoutes() {
             {
               id: AwxRoute.PolicyAsCodeGatekeeperOverview,
               label: t('Overview'),
-              path: '',
+              path: 'overview',
               element: <PolicyAsCode view="gatekeeper-overview" />,
             },
             {
@@ -62,6 +62,11 @@ export function useAwxPolicyRoutes() {
               label: t('Configurations'),
               path: 'configurations',
               element: <PolicyAsCode view="gatekeeper-configs" />,
+            },
+            {
+              path: '',
+              element: <Navigate to="overview" replace />,
+              hidden: true,
             },
           ],
         },

@@ -7,6 +7,7 @@ import { useAwxConfig } from '../../common/useAwxConfig';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
 import type { GatekeeperPolicyManagerView } from './GatekeeperPolicyManager';
+import { PolicyAsCodeOverview } from './PolicyAsCodeOverview';
 
 type PolicyAsCodeView =
   | 'overview'
@@ -72,7 +73,11 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
     <PageLayout>
       <PageHeader title={title} />
       {view === 'overview' ? (
-        <OPAPolicyManagementPanel sections={['status']} canManagePolicy={canManagePolicy} />
+        <PolicyAsCodeOverview
+          canManagePolicy={canManagePolicy}
+          opaEnabled={moduleOpaEnabled}
+          gatekeeperEnabled={moduleGatekeeperEnabled}
+        />
       ) : null}
       {gatekeeperPolicyView ? (
         <GatekeeperPolicyManager view={gatekeeperPolicyView} canManagePolicy={canManagePolicy} />
