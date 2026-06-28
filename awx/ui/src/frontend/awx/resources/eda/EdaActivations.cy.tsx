@@ -385,6 +385,20 @@ describe('EdaActivations', () => {
     cy.wait('@restartActivation');
   });
 
+  it('centers EDA RBAC access sync while loading', () => {
+    cy.intercept('GET', '/api/v2/eda/rbac-sync/', {
+      delayMs: 1000,
+      body: rbacSyncReport,
+    }).as('rbacSyncDelayed');
+
+    cy.mount(<EdaRbacSync />, {
+      path: '/eda/access/sync',
+      initialEntries: ['/eda/access/sync'],
+    });
+
+    cy.get('[role="progressbar"]').parents('.pf-v5-l-bullseye').should('exist');
+  });
+
   it('renders EDA RBAC access sync drift and posts sync modes', () => {
     cy.intercept('GET', '/api/v2/eda/rbac-sync/', rbacSyncReport).as('rbacSync');
     cy.intercept('POST', '/api/v2/eda/rbac-sync/', (req) => {
@@ -401,6 +415,11 @@ describe('EdaActivations', () => {
     });
 
     cy.verifyPageTitle('Access Sync');
+    cy.get('[data-cy="manage-view"] [data-cy="eda-rbac-sync-actions"]').within(() => {
+      cy.contains('button', /^Refresh$/).should('be.visible');
+      cy.contains('button', /^Sync missing$/).should('be.visible');
+      cy.contains('button', /^Enforce drift$/).should('be.visible');
+    });
     cy.contains('Desired assignments').should('be.visible');
     cy.contains('user eda-operator -> Operator on Default').should('be.visible');
     cy.contains('user stale-user -> Admin on Default').should('be.visible');

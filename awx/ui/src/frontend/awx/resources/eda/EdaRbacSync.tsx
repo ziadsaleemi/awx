@@ -10,10 +10,9 @@ import {
   CardTitle,
   Gallery,
   GalleryItem,
-  Spinner,
 } from '@patternfly/react-core';
 import { SyncAltIcon } from '@patternfly/react-icons';
-import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
+import { LoadingPage, PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
@@ -126,6 +125,44 @@ export function EdaRbacSync() {
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
 
+  if (isLoading && !report) return <LoadingPage />;
+
+  const headerActions = report ? (
+    <div
+      data-cy="eda-rbac-sync-actions"
+      style={{
+        display: 'flex',
+        gap: 8,
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        flexWrap: 'wrap',
+      }}
+    >
+      <Button
+        variant={ButtonVariant.secondary}
+        icon={<SyncAltIcon />}
+        isDisabled={isLoading || isApplying}
+        onClick={refresh}
+      >
+        {t('Refresh')}
+      </Button>
+      <Button
+        variant={ButtonVariant.primary}
+        isDisabled={!canManageEda || isApplying || report.source !== 'eda_controller'}
+        onClick={() => void runSync('sync')}
+      >
+        {t('Sync missing')}
+      </Button>
+      <Button
+        variant="danger"
+        isDisabled={!canManageEda || isApplying || report.source !== 'eda_controller'}
+        onClick={() => void runSync('enforce')}
+      >
+        {t('Enforce drift')}
+      </Button>
+    </div>
+  ) : undefined;
+
   return (
     <PageLayout>
       <PageHeader
@@ -133,9 +170,9 @@ export function EdaRbacSync() {
         description={t(
           'Preview, sync, and enforce EDA role assignments from AWX organization RBAC.'
         )}
+        headerActions={headerActions}
       />
       <div style={{ padding: '0 24px 24px' }}>
-        {isLoading && <Spinner />}
         {report?.source === 'not_configured' && (
           <Alert isInline variant="warning" title={t('EDA Controller is not configured')}>
             {t('Configure Event-Driven Ansible settings before syncing access.')}
@@ -143,34 +180,6 @@ export function EdaRbacSync() {
         )}
         {report && (
           <>
-            <div
-              style={{
-                display: 'flex',
-                gap: 12,
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                marginBottom: 16,
-                flexWrap: 'wrap',
-              }}
-            >
-              <Button variant={ButtonVariant.secondary} icon={<SyncAltIcon />} onClick={refresh}>
-                {t('Refresh')}
-              </Button>
-              <Button
-                variant={ButtonVariant.primary}
-                isDisabled={!canManageEda || isApplying || report.source !== 'eda_controller'}
-                onClick={() => void runSync('sync')}
-              >
-                {t('Sync missing')}
-              </Button>
-              <Button
-                variant="danger"
-                isDisabled={!canManageEda || isApplying || report.source !== 'eda_controller'}
-                onClick={() => void runSync('enforce')}
-              >
-                {t('Enforce drift')}
-              </Button>
-            </div>
             <SummaryCards summary={report.summary} />
             <ReportSection
               title={t('Missing identities')}
