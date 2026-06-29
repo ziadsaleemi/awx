@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import zlib
 from urllib.parse import urljoin
 
 import requests
@@ -101,3 +102,51 @@ class GalaxyNGClient:
         if isinstance(data, list):
             return len(data)
         return 0
+
+
+def stable_numeric_id(item, fallback):
+    if isinstance(item, dict):
+        item_id = item.get('id')
+        if isinstance(item_id, int):
+            return item_id
+        key = item_id or item.get('pulp_href') or item.get('href') or item.get('name') or item.get('namespace') or fallback
+    else:
+        key = fallback
+    return zlib.crc32(str(key).encode()) & 0x7FFFFFFF
+
+
+def normalize_list_response(payload, offset=0):
+    if isinstance(payload, list):
+        results = payload
+        count = len(results)
+    elif isinstance(payload, dict):
+        if isinstance(payload.get('results'), list):
+            results = payload['results']
+            count = payload.get('count', len(results))
+        elif isinstance(payload.get('data'), list):
+            results = payload['data']
+            meta = payload.get('meta') if isinstance(payload.get('meta'), dict) else {}
+            count = meta.get('count', payload.get('count', len(results)))
+        else:
+            results = [payload] if payload else []
+            count = len(results)
+    else:
+        results = []
+        count = 0
+
+    normalized_results = []
+    for index, item in enumerate(results):
+        if isinstance(item, dict):
+            normalized_item = dict(item)
+        else:
+            normalized_item = {'value': item}
+        normalized_item.setdefault('id', stable_numeric_id(normalized_item, offset + index + 1))
+        normalized_item.setdefault('_awx_key', str(normalized_item['id']))
+        normalized_results.append(normalized_item)
+
+    return {
+        'count': count,
+        'next': None,
+        'previous': None,
+        'results': normalized_results,
+    }

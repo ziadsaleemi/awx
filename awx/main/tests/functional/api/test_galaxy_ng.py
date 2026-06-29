@@ -98,3 +98,99 @@ def test_galaxy_ng_status_fails_soft_when_controller_unreachable(get, admin_user
     assert response.data['configured'] is True
     assert response.data['counts']['collections'] == 0
     assert 'boom' in response.data['controller_error']
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=False, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_resource_list_reports_module_disabled(get, admin_user):
+    response = get(reverse('api:galaxy_ng_collections_list'), user=admin_user, expect=200)
+
+    assert response.data == {
+        'count': 0,
+        'next': None,
+        'previous': None,
+        'source': 'module_disabled',
+        'resource': 'collections',
+        'controller_error': '',
+        'detail': 'Galaxy NG module is disabled.',
+        'results': [],
+    }
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='')
+def test_galaxy_ng_resource_list_reports_not_configured(get, admin_user):
+    response = get(reverse('api:galaxy_ng_namespaces_list'), user=admin_user, expect=200)
+
+    assert response.data['count'] == 0
+    assert response.data['source'] == 'not_configured'
+    assert response.data['resource'] == 'namespaces'
+    assert response.data['results'] == []
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_resource_list_normalizes_pulp_payload(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(
+            mocker,
+            {
+                'count': 2,
+                'results': [
+                    {'pulp_href': '/pulp/api/v3/tasks/1/', 'name': 'import-one', 'state': 'completed'},
+                    {'pulp_href': '/pulp/api/v3/tasks/2/', 'name': 'import-two', 'state': 'running'},
+                ],
+            },
+        ),
+    )
+
+    response = get(reverse('api:galaxy_ng_tasks_list') + '?page=2&page_size=10&order_by=-name&name__icontains=import', user=admin_user, expect=200)
+
+    assert response.data['count'] == 2
+    assert response.data['next'] is None
+    assert response.data['previous'] is None
+    assert response.data['source'] == 'galaxy_ng'
+    assert response.data['resource'] == 'tasks'
+    assert response.data['controller_error'] == ''
+    assert response.data['results'][0]['name'] == 'import-one'
+    assert isinstance(response.data['results'][0]['id'], int)
+    assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/tasks/'
+    assert request_mock.call_args.kwargs['params'] == {
+        'limit': 10,
+        'offset': 10,
+        'ordering': '-name',
+        'search': 'import',
+    }
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(
+            mocker,
+            {
+                'meta': {'count': 1},
+                'data': [
+                    {
+                        'namespace': 'infra',
+                        'name': 'network',
+                        'latest_version': {'version': '1.2.3'},
+                    }
+                ],
+            },
+        ),
+    )
+
+    response = get(reverse('api:galaxy_ng_collections_list'), user=admin_user, expect=200)
+
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['namespace'] == 'infra'
+    assert response.data['results'][0]['name'] == 'network'
+    assert isinstance(response.data['results'][0]['id'], int)

@@ -29,7 +29,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 
-interface GalaxyNgStatus {
+export interface GalaxyNgStatus {
   enabled: boolean;
   configured: boolean;
   status: string;
@@ -274,24 +274,24 @@ export function GalaxyNgOverview() {
         <CardBody>
           <Gallery hasGutter minWidths={{ default: '220px' }}>
             <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGCollections) || '/galaxy-ng/collections'}
+              label={t('Collections')}
+              description={t('Review private automation hub collections visible to AWX.')}
+            />
+            <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGRepositories) || '/galaxy-ng/repositories'}
+              label={t('Repositories')}
+              description={t('Inspect Pulp Ansible repositories backing content distribution.')}
+            />
+            <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGTasks) || '/galaxy-ng/tasks'}
+              label={t('Tasks')}
+              description={t('Track import, sync, copy, and publish task state.')}
+            />
+            <QuickLink
               href={data?.ui_url}
               label={t('Open Galaxy NG UI')}
-              description={t('Review namespaces, collections, approvals, and import tasks.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.Projects) || '/projects'}
-              label={t('AWX Projects')}
-              description={t('Use project sync with requirements.yml pointing at private hub.')}
-            />
-            <QuickLink
-              to={settingsUrl}
-              label={t('Hub connection')}
-              description={t('Configure server URL, API token, basic auth, and path prefixes.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.SettingsJobs) || '/settings/job-settings'}
-              label={t('Job settings')}
-              description={t('Set ansible-galaxy environment for project update jobs.')}
+              description={t('Open the upstream hub UI for actions AWX has not yet implemented.')}
             />
           </Gallery>
         </CardBody>

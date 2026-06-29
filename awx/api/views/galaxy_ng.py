@@ -6,7 +6,64 @@ from rest_framework.response import Response
 
 from awx.api.generics import APIView
 from awx.api.versioning import reverse
-from awx.main.utils.galaxy_ng import GalaxyNGClient, GalaxyNGControllerError, configured_url, connection_status, module_enabled
+from awx.main.utils.galaxy_ng import (
+    GalaxyNGClient,
+    GalaxyNGControllerError,
+    configured_url,
+    connection_status,
+    module_enabled,
+    normalize_list_response,
+)
+
+
+GALAXY_NG_RESOURCE_PATHS = {
+    'namespaces': 'v3/namespaces/',
+    'collections': 'v3/collections/',
+    'repositories': 'pulp/api/v3/repositories/ansible/ansible/',
+    'tasks': 'pulp/api/v3/tasks/',
+}
+
+
+def _parse_positive_int(value, default, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(parsed, 1)
+    if maximum is not None:
+        parsed = min(parsed, maximum)
+    return parsed
+
+
+def _galaxy_list_params(request, page, page_size):
+    params = {
+        'limit': page_size,
+        'offset': (page - 1) * page_size,
+    }
+    for key, values in request.query_params.lists():
+        if key in ('page', 'page_size'):
+            continue
+        value = values if len(values) > 1 else values[0]
+        if key == 'order_by':
+            params['ordering'] = value
+        elif key in ('name__icontains', 'search'):
+            params['search'] = value
+        else:
+            params[key] = value
+    return params
+
+
+def _empty_resource_response(resource, source, detail=''):
+    return {
+        'count': 0,
+        'next': None,
+        'previous': None,
+        'source': source,
+        'resource': resource,
+        'controller_error': '',
+        'detail': detail,
+        'results': [],
+    }
 
 
 class GalaxyNGStatusView(APIView):
@@ -69,3 +126,72 @@ class GalaxyNGStatusView(APIView):
             response['controller_error'] = str(exc)
 
         return Response(response)
+
+
+class GalaxyNGResourceListView(APIView):
+    name = _('Galaxy NG Resources')
+    resource_purpose = 'galaxy ng private automation hub resources'
+    resource = ''
+
+    def get_resource_path(self, client):
+        return f'{client.api_path_prefix.rstrip("/")}/{GALAXY_NG_RESOURCE_PATHS[self.resource]}'
+
+    def get(self, request, format=None):
+        if not module_enabled():
+            return Response(
+                _empty_resource_response(
+                    self.resource,
+                    'module_disabled',
+                    _('Galaxy NG module is disabled.'),
+                )
+            )
+        if connection_status() != 'configured':
+            return Response(_empty_resource_response(self.resource, 'not_configured'))
+
+        page = _parse_positive_int(request.query_params.get('page'), 1)
+        page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=200)
+        client = GalaxyNGClient()
+        try:
+            payload = client.get(
+                self.get_resource_path(client),
+                params=_galaxy_list_params(request, page, page_size),
+            )
+        except GalaxyNGControllerError as exc:
+            return Response(
+                {
+                    'count': 0,
+                    'next': None,
+                    'previous': None,
+                    'source': 'galaxy_ng',
+                    'resource': self.resource,
+                    'controller_error': str(exc),
+                    'results': [],
+                },
+                status=502,
+            )
+
+        response = normalize_list_response(payload, offset=(page - 1) * page_size)
+        response['source'] = 'galaxy_ng'
+        response['resource'] = self.resource
+        response['controller_error'] = ''
+        return Response(response)
+
+
+class GalaxyNGNamespacesListView(GalaxyNGResourceListView):
+    name = _('Galaxy NG Namespaces')
+    resource = 'namespaces'
+
+
+class GalaxyNGCollectionsListView(GalaxyNGResourceListView):
+    name = _('Galaxy NG Collections')
+    resource = 'collections'
+
+
+class GalaxyNGRepositoriesListView(GalaxyNGResourceListView):
+    name = _('Galaxy NG Repositories')
+    resource = 'repositories'
+
+
+class GalaxyNGTasksListView(GalaxyNGResourceListView):
+    name = _('Galaxy NG Tasks')
+    resource = 'tasks'
