@@ -1,0 +1,134 @@
+---
+- name: Validate Galaxy NG server secrets
+  ansible.builtin.assert:
+    that:
+      - awx_galaxy_ng_admin_password | length > 0
+      - awx_galaxy_ng_postgres_password | length > 0
+      - awx_galaxy_ng_secret_key | length > 0
+    fail_msg: >-
+      Galaxy NG server deploy needs GALAXY_NG_ADMIN_PASSWORD,
+      GALAXY_NG_POSTGRES_PASSWORD, and GALAXY_NG_SECRET_KEY.
+  no_log: true
+
+- name: Install Galaxy NG server host packages
+  ansible.builtin.package:
+    name: "{{ awx_galaxy_ng_packages }}"
+    state: present
+  when: awx_galaxy_ng_install_packages | bool
+
+- name: Enable Docker for Galaxy NG compose
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: "'docker' in awx_galaxy_ng_compose_command"
+
+- name: Resolve Galaxy NG public URL
+  ansible.builtin.set_fact:
+    awx_galaxy_ng_effective_public_url: >-
+      {{ awx_galaxy_ng_public_url
+        if awx_galaxy_ng_public_url | length > 0
+        else 'http://' ~ (ansible_host | default(inventory_hostname)) ~ ':' ~ (awx_galaxy_ng_public_port | string) }}
+
+- name: Create Galaxy NG directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ awx_galaxy_ng_base_dir }}"
+    - "{{ awx_galaxy_ng_data_dir }}"
+    - "{{ awx_galaxy_ng_data_dir }}/postgres"
+    - "{{ awx_galaxy_ng_data_dir }}/redis"
+    - "{{ awx_galaxy_ng_data_dir }}/pulp"
+    - "{{ awx_galaxy_ng_data_dir }}/etc-pulp"
+    - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible"
+
+- name: Render Galaxy NG environment
+  ansible.builtin.template:
+    src: galaxy-ng.env.j2
+    dest: "{{ awx_galaxy_ng_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render Galaxy NG compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ awx_galaxy_ng_compose_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render Galaxy NG nginx config
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ awx_galaxy_ng_nginx_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render Galaxy NG systemd service
+  ansible.builtin.template:
+    src: awx-galaxy-ng.service.j2
+    dest: /etc/systemd/system/awx-galaxy-ng.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Galaxy NG
+  ansible.builtin.service:
+    name: awx-galaxy-ng
+    state: restarted
+    enabled: true
+
+- name: Check firewalld state for Galaxy NG
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_galaxy_ng_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Check Galaxy NG firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_galaxy_ng_public_port }}/tcp"
+  register: awx_galaxy_ng_firewalld_port
+  changed_when: false
+  failed_when: false
+  when: awx_galaxy_ng_firewalld_state.stdout == "active"
+
+- name: Open Galaxy NG firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_galaxy_ng_public_port }}/tcp"
+  register: awx_galaxy_ng_firewalld_open
+  changed_when: true
+  when:
+    - awx_galaxy_ng_firewalld_state.stdout == "active"
+    - awx_galaxy_ng_firewalld_port.rc != 0
+
+- name: Reload firewalld for Galaxy NG
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_galaxy_ng_firewalld_state.stdout == "active"
+    - awx_galaxy_ng_firewalld_open is changed
+
+- name: Wait for Galaxy NG health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_galaxy_ng_public_port }}{{ awx_galaxy_ng_health_path }}"
+    method: GET
+    status_code: 200
+  register: awx_galaxy_ng_health
+  until: awx_galaxy_ng_health.status == 200
+  retries: 90
+  delay: 10
+  when: awx_galaxy_ng_wait_for_health | bool

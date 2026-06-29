@@ -39,3 +39,14 @@
   roles:
     - role: awx_eda_k8s
       when: awx_eda_enabled | default(false) | bool
+
+- name: Deploy Galaxy NG to k3s
+  hosts: awx_k3s_servers[0]
+  gather_facts: true
+  become: true
+  vars:
+    awx_deploy_method: k3s
+    awx_k8s_kubectl_binary: /usr/local/bin/kubectl
+  roles:
+    - role: awx_galaxy_ng_k8s
+      when: awx_galaxy_ng_enabled | default(false) | bool

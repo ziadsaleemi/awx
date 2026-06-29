@@ -49,6 +49,7 @@ import { useAwxNotificationsRoutes } from './routes/useAwxNotificationsRoutes';
 import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
 import { useAwxPolicyRoutes } from './routes/useAwxPolicyRoutes';
+import { useAwxGalaxyRoutes } from './routes/useAwxGalaxyRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
 import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
@@ -239,6 +240,7 @@ export function useAwxNavigation() {
   const awxCatalogRoutes = useAwxCatalogRoutes();
   const awxCloudRoutes = useAwxCloudRoutes();
   const awxPolicyRoutes = useAwxPolicyRoutes();
+  const awxGalaxyRoutes = useAwxGalaxyRoutes();
   const awxEdaRoutes = useAwxEdaRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
@@ -261,6 +263,7 @@ export function useAwxNavigation() {
   const moduleEdaEnabled = awxConfig?.modules?.eda?.enabled !== false;
   const moduleOpaEnabled = awxConfig?.modules?.opa?.enabled !== false;
   const moduleGatekeeperEnabled = awxConfig?.modules?.gatekeeper?.enabled !== false;
+  const moduleGalaxyNgEnabled = awxConfig?.modules?.galaxy_ng?.enabled === true;
   const modulePolicyEnabled = moduleOpaEnabled || moduleGatekeeperEnabled;
   const awxPolicyRoutesForModules = filterPolicyRoutesByModules(
     awxPolicyRoutes,
@@ -687,6 +690,21 @@ export function useAwxNavigation() {
           ],
         },
         {
+          id: AwxRoute.SettingsGalaxyNG,
+          label: t('Galaxy NG'),
+          path: 'galaxy-ng',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="galaxy_ng" key="galaxy_ng" />,
+            },
+            {
+              path: '',
+              element: <AwxSettingsCategoryDetailsPage categoryId="galaxy_ng" key="galaxy_ng" />,
+            },
+          ],
+        },
+        {
           id: AwxRoute.SettingsOther,
           label: t('Other'),
           path: 'other',
@@ -784,6 +802,9 @@ export function useAwxNavigation() {
             ),
           ]
         : []),
+      ...(moduleGalaxyNgEnabled && capabilities.canViewCatalog
+        ? [withNavigationDetails(awxGalaxyRoutes, t('Galaxy NG'), t('Private automation hub'))]
+        : []),
       ...(capabilities.canViewCloud
         ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
         : []),
@@ -851,6 +872,9 @@ export function useAwxNavigation() {
     ...overview,
     ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
     withNavigationDetails(awxCatalogRoutes, t('Automation Content'), t('Service Catalog')),
+    ...(moduleGalaxyNgEnabled
+      ? [withNavigationDetails(awxGalaxyRoutes, t('Galaxy NG'), t('Private automation hub'))]
+      : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),

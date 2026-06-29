@@ -103,6 +103,33 @@ awx_eda_k8s_operator_ref: main
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
 
+# Galaxy NG / private automation hub deployment integration.
+# For k3s/k8s, enabling this deploys Galaxy NG beside AWX and configures AWX to
+# talk to the in-cluster hub service. For server deployments, deploy Galaxy NG
+# on hosts in [awx_galaxy_ng], then set awx_galaxy_ng_configure_awx_settings=true.
+awx_galaxy_ng_enabled: false
+awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
+awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image_tag: latest
+awx_galaxy_ng_admin_user: admin
+awx_galaxy_ng_admin_password: "{{ lookup('env', 'GALAXY_NG_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
+awx_galaxy_ng_postgres_password: "{{ lookup('env', 'GALAXY_NG_POSTGRES_PASSWORD') }}"
+awx_galaxy_ng_secret_key: "{{ lookup('env', 'GALAXY_NG_SECRET_KEY') }}"
+awx_galaxy_ng_auth_token: "{{ lookup('env', 'GALAXY_NG_AUTH_TOKEN') | default('', true) }}"
+awx_galaxy_ng_server_url: ""
+awx_galaxy_ng_verify_ssl: false
+awx_galaxy_ng_public_port: 5001
+
+# k3s/k8s Galaxy NG path.
+awx_galaxy_ng_namespace: galaxy-ng
+awx_galaxy_ng_name: awx-galaxy-ng
+awx_galaxy_ng_service_type: ClusterIP
+awx_galaxy_ng_node_port: 30501
+awx_galaxy_ng_postgres_access_mode: ReadWriteOnce
+awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
+awx_galaxy_ng_postgres_storage_size: 20Gi
+awx_galaxy_ng_pulp_storage_size: 50Gi
+
 # Policy as Code integration.
 # OPA is standalone and can run on a dedicated VM/container host or any external
 # OPA URL. Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or

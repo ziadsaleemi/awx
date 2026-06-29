@@ -1,0 +1,489 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ awx_galaxy_ng_name }}-secret
+  namespace: {{ awx_galaxy_ng_namespace }}
+type: Opaque
+stringData:
+  DJANGO_SUPERUSER_USERNAME: {{ awx_galaxy_ng_admin_user | quote }}
+  DJANGO_SUPERUSER_EMAIL: {{ awx_galaxy_ng_admin_email | quote }}
+  DJANGO_SUPERUSER_PASSWORD: {{ awx_galaxy_ng_effective_admin_password | quote }}
+  POSTGRES_USER: {{ awx_galaxy_ng_postgres_user | quote }}
+  POSTGRES_PASSWORD: {{ awx_galaxy_ng_effective_postgres_password | quote }}
+  POSTGRES_DB: {{ awx_galaxy_ng_postgres_database | quote }}
+  PULP_SECRET_KEY: {{ awx_galaxy_ng_effective_secret_key | quote }}
+  PULP_DB_NAME: {{ awx_galaxy_ng_postgres_database | quote }}
+  PULP_DB_USER: {{ awx_galaxy_ng_postgres_user | quote }}
+  PULP_DB_PASSWORD: {{ awx_galaxy_ng_effective_postgres_password | quote }}
+  PULP_DB_HOST: {{ awx_galaxy_ng_name }}-postgres
+  PULP_DB_PORT: "5432"
+  PULP_REDIS_HOST: {{ awx_galaxy_ng_name }}-redis
+  PULP_REDIS_PORT: "6379"
+  PULP_REDIS_PASSWORD: ""
+  PULP_CACHE_ENABLED: "true"
+  PULP_ANALYTICS: "false"
+  PULP_GALAXY_DEPLOYMENT_MODE: standalone
+  PULP_DEFAULT_FILE_STORAGE: pulpcore.app.models.storage.FileSystem
+  PULP_REDIRECT_TO_OBJECT_STORAGE: "false"
+  PULP_GALAXY_API_PATH_PREFIX: {{ awx_galaxy_ng_api_path_prefix | quote }}
+  PULP_CONTENT_PATH_PREFIX: {{ awx_galaxy_ng_content_path_prefix | quote }}
+  PULP_ANSIBLE_API_HOSTNAME: {{ awx_galaxy_ng_effective_public_url | quote }}
+  PULP_ANSIBLE_CONTENT_HOSTNAME: {{ awx_galaxy_ng_effective_public_url | quote }}
+  PULP_CONTENT_ORIGIN: {{ awx_galaxy_ng_effective_public_url | quote }}
+  PULP_CSRF_TRUSTED_ORIGINS: "['{{ awx_galaxy_ng_effective_public_url }}']"
+  PULP_GALAXY_AUTHENTICATION_CLASSES: "['galaxy_ng.app.auth.session.SessionAuthentication','rest_framework.authentication.TokenAuthentication','rest_framework.authentication.BasicAuthentication']"
+  PULP_GALAXY_API_SPEC_REQUIRE_AUTHENTICATION: "false"
+  PULP_ANSIBLE_BASE_ROLES_REQUIRE_VIEW: "false"
+  PULP_RESOURCE_SERVER_SYNC_ENABLED: "false"
+  PULP_TOKEN_AUTH_DISABLED: "false"
+  PULP_TOKEN_SERVER: "{{ awx_galaxy_ng_effective_public_url }}/token/"
+  PULP_TOKEN_SIGNATURE_ALGORITHM: ES256
+  PULP_PUBLIC_KEY_PATH: /app/dev/common/container_auth_public_key.pem
+  PULP_PRIVATE_KEY_PATH: /app/dev/common/container_auth_private_key.pem
+  PULP_ALLOWED_EXPORT_PATHS: /app/tmp
+  PULP_ALLOWED_IMPORT_PATHS: /app/tmp
+  GALAXY_IMPORTER_ANSIBLE_LOCAL_TMP: /tmp/ansible
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ awx_galaxy_ng_name }}-nginx
+  namespace: {{ awx_galaxy_ng_namespace }}
+data:
+  nginx.conf: |
+    worker_processes 1;
+    events {
+        worker_connections 1024;
+    }
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        sendfile on;
+        types_hash_max_size 4096;
+
+        upstream galaxy_content {
+            server {{ awx_galaxy_ng_name }}-content:{{ awx_galaxy_ng_content_port }};
+        }
+        upstream galaxy_api {
+            server {{ awx_galaxy_ng_name }}-api:{{ awx_galaxy_ng_api_port }};
+        }
+        server {
+            listen 5001 default_server;
+            server_name _;
+            client_max_body_size 0;
+            keepalive_timeout 5;
+            location {{ awx_galaxy_ng_content_path_prefix }} {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_content;
+            }
+            location / {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+        }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ awx_galaxy_ng_name }}-postgres
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  accessModes:
+    - {{ awx_galaxy_ng_postgres_access_mode }}
+{% if awx_galaxy_ng_storage_class | length > 0 %}
+  storageClassName: {{ awx_galaxy_ng_storage_class | quote }}
+{% endif %}
+  resources:
+    requests:
+      storage: {{ awx_galaxy_ng_postgres_storage_size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ awx_galaxy_ng_name }}-pulp
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  accessModes:
+    - {{ awx_galaxy_ng_pulp_access_mode }}
+{% if awx_galaxy_ng_storage_class | length > 0 %}
+  storageClassName: {{ awx_galaxy_ng_storage_class | quote }}
+{% endif %}
+  resources:
+    requests:
+      storage: {{ awx_galaxy_ng_pulp_storage_size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-postgres
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ awx_galaxy_ng_postgres_image }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ awx_galaxy_ng_name }}-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}-postgres
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-redis
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ awx_galaxy_ng_redis_image }}
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}-redis
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-redis
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ awx_galaxy_ng_name }}-migrate
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-postgres
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command: ["wait-for-tcp", "{{ awx_galaxy_ng_name }}-postgres", "5432"]
+        - name: wait-redis
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command: ["wait-for-tcp", "{{ awx_galaxy_ng_name }}-redis", "6379"]
+      containers:
+        - name: migrate
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command:
+            - bash
+            - -lc
+          args:
+            - django-admin fix-squashed-migrations && django-admin migrate && django-admin createsuperuser --noinput || true
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+      volumes:
+        - name: pulp
+          persistentVolumeClaim:
+            claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: tmp-ansible
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-api
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: {{ awx_galaxy_ng_api_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
+    spec:
+      initContainers:
+        - name: wait-migrations
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command: ["wait-for-migrations"]
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+      containers:
+        - name: api
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          args: ["run", "api"]
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          env:
+            - name: GUNICORN_PORT
+              value: {{ awx_galaxy_ng_api_port | quote }}
+          ports:
+            - containerPort: {{ awx_galaxy_ng_api_port }}
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+      volumes:
+        - name: pulp
+          persistentVolumeClaim:
+            claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: tmp-ansible
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}-api
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: {{ awx_galaxy_ng_api_port }}
+      targetPort: {{ awx_galaxy_ng_api_port }}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-content
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: {{ awx_galaxy_ng_content_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
+    spec:
+      initContainers:
+        - name: wait-migrations
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command: ["wait-for-migrations"]
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+      containers:
+        - name: content
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          args: ["run", "content-app"]
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          env:
+            - name: GUNICORN_PORT
+              value: {{ awx_galaxy_ng_content_port | quote }}
+          ports:
+            - containerPort: {{ awx_galaxy_ng_content_port }}
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+      volumes:
+        - name: pulp
+          persistentVolumeClaim:
+            claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: tmp-ansible
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}-content
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: {{ awx_galaxy_ng_content_port }}
+      targetPort: {{ awx_galaxy_ng_content_port }}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-worker
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: {{ awx_galaxy_ng_worker_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-worker
+    spec:
+      initContainers:
+        - name: wait-migrations
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command: ["wait-for-migrations"]
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+      containers:
+        - name: worker
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          args: ["run", "worker"]
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+      volumes:
+        - name: pulp
+          persistentVolumeClaim:
+            claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: tmp-ansible
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ awx_galaxy_ng_nginx_image }}
+          ports:
+            - containerPort: 5001
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ awx_galaxy_ng_name }}-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  type: {{ awx_galaxy_ng_service_type }}
+  ports:
+    - name: http
+      port: {{ awx_galaxy_ng_public_port }}
+      targetPort: 5001
+{% if awx_galaxy_ng_service_type == 'NodePort' and (awx_galaxy_ng_node_port | int) > 0 %}
+      nodePort: {{ awx_galaxy_ng_node_port }}
+{% endif %}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}
+{% if awx_galaxy_ng_ingress_enabled | bool %}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ awx_galaxy_ng_name }}
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  rules:
+    - host: {{ awx_galaxy_ng_ingress_host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ awx_galaxy_ng_name }}
+                port:
+                  number: {{ awx_galaxy_ng_public_port }}
+{% endif %}

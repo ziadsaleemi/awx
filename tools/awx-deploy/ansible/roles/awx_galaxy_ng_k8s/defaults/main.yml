@@ -1,0 +1,36 @@
+---
+awx_galaxy_ng_enabled: false
+awx_galaxy_ng_namespace: galaxy-ng
+awx_galaxy_ng_name: awx-galaxy-ng
+awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image_tag: latest
+awx_galaxy_ng_nginx_image: docker.io/library/nginx:1.27
+awx_galaxy_ng_postgres_image: docker.io/library/postgres:16
+awx_galaxy_ng_redis_image: docker.io/library/redis:7
+awx_galaxy_ng_admin_user: admin
+awx_galaxy_ng_admin_password: "{{ lookup('env', 'GALAXY_NG_ADMIN_PASSWORD') | default(lookup('env', 'AWX_ADMIN_PASSWORD'), true) }}"
+awx_galaxy_ng_admin_email: admin@example.com
+awx_galaxy_ng_postgres_database: galaxy_ng
+awx_galaxy_ng_postgres_user: galaxy_ng
+awx_galaxy_ng_postgres_password: "{{ lookup('env', 'GALAXY_NG_POSTGRES_PASSWORD') }}"
+awx_galaxy_ng_secret_key: "{{ lookup('env', 'GALAXY_NG_SECRET_KEY') }}"
+awx_galaxy_ng_api_port: 8000
+awx_galaxy_ng_content_port: 24816
+awx_galaxy_ng_public_port: 5001
+awx_galaxy_ng_api_path_prefix: /api/galaxy/
+awx_galaxy_ng_content_path_prefix: /pulp/content/
+awx_galaxy_ng_public_url: ""
+awx_galaxy_ng_service_type: ClusterIP
+awx_galaxy_ng_node_port: 30501
+awx_galaxy_ng_ingress_enabled: false
+awx_galaxy_ng_ingress_host: ""
+awx_galaxy_ng_storage_class: ""
+awx_galaxy_ng_postgres_access_mode: ReadWriteOnce
+awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
+awx_galaxy_ng_postgres_storage_size: 20Gi
+awx_galaxy_ng_pulp_storage_size: 50Gi
+awx_galaxy_ng_api_replicas: 1
+awx_galaxy_ng_content_replicas: 1
+awx_galaxy_ng_worker_replicas: 1
+awx_galaxy_ng_work_dir: "{{ awx_k8s_work_dir }}/galaxy-ng"
+awx_galaxy_ng_wait_for_service: true

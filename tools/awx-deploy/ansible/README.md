@@ -10,6 +10,8 @@ Supported paths:
 - `k8s`: deploy AWX into an existing Kubernetes cluster.
 - `eda-server`: deploy EDA on a dedicated VM for server deployments.
 - `eda-k8s`: deploy EDA beside AWX in k3s or Kubernetes.
+- `galaxy-ng-server`: deploy Galaxy NG/private automation hub on a dedicated VM.
+- `galaxy-ng-k8s`: deploy Galaxy NG/private automation hub beside AWX in k3s or Kubernetes.
 - `opa-server`: deploy standalone OPA on a dedicated VM/container host.
 - `gatekeeper-k8s`: deploy Gatekeeper into k3s or Kubernetes.
 
@@ -42,6 +44,12 @@ can run on hosts in the `awx_opa` inventory group or any external OPA endpoint.
 Gatekeeper is Kubernetes-only and is deployed only in k3s/k8s paths unless a
 server AWX install is explicitly configured to manage a remote Kubernetes API.
 See `docs/policy_deployment_topology.md`.
+
+Galaxy NG is intentionally a separate content hub workload. For k3s/k8s, it
+runs as API/content/worker/nginx/PostgreSQL/Redis pods beside AWX. For direct
+server deployments, it runs on hosts in the `awx_galaxy_ng` inventory group as
+its own Docker Compose/systemd stack. AWX stores only connection settings and
+uses Galaxy NG as private automation hub inventory/content source.
 
 VMware/vCenter provisioning is intentionally separate from the AWX deployment
 roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
@@ -130,6 +138,49 @@ ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
   -e awx_eda_enabled=true \
   -e awx_eda_configure_awx_settings=true
 ```
+
+## Quick Start: Galaxy NG on Server VM
+
+For direct server AWX deployments, put Galaxy NG on a dedicated VM in the
+`awx_galaxy_ng` inventory group:
+
+```bash
+cd tools/awx-deploy/ansible
+export GALAXY_NG_ADMIN_PASSWORD='change-me'
+export GALAXY_NG_POSTGRES_PASSWORD='change-me'
+export GALAXY_NG_SECRET_KEY="$(openssl rand -base64 48)"
+ansible-playbook -i inventories/example.ini playbooks/deploy-galaxy-ng-server.yml
+```
+
+Then configure AWX to point at that VM and rerun the AWX server deployment or
+upgrade:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
+  -e awx_galaxy_ng_enabled=true \
+  -e awx_galaxy_ng_configure_awx_settings=true
+```
+
+## Quick Start: Galaxy NG on k3s/Kubernetes
+
+```bash
+cd tools/awx-deploy/ansible
+export KUBECONFIG=/path/to/kubeconfig
+export GALAXY_NG_ADMIN_PASSWORD='change-me'
+ansible-playbook -i localhost, playbooks/deploy-galaxy-ng-k8s.yml
+ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
+  -e awx_galaxy_ng_enabled=true \
+  -e awx_galaxy_ng_configure_awx_settings=true
+```
+
+For k3s, use `playbooks/deploy-k3s.yml` with the same variables. If password
+vars are omitted on Kubernetes, the role reuses existing secrets or generates
+new secrets once.
+
+Galaxy NG mounts shared Pulp content into API, content, and worker pods. The
+default `awx_galaxy_ng_pulp_access_mode: ReadWriteOnce` works for single-node
+k3s/local clusters. Use `ReadWriteMany` with a compatible storage class for
+multi-node Kubernetes or when scaling Galaxy NG replicas.
 
 ## Quick Start: OPA on Server VM
 

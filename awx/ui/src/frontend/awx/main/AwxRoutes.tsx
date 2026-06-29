@@ -193,6 +193,10 @@ export enum AwxRoute {
   CatalogAdminDeployments = 'awx-catalog-admin-deployments',
   CatalogMarketplace = 'awx-catalog-marketplace',
 
+  // Galaxy NG
+  GalaxyNG = 'awx-galaxy-ng',
+  GalaxyNGOverview = 'awx-galaxy-ng-overview',
+
   // Cloud
   Cloud = 'awx-cloud',
   CloudConnections = 'awx-cloud-connections',
@@ -386,6 +390,7 @@ export enum AwxRoute {
   SettingsGatekeeper = 'awx-settings-gatekeeper',
   SettingsAiAssistant = 'awx-settings-ai-assistant',
   SettingsEda = 'awx-settings-eda',
+  SettingsGalaxyNG = 'awx-settings-galaxy-ng',
   SettingsOther = 'awx-settings-other',
   SettingsAuthentication = 'awx-settings-authentication',
   SettingsCategory = 'awx-settings-category',

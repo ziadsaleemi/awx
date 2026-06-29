@@ -254,6 +254,97 @@ register(
 )
 
 register(
+    'GALAXY_NG_SERVER_URL',
+    field_class=fields.URLField,
+    default='',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('Galaxy NG server URL'),
+    help_text=_('Base URL for Galaxy NG / private automation hub.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_AUTH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Galaxy NG API token'),
+    help_text=_('Bearer token used to read Galaxy NG APIs.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_USERNAME',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('Galaxy NG username'),
+    help_text=_('Username used for basic authentication when API token is not set.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_PASSWORD',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Galaxy NG password'),
+    help_text=_('Password used for basic authentication when API token is not set.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify Galaxy NG SSL'),
+    help_text=_('Verify TLS certificates when AWX connects to Galaxy NG.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=10,
+    min_value=1,
+    label=_('Galaxy NG request timeout'),
+    help_text=_('Maximum seconds to wait when AWX requests Galaxy NG API data.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_API_PATH_PREFIX',
+    field_class=fields.CharField,
+    default='/api/galaxy/',
+    allow_blank=False,
+    label=_('Galaxy NG API path prefix'),
+    help_text=_('Path prefix for Galaxy NG APIs.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
+    'GALAXY_NG_CONTENT_PATH_PREFIX',
+    field_class=fields.CharField,
+    default='/pulp/content/',
+    allow_blank=False,
+    label=_('Galaxy NG content path prefix'),
+    help_text=_('Path prefix for Galaxy NG/Pulp content downloads.'),
+    category=_('Galaxy NG'),
+    category_slug='galaxy_ng',
+)
+
+register(
     'EDA_SERVER_URL',
     field_class=fields.URLField,
     default='',

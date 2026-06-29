@@ -1,0 +1,110 @@
+services:
+  redis:
+    image: "{{ awx_galaxy_ng_redis_image }}"
+    restart: unless-stopped
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/redis:/data:Z"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: "{{ awx_galaxy_ng_postgres_image }}"
+    restart: unless-stopped
+    env_file: "{{ awx_galaxy_ng_env_file }}"
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/postgres:/var/lib/postgresql/data:Z"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "{{ awx_galaxy_ng_postgres_user }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrations:
+    image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
+    env_file: "{{ awx_galaxy_ng_env_file }}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+    command:
+      - bash
+      - -lc
+      - django-admin fix-squashed-migrations && django-admin migrate && django-admin createsuperuser --noinput || true
+
+  api:
+    image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
+    restart: unless-stopped
+    env_file: "{{ awx_galaxy_ng_env_file }}"
+    environment:
+      WAIT_FOR_MIGRATIONS: "1"
+      GUNICORN_PORT: "{{ awx_galaxy_ng_api_port }}"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+    command: ["run", "api"]
+
+  content:
+    image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
+    restart: unless-stopped
+    env_file: "{{ awx_galaxy_ng_env_file }}"
+    environment:
+      WAIT_FOR_MIGRATIONS: "1"
+      GUNICORN_PORT: "{{ awx_galaxy_ng_content_port }}"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+    command: ["run", "content-app"]
+
+  worker:
+    image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
+    restart: unless-stopped
+    env_file: "{{ awx_galaxy_ng_env_file }}"
+    environment:
+      WAIT_FOR_MIGRATIONS: "1"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+    command: ["run", "worker"]
+
+  nginx:
+    image: "{{ awx_galaxy_ng_nginx_image }}"
+    restart: unless-stopped
+    depends_on:
+      - api
+      - content
+    ports:
+      - "{{ awx_galaxy_ng_public_port }}:5001"
+    volumes:
+      - "{{ awx_galaxy_ng_nginx_conf }}:/etc/nginx/nginx.conf:ro,Z"

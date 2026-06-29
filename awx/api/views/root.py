@@ -121,6 +121,7 @@ class ApiVersionRootView(APIView):
         data['workflow_job_nodes'] = reverse('api:workflow_job_node_list', request=request)
         data['mesh_visualizer'] = reverse('api:mesh_visualizer_view', request=request)
         data['eda'] = reverse('api:eda_status', request=request)
+        data['galaxy_ng'] = reverse('api:galaxy_ng_status', request=request)
         data['external_automation'] = reverse('api:external_automation_check', request=request)
         data['bulk'] = reverse('api:bulk', request=request)
         data['analytics'] = reverse('api:analytics_root_view', request=request)
@@ -385,7 +386,7 @@ class ApiV2ConfigView(APIView):
                 },
                 'galaxy_ng': {
                     'enabled': bool(getattr(settings, 'MODULE_GALAXY_NG_ENABLED', False)),
-                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}, request=request),
+                    'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'galaxy_ng'}, request=request),
                 },
                 'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}, request=request),
             },

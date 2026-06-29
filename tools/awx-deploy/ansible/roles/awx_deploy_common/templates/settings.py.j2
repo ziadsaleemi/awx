@@ -82,6 +82,27 @@ EDA_VERIFY_SSL = {{ 'True' if awx_eda_verify_ssl | bool else 'False' }}
 EDA_REQUEST_TIMEOUT = {{ awx_eda_request_timeout | int }}
 {% endif %}
 
+MODULE_GALAXY_NG_ENABLED = {{ 'True' if awx_galaxy_ng_module_enabled | bool else 'False' }}
+{% if awx_galaxy_ng_configure_awx_settings | bool %}
+{% set effective_galaxy_ng_server_url = awx_galaxy_ng_server_url %}
+{% if not effective_galaxy_ng_server_url %}
+{% if awx_deploy_method in ['k8s', 'k3s'] %}
+{% set effective_galaxy_ng_server_url = awx_galaxy_ng_k8s_url %}
+{% elif awx_galaxy_ng_server_inventory_host %}
+{% set galaxy_ng_host = hostvars.get(awx_galaxy_ng_server_inventory_host, {}).get('ansible_host', awx_galaxy_ng_server_inventory_host) %}
+{% set effective_galaxy_ng_server_url = 'http://' ~ galaxy_ng_host ~ ':' ~ awx_galaxy_ng_public_port %}
+{% endif %}
+{% endif %}
+GALAXY_NG_SERVER_URL = {{ effective_galaxy_ng_server_url | to_json }}
+GALAXY_NG_AUTH_TOKEN = {{ awx_galaxy_ng_auth_token | to_json }}
+GALAXY_NG_USERNAME = {{ awx_galaxy_ng_username | to_json }}
+GALAXY_NG_PASSWORD = {{ awx_galaxy_ng_password | to_json }}
+GALAXY_NG_VERIFY_SSL = {{ 'True' if awx_galaxy_ng_verify_ssl | bool else 'False' }}
+GALAXY_NG_REQUEST_TIMEOUT = {{ awx_galaxy_ng_request_timeout | int }}
+GALAXY_NG_API_PATH_PREFIX = {{ awx_galaxy_ng_api_path_prefix | to_json }}
+GALAXY_NG_CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }}
+{% endif %}
+
 MODULE_OPA_ENABLED = {{ 'True' if awx_opa_module_enabled | bool else 'False' }}
 MODULE_GATEKEEPER_ENABLED = {{ 'True' if awx_gatekeeper_module_enabled | bool else 'False' }}
 {% if awx_opa_configure_awx_settings | bool %}

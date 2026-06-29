@@ -158,6 +158,31 @@ awx_eda_k8s_api_url: "http://{{ awx_eda_name }}-service.{{ awx_eda_namespace }}.
 awx_eda_k8s_work_dir: "{{ awx_k8s_work_dir }}/eda"
 awx_eda_k8s_wait_for_service: true
 
+awx_galaxy_ng_enabled: false
+awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
+awx_galaxy_ng_module_enabled: "{{ awx_galaxy_ng_enabled or awx_galaxy_ng_configure_awx_settings }}"
+awx_galaxy_ng_server_inventory_host: "{{ groups.get('awx_galaxy_ng', []) | first | default('') }}"
+awx_galaxy_ng_namespace: galaxy-ng
+awx_galaxy_ng_name: awx-galaxy-ng
+awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image_tag: latest
+awx_galaxy_ng_admin_user: admin
+awx_galaxy_ng_admin_password: "{{ lookup('env', 'GALAXY_NG_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
+awx_galaxy_ng_auth_token: "{{ lookup('env', 'GALAXY_NG_AUTH_TOKEN') | default('', true) }}"
+awx_galaxy_ng_server_url: ""
+awx_galaxy_ng_username: "{{ awx_galaxy_ng_admin_user }}"
+awx_galaxy_ng_password: "{{ awx_galaxy_ng_admin_password }}"
+awx_galaxy_ng_verify_ssl: false
+awx_galaxy_ng_request_timeout: 10
+awx_galaxy_ng_api_path_prefix: /api/galaxy/
+awx_galaxy_ng_content_path_prefix: /pulp/content/
+awx_galaxy_ng_public_port: 5001
+awx_galaxy_ng_service_type: ClusterIP
+awx_galaxy_ng_node_port: 30501
+awx_galaxy_ng_postgres_access_mode: ReadWriteOnce
+awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
+awx_galaxy_ng_k8s_url: "http://{{ awx_galaxy_ng_name }}.{{ awx_galaxy_ng_namespace }}.svc.cluster.local:{{ awx_galaxy_ng_public_port }}"
+
 awx_opa_enabled: false
 awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
 awx_opa_module_enabled: "{{ awx_opa_enabled or awx_opa_configure_awx_settings }}"

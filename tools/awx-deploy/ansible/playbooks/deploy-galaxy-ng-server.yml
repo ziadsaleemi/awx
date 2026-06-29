@@ -1,0 +1,7 @@
+---
+- name: Deploy Galaxy NG to dedicated servers
+  hosts: awx_galaxy_ng
+  gather_facts: true
+  become: true
+roles:
+  - awx_galaxy_ng_server

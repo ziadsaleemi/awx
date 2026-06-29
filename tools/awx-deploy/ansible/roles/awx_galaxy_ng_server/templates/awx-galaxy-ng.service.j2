@@ -1,0 +1,18 @@
+[Unit]
+Description=AWX Galaxy NG
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ awx_galaxy_ng_base_dir }}
+EnvironmentFile={{ awx_galaxy_ng_env_file }}
+ExecStart={{ awx_galaxy_ng_compose_command }} -p {{ awx_galaxy_ng_compose_project }} -f {{ awx_galaxy_ng_compose_file }} up --remove-orphans
+ExecStop={{ awx_galaxy_ng_compose_command }} -p {{ awx_galaxy_ng_compose_project }} -f {{ awx_galaxy_ng_compose_file }} down
+Restart=always
+RestartSec=15
+TimeoutStartSec=900
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

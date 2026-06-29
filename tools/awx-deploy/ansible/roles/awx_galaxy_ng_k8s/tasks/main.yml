@@ -1,0 +1,198 @@
+---
+- name: Resolve kubectl command for Galaxy NG
+  ansible.builtin.set_fact:
+    awx_k8s_kubectl: >-
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness for Galaxy NG
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} get --raw=/readyz"
+  register: awx_galaxy_ng_k8s_readyz
+  retries: 60
+  delay: 5
+  until: awx_galaxy_ng_k8s_readyz.rc == 0
+  changed_when: false
+
+- name: Create Galaxy NG namespace
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} create namespace {{ awx_galaxy_ng_namespace }}"
+  register: awx_galaxy_ng_namespace_create
+  changed_when: awx_galaxy_ng_namespace_create.rc == 0
+  failed_when:
+    - awx_galaxy_ng_namespace_create.rc != 0
+    - "'AlreadyExists' not in awx_galaxy_ng_namespace_create.stderr"
+
+- name: Read existing Galaxy NG secret
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} get secret {{ awx_galaxy_ng_name }}-secret -o json"
+  register: awx_galaxy_ng_existing_secret
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Generate Galaxy NG admin password when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 24
+  register: awx_galaxy_ng_generated_admin_password
+  changed_when: false
+  when:
+    - awx_galaxy_ng_admin_password | length == 0
+    - awx_galaxy_ng_existing_secret.rc != 0
+  no_log: true
+
+- name: Generate Galaxy NG PostgreSQL password when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 24
+  register: awx_galaxy_ng_generated_postgres_password
+  changed_when: false
+  when:
+    - awx_galaxy_ng_postgres_password | length == 0
+    - awx_galaxy_ng_existing_secret.rc != 0
+  no_log: true
+
+- name: Generate Galaxy NG secret key when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 48
+  register: awx_galaxy_ng_generated_secret_key
+  changed_when: false
+  when:
+    - awx_galaxy_ng_secret_key | length == 0
+    - awx_galaxy_ng_existing_secret.rc != 0
+  no_log: true
+
+- name: Resolve existing Galaxy NG Kubernetes secret data
+  ansible.builtin.set_fact:
+    awx_galaxy_ng_existing_secret_data: "{{ (awx_galaxy_ng_existing_secret.stdout | default('{}') | from_json).data | default({}) }}"
+  no_log: true
+
+- name: Resolve Galaxy NG Kubernetes secrets
+  ansible.builtin.set_fact:
+    awx_galaxy_ng_effective_admin_password: >-
+      {{ awx_galaxy_ng_admin_password
+        if awx_galaxy_ng_admin_password | length > 0
+        else (awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | b64decode
+          if awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | length > 0
+          else awx_galaxy_ng_generated_admin_password.stdout) }}
+    awx_galaxy_ng_effective_postgres_password: >-
+      {{ awx_galaxy_ng_postgres_password
+        if awx_galaxy_ng_postgres_password | length > 0
+        else (awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | b64decode
+          if awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | length > 0
+          else awx_galaxy_ng_generated_postgres_password.stdout) }}
+    awx_galaxy_ng_effective_secret_key: >-
+      {{ awx_galaxy_ng_secret_key
+        if awx_galaxy_ng_secret_key | length > 0
+        else (awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | b64decode
+          if awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | length > 0
+          else awx_galaxy_ng_generated_secret_key.stdout) }}
+  no_log: true
+
+- name: Resolve Galaxy NG public URL for Kubernetes
+  ansible.builtin.set_fact:
+    awx_galaxy_ng_effective_public_url: >-
+      {{ awx_galaxy_ng_public_url
+        if awx_galaxy_ng_public_url | length > 0
+        else 'http://' ~ awx_galaxy_ng_name ~ '.' ~ awx_galaxy_ng_namespace ~ '.svc.cluster.local:' ~ (awx_galaxy_ng_public_port | string) }}
+
+- name: Create Galaxy NG manifest workspace
+  ansible.builtin.file:
+    path: "{{ awx_galaxy_ng_work_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Render Galaxy NG Kubernetes manifest
+  ansible.builtin.template:
+    src: galaxy-ng.yml.j2
+    dest: "{{ awx_galaxy_ng_work_dir }}/galaxy-ng.yml"
+    mode: "0600"
+  no_log: true
+
+- name: Apply Galaxy NG Kubernetes resources
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_galaxy_ng_work_dir }}/galaxy-ng.yml"
+  register: awx_galaxy_ng_k8s_apply
+  changed_when: "'created' in awx_galaxy_ng_k8s_apply.stdout or 'configured' in awx_galaxy_ng_k8s_apply.stdout"
+
+- name: Wait for Galaxy NG PostgreSQL deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-postgres --timeout=300s"
+  changed_when: false
+
+- name: Wait for Galaxy NG Redis deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-redis --timeout=180s"
+  changed_when: false
+
+- name: Recreate Galaxy NG migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} delete job {{ awx_galaxy_ng_name }}-migrate --ignore-not-found=true"
+  register: awx_galaxy_ng_delete_migrate
+  changed_when: "'deleted' in awx_galaxy_ng_delete_migrate.stdout"
+
+- name: Apply Galaxy NG migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_galaxy_ng_work_dir }}/galaxy-ng.yml"
+  register: awx_galaxy_ng_migrate_apply
+  changed_when: "'created' in awx_galaxy_ng_migrate_apply.stdout or 'configured' in awx_galaxy_ng_migrate_apply.stdout"
+
+- name: Wait for Galaxy NG migration job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} wait --for=condition=complete job/{{ awx_galaxy_ng_name }}-migrate --timeout=900s"
+  changed_when: false
+
+- name: Wait for Galaxy NG API deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-api --timeout=300s"
+  changed_when: false
+
+- name: Wait for Galaxy NG content deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-content --timeout=300s"
+  changed_when: false
+
+- name: Wait for Galaxy NG worker deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-worker --timeout=300s"
+  changed_when: false
+
+- name: Wait for Galaxy NG nginx deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }} --timeout=300s"
+  changed_when: false
+
+- name: Check firewalld state for Galaxy NG NodePort
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_galaxy_ng_k8s_firewalld_state
+  changed_when: false
+  failed_when: false
+  when: awx_galaxy_ng_service_type == "NodePort"
+
+- name: Check Galaxy NG NodePort firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_galaxy_ng_node_port }}/tcp"
+  register: awx_galaxy_ng_k8s_firewalld_port
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_galaxy_ng_service_type == "NodePort"
+    - awx_galaxy_ng_k8s_firewalld_state.stdout == "active"
+
+- name: Open Galaxy NG NodePort in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_galaxy_ng_node_port }}/tcp"
+  register: awx_galaxy_ng_k8s_firewalld_open
+  changed_when: true
+  when:
+    - awx_galaxy_ng_service_type == "NodePort"
+    - awx_galaxy_ng_k8s_firewalld_state.stdout == "active"
+    - awx_galaxy_ng_k8s_firewalld_port.rc != 0
+
+- name: Reload firewalld for Galaxy NG NodePort
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_galaxy_ng_service_type == "NodePort"
+    - awx_galaxy_ng_k8s_firewalld_state.stdout == "active"
+    - awx_galaxy_ng_k8s_firewalld_open is changed

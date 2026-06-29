@@ -81,6 +81,20 @@ def test_eda_settings_category_is_registered(api_request):
 
 
 @pytest.mark.django_db
+def test_galaxy_ng_settings_category_is_registered(api_request):
+    response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'galaxy_ng'}))
+    assert response.status_code == 200
+    assert response.data['GALAXY_NG_SERVER_URL'] == ''
+    assert response.data['GALAXY_NG_AUTH_TOKEN'] == ''
+    assert response.data['GALAXY_NG_USERNAME'] == ''
+    assert response.data['GALAXY_NG_PASSWORD'] == ''
+    assert response.data['GALAXY_NG_VERIFY_SSL'] is True
+    assert response.data['GALAXY_NG_REQUEST_TIMEOUT'] == 10
+    assert response.data['GALAXY_NG_API_PATH_PREFIX'] == '/api/galaxy/'
+    assert response.data['GALAXY_NG_CONTENT_PATH_PREFIX'] == '/pulp/content/'
+
+
+@pytest.mark.django_db
 def test_module_settings_category_is_registered(api_request):
     response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}))
     assert response.status_code == 200
@@ -98,6 +112,7 @@ def test_config_exposes_module_switches(api_request):
     assert response.data['modules']['opa']['enabled'] is True
     assert response.data['modules']['gatekeeper']['enabled'] is True
     assert response.data['modules']['galaxy_ng']['enabled'] is False
+    assert response.data['modules']['galaxy_ng']['settings_url'].endswith('/api/v2/settings/galaxy_ng/')
     assert response.data['modules']['settings_url'].endswith('/api/v2/settings/modules/')
 
 
