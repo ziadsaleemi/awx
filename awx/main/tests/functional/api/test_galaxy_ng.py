@@ -194,3 +194,67 @@ def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, m
     assert response.data['results'][0]['namespace'] == 'infra'
     assert response.data['results'][0]['name'] == 'network'
     assert isinstance(response.data['results'][0]['id'], int)
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_repository_sync_resolves_distribution_and_launches_task(post, admin_user, mocker):
+    get_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(
+            mocker,
+            {
+                'count': 1,
+                'results': [
+                    {
+                        'name': 'published',
+                        'base_path': 'published',
+                    }
+                ],
+            },
+        ),
+    )
+    post_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.post',
+        return_value=galaxy_response(mocker, {'task': 'sync-task-1'}),
+    )
+
+    response = post(
+        reverse('api:galaxy_ng_repository_sync'),
+        data={'repository': 'published'},
+        user=admin_user,
+        expect=202,
+    )
+
+    assert response.data['source'] == 'galaxy_ng'
+    assert response.data['repository'] == 'published'
+    assert response.data['base_path'] == 'published'
+    assert response.data['task'] == 'sync-task-1'
+    assert get_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/distributions/ansible/ansible/'
+    assert get_mock.call_args.kwargs['params'] == {'base_path': 'published', 'limit': 1}
+    assert post_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/content/published/v3/sync/'
+    assert post_mock.call_args.kwargs['json'] == {}
+    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_repository_sync_requires_system_admin(post, rando):
+    post(reverse('api:galaxy_ng_repository_sync'), data={'repository': 'published'}, user=rando, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_repository_sync_rejects_unsafe_distribution_path(post, admin_user):
+    response = post(
+        reverse('api:galaxy_ng_repository_sync'),
+        data={'repository': '../published'},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['status'] == 'bad_request'

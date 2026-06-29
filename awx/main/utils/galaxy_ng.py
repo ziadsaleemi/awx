@@ -87,6 +87,23 @@ class GalaxyNGClient:
         except ValueError as exc:
             raise GalaxyNGControllerError(f'Invalid JSON response from Galaxy NG: {exc}') from exc
 
+    def post(self, path, payload=None):
+        try:
+            response = requests.post(
+                self.url(path),
+                json=payload or {},
+                headers={**self._headers(), 'Content-Type': 'application/json'},
+                auth=self._auth(),
+                timeout=self.timeout,
+                verify=self.verify_ssl,
+            )
+            response.raise_for_status()
+            return response.json() if response.content else {}
+        except requests.RequestException as exc:
+            raise GalaxyNGControllerError(str(exc)) from exc
+        except ValueError as exc:
+            raise GalaxyNGControllerError(f'Invalid JSON response from Galaxy NG: {exc}') from exc
+
     def pulp_status(self):
         return self.get(f'{self.api_path_prefix.rstrip("/")}/pulp/api/v3/status/')
 
@@ -102,6 +119,19 @@ class GalaxyNGClient:
         if isinstance(data, list):
             return len(data)
         return 0
+
+    def ansible_distribution_base_path(self, repository_name):
+        distributions_path = f'{self.api_path_prefix.rstrip("/")}/pulp/api/v3/distributions/ansible/ansible/'
+        for query_key in ('base_path', 'name'):
+            payload = self.get(distributions_path, params={query_key: repository_name, 'limit': 1})
+            if isinstance(payload, dict) and isinstance(payload.get('results'), list) and payload['results']:
+                base_path = payload['results'][0].get('base_path')
+                if base_path:
+                    return base_path
+        return repository_name
+
+    def sync_ansible_distribution(self, base_path):
+        return self.post(f'{self.api_path_prefix.rstrip("/")}/content/{base_path}/v3/sync/')
 
 
 def stable_numeric_id(item, fallback):

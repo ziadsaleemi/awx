@@ -56,4 +56,47 @@ describe('GalaxyNgResourceList', () => {
     cy.get('table[aria-label="Simple table"]').should('contain', '1.2.3');
     cy.get('table[aria-label="Simple table"]').should('contain', 'Network automation content');
   });
+
+  it('syncs a Galaxy NG repository from the row action', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/galaxy_ng/repositories/`}*`, {
+      count: 1,
+      next: null,
+      previous: null,
+      source: 'galaxy_ng',
+      resource: 'repositories',
+      controller_error: '',
+      results: [
+        {
+          id: 1,
+          name: 'published',
+          base_path: 'published',
+          remote: 'community',
+          pulp_last_updated: '2026-06-29T10:00:00Z',
+        },
+      ],
+    }).as('repositories');
+    cy.intercept('POST', awxAPI`/galaxy_ng/repositories/sync/`, {
+      statusCode: 202,
+      body: {
+        source: 'galaxy_ng',
+        repository: 'published',
+        base_path: 'published',
+        task: 'sync-task-1',
+        response: { task: 'sync-task-1' },
+      },
+    }).as('syncRepository');
+
+    cy.mount(<GalaxyNgResourceList resource="repositories" />);
+    cy.wait('@status');
+    cy.wait('@repositories');
+
+    cy.get('[data-cy="actions-dropdown"]').click();
+    cy.get('[data-cy="sync"]').click();
+    cy.wait('@syncRepository')
+      .its('request.body')
+      .should('deep.equal', { repository: 'published' });
+    cy.get('[data-cy="alert-toaster"]').should('contain', 'sync-task-1');
+  });
 });

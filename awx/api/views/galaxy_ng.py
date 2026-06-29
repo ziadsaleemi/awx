@@ -2,6 +2,7 @@
 # All Rights Reserved.
 
 from django.utils.translation import gettext_lazy as _
+from rest_framework import status as http_status
 from rest_framework.response import Response
 
 from awx.api.generics import APIView
@@ -22,6 +23,8 @@ GALAXY_NG_RESOURCE_PATHS = {
     'repositories': 'pulp/api/v3/repositories/ansible/ansible/',
     'tasks': 'pulp/api/v3/tasks/',
 }
+
+GALAXY_NG_DISTRIBUTION_PATH_CHARS = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-')
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -64,6 +67,24 @@ def _empty_resource_response(resource, source, detail=''):
         'detail': detail,
         'results': [],
     }
+
+
+def _galaxy_ng_error_response(exc):
+    response_status = (
+        http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_502_BAD_GATEWAY
+    )
+    return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+
+
+def _validate_distribution_path(value):
+    value = str(value or '').strip()
+    if not value:
+        return '', _('Repository or distribution path is required.')
+    if any(char not in GALAXY_NG_DISTRIBUTION_PATH_CHARS for char in value):
+        return '', _('Distribution path may contain only letters, numbers, dots, underscores, and hyphens.')
+    if value in ('.', '..'):
+        return '', _('Distribution path is invalid.')
+    return value, ''
 
 
 class GalaxyNGStatusView(APIView):
@@ -195,3 +216,52 @@ class GalaxyNGRepositoriesListView(GalaxyNGResourceListView):
 class GalaxyNGTasksListView(GalaxyNGResourceListView):
     name = _('Galaxy NG Tasks')
     resource = 'tasks'
+
+
+class GalaxyNGRepositorySyncView(APIView):
+    name = _('Galaxy NG Repository Sync')
+    resource_purpose = 'galaxy ng private automation hub repository sync'
+
+    def post(self, request, format=None):
+        if not request.user.is_superuser:
+            return Response(
+                {'detail': _('You do not have permission to sync Galaxy NG repositories.')},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+        if not module_enabled():
+            return Response(
+                {'detail': _('Galaxy NG module is disabled.'), 'status': 'disabled'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if connection_status() != 'configured':
+            return Response(
+                {'detail': _('Galaxy NG server URL is not configured.'), 'status': connection_status()},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = request.data if isinstance(request.data, dict) else {}
+        repository = data.get('repository') or data.get('name') or data.get('base_path') or data.get('distro_base_path')
+        repository, error = _validate_distribution_path(repository)
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        client = GalaxyNGClient()
+        try:
+            base_path = client.ansible_distribution_base_path(repository)
+            base_path, error = _validate_distribution_path(base_path)
+            if error:
+                return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+            payload = client.sync_ansible_distribution(base_path)
+        except GalaxyNGControllerError as exc:
+            return _galaxy_ng_error_response(exc)
+
+        return Response(
+            {
+                'source': 'galaxy_ng',
+                'repository': repository,
+                'base_path': base_path,
+                'task': payload.get('task') if isinstance(payload, dict) else None,
+                'response': payload,
+            },
+            status=http_status.HTTP_202_ACCEPTED,
+        )

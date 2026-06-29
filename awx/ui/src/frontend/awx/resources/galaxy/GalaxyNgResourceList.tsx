@@ -1,19 +1,26 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert } from '@patternfly/react-core';
+import { SyncAltIcon } from '@patternfly/react-icons';
 import {
   DateTimeCell,
+  IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageActionSelection,
+  PageActionType,
   PageHeader,
   PageLayout,
   PageTable,
   TextCell,
   ToolbarFilterType,
+  usePageAlertToaster,
 } from '../../../../framework';
 import { StatusCell } from '../../../common/Status';
+import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
+import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxView } from '../../common/useAwxView';
 import { GalaxyNgStatus } from './GalaxyNgOverview';
 
@@ -23,6 +30,7 @@ interface GalaxyNgRecord {
   id: number;
   name?: string;
   namespace?: string;
+  base_path?: string;
   description?: string;
   pulp_href?: string;
   href?: string;
@@ -42,6 +50,14 @@ interface GalaxyNgRecord {
   error?: {
     description?: string;
   };
+}
+
+interface GalaxyNgSyncResponse {
+  source: string;
+  repository: string;
+  base_path: string;
+  task?: string | null;
+  response?: Record<string, unknown>;
 }
 
 const resourceTitles: Record<GalaxyNgResourceKind, string> = {
@@ -91,6 +107,9 @@ function latestVersion(record: GalaxyNgRecord) {
 export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) {
   const { resource } = props;
   const { t } = useTranslation();
+  const alertToaster = usePageAlertToaster();
+  const { activeAwxUser } = useAwxActiveUser();
+  const canSyncRepositories = Boolean(activeAwxUser?.is_superuser);
   const tableColumns = useGalaxyNgColumns(resource);
   const toolbarFilters = useGalaxyNgFilters();
   const status = useGet<GalaxyNgStatus>(awxAPI`/galaxy_ng/status/`);
@@ -99,6 +118,61 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
     toolbarFilters,
     tableColumns,
   });
+
+  const syncRepository = useCallback(
+    async (record: GalaxyNgRecord) => {
+      const repository = record.base_path || record.name || record.repository || '';
+      try {
+        const result = await postRequest<GalaxyNgSyncResponse, { repository: string }>(
+          awxAPI`/galaxy_ng/repositories/sync/`,
+          { repository }
+        );
+        alertToaster.addAlert({
+          variant: 'success',
+          title: result.task
+            ? t('Galaxy NG repository sync requested. Task: {{task}}', { task: result.task })
+            : t('Galaxy NG repository sync requested.'),
+          timeout: 4000,
+        });
+        await view.refresh();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to sync Galaxy NG repository'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, t, view]
+  );
+
+  const rowActions = useMemo<IPageAction<GalaxyNgRecord>[]>(
+    () =>
+      resource === 'repositories'
+        ? [
+            {
+              type: PageActionType.Button,
+              selection: PageActionSelection.Single,
+              icon: SyncAltIcon,
+              label: t('Sync'),
+              isDisabled: (record) => {
+                if (!canSyncRepositories) {
+                  return t(
+                    'You need system administrator permissions to sync Galaxy NG repositories.'
+                  );
+                }
+                const repository = record.base_path || record.name || record.repository;
+                if (!repository) {
+                  return t('This repository does not include a syncable name.');
+                }
+                return undefined;
+              },
+              onClick: (record) => void syncRepository(record),
+            },
+          ]
+        : [],
+    [canSyncRepositories, resource, syncRepository, t]
+  );
 
   const title = t(resourceTitles[resource]);
   const description = t(resourceDescriptions[resource]);
@@ -120,6 +194,7 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
         id={`galaxy-ng-${resource}-table`}
         toolbarFilters={toolbarFilters}
         tableColumns={tableColumns}
+        rowActions={rowActions}
         errorStateTitle={t('Error loading Galaxy NG {{resource}}', { resource: title })}
         emptyStateTitle={t('No Galaxy NG {{resource}} found', { resource: title.toLowerCase() })}
         emptyStateDescription={t('Configure Galaxy NG and sync content to populate this view.')}
