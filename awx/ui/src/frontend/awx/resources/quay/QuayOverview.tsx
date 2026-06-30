@@ -282,7 +282,7 @@ export function QuayOverview() {
             />
             <QuickLink
               to={imagesUrl}
-              label={t('Execution environment images')}
+              label={t('Execution Environments')}
               description={t('Generate build and push commands from an AWX Project checkout.')}
             />
             <QuickLink

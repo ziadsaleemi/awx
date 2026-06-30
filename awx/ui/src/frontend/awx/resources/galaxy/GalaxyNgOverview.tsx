@@ -401,7 +401,7 @@ export function GalaxyNgOverview() {
                 getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) ||
                 '/quay/execution-environment-images'
               }
-              label={t('Execution Environment Images')}
+              label={t('Execution Environments')}
               description={t('Use Project Quay for AWX execution environment image hosting.')}
             />
             <QuickLink

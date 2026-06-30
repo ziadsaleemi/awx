@@ -32,7 +32,7 @@ export function useAwxQuayRoutes() {
         },
         {
           id: AwxRoute.QuayExecutionEnvironmentImages,
-          label: t('Execution Environment Images'),
+          label: t('Execution Environments'),
           path: 'execution-environment-images',
           element: <QuayExecutionEnvironmentImages />,
         },

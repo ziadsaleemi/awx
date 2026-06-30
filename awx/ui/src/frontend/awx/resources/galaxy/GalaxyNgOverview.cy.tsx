@@ -102,7 +102,7 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-workflows').should('contain', 'Signature Keys');
     cy.get('#galaxy-ng-workflows').should('contain', 'Collection Approvals');
     cy.get('#galaxy-ng-workflows').should('contain', 'API Token');
-    cy.get('#galaxy-ng-workflows').should('contain', 'Execution Environment Images');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Execution Environments');
     cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG API');
     cy.get('#galaxy-ng-status').should('contain', 'Pulp API responded.');
   });

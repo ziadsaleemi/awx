@@ -844,13 +844,13 @@ export function useAwxNavigation() {
       ...permissionInfrastructureItems,
       ...permissionAdministrationItems,
     ];
-    const automationContentItems = [
+    const automationContentChildren = [
       ...(capabilities.canViewCatalog
         ? [
             withNavigationDetails(
               filterCatalogRoutesByPermissions(awxCatalogRoutes, capabilities.canManageCatalog),
-              t('Automation Content'),
-              t('Service Catalog')
+              t('Service Catalog'),
+              t('Requestable automation')
             ),
           ]
         : []),
@@ -858,8 +858,8 @@ export function useAwxNavigation() {
         ? [
             withNavigationDetails(
               filterGalaxyRoutesByPermissions(awxGalaxyRoutes, capabilities.canManageGalaxy),
-              t('Galaxy NG'),
-              t('Private automation hub')
+              t('Automation Hub'),
+              t('Galaxy NG')
             ),
           ]
         : []),
@@ -868,10 +868,18 @@ export function useAwxNavigation() {
             withNavigationDetails(
               filterQuayRoutesByPermissions(awxQuayRoutes, capabilities.canManageQuay),
               t('Project Quay'),
-              t('Execution environment registry')
+              t('EE image registry')
             ),
           ]
         : []),
+    ];
+    const automationContentGroup = pathlessNavigationGroup(
+      AwxNavigationGroup.AutomationContent,
+      t('Automation Content'),
+      t('Catalog, hub, and registries'),
+      automationContentChildren
+    );
+    const cloudItems = [
       ...(capabilities.canViewCloud
         ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
         : []),
@@ -887,7 +895,8 @@ export function useAwxNavigation() {
     return [
       ...overview,
       ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
-      ...automationContentItems,
+      ...(hasVisibleSidebarItem(automationContentGroup) ? [automationContentGroup] : []),
+      ...cloudItems,
       ...(modulePolicyEnabled && capabilities.canViewPolicy
         ? [
             withNavigationDetails(
@@ -938,19 +947,20 @@ export function useAwxNavigation() {
   const navigationItems = [
     ...overview,
     ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
-    withNavigationDetails(awxCatalogRoutes, t('Automation Content'), t('Service Catalog')),
-    ...(moduleGalaxyNgEnabled
-      ? [withNavigationDetails(awxGalaxyRoutes, t('Galaxy NG'), t('Private automation hub'))]
-      : []),
-    ...(moduleQuayEnabled
-      ? [
-          withNavigationDetails(
-            awxQuayRoutes,
-            t('Project Quay'),
-            t('Execution environment registry')
-          ),
-        ]
-      : []),
+    pathlessNavigationGroup(
+      AwxNavigationGroup.AutomationContent,
+      t('Automation Content'),
+      t('Catalog, hub, and registries'),
+      [
+        withNavigationDetails(awxCatalogRoutes, t('Service Catalog'), t('Requestable automation')),
+        ...(moduleGalaxyNgEnabled
+          ? [withNavigationDetails(awxGalaxyRoutes, t('Automation Hub'), t('Galaxy NG'))]
+          : []),
+        ...(moduleQuayEnabled
+          ? [withNavigationDetails(awxQuayRoutes, t('Project Quay'), t('EE image registry'))]
+          : []),
+      ]
+    ),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),

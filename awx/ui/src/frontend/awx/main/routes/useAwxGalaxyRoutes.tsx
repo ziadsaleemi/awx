@@ -15,7 +15,7 @@ export function useAwxGalaxyRoutes() {
   return useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.GalaxyNG,
-      label: t('Galaxy NG'),
+      label: t('Automation Hub'),
       path: 'galaxy-ng',
       icon: <CubesIcon />,
       children: [
@@ -50,16 +50,16 @@ export function useAwxGalaxyRoutes() {
           element: <GalaxyNgResourceList resource="repositories" />,
         },
         {
-          id: AwxRoute.GalaxyNGRemotes,
-          label: t('Remotes'),
-          path: 'remotes',
-          element: <GalaxyNgResourceList resource="remotes" />,
-        },
-        {
           id: AwxRoute.GalaxyNGRemoteRegistries,
           label: t('Remote Registries'),
           path: 'remote-registries',
           element: <GalaxyNgResourceList resource="remote-registries" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGRemotes,
+          label: t('Remotes'),
+          path: 'remotes',
+          element: <GalaxyNgResourceList resource="remotes" />,
         },
         {
           id: AwxRoute.GalaxyNGSignatureKeys,
