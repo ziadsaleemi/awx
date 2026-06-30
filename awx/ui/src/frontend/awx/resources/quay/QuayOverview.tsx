@@ -124,6 +124,8 @@ export function QuayOverview() {
   const data = status.data;
   const settingsUrl = getPageUrl(AwxRoute.SettingsQuay) || '/settings/quay';
   const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
+  const repositoryPermissionsUrl = getPageUrl(AwxRoute.QuayRepositoryPermissions);
+  const robotsUrl = getPageUrl(AwxRoute.QuayRobots);
   const imagesUrl =
     getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) || '/quay/execution-environment-images';
   const ready = Boolean(
@@ -283,6 +285,20 @@ export function QuayOverview() {
               label={t('Repositories')}
               description={t('Inspect Project Quay repositories visible to AWX.')}
             />
+            {repositoryPermissionsUrl ? (
+              <QuickLink
+                to={repositoryPermissionsUrl}
+                label={t('Repository Permissions')}
+                description={t('Grant user, team, and robot access to Quay repositories.')}
+              />
+            ) : null}
+            {robotsUrl ? (
+              <QuickLink
+                to={robotsUrl}
+                label={t('Robot Accounts')}
+                description={t('Create and rotate robot accounts used by AWX image workflows.')}
+              />
+            ) : null}
             <QuickLink
               to={imagesUrl}
               label={t('Execution Environments')}

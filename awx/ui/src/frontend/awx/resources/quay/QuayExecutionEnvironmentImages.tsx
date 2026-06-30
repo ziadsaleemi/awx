@@ -28,6 +28,7 @@ import {
   TextVariants,
   Title,
 } from '@patternfly/react-core';
+import { TrashIcon } from '@patternfly/react-icons';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
 import { postRequest } from '../../../common/crud/Data';
@@ -147,6 +148,7 @@ export function QuayExecutionEnvironmentImages() {
   const effectiveNamespace = namespace.trim() || status.data?.namespace || '';
   const projectOptions = projects.data?.results ?? [];
   const canLoadTags = Boolean(status.data?.auth_configured);
+  const canManageTags = Boolean(status.data?.can_manage && status.data?.management_configured);
   const shouldLoadTags =
     configured && canLoadTags && Boolean(effectiveNamespace) && Boolean(imageName.trim());
   const tags = useGet<AwxItemsResponse<QuayImageTag>>(
@@ -200,6 +202,38 @@ export function QuayExecutionEnvironmentImages() {
       });
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const deleteTag = async (imageTag: QuayImageTag) => {
+    if (!imageTag.name) return;
+    try {
+      await postRequest<
+        {
+          source: string;
+          action: string;
+          namespace: string;
+          repository: string;
+          tag: string;
+        },
+        { namespace: string; repository: string; tag: string }
+      >(awxAPI`/quay/tags/delete/`, {
+        namespace: effectiveNamespace,
+        repository: imageName.trim(),
+        tag: imageTag.name,
+      });
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('Project Quay tag {{tag}} deleted.', { tag: imageTag.name }),
+        timeout: 4000,
+      });
+      tags.refresh();
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Failed to delete Project Quay image tag'),
+        children: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
@@ -520,6 +554,7 @@ export function QuayExecutionEnvironmentImages() {
                         <Th>{t('Digest')}</Th>
                         <Th>{t('Size')}</Th>
                         <Th>{t('Updated')}</Th>
+                        <Th>{t('Actions')}</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
@@ -529,6 +564,17 @@ export function QuayExecutionEnvironmentImages() {
                           <Td>{imageTag.manifest_digest || '-'}</Td>
                           <Td>{formatBytes(imageTag.size)}</Td>
                           <Td>{timestampFromTag(imageTag)}</Td>
+                          <Td>
+                            <Button
+                              variant="link"
+                              icon={<TrashIcon />}
+                              isDanger
+                              isDisabled={!canManageTags}
+                              onClick={() => void deleteTag(imageTag)}
+                            >
+                              {t('Delete tag')}
+                            </Button>
+                          </Td>
                         </Tr>
                       ))}
                     </Tbody>

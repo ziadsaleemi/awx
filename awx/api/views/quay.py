@@ -27,12 +27,15 @@ from awx.main.utils.quay import (
     configured_url,
     connection_status,
     module_enabled,
+    normalize_quay_list,
     normalize_repository_list,
     normalize_tag_list,
 )
 
 QUAY_CONTAINER_RUNTIMES = ('podman', 'docker')
 QUAY_REPOSITORY_VISIBILITIES = ('public', 'private')
+QUAY_REPOSITORY_ROLES = ('read', 'write', 'admin')
+QUAY_ROBOT_NAMESPACE_KINDS = ('user', 'organization')
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -75,6 +78,40 @@ def _validate_repository_name(value):
     return repository, ''
 
 
+def _validate_path_segment(value, label):
+    segment = str(value or '').strip().strip('/')
+    if not segment:
+        return '', _('%(label)s is required.') % {'label': label}
+    if '/' in segment:
+        return '', _('%(label)s cannot include a slash.') % {'label': label}
+    return segment, ''
+
+
+def _validate_role(value):
+    role = str(value or '').strip().lower()
+    if role not in QUAY_REPOSITORY_ROLES:
+        return '', _('Role must be read, write, or admin.')
+    return role, ''
+
+
+def _validate_robot_shortname(value):
+    robot, error = _validate_image_name(value)
+    if error:
+        return '', _('Robot short name may contain lowercase letters, numbers, dots, underscores, and hyphens.')
+    if '/' in robot:
+        return '', _('Robot short name cannot include a namespace path.')
+    return robot, ''
+
+
+def _namespace_kind(value):
+    kind = str(value or 'user').strip().lower()
+    if kind == 'org':
+        kind = 'organization'
+    if kind not in QUAY_ROBOT_NAMESPACE_KINDS:
+        return '', _('Namespace kind must be user or organization.')
+    return kind, ''
+
+
 def _repository_action_payload(request):
     if not module_enabled():
         return None, Response({'detail': _('Project Quay module is disabled.'), 'status': 'disabled'}, status=http_status.HTTP_400_BAD_REQUEST)
@@ -93,6 +130,23 @@ def _repository_action_payload(request):
     return (data, namespace, repository), None
 
 
+def _repository_query_payload(request):
+    if not module_enabled():
+        return None, Response({'detail': _('Project Quay module is disabled.'), 'status': 'disabled'}, status=http_status.HTTP_400_BAD_REQUEST)
+    if connection_status() != 'configured':
+        return None, Response(
+            {'detail': _('Project Quay registry URL is not configured.'), 'status': connection_status()},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    namespace = str(request.query_params.get('namespace') or configured_namespace()).strip().strip('/')
+    if not namespace:
+        return None, Response({'detail': _('Project Quay namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    repository, error = _validate_repository_name(request.query_params.get('repository') or request.query_params.get('name'))
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    return (namespace, repository), None
+
+
 def _repository_action_response(action, namespace, repository, payload):
     return {
         'source': 'quay',
@@ -102,6 +156,34 @@ def _repository_action_response(action, namespace, repository, payload):
         'repository_path': f'{namespace}/{repository}',
         'response': payload,
     }
+
+
+def _normalize_permissions(payload, principal_key):
+    if isinstance(payload, dict):
+        if isinstance(payload.get('permissions'), list):
+            items = payload['permissions']
+        elif isinstance(payload.get('results'), list):
+            items = payload['results']
+        elif payload and all(isinstance(value, dict) for value in payload.values()):
+            items = [{principal_key: key, **value} for key, value in payload.items()]
+        elif payload:
+            items = [payload]
+        else:
+            items = []
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        items = []
+
+    results = []
+    for index, item in enumerate(items):
+        normalized = dict(item) if isinstance(item, dict) else {principal_key: str(item)}
+        if 'name' in normalized and principal_key not in normalized:
+            normalized[principal_key] = normalized['name']
+        normalized.setdefault('id', index + 1)
+        normalized.setdefault('_awx_key', str(normalized['id']))
+        results.append(normalized)
+    return {'count': len(results), 'next': None, 'previous': None, 'results': results}
 
 
 class QuayStatusView(APIView):
@@ -133,7 +215,7 @@ class QuayStatusView(APIView):
             'push_token_configured': bool(client.push_token),
             'can_manage': user_can_manage_quay(request.user),
             'management_configured': client.auth_configured,
-            'management_required_scopes': ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
+            'management_required_scopes': ['repo:read', 'repo:create', 'repo:write', 'repo:admin', 'user:admin', 'org:admin'],
             'verify_ssl': client.verify_ssl,
             'request_timeout': client.timeout,
             'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'quay'}, request=request),
@@ -302,6 +384,286 @@ class QuayTagsListView(APIView):
         response['repository'] = repository
         response['controller_error'] = ''
         return Response(response)
+
+
+class QuayTagDeleteView(APIView):
+    name = _('Project Quay Tag Delete')
+    resource_purpose = 'delete project quay repository image tag'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        tag, error = _validate_image_tag(data.get('tag') or data.get('name'))
+        if error:
+            return Response({'detail': _('Project Quay tag is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().delete_tag(repository, tag, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('delete_tag', namespace, repository, result)
+        response['tag'] = tag
+        return Response(response)
+
+
+class QuayRepositoryPermissionsView(APIView):
+    name = _('Project Quay Repository Permissions')
+    resource_purpose = 'project quay repository user and team permissions'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get(self, request, format=None):
+        payload, error_response = _repository_query_payload(request)
+        if error_response:
+            return error_response
+        namespace, repository = payload
+        client = QuayClient()
+        if not client.auth_configured:
+            response = _empty_resource_response('repository_permissions', 'api_token_missing', _('Project Quay API token is not configured.'))
+            response['namespace'] = namespace
+            response['repository'] = repository
+            response['users'] = []
+            response['teams'] = []
+            return Response(response)
+        try:
+            users = _normalize_permissions(client.repository_user_permissions(repository, namespace=namespace), 'username')
+            teams = _normalize_permissions(client.repository_team_permissions(repository, namespace=namespace), 'teamname')
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(
+            {
+                'source': 'quay',
+                'resource': 'repository_permissions',
+                'namespace': namespace,
+                'repository': repository,
+                'users': users['results'],
+                'teams': teams['results'],
+                'count': users['count'] + teams['count'],
+                'controller_error': '',
+            }
+        )
+
+
+class QuayRepositoryUserPermissionSetView(APIView):
+    name = _('Project Quay Repository User Permission Set')
+    resource_purpose = 'set project quay repository user permission'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        username, error = _validate_path_segment(data.get('username') or data.get('user'), _('Username'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        role, error = _validate_role(data.get('role'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().set_repository_user_permission(repository, username, role, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('set_user_permission', namespace, repository, result)
+        response.update({'username': username, 'role': role})
+        return Response(response)
+
+
+class QuayRepositoryUserPermissionDeleteView(APIView):
+    name = _('Project Quay Repository User Permission Delete')
+    resource_purpose = 'delete project quay repository user permission'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        username, error = _validate_path_segment(data.get('username') or data.get('user'), _('Username'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().delete_repository_user_permission(repository, username, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('delete_user_permission', namespace, repository, result)
+        response['username'] = username
+        return Response(response)
+
+
+class QuayRepositoryTeamPermissionSetView(APIView):
+    name = _('Project Quay Repository Team Permission Set')
+    resource_purpose = 'set project quay repository team permission'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        teamname, error = _validate_path_segment(data.get('teamname') or data.get('team'), _('Team name'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        role, error = _validate_role(data.get('role'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().set_repository_team_permission(repository, teamname, role, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('set_team_permission', namespace, repository, result)
+        response.update({'teamname': teamname, 'role': role})
+        return Response(response)
+
+
+class QuayRepositoryTeamPermissionDeleteView(APIView):
+    name = _('Project Quay Repository Team Permission Delete')
+    resource_purpose = 'delete project quay repository team permission'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        teamname, error = _validate_path_segment(data.get('teamname') or data.get('team'), _('Team name'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().delete_repository_team_permission(repository, teamname, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('delete_team_permission', namespace, repository, result)
+        response['teamname'] = teamname
+        return Response(response)
+
+
+class QuayRobotsListView(APIView):
+    name = _('Project Quay Robot Accounts')
+    resource_purpose = 'project quay robot accounts'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get(self, request, format=None):
+        if not module_enabled():
+            return Response(_empty_resource_response('robots', 'module_disabled', _('Project Quay module is disabled.')))
+        if connection_status() != 'configured':
+            return Response(_empty_resource_response('robots', 'not_configured', _('Project Quay registry URL is not configured.')))
+        namespace_kind, error = _namespace_kind(request.query_params.get('namespace_kind'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        namespace = str(request.query_params.get('namespace') or configured_namespace()).strip().strip('/')
+        if namespace_kind == 'organization' and not namespace:
+            return Response({'detail': _('Project Quay organization namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        client = QuayClient()
+        if not client.auth_configured:
+            response = _empty_resource_response('robots', 'api_token_missing', _('Project Quay API token is not configured.'))
+            response['namespace'] = namespace
+            response['namespace_kind'] = namespace_kind
+            return Response(response)
+        params = {
+            'limit': _parse_positive_int(request.query_params.get('page_size'), 50, maximum=100),
+            'token': False,
+            'permissions': True,
+        }
+        try:
+            payload = client.robots(namespace_kind=namespace_kind, namespace=namespace, params=params)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = normalize_quay_list(payload, ('robots',), offset=0)
+        response['source'] = 'quay'
+        response['resource'] = 'robots'
+        response['namespace'] = namespace
+        response['namespace_kind'] = namespace_kind
+        response['controller_error'] = ''
+        return Response(response)
+
+
+class QuayRobotCreateView(APIView):
+    name = _('Project Quay Robot Account Create')
+    resource_purpose = 'create project quay robot account'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        if not module_enabled() or connection_status() != 'configured':
+            return Response({'detail': _('Project Quay is not configured.'), 'status': connection_status()}, status=http_status.HTTP_400_BAD_REQUEST)
+        data = request.data if isinstance(request.data, dict) else {}
+        namespace_kind, error = _namespace_kind(data.get('namespace_kind'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
+        if namespace_kind == 'organization' and not namespace:
+            return Response({'detail': _('Project Quay organization namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        robot, error = _validate_robot_shortname(data.get('robot') or data.get('name') or data.get('shortname'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        description = str(data.get('description') or '')[:255]
+        try:
+            result = QuayClient().create_robot(robot, namespace_kind=namespace_kind, namespace=namespace, description=description)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(
+            {
+                'source': 'quay',
+                'action': 'create_robot',
+                'namespace_kind': namespace_kind,
+                'namespace': namespace,
+                'robot': robot,
+                'response': result,
+            },
+            status=http_status.HTTP_201_CREATED,
+        )
+
+
+class QuayRobotDeleteView(APIView):
+    name = _('Project Quay Robot Account Delete')
+    resource_purpose = 'delete project quay robot account'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        if not module_enabled() or connection_status() != 'configured':
+            return Response({'detail': _('Project Quay is not configured.'), 'status': connection_status()}, status=http_status.HTTP_400_BAD_REQUEST)
+        data = request.data if isinstance(request.data, dict) else {}
+        namespace_kind, error = _namespace_kind(data.get('namespace_kind'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
+        robot, error = _validate_robot_shortname(data.get('robot') or data.get('name') or data.get('shortname'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().delete_robot(robot, namespace_kind=namespace_kind, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(
+            {'source': 'quay', 'action': 'delete_robot', 'namespace_kind': namespace_kind, 'namespace': namespace, 'robot': robot, 'response': result}
+        )
+
+
+class QuayRobotRegenerateTokenView(APIView):
+    name = _('Project Quay Robot Account Token Regenerate')
+    resource_purpose = 'regenerate project quay robot account token'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        if not module_enabled() or connection_status() != 'configured':
+            return Response({'detail': _('Project Quay is not configured.'), 'status': connection_status()}, status=http_status.HTTP_400_BAD_REQUEST)
+        data = request.data if isinstance(request.data, dict) else {}
+        namespace_kind, error = _namespace_kind(data.get('namespace_kind'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
+        robot, error = _validate_robot_shortname(data.get('robot') or data.get('name') or data.get('shortname'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().regenerate_robot_token(robot, namespace_kind=namespace_kind, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(
+            {'source': 'quay', 'action': 'regenerate_robot_token', 'namespace_kind': namespace_kind, 'namespace': namespace, 'robot': robot, 'response': result}
+        )
 
 
 class QuayExecutionEnvironmentImageBuildPlanView(APIView):

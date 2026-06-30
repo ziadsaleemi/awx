@@ -18,7 +18,14 @@ const status = {
   push_token_configured: true,
   can_manage: true,
   management_configured: true,
-  management_required_scopes: ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
+  management_required_scopes: [
+    'repo:read',
+    'repo:create',
+    'repo:write',
+    'repo:admin',
+    'user:admin',
+    'org:admin',
+  ],
   verify_ssl: true,
   request_timeout: 10,
   settings_url: '/api/v2/settings/quay/',
@@ -42,6 +49,16 @@ function SeedNavigation(props: { children: ReactNode }) {
       {
         id: AwxRoute.QuayRepositories,
         path: 'quay/repositories',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.QuayRepositoryPermissions,
+        path: 'quay/repository-permissions',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.QuayRobots,
+        path: 'quay/robots',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -72,6 +89,8 @@ describe('QuayOverview', () => {
     cy.get('#quay-control-plane').should('contain', '2');
     cy.get('#quay-connection input[value="https://quay.example.test"]').should('exist');
     cy.get('#quay-workflows').should('contain', 'Repositories');
+    cy.get('#quay-workflows').should('contain', 'Repository Permissions');
+    cy.get('#quay-workflows').should('contain', 'Robot Accounts');
     cy.get('#quay-workflows').should('contain', 'Execution Environments');
     cy.get('#quay-status').should('contain', 'Project Quay is ready');
   });

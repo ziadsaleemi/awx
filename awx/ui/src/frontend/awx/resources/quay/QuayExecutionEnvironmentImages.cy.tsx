@@ -14,7 +14,14 @@ const status = {
   push_token_configured: true,
   can_manage: true,
   management_configured: true,
-  management_required_scopes: ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
+  management_required_scopes: [
+    'repo:read',
+    'repo:create',
+    'repo:write',
+    'repo:admin',
+    'user:admin',
+    'org:admin',
+  ],
   verify_ssl: false,
   request_timeout: 10,
   settings_url: '/api/v2/settings/quay/',
@@ -121,6 +128,13 @@ describe('QuayExecutionEnvironmentImages', () => {
         notes: ['Use the AWX image value when creating or updating an AWX execution environment.'],
       },
     }).as('buildPlan');
+    cy.intercept('POST', awxAPI`/quay/tags/delete/`, {
+      source: 'quay',
+      action: 'delete_tag',
+      namespace: 'awx',
+      repository: 'custom-ee',
+      tag: 'latest',
+    }).as('deleteTag');
 
     cy.mount(<QuayExecutionEnvironmentImages />);
     cy.wait('@status');
@@ -128,6 +142,12 @@ describe('QuayExecutionEnvironmentImages', () => {
     cy.wait('@images');
 
     cy.contains('td', 'latest').should('exist');
+    cy.contains('button', 'Delete tag').click();
+    cy.wait('@deleteTag').its('request.body').should('deep.equal', {
+      namespace: 'awx',
+      repository: 'custom-ee',
+      tag: 'latest',
+    });
     cy.get('#quay-ee-project').then(($select) => {
       const select = $select[0] as HTMLSelectElement;
       select.value = '7';

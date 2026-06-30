@@ -6,6 +6,8 @@ import { PageNavigationItem } from '../../../../framework';
 import { QuayExecutionEnvironmentImages } from '../../resources/quay/QuayExecutionEnvironmentImages';
 import { QuayOverview } from '../../resources/quay/QuayOverview';
 import { QuayRepositories } from '../../resources/quay/QuayRepositories';
+import { QuayRepositoryPermissions } from '../../resources/quay/QuayRepositoryPermissions';
+import { QuayRobots } from '../../resources/quay/QuayRobots';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxQuayRoutes() {
@@ -29,6 +31,18 @@ export function useAwxQuayRoutes() {
           label: t('Repositories'),
           path: 'repositories',
           element: <QuayRepositories />,
+        },
+        {
+          id: AwxRoute.QuayRepositoryPermissions,
+          label: t('Repository Permissions'),
+          path: 'repository-permissions',
+          element: <QuayRepositoryPermissions />,
+        },
+        {
+          id: AwxRoute.QuayRobots,
+          label: t('Robot Accounts'),
+          path: 'robots',
+          element: <QuayRobots />,
         },
         {
           id: AwxRoute.QuayExecutionEnvironmentImages,

@@ -123,16 +123,24 @@ class QuayClient:
     def delete(self, path):
         return self.request('DELETE', path)
 
-    def repositories(self, namespace=None, params=None):
+    def _namespace_or_error(self, namespace=None):
         namespace = namespace or self.namespace
         if not namespace:
             raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        return namespace
+
+    def _repository_or_error(self, repository):
+        repository = (repository or '').strip().strip('/')
+        if not repository:
+            raise QuayControllerError('Project Quay repository is required.', status='bad_request')
+        return repository
+
+    def repositories(self, namespace=None, params=None):
+        namespace = self._namespace_or_error(namespace)
         return self.get('/api/v1/repository', params={'namespace': namespace, **(params or {})})
 
     def create_repository(self, repository, namespace=None, visibility='private', description='', repo_kind='image'):
-        namespace = namespace or self.namespace
-        if not namespace:
-            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        namespace = self._namespace_or_error(namespace)
         return self.post(
             '/api/v1/repository',
             json={
@@ -145,31 +153,95 @@ class QuayClient:
         )
 
     def update_repository(self, repository, namespace=None, description=''):
-        namespace = namespace or self.namespace
-        if not namespace:
-            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        namespace = self._namespace_or_error(namespace)
         return self.put(f'/api/v1/repository/{namespace}/{repository}', json={'description': description})
 
     def change_repository_visibility(self, repository, namespace=None, visibility='private'):
-        namespace = namespace or self.namespace
-        if not namespace:
-            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        namespace = self._namespace_or_error(namespace)
         return self.post(f'/api/v1/repository/{namespace}/{repository}/changevisibility', json={'visibility': visibility})
 
     def delete_repository(self, repository, namespace=None):
-        namespace = namespace or self.namespace
-        if not namespace:
-            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        namespace = self._namespace_or_error(namespace)
         return self.delete(f'/api/v1/repository/{namespace}/{repository}')
 
     def tags(self, repository, namespace=None, params=None):
-        namespace = namespace or self.namespace
-        if not namespace:
-            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
-        repository = (repository or '').strip().strip('/')
-        if not repository:
-            raise QuayControllerError('Project Quay repository is required.', status='bad_request')
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
         return self.get(f'/api/v1/repository/{namespace}/{repository}/tag/', params=params or {})
+
+    def delete_tag(self, repository, tag, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        tag = (tag or '').strip()
+        if not tag:
+            raise QuayControllerError('Project Quay tag is required.', status='bad_request')
+        return self.delete(f'/api/v1/repository/{namespace}/{repository}/tag/{tag}')
+
+    def repository_user_permissions(self, repository, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.get(f'/api/v1/repository/{namespace}/{repository}/permissions/user/')
+
+    def set_repository_user_permission(self, repository, username, role, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.put(f'/api/v1/repository/{namespace}/{repository}/permissions/user/{username}', json={'role': role})
+
+    def delete_repository_user_permission(self, repository, username, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.delete(f'/api/v1/repository/{namespace}/{repository}/permissions/user/{username}')
+
+    def repository_team_permissions(self, repository, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.get(f'/api/v1/repository/{namespace}/{repository}/permissions/team/')
+
+    def set_repository_team_permission(self, repository, teamname, role, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.put(f'/api/v1/repository/{namespace}/{repository}/permissions/team/{teamname}', json={'role': role})
+
+    def delete_repository_team_permission(self, repository, teamname, namespace=None):
+        namespace = self._namespace_or_error(namespace)
+        repository = self._repository_or_error(repository)
+        return self.delete(f'/api/v1/repository/{namespace}/{repository}/permissions/team/{teamname}')
+
+    def robots(self, namespace_kind='user', namespace=None, params=None):
+        if namespace_kind == 'organization':
+            namespace = self._namespace_or_error(namespace)
+            return self.get(f'/api/v1/organization/{namespace}/robots', params=params or {})
+        return self.get('/api/v1/user/robots', params=params or {})
+
+    def create_robot(self, robot, namespace_kind='user', namespace=None, description='', metadata=None):
+        robot = (robot or '').strip()
+        if not robot:
+            raise QuayControllerError('Project Quay robot short name is required.', status='bad_request')
+        payload = {'description': description}
+        if metadata:
+            payload['unstructured_metadata'] = metadata
+        if namespace_kind == 'organization':
+            namespace = self._namespace_or_error(namespace)
+            return self.put(f'/api/v1/organization/{namespace}/robots/{robot}', json=payload)
+        return self.put(f'/api/v1/user/robots/{robot}', json=payload)
+
+    def delete_robot(self, robot, namespace_kind='user', namespace=None):
+        robot = (robot or '').strip()
+        if not robot:
+            raise QuayControllerError('Project Quay robot short name is required.', status='bad_request')
+        if namespace_kind == 'organization':
+            namespace = self._namespace_or_error(namespace)
+            return self.delete(f'/api/v1/organization/{namespace}/robots/{robot}')
+        return self.delete(f'/api/v1/user/robots/{robot}')
+
+    def regenerate_robot_token(self, robot, namespace_kind='user', namespace=None):
+        robot = (robot or '').strip()
+        if not robot:
+            raise QuayControllerError('Project Quay robot short name is required.', status='bad_request')
+        if namespace_kind == 'organization':
+            namespace = self._namespace_or_error(namespace)
+            return self.post(f'/api/v1/organization/{namespace}/robots/{robot}/regenerate')
+        return self.post(f'/api/v1/user/robots/{robot}/regenerate')
 
 
 def normalize_repository_list(payload, offset=0):
@@ -207,6 +279,29 @@ def normalize_tag_list(payload, offset=0):
 
     normalized = []
     for index, item in enumerate(tags):
+        normalized_item = dict(item) if isinstance(item, dict) else {'name': str(item)}
+        normalized_item.setdefault('id', offset + index + 1)
+        normalized_item.setdefault('_awx_key', str(normalized_item['id']))
+        normalized.append(normalized_item)
+    return {'count': len(normalized), 'next': None, 'previous': None, 'results': normalized}
+
+
+def normalize_quay_list(payload, keys, offset=0):
+    items = []
+    if isinstance(payload, dict):
+        for key in keys:
+            if isinstance(payload.get(key), list):
+                items = payload[key]
+                break
+        if not items and isinstance(payload.get('results'), list):
+            items = payload['results']
+        elif not items and payload:
+            items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+
+    normalized = []
+    for index, item in enumerate(items):
         normalized_item = dict(item) if isinstance(item, dict) else {'name': str(item)}
         normalized_item.setdefault('id', offset + index + 1)
         normalized_item.setdefault('_awx_key', str(normalized_item['id']))

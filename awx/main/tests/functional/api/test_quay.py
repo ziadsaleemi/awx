@@ -61,7 +61,7 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
     assert response.data['push_configured'] is True
     assert response.data['can_manage'] is True
     assert response.data['management_configured'] is True
-    assert response.data['management_required_scopes'] == ['repo:read', 'repo:create', 'repo:write', 'repo:admin']
+    assert response.data['management_required_scopes'] == ['repo:read', 'repo:create', 'repo:write', 'repo:admin', 'user:admin', 'org:admin']
     assert response.data['counts']['repositories'] == 2
     assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository'
     assert request_mock.call_args.kwargs['params']['namespace'] == 'awx'
@@ -283,6 +283,156 @@ def test_quay_tags_list_normalizes_tags_payload(get, admin_user, mocker):
     assert response.data['repository'] == 'custom-ee'
     assert response.data['results'][0]['name'] == 'v1'
     assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/tag/'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_tag_delete_calls_quay_api(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.delete',
+        return_value=quay_response(mocker, {}),
+    )
+
+    response = post(
+        reverse('api:quay_tag_delete'),
+        data={'repository': 'custom-ee', 'tag': 'v1'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'delete_tag'
+    assert response.data['tag'] == 'v1'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/tag/v1'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_permissions_lists_user_and_team_permissions(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.get',
+        side_effect=[
+            quay_response(mocker, {'permissions': [{'username': 'awx+builder', 'role': 'write'}]}),
+            quay_response(mocker, {'qa-team': {'role': 'read'}}),
+        ],
+    )
+
+    response = get(reverse('api:quay_repository_permissions') + '?repository=custom-ee', user=admin_user, expect=200)
+
+    assert response.data['resource'] == 'repository_permissions'
+    assert response.data['users'][0]['username'] == 'awx+builder'
+    assert response.data['teams'][0]['teamname'] == 'qa-team'
+    assert response.data['teams'][0]['role'] == 'read'
+    assert request_mock.call_args_list[0].args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/permissions/user/'
+    assert request_mock.call_args_list[1].args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/permissions/team/'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_permission_set_and_delete_calls_quay_api(post, admin_user, mocker):
+    put_mock = mocker.patch('awx.main.utils.quay.requests.put', return_value=quay_response(mocker, {'role': 'write'}))
+    delete_mock = mocker.patch('awx.main.utils.quay.requests.delete', return_value=quay_response(mocker, {}))
+
+    response = post(
+        reverse('api:quay_repository_user_permission_set'),
+        data={'repository': 'custom-ee', 'username': 'awx+builder', 'role': 'write'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'set_user_permission'
+    assert put_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/permissions/user/awx+builder'
+    assert put_mock.call_args.kwargs['json'] == {'role': 'write'}
+
+    response = post(
+        reverse('api:quay_repository_team_permission_delete'),
+        data={'repository': 'custom-ee', 'teamname': 'qa-team'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'delete_team_permission'
+    assert delete_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/permissions/team/qa-team'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_robots_list_uses_organization_endpoint(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.get',
+        return_value=quay_response(mocker, {'robots': [{'name': 'awx+builder', 'shortname': 'builder'}]}),
+    )
+
+    response = get(reverse('api:quay_robots_list') + '?namespace_kind=organization', user=admin_user, expect=200)
+
+    assert response.data['resource'] == 'robots'
+    assert response.data['namespace_kind'] == 'organization'
+    assert response.data['results'][0]['shortname'] == 'builder'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/organization/awx/robots'
+    assert request_mock.call_args.kwargs['params']['permissions'] is True
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_robot_create_delete_and_regenerate_call_quay_api(post, admin_user, mocker):
+    put_mock = mocker.patch('awx.main.utils.quay.requests.put', return_value=quay_response(mocker, {'name': 'awx+builder'}))
+    delete_mock = mocker.patch('awx.main.utils.quay.requests.delete', return_value=quay_response(mocker, {}))
+    post_mock = mocker.patch('awx.main.utils.quay.requests.post', return_value=quay_response(mocker, {'token': 'new-token'}))
+
+    response = post(
+        reverse('api:quay_robot_create'),
+        data={'namespace_kind': 'organization', 'robot': 'builder', 'description': 'AWX image builder'},
+        user=admin_user,
+        expect=201,
+    )
+
+    assert response.data['action'] == 'create_robot'
+    assert put_mock.call_args.args[0] == 'https://quay.example.test/api/v1/organization/awx/robots/builder'
+    assert put_mock.call_args.kwargs['json'] == {'description': 'AWX image builder'}
+
+    response = post(
+        reverse('api:quay_robot_delete'),
+        data={'namespace_kind': 'user', 'robot': 'builder'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'delete_robot'
+    assert delete_mock.call_args.args[0] == 'https://quay.example.test/api/v1/user/robots/builder'
+
+    response = post(
+        reverse('api:quay_robot_regenerate_token'),
+        data={'namespace_kind': 'organization', 'robot': 'builder'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'regenerate_robot_token'
+    assert post_mock.call_args.args[0] == 'https://quay.example.test/api/v1/organization/awx/robots/builder/regenerate'
 
 
 @pytest.mark.django_db
