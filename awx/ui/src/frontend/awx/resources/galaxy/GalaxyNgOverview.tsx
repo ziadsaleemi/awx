@@ -358,9 +358,11 @@ export function GalaxyNgOverview() {
               description={t('Build and publish collection artifacts from synced AWX Projects.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGExecutionEnvironments)}
-              label={t('Execution Environments')}
-              description={t('Build EE images from AWX Projects and host them in Project Quay.')}
+              to={getPageUrl(AwxRoute.QuayExecutionEnvironmentImages)}
+              label={t('Project Quay Execution Environments')}
+              description={t(
+                'Build EE images from AWX Projects in the separate Project Quay module.'
+              )}
             />
             <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys)}

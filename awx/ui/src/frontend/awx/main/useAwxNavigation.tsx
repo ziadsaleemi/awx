@@ -156,9 +156,6 @@ export function filterGalaxyRoutesByPermissions(
   if (permissions.canManageGalaxy) {
     allowedIds.add(AwxRoute.GalaxyNGProjectImports);
   }
-  if (permissions.canManageQuay) {
-    allowedIds.add(AwxRoute.GalaxyNGExecutionEnvironments);
-  }
   if (permissions.canAdminGalaxy) {
     allowedIds.add(AwxRoute.GalaxyNGCollectionApprovals);
     allowedIds.add(AwxRoute.GalaxyNGTasks);
