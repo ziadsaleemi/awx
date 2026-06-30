@@ -111,6 +111,9 @@ function MetricTile(props: { label: string; value: string | number; detail?: str
 }
 
 function QuickLink(props: { href?: string; to?: string; label: string; description: string }) {
+  if (!props.href && !props.to) {
+    return null;
+  }
   return (
     <GalleryItem>
       <Stack hasGutter>
@@ -340,67 +343,61 @@ export function GalaxyNgOverview() {
         <CardBody>
           <Gallery hasGutter minWidths={{ default: '220px' }}>
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGNamespaces) || '/galaxy-ng/namespaces'}
+              to={getPageUrl(AwxRoute.GalaxyNGNamespaces)}
               label={t('Namespaces')}
               description={t('Review private automation hub namespaces visible to AWX.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGCollections) || '/galaxy-ng/collections'}
+              to={getPageUrl(AwxRoute.GalaxyNGCollections)}
               label={t('Collections')}
               description={t('Review private automation hub collections visible to AWX.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGProjectImports) || '/galaxy-ng/project-imports'}
+              to={getPageUrl(AwxRoute.GalaxyNGProjectImports)}
               label={t('Project Imports')}
               description={t('Build and publish collection artifacts from synced AWX Projects.')}
             />
             <QuickLink
-              to={
-                getPageUrl(AwxRoute.GalaxyNGExecutionEnvironments) ||
-                '/galaxy-ng/execution-environments'
-              }
+              to={getPageUrl(AwxRoute.GalaxyNGExecutionEnvironments)}
               label={t('Execution Environments')}
               description={t('Build EE images from AWX Projects and host them in Project Quay.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys) || '/galaxy-ng/signature-keys'}
+              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys)}
               label={t('Signature Keys')}
               description={t('Review signing services used to verify automation content.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRepositories) || '/galaxy-ng/repositories'}
+              to={getPageUrl(AwxRoute.GalaxyNGRepositories)}
               label={t('Repositories')}
               description={t('Inspect Pulp Ansible repositories backing content distribution.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRemoteRegistries) || '/galaxy-ng/remote-registries'}
+              to={getPageUrl(AwxRoute.GalaxyNGRemoteRegistries)}
               label={t('Remote Registries')}
               description={t(
                 'Inspect external registries Galaxy NG can pull container content from.'
               )}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGTasks) || '/galaxy-ng/tasks'}
+              to={getPageUrl(AwxRoute.GalaxyNGTasks)}
               label={t('Task Management')}
               description={t('Track import, sync, copy, and publish task state.')}
             />
             <QuickLink
-              to={
-                getPageUrl(AwxRoute.GalaxyNGCollectionApprovals) ||
-                '/galaxy-ng/collection-approvals'
-              }
+              to={getPageUrl(AwxRoute.GalaxyNGCollectionApprovals)}
               label={t('Collection Approvals')}
               description={t(
                 'Review staged collection versions before promotion to approved content.'
               )}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRemotes) || '/galaxy-ng/remotes'}
+              to={getPageUrl(AwxRoute.GalaxyNGRemotes)}
               label={t('Remotes')}
               description={t('Inspect remote Automation Hub sources used for collection sync.')}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGApiToken) || '/galaxy-ng/api-token'}
+              to={getPageUrl(AwxRoute.GalaxyNGApiToken)}
               label={t('API Token')}
               description={t('See how AWX authenticates to Galaxy NG APIs.')}
             />

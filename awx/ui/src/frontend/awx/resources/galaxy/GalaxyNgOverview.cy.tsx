@@ -51,8 +51,13 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
-        id: AwxRoute.GalaxyNGRemoteRegistries,
-        path: 'galaxy-ng/remote-registries',
+        id: AwxRoute.GalaxyNGNamespaces,
+        path: 'galaxy-ng/namespaces',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGCollections,
+        path: 'galaxy-ng/collections',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -61,13 +66,43 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
+        id: AwxRoute.GalaxyNGExecutionEnvironments,
+        path: 'galaxy-ng/execution-environments',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGSignatureKeys,
+        path: 'galaxy-ng/signature-keys',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGRepositories,
+        path: 'galaxy-ng/repositories',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGRemoteRegistries,
+        path: 'galaxy-ng/remote-registries',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGTasks,
+        path: 'galaxy-ng/tasks',
+        element: <div />,
+      } as PageNavigationItem,
+      {
         id: AwxRoute.GalaxyNGCollectionApprovals,
         path: 'galaxy-ng/collection-approvals',
         element: <div />,
       } as PageNavigationItem,
       {
-        id: AwxRoute.QuayExecutionEnvironmentImages,
-        path: 'quay/execution-environment-images',
+        id: AwxRoute.GalaxyNGRemotes,
+        path: 'galaxy-ng/remotes',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGApiToken,
+        path: 'galaxy-ng/api-token',
         element: <div />,
       } as PageNavigationItem,
       {

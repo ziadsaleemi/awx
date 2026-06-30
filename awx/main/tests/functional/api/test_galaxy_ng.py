@@ -187,31 +187,17 @@ def test_galaxy_ng_resource_list_normalizes_pulp_payload(get, admin_user, mocker
     GALAXY_NG_SERVER_URL='https://hub.example.test',
     GALAXY_NG_AUTH_TOKEN='hub-token',
 )
-def test_galaxy_ng_execution_environment_images_list_uses_container_tags_endpoint(get, admin_user, mocker):
-    request_mock = mocker.patch(
-        'awx.main.utils.galaxy_ng.requests.get',
-        return_value=galaxy_response(
-            mocker,
-            {
-                'count': 1,
-                'results': [
-                    {
-                        'name': 'latest',
-                        'repository': '/pulp/api/v3/repositories/container/container/1/',
-                        'manifest': '/pulp/api/v3/content/container/manifests/1/',
-                    }
-                ],
-            },
-        ),
-    )
+def test_galaxy_ng_execution_environment_images_list_hands_off_to_quay(get, admin_user, mocker):
+    request_mock = mocker.patch('awx.main.utils.galaxy_ng.requests.get')
 
-    response = get(reverse('api:galaxy_ng_execution_environment_images_list'), user=admin_user, expect=200)
+    response = get(reverse('api:galaxy_ng_execution_environment_images_list'), user=admin_user, expect=410)
 
-    assert response.data['count'] == 1
+    assert response.data['count'] == 0
+    assert response.data['source'] == 'quay'
     assert response.data['resource'] == 'execution-environment-images'
-    assert response.data['results'][0]['name'] == 'latest'
-    assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/content/container/tags/'
-    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert response.data['results'] == []
+    assert response.data['quay_build_plan_url'].endswith('/api/v2/quay/execution-environment-images/build-plan/')
+    assert request_mock.call_count == 0
 
 
 @pytest.mark.django_db
@@ -453,8 +439,41 @@ def test_galaxy_ng_collection_import_plan_handles_awx_project_source(post, admin
 
 
 @pytest.mark.django_db
+def test_galaxy_ng_collection_import_plan_allows_project_updater(post, rando, organization, tmp_path):
+    project_root = tmp_path / 'collection-project'
+    source_dir = project_root / 'collections' / 'infra' / 'network'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'galaxy.yml').write_text(
+        'namespace: infra\nname: network\nversion: 1.2.3\ndescription: Network automation content\n',
+        encoding='utf-8',
+    )
+    project = Project.objects.create(name='Collection Project', organization=organization, scm_type='', local_path='collection-project')
+    project.update_role.members.add(rando)
+
+    with override_settings(
+        MODULE_GALAXY_NG_ENABLED=True,
+        GALAXY_NG_SERVER_URL='https://hub.example.test',
+        GALAXY_NG_AUTH_TOKEN='hub-token',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:galaxy_ng_collection_import_plan'),
+            data={
+                'project_id': project.pk,
+                'collection_path': 'collections/infra/network',
+                'artifact_dir': 'dist',
+            },
+            user=rando,
+            expect=200,
+        )
+
+    assert response.data['project']['project_id'] == project.pk
+    assert response.data['collection']['reference'] == 'infra.network:1.2.3'
+
+
+@pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
-def test_galaxy_ng_collection_import_plan_requires_system_admin(post, rando):
+def test_galaxy_ng_collection_import_plan_requires_hub_manage_permission(post, rando):
     post(
         reverse('api:galaxy_ng_collection_import_plan'),
         data={'project_id': 1, 'collection_path': '.', 'artifact_dir': 'dist'},
@@ -593,155 +612,15 @@ def test_galaxy_ng_repository_sync_rejects_unsafe_distribution_path(post, admin_
 
 
 @pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_handles_awx_project_source(post, admin_user, organization, tmp_path):
-    project_root = tmp_path / 'ee-project'
-    source_dir = project_root / 'ee'
-    source_dir.mkdir(parents=True)
-    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
-
-    with override_settings(
-        MODULE_GALAXY_NG_ENABLED=True,
-        GALAXY_NG_SERVER_URL='http://host.docker.internal:5001',
-        GALAXY_NG_VERIFY_SSL=False,
-        PROJECTS_ROOT=str(tmp_path),
-    ):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={
-                'project_id': project.pk,
-                'image_name': 'awx/custom-ee',
-                'tag': 'v1',
-                'runtime': 'podman',
-                'definition_file': 'ee/execution-environment.yml',
-                'context': 'ee',
-            },
-            user=admin_user,
-            expect=200,
-        )
-
-    assert response.data['project']['project_id'] == project.pk
-    assert response.data['project']['project_name'] == 'EE Project'
-    assert response.data['project']['project_path'] == str(project_root)
-    assert response.data['project']['definition_file'] == 'ee/execution-environment.yml'
-    assert response.data['project']['context'] == 'ee'
-    assert response.data['registry']['controller'] == 'host.docker.internal:5001'
-    assert response.data['registry']['local'] == 'localhost:5001'
-    assert response.data['registry']['insecure'] is True
-    assert response.data['image']['local'] == 'awx/custom-ee:v1'
-    assert response.data['image']['push'] == 'localhost:5001/awx/custom-ee:v1'
-    assert response.data['image']['awx'] == 'host.docker.internal:5001/awx/custom-ee:v1'
-    assert response.data['commands'][0]['command'] == (
-        f'cd {project_root} && ansible-builder build --container-runtime podman -f ee/execution-environment.yml -t awx/custom-ee:v1 ee'
-    )
-    assert response.data['commands'][0]['working_directory'] == str(project_root)
-    assert response.data['commands'][1]['command'] == 'podman login --tls-verify=false localhost:5001'
-    assert response.data['commands'][3]['command'] == 'podman push --tls-verify=false localhost:5001/awx/custom-ee:v1'
-    assert response.data['awx_execution_environment'] == {
-        'image': 'host.docker.internal:5001/awx/custom-ee:v1',
-        'pull': 'missing',
-    }
-
-
-@pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
-def test_galaxy_ng_execution_environment_image_build_plan_requires_project(post, admin_user):
+def test_galaxy_ng_execution_environment_image_build_plan_hands_off_to_quay(post, admin_user):
     response = post(
         reverse('api:galaxy_ng_execution_environment_image_build_plan'),
         data={'image_name': 'custom-ee', 'tag': 'latest'},
         user=admin_user,
-        expect=400,
+        expect=410,
     )
 
-    assert response.data['status'] == 'bad_request'
-    assert 'Project' in response.data['detail']
-
-
-@pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_rejects_bad_image(post, admin_user, organization, tmp_path):
-    project_root = tmp_path / 'ee-project'
-    project_root.mkdir()
-    (project_root / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
-
-    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={'project_id': project.pk, 'image_name': '../bad', 'tag': 'latest'},
-            user=admin_user,
-            expect=400,
-        )
-
-    assert response.data['status'] == 'bad_request'
-
-
-@pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_rejects_unsynced_project(post, admin_user, organization, tmp_path):
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='missing-ee-project')
-
-    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={'project_id': project.pk, 'image_name': 'custom-ee', 'tag': 'latest'},
-            user=admin_user,
-            expect=400,
-        )
-
-    assert response.data['status'] == 'bad_request'
-    assert 'synced' in response.data['detail']
-
-
-@pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_rejects_definition_outside_project(post, admin_user, organization, tmp_path):
-    project_root = tmp_path / 'ee-project'
-    project_root.mkdir()
-    (project_root / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
-
-    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={'project_id': project.pk, 'image_name': 'custom-ee', 'definition_file': '../execution-environment.yml'},
-            user=admin_user,
-            expect=400,
-        )
-
-    assert response.data['status'] == 'bad_request'
-    assert 'relative to the selected AWX project' in response.data['detail']
-
-
-@pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_rejects_missing_definition(post, admin_user, organization, tmp_path):
-    project_root = tmp_path / 'ee-project'
-    project_root.mkdir()
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
-
-    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={'project_id': project.pk, 'image_name': 'custom-ee', 'definition_file': 'execution-environment.yml'},
-            user=admin_user,
-            expect=400,
-        )
-
-    assert response.data['status'] == 'bad_request'
-    assert 'Definition file was not found' in response.data['detail']
-
-
-@pytest.mark.django_db
-def test_galaxy_ng_execution_environment_image_build_plan_denies_unreadable_project(post, rando, organization, tmp_path):
-    project_root = tmp_path / 'ee-project'
-    project_root.mkdir()
-    (project_root / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
-    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
-
-    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
-        response = post(
-            reverse('api:galaxy_ng_execution_environment_image_build_plan'),
-            data={'project_id': project.pk, 'image_name': 'custom-ee'},
-            user=rando,
-            expect=400,
-        )
-
-    assert response.data['status'] == 'bad_request'
-    assert 'not found' in response.data['detail']
+    assert response.data['status'] == 'moved_to_quay'
+    assert response.data['source'] == 'quay'
+    assert response.data['quay_build_plan_url'].endswith('/api/v2/quay/execution-environment-images/build-plan/')

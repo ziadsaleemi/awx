@@ -191,3 +191,46 @@ def test_quay_execution_environment_image_build_plan_handles_awx_project_source(
         'image': 'quay.example.test/awx/custom-ee:v1',
         'pull': 'missing',
     }
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_image_build_plan_requires_quay_management_permission(post, rando):
+    response = post(
+        reverse('api:quay_execution_environment_image_build_plan'),
+        data={'project_id': 1, 'image_name': 'custom-ee'},
+        user=rando,
+        expect=403,
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_image_build_plan_allows_project_updater(post, rando, organization, tmp_path):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
+    project.update_role.members.add(rando)
+
+    with override_settings(
+        MODULE_QUAY_ENABLED=True,
+        QUAY_REGISTRY_URL='https://quay.example.test',
+        QUAY_NAMESPACE='awx',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:quay_execution_environment_image_build_plan'),
+            data={
+                'project_id': project.pk,
+                'image_name': 'custom-ee',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=rando,
+            expect=200,
+        )
+
+    assert response.data['project']['project_id'] == project.pk
+    assert response.data['image']['awx'] == 'quay.example.test/awx/custom-ee:latest'

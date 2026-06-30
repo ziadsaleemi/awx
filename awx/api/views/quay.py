@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from awx.api.generics import APIView
 from awx.api.versioning import reverse
+from awx.api.views.content_permissions import QuayManagePermission, QuayViewPermission
 from awx.api.views.galaxy_ng import (
     _project_for_build_plan,
     _resolve_project_build_source,
@@ -66,7 +67,7 @@ def _quay_error_response(exc):
 class QuayStatusView(APIView):
     name = _('Project Quay Status')
     resource_purpose = 'project quay execution environment registry status'
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, QuayViewPermission)
 
     def get(self, request, format=None):
         client = QuayClient()
@@ -118,7 +119,7 @@ class QuayStatusView(APIView):
 class QuayRepositoriesListView(APIView):
     name = _('Project Quay Repositories')
     resource_purpose = 'project quay repositories'
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, QuayViewPermission)
 
     def get(self, request, format=None):
         if not module_enabled():
@@ -150,7 +151,7 @@ class QuayRepositoriesListView(APIView):
 class QuayTagsListView(APIView):
     name = _('Project Quay Repository Tags')
     resource_purpose = 'project quay repository image tags'
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, QuayViewPermission)
 
     def get(self, request, format=None):
         if not module_enabled():
@@ -183,7 +184,7 @@ class QuayTagsListView(APIView):
 class QuayExecutionEnvironmentImageBuildPlanView(APIView):
     name = _('Project Quay Execution Environment Image Build Plan')
     resource_purpose = 'project quay execution environment image build and push command plan'
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, QuayManagePermission)
 
     def post(self, request, format=None):
         if not module_enabled():

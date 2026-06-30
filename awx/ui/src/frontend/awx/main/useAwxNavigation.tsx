@@ -134,25 +134,37 @@ export function filterPolicyRoutesByPermissions(
   };
 }
 
+export interface GalaxyRoutePermissions {
+  canManageGalaxy: boolean;
+  canManageQuay: boolean;
+  canAdminGalaxy: boolean;
+}
+
 export function filterGalaxyRoutesByPermissions(
   galaxyRoutes: PageNavigationItem,
-  canManageGalaxy: boolean
+  permissions: GalaxyRoutePermissions
 ) {
-  if (canManageGalaxy) {
-    return galaxyRoutes;
+  const allowedIds = new Set<string>([
+    AwxRoute.GalaxyNGOverview,
+    AwxRoute.GalaxyNGNamespaces,
+    AwxRoute.GalaxyNGCollections,
+    AwxRoute.GalaxyNGRepositories,
+    AwxRoute.GalaxyNGRemotes,
+    AwxRoute.GalaxyNGRemoteRegistries,
+    AwxRoute.GalaxyNGSignatureKeys,
+  ]);
+  if (permissions.canManageGalaxy) {
+    allowedIds.add(AwxRoute.GalaxyNGProjectImports);
   }
-  return filterRouteChildrenById(
-    galaxyRoutes,
-    new Set([
-      AwxRoute.GalaxyNGOverview,
-      AwxRoute.GalaxyNGNamespaces,
-      AwxRoute.GalaxyNGCollections,
-      AwxRoute.GalaxyNGRepositories,
-      AwxRoute.GalaxyNGRemotes,
-      AwxRoute.GalaxyNGRemoteRegistries,
-      AwxRoute.GalaxyNGSignatureKeys,
-    ])
-  );
+  if (permissions.canManageQuay) {
+    allowedIds.add(AwxRoute.GalaxyNGExecutionEnvironments);
+  }
+  if (permissions.canAdminGalaxy) {
+    allowedIds.add(AwxRoute.GalaxyNGCollectionApprovals);
+    allowedIds.add(AwxRoute.GalaxyNGTasks);
+    allowedIds.add(AwxRoute.GalaxyNGApiToken);
+  }
+  return filterRouteChildrenById(galaxyRoutes, allowedIds);
 }
 
 export function filterQuayRoutesByPermissions(
@@ -857,7 +869,11 @@ export function useAwxNavigation() {
       ...(moduleGalaxyNgEnabled && capabilities.canViewGalaxy
         ? [
             withNavigationDetails(
-              filterGalaxyRoutesByPermissions(awxGalaxyRoutes, capabilities.canManageGalaxy),
+              filterGalaxyRoutesByPermissions(awxGalaxyRoutes, {
+                canManageGalaxy: capabilities.canManageGalaxy,
+                canManageQuay: capabilities.canManageQuay,
+                canAdminGalaxy: false,
+              }),
               t('Automation Hub'),
               t('Galaxy NG')
             ),
@@ -954,10 +970,30 @@ export function useAwxNavigation() {
       [
         withNavigationDetails(awxCatalogRoutes, t('Service Catalog'), t('Requestable automation')),
         ...(moduleGalaxyNgEnabled
-          ? [withNavigationDetails(awxGalaxyRoutes, t('Automation Hub'), t('Galaxy NG'))]
+          ? [
+              withNavigationDetails(
+                activeAwxUser?.is_system_auditor
+                  ? filterGalaxyRoutesByPermissions(awxGalaxyRoutes, {
+                      canManageGalaxy: false,
+                      canManageQuay: false,
+                      canAdminGalaxy: false,
+                    })
+                  : awxGalaxyRoutes,
+                t('Automation Hub'),
+                t('Galaxy NG')
+              ),
+            ]
           : []),
         ...(moduleQuayEnabled
-          ? [withNavigationDetails(awxQuayRoutes, t('Project Quay'), t('EE image registry'))]
+          ? [
+              withNavigationDetails(
+                activeAwxUser?.is_system_auditor
+                  ? filterQuayRoutesByPermissions(awxQuayRoutes, false)
+                  : awxQuayRoutes,
+                t('Project Quay'),
+                t('EE image registry')
+              ),
+            ]
           : []),
       ]
     ),

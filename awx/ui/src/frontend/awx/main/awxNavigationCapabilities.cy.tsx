@@ -236,7 +236,7 @@ describe('AWX navigation capabilities', () => {
     ]);
   });
 
-  it('removes Galaxy NG admin routes when the user cannot manage hub content', () => {
+  it('filters Galaxy NG routes by hub, Quay, and admin permissions', () => {
     const galaxyRoutes: PageNavigationItem = {
       id: AwxRoute.GalaxyNG,
       label: 'Galaxy NG',
@@ -246,6 +246,11 @@ describe('AWX navigation capabilities', () => {
         { id: AwxRoute.GalaxyNGNamespaces, path: 'namespaces', element: <div /> },
         { id: AwxRoute.GalaxyNGCollections, path: 'collections', element: <div /> },
         { id: AwxRoute.GalaxyNGProjectImports, path: 'project-imports', element: <div /> },
+        {
+          id: AwxRoute.GalaxyNGExecutionEnvironments,
+          path: 'execution-environments',
+          element: <div />,
+        },
         { id: AwxRoute.GalaxyNGRepositories, path: 'repositories', element: <div /> },
         { id: AwxRoute.GalaxyNGRemoteRegistries, path: 'remote-registries', element: <div /> },
         { id: AwxRoute.GalaxyNGRemotes, path: 'remotes', element: <div /> },
@@ -261,7 +266,15 @@ describe('AWX navigation capabilities', () => {
       ],
     };
 
-    expect(childIds(filterGalaxyRoutesByPermissions(galaxyRoutes, false))).to.deep.equal([
+    expect(
+      childIds(
+        filterGalaxyRoutesByPermissions(galaxyRoutes, {
+          canManageGalaxy: false,
+          canManageQuay: false,
+          canAdminGalaxy: false,
+        })
+      )
+    ).to.deep.equal([
       AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
@@ -271,11 +284,58 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.GalaxyNGSignatureKeys,
       undefined,
     ]);
-    expect(childIds(filterGalaxyRoutesByPermissions(galaxyRoutes, true))).to.deep.equal([
+    expect(
+      childIds(
+        filterGalaxyRoutesByPermissions(galaxyRoutes, {
+          canManageGalaxy: true,
+          canManageQuay: false,
+          canAdminGalaxy: false,
+        })
+      )
+    ).to.deep.equal([
       AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
       AwxRoute.GalaxyNGProjectImports,
+      AwxRoute.GalaxyNGRepositories,
+      AwxRoute.GalaxyNGRemoteRegistries,
+      AwxRoute.GalaxyNGRemotes,
+      AwxRoute.GalaxyNGSignatureKeys,
+      undefined,
+    ]);
+    expect(
+      childIds(
+        filterGalaxyRoutesByPermissions(galaxyRoutes, {
+          canManageGalaxy: false,
+          canManageQuay: true,
+          canAdminGalaxy: false,
+        })
+      )
+    ).to.deep.equal([
+      AwxRoute.GalaxyNGOverview,
+      AwxRoute.GalaxyNGNamespaces,
+      AwxRoute.GalaxyNGCollections,
+      AwxRoute.GalaxyNGExecutionEnvironments,
+      AwxRoute.GalaxyNGRepositories,
+      AwxRoute.GalaxyNGRemoteRegistries,
+      AwxRoute.GalaxyNGRemotes,
+      AwxRoute.GalaxyNGSignatureKeys,
+      undefined,
+    ]);
+    expect(
+      childIds(
+        filterGalaxyRoutesByPermissions(galaxyRoutes, {
+          canManageGalaxy: true,
+          canManageQuay: true,
+          canAdminGalaxy: true,
+        })
+      )
+    ).to.deep.equal([
+      AwxRoute.GalaxyNGOverview,
+      AwxRoute.GalaxyNGNamespaces,
+      AwxRoute.GalaxyNGCollections,
+      AwxRoute.GalaxyNGProjectImports,
+      AwxRoute.GalaxyNGExecutionEnvironments,
       AwxRoute.GalaxyNGRepositories,
       AwxRoute.GalaxyNGRemoteRegistries,
       AwxRoute.GalaxyNGRemotes,
