@@ -16,6 +16,9 @@ const status = {
   push_configured: true,
   push_username_configured: true,
   push_token_configured: true,
+  can_manage: true,
+  management_configured: true,
+  management_required_scopes: ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
   verify_ssl: true,
   request_timeout: 10,
   settings_url: '/api/v2/settings/quay/',
@@ -67,7 +70,7 @@ describe('QuayOverview', () => {
     cy.get('#quay-control-plane').should('contain', 'Quay connected');
     cy.get('#quay-control-plane').should('contain', 'quay.example.test');
     cy.get('#quay-control-plane').should('contain', '2');
-    cy.get('#quay-connection').should('contain', 'https://quay.example.test');
+    cy.get('#quay-connection input[value="https://quay.example.test"]').should('exist');
     cy.get('#quay-workflows').should('contain', 'Repositories');
     cy.get('#quay-workflows').should('contain', 'Execution Environments');
     cy.get('#quay-status').should('contain', 'Project Quay is ready');

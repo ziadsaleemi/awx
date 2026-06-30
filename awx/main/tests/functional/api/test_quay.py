@@ -59,6 +59,9 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
     assert response.data['namespace'] == 'awx'
     assert response.data['auth_configured'] is True
     assert response.data['push_configured'] is True
+    assert response.data['can_manage'] is True
+    assert response.data['management_configured'] is True
+    assert response.data['management_required_scopes'] == ['repo:read', 'repo:create', 'repo:write', 'repo:admin']
     assert response.data['counts']['repositories'] == 2
     assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository'
     assert request_mock.call_args.kwargs['params']['namespace'] == 'awx'
@@ -97,6 +100,143 @@ def test_quay_repositories_list_normalizes_repository_payload(get, admin_user, m
     assert response.data['results'][0]['name'] == 'custom-ee'
     assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository'
     assert request_mock.call_args.kwargs['params']['query'] == 'custom'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_create_calls_quay_api(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.post',
+        return_value=quay_response(mocker, {'name': 'custom-ee'}),
+    )
+
+    response = post(
+        reverse('api:quay_repository_create'),
+        data={
+            'repository': 'custom-ee',
+            'description': 'AWX custom execution environment',
+            'visibility': 'private',
+        },
+        user=admin_user,
+        expect=201,
+    )
+
+    assert response.data['source'] == 'quay'
+    assert response.data['action'] == 'create'
+    assert response.data['repository_path'] == 'awx/custom-ee'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository'
+    assert request_mock.call_args.kwargs['json'] == {
+        'namespace': 'awx',
+        'repository': 'custom-ee',
+        'visibility': 'private',
+        'description': 'AWX custom execution environment',
+        'repo_kind': 'image',
+    }
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_update_calls_quay_api(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.put',
+        return_value=quay_response(mocker, {'name': 'custom-ee'}),
+    )
+
+    response = post(
+        reverse('api:quay_repository_update'),
+        data={'repository': 'custom-ee', 'description': 'Updated description'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'update'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee'
+    assert request_mock.call_args.kwargs['json'] == {'description': 'Updated description'}
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_change_visibility_calls_quay_api(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.post',
+        return_value=quay_response(mocker, {'visibility': 'public'}),
+    )
+
+    response = post(
+        reverse('api:quay_repository_change_visibility'),
+        data={'repository': 'custom-ee', 'visibility': 'public'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'change_visibility'
+    assert response.data['visibility'] == 'public'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee/changevisibility'
+    assert request_mock.call_args.kwargs['json'] == {'visibility': 'public'}
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
+def test_quay_repository_delete_calls_quay_api(post, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.delete',
+        return_value=quay_response(mocker, {}),
+    )
+
+    response = post(
+        reverse('api:quay_repository_delete'),
+        data={'repository': 'custom-ee'},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['action'] == 'delete'
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository/awx/custom-ee'
+
+
+@pytest.mark.django_db
+def test_quay_repository_management_requires_quay_permission(post, rando):
+    response = post(
+        reverse('api:quay_repository_create'),
+        data={'repository': 'custom-ee'},
+        user=rando,
+        expect=403,
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_quay_repository_create_rejects_namespace_in_repository_name(post, admin_user):
+    with override_settings(MODULE_QUAY_ENABLED=True, QUAY_REGISTRY_URL='https://quay.example.test', QUAY_NAMESPACE='awx'):
+        response = post(
+            reverse('api:quay_repository_create'),
+            data={'repository': 'awx/custom-ee'},
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['status'] == 'bad_request'
 
 
 @pytest.mark.django_db

@@ -86,11 +86,20 @@ class QuayClient:
             raise QuayControllerError('Project Quay is not configured.', status=connection_status(self.server_url))
         return urljoin(f'{self.server_url}/', path.lstrip('/'))
 
-    def get(self, path, params=None):
+    def request(self, method, path, params=None, json=None):
+        transport = {
+            'GET': requests.get,
+            'POST': requests.post,
+            'PUT': requests.put,
+            'DELETE': requests.delete,
+        }.get(method.upper())
+        if transport is None:
+            raise QuayControllerError(f'Unsupported Project Quay request method: {method}', status='bad_request')
         try:
-            response = requests.get(
+            response = transport(
                 self.url(path),
                 params=params,
+                json=json,
                 headers=self._headers(),
                 timeout=self.timeout,
                 verify=self.verify_ssl,
@@ -102,11 +111,56 @@ class QuayClient:
         except ValueError as exc:
             raise QuayControllerError(f'Invalid JSON response from Project Quay: {exc}') from exc
 
+    def get(self, path, params=None):
+        return self.request('GET', path, params=params)
+
+    def post(self, path, json=None):
+        return self.request('POST', path, json=json or {})
+
+    def put(self, path, json=None):
+        return self.request('PUT', path, json=json or {})
+
+    def delete(self, path):
+        return self.request('DELETE', path)
+
     def repositories(self, namespace=None, params=None):
         namespace = namespace or self.namespace
         if not namespace:
             raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
         return self.get('/api/v1/repository', params={'namespace': namespace, **(params or {})})
+
+    def create_repository(self, repository, namespace=None, visibility='private', description='', repo_kind='image'):
+        namespace = namespace or self.namespace
+        if not namespace:
+            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        return self.post(
+            '/api/v1/repository',
+            json={
+                'namespace': namespace,
+                'repository': repository,
+                'visibility': visibility,
+                'description': description,
+                'repo_kind': repo_kind,
+            },
+        )
+
+    def update_repository(self, repository, namespace=None, description=''):
+        namespace = namespace or self.namespace
+        if not namespace:
+            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        return self.put(f'/api/v1/repository/{namespace}/{repository}', json={'description': description})
+
+    def change_repository_visibility(self, repository, namespace=None, visibility='private'):
+        namespace = namespace or self.namespace
+        if not namespace:
+            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        return self.post(f'/api/v1/repository/{namespace}/{repository}/changevisibility', json={'visibility': visibility})
+
+    def delete_repository(self, repository, namespace=None):
+        namespace = namespace or self.namespace
+        if not namespace:
+            raise QuayControllerError('Project Quay namespace is not configured.', status='not_configured')
+        return self.delete(f'/api/v1/repository/{namespace}/{repository}')
 
     def tags(self, repository, namespace=None, params=None):
         namespace = namespace or self.namespace

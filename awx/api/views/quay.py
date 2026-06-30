@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from awx.api.generics import APIView
 from awx.api.versioning import reverse
 from awx.api.views.content_permissions import QuayManagePermission, QuayViewPermission
+from awx.api.views.content_permissions import user_can_manage_quay
 from awx.api.views.galaxy_ng import (
     _project_for_build_plan,
     _resolve_project_build_source,
@@ -31,6 +32,7 @@ from awx.main.utils.quay import (
 )
 
 QUAY_CONTAINER_RUNTIMES = ('podman', 'docker')
+QUAY_REPOSITORY_VISIBILITIES = ('public', 'private')
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -64,6 +66,44 @@ def _quay_error_response(exc):
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
 
 
+def _validate_repository_name(value):
+    repository, error = _validate_image_name(value)
+    if error:
+        return '', _('Repository name may contain lowercase letters, numbers, dots, underscores, and hyphens.')
+    if '/' in repository:
+        return '', _('Repository name cannot include a namespace path. Use the namespace field separately.')
+    return repository, ''
+
+
+def _repository_action_payload(request):
+    if not module_enabled():
+        return None, Response({'detail': _('Project Quay module is disabled.'), 'status': 'disabled'}, status=http_status.HTTP_400_BAD_REQUEST)
+    if connection_status() != 'configured':
+        return None, Response(
+            {'detail': _('Project Quay registry URL is not configured.'), 'status': connection_status()},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    data = request.data if isinstance(request.data, dict) else {}
+    namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
+    if not namespace:
+        return None, Response({'detail': _('Project Quay namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    repository, error = _validate_repository_name(data.get('repository') or data.get('name'))
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    return (data, namespace, repository), None
+
+
+def _repository_action_response(action, namespace, repository, payload):
+    return {
+        'source': 'quay',
+        'action': action,
+        'namespace': namespace,
+        'repository': repository,
+        'repository_path': f'{namespace}/{repository}',
+        'response': payload,
+    }
+
+
 class QuayStatusView(APIView):
     name = _('Project Quay Status')
     resource_purpose = 'project quay execution environment registry status'
@@ -91,6 +131,9 @@ class QuayStatusView(APIView):
             'push_configured': client.push_configured,
             'push_username_configured': bool(client.push_username),
             'push_token_configured': bool(client.push_token),
+            'can_manage': user_can_manage_quay(request.user),
+            'management_configured': client.auth_configured,
+            'management_required_scopes': ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
             'verify_ssl': client.verify_ssl,
             'request_timeout': client.timeout,
             'settings_url': reverse('api:setting_singleton_detail', kwargs={'category_slug': 'quay'}, request=request),
@@ -114,6 +157,86 @@ class QuayStatusView(APIView):
             response['controller_error'] = str(exc)
 
         return Response(response)
+
+
+class QuayRepositoryCreateView(APIView):
+    name = _('Project Quay Repository Create')
+    resource_purpose = 'create project quay repository'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        visibility = str(data.get('visibility') or 'private').strip().lower()
+        if visibility not in QUAY_REPOSITORY_VISIBILITIES:
+            return Response({'detail': _('Visibility must be public or private.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        repo_kind = str(data.get('repo_kind') or 'image').strip().lower()
+        if repo_kind not in ('image', 'application'):
+            return Response({'detail': _('Repository kind must be image or application.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        description = str(data.get('description') or '')
+        try:
+            result = QuayClient().create_repository(repository, namespace=namespace, visibility=visibility, description=description, repo_kind=repo_kind)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(_repository_action_response('create', namespace, repository, result), status=http_status.HTTP_201_CREATED)
+
+
+class QuayRepositoryUpdateView(APIView):
+    name = _('Project Quay Repository Update')
+    resource_purpose = 'update project quay repository'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        try:
+            result = QuayClient().update_repository(repository, namespace=namespace, description=str(data.get('description') or ''))
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(_repository_action_response('update', namespace, repository, result))
+
+
+class QuayRepositoryChangeVisibilityView(APIView):
+    name = _('Project Quay Repository Change Visibility')
+    resource_purpose = 'change project quay repository visibility'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        data, namespace, repository = payload
+        visibility = str(data.get('visibility') or '').strip().lower()
+        if visibility not in QUAY_REPOSITORY_VISIBILITIES:
+            return Response({'detail': _('Visibility must be public or private.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            result = QuayClient().change_repository_visibility(repository, namespace=namespace, visibility=visibility)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        response = _repository_action_response('change_visibility', namespace, repository, result)
+        response['visibility'] = visibility
+        return Response(response)
+
+
+class QuayRepositoryDeleteView(APIView):
+    name = _('Project Quay Repository Delete')
+    resource_purpose = 'delete project quay repository'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, format=None):
+        payload, error_response = _repository_action_payload(request)
+        if error_response:
+            return error_response
+        _data, namespace, repository = payload
+        try:
+            result = QuayClient().delete_repository(repository, namespace=namespace)
+        except QuayControllerError as exc:
+            return _quay_error_response(exc)
+        return Response(_repository_action_response('delete', namespace, repository, result))
 
 
 class QuayRepositoriesListView(APIView):

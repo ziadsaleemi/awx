@@ -385,7 +385,10 @@ register(
     allow_blank=True,
     encrypted=True,
     label=_('Project Quay API token'),
-    help_text=_('OAuth access token used by AWX to read Project Quay repositories and tags.'),
+    help_text=_(
+        'OAuth access token used by AWX to read and manage Project Quay repositories and tags. '
+        'Repository management requires repo:read, repo:create, repo:write, and repo:admin scopes.'
+    ),
     category=_('Project Quay'),
     category_slug='quay',
 )

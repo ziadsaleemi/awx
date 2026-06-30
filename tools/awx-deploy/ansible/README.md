@@ -208,9 +208,10 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-quay-server.yml
 ```
 
 Then configure AWX to point at that VM and rerun the AWX server deployment or
-upgrade. `QUAY_API_TOKEN` is used for read/list calls, while
-`QUAY_PUSH_USERNAME` and `QUAY_PUSH_TOKEN` are used only to generate image push
-commands without printing stored tokens:
+upgrade. `QUAY_API_TOKEN` must be a Project Quay OAuth access token with
+`repo:read`, `repo:create`, `repo:write`, and `repo:admin` scopes for AWX
+repository management. `QUAY_PUSH_USERNAME` and `QUAY_PUSH_TOKEN` are used only
+to generate image push commands without printing stored tokens:
 
 ```bash
 export QUAY_API_TOKEN='token-from-quay'

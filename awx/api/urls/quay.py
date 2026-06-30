@@ -5,6 +5,10 @@ from django.urls import re_path
 
 from awx.api.views.quay import (
     QuayExecutionEnvironmentImageBuildPlanView,
+    QuayRepositoryChangeVisibilityView,
+    QuayRepositoryCreateView,
+    QuayRepositoryDeleteView,
+    QuayRepositoryUpdateView,
     QuayRepositoriesListView,
     QuayStatusView,
     QuayTagsListView,
@@ -13,6 +17,10 @@ from awx.api.views.quay import (
 quay_urls = [
     re_path(r'^status/$', QuayStatusView.as_view(), name='quay_status'),
     re_path(r'^repositories/$', QuayRepositoriesListView.as_view(), name='quay_repositories_list'),
+    re_path(r'^repositories/create/$', QuayRepositoryCreateView.as_view(), name='quay_repository_create'),
+    re_path(r'^repositories/update/$', QuayRepositoryUpdateView.as_view(), name='quay_repository_update'),
+    re_path(r'^repositories/change-visibility/$', QuayRepositoryChangeVisibilityView.as_view(), name='quay_repository_change_visibility'),
+    re_path(r'^repositories/delete/$', QuayRepositoryDeleteView.as_view(), name='quay_repository_delete'),
     re_path(r'^tags/$', QuayTagsListView.as_view(), name='quay_tags_list'),
     re_path(
         r'^execution-environment-images/build-plan/$',

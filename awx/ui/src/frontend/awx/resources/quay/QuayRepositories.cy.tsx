@@ -1,0 +1,111 @@
+import { awxAPI } from '../../common/api/awx-utils';
+import { QuayRepositories } from './QuayRepositories';
+
+const status = {
+  enabled: true,
+  configured: true,
+  status: 'configured',
+  server_url: 'https://quay.example.test',
+  registry: 'quay.example.test',
+  namespace: 'awx',
+  auth_configured: true,
+  push_configured: true,
+  push_username_configured: true,
+  push_token_configured: true,
+  can_manage: true,
+  management_configured: true,
+  management_required_scopes: ['repo:read', 'repo:create', 'repo:write', 'repo:admin'],
+  verify_ssl: true,
+  request_timeout: 10,
+  settings_url: '/api/v2/settings/quay/',
+  message: 'Project Quay registry URL is configured.',
+  counts: {
+    repositories: 1,
+    tags: 0,
+  },
+  controller_error: '',
+};
+
+const repositories = {
+  count: 1,
+  next: null,
+  previous: null,
+  source: 'quay',
+  resource: 'repositories',
+  namespace: 'awx',
+  controller_error: '',
+  results: [
+    {
+      id: 1,
+      _awx_key: 'awx/custom-ee',
+      name: 'custom-ee',
+      namespace: 'awx',
+      description: 'Custom AWX execution environment',
+      is_public: false,
+      last_modified: '2026-06-29T10:00:00Z',
+    },
+  ],
+};
+
+describe('QuayRepositories', () => {
+  it('allows Quay managers to create repositories from AWX', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('POST', awxAPI`/quay/repositories/create/`, {
+      statusCode: 201,
+      body: {
+        source: 'quay',
+        action: 'create',
+        namespace: 'awx',
+        repository: 'new-ee',
+        repository_path: 'awx/new-ee',
+        response: {},
+      },
+    }).as('createRepository');
+
+    cy.mount(<QuayRepositories />);
+    cy.wait(['@status', '@repositories']);
+
+    cy.contains('button', 'Create repository').click();
+    cy.get('#quay-repository-name').type('new-ee');
+    cy.get('#quay-repository-description').type('New EE image repository');
+    cy.get('.pf-v5-c-modal-box').within(() => {
+      cy.contains('button', 'Create repository').click();
+    });
+    cy.wait('@createRepository').its('request.body').should('deep.equal', {
+      repository: 'new-ee',
+      namespace: 'awx',
+      description: 'New EE image repository',
+      visibility: 'private',
+    });
+  });
+
+  it('keeps repository management controls hidden for read-only users', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/quay/status/`, { ...status, can_manage: false }).as('status');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+
+    cy.mount(<QuayRepositories />);
+    cy.wait(['@status', '@repositories']);
+
+    cy.contains('Read-only Project Quay access').should('be.visible');
+    cy.contains('button', 'Create repository').should('not.exist');
+    cy.contains('button', 'Delete repository').should('not.exist');
+  });
+
+  it('keeps repository management controls hidden until Quay API token is configured', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/quay/status/`, { ...status, management_configured: false }).as(
+      'status'
+    );
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+
+    cy.mount(<QuayRepositories />);
+    cy.wait(['@status', '@repositories']);
+
+    cy.contains('Project Quay repository management needs an API token.').should('be.visible');
+    cy.contains('button', 'Create repository').should('not.exist');
+    cy.contains('button', 'Delete repository').should('not.exist');
+  });
+});
