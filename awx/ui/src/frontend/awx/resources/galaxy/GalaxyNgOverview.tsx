@@ -350,6 +350,11 @@ export function GalaxyNgOverview() {
               description={t('Review private automation hub collections visible to AWX.')}
             />
             <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGProjectImports) || '/galaxy-ng/project-imports'}
+              label={t('Project Imports')}
+              description={t('Build and publish collection artifacts from synced AWX Projects.')}
+            />
+            <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGRepositories) || '/galaxy-ng/repositories'}
               label={t('Repositories')}
               description={t('Inspect Pulp Ansible repositories backing content distribution.')}

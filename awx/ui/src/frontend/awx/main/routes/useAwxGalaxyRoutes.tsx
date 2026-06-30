@@ -5,6 +5,7 @@ import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
 import { GalaxyNgApiToken } from '../../resources/galaxy/GalaxyNgApiToken';
 import { GalaxyNgOverview } from '../../resources/galaxy/GalaxyNgOverview';
+import { GalaxyNgProjectImports } from '../../resources/galaxy/GalaxyNgProjectImports';
 import { GalaxyNgResourceList } from '../../resources/galaxy/GalaxyNgResourceList';
 import { AwxRoute } from '../AwxRoutes';
 
@@ -35,6 +36,12 @@ export function useAwxGalaxyRoutes() {
           label: t('Collections'),
           path: 'collections',
           element: <GalaxyNgResourceList resource="collections" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGProjectImports,
+          label: t('Project Imports'),
+          path: 'project-imports',
+          element: <GalaxyNgProjectImports />,
         },
         {
           id: AwxRoute.GalaxyNGRepositories,

@@ -56,6 +56,11 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
+        id: AwxRoute.GalaxyNGProjectImports,
+        path: 'galaxy-ng/project-imports',
+        element: <div />,
+      } as PageNavigationItem,
+      {
         id: AwxRoute.GalaxyNGCollectionApprovals,
         path: 'galaxy-ng/collection-approvals',
         element: <div />,
@@ -93,6 +98,7 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-connection').should('contain', 'https://hub.example.test');
     cy.get('#galaxy-ng-workflows').should('contain', 'Remotes');
     cy.get('#galaxy-ng-workflows').should('contain', 'Remote Registries');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Project Imports');
     cy.get('#galaxy-ng-workflows').should('contain', 'Signature Keys');
     cy.get('#galaxy-ng-workflows').should('contain', 'Collection Approvals');
     cy.get('#galaxy-ng-workflows').should('contain', 'API Token');

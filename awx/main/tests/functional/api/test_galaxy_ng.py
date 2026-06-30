@@ -398,6 +398,109 @@ def test_galaxy_ng_collection_approval_rejects_unsafe_version(post, admin_user):
 
 
 @pytest.mark.django_db
+def test_galaxy_ng_collection_import_plan_handles_awx_project_source(post, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'collection-project'
+    source_dir = project_root / 'collections' / 'infra' / 'network'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'galaxy.yml').write_text(
+        'namespace: infra\nname: network\nversion: 1.2.3\ndescription: Network automation content\n',
+        encoding='utf-8',
+    )
+    project = Project.objects.create(name='Collection Project', organization=organization, scm_type='', local_path='collection-project')
+
+    with override_settings(
+        MODULE_GALAXY_NG_ENABLED=True,
+        GALAXY_NG_SERVER_URL='http://host.docker.internal:5001',
+        GALAXY_NG_VERIFY_SSL=False,
+        GALAXY_NG_AUTH_TOKEN='hub-token',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:galaxy_ng_collection_import_plan'),
+            data={
+                'project_id': project.pk,
+                'collection_path': 'collections/infra/network',
+                'artifact_dir': 'dist',
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['source'] == 'galaxy_ng'
+    assert response.data['project']['project_id'] == project.pk
+    assert response.data['project']['project_name'] == 'Collection Project'
+    assert response.data['project']['collection_root'] == str(source_dir)
+    assert response.data['project']['artifact_path'] == str(source_dir / 'dist' / 'infra-network-1.2.3.tar.gz')
+    assert response.data['hub']['api_root_url'] == 'http://host.docker.internal:5001/api/galaxy/'
+    assert response.data['hub']['auth_configured'] is True
+    assert response.data['collection'] == {
+        'namespace': 'infra',
+        'name': 'network',
+        'version': '1.2.3',
+        'fqcn': 'infra.network',
+        'reference': 'infra.network:1.2.3',
+        'artifact': str(source_dir / 'dist' / 'infra-network-1.2.3.tar.gz'),
+    }
+    assert response.data['commands'][0]['command'] == (f'cd {source_dir} && mkdir -p dist && ansible-galaxy collection build --output-path dist')
+    assert response.data['commands'][1]['command'] == (
+        f'ansible-galaxy collection publish {source_dir}/dist/infra-network-1.2.3.tar.gz '
+        '--server http://host.docker.internal:5001/api/galaxy/ --api-key "$GALAXY_TOKEN" --ignore-certs'
+    )
+    assert response.data['commands'][2]['command'] == (
+        'ansible-galaxy collection install infra.network:1.2.3 --server http://host.docker.internal:5001/api/galaxy/ --ignore-certs'
+    )
+    assert response.data['approval']['next_url'] == '/galaxy-ng/collection-approvals'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_collection_import_plan_requires_system_admin(post, rando):
+    post(
+        reverse('api:galaxy_ng_collection_import_plan'),
+        data={'project_id': 1, 'collection_path': '.', 'artifact_dir': 'dist'},
+        user=rando,
+        expect=403,
+    )
+
+
+@pytest.mark.django_db
+def test_galaxy_ng_collection_import_plan_rejects_missing_galaxy_yml(post, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'collection-project'
+    source_dir = project_root / 'collections' / 'infra' / 'network'
+    source_dir.mkdir(parents=True)
+    project = Project.objects.create(name='Collection Project', organization=organization, scm_type='', local_path='collection-project')
+
+    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:galaxy_ng_collection_import_plan'),
+            data={'project_id': project.pk, 'collection_path': 'collections/infra/network', 'artifact_dir': 'dist'},
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['status'] == 'bad_request'
+    assert 'galaxy.yml' in response.data['detail']
+
+
+@pytest.mark.django_db
+def test_galaxy_ng_collection_import_plan_rejects_path_traversal(post, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'collection-project'
+    project_root.mkdir()
+    project = Project.objects.create(name='Collection Project', organization=organization, scm_type='', local_path='collection-project')
+
+    with override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test', PROJECTS_ROOT=str(tmp_path)):
+        response = post(
+            reverse('api:galaxy_ng_collection_import_plan'),
+            data={'project_id': project.pk, 'collection_path': '../outside', 'artifact_dir': 'dist'},
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['status'] == 'bad_request'
+    assert 'relative to the selected AWX project' in response.data['detail']
+
+
+@pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
 def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, mocker):
     mocker.patch(

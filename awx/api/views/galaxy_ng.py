@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
 
+import yaml
 from django.utils.translation import gettext_lazy as _
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status as http_status
@@ -206,6 +207,66 @@ def _resolve_project_build_source(project, definition_file, context_path):
         'project_path': str(root),
         'definition_file': definition_file,
         'context': context_path,
+    }, ''
+
+
+def _resolve_project_collection_source(project, collection_path, artifact_dir):
+    try:
+        root = Path(project.get_project_path()).resolve(strict=True)
+    except OSError as exc:
+        return None, _('Could not read AWX Project checkout: %(error)s') % {'error': exc}
+
+    collection_root = (root / collection_path).resolve(strict=False)
+    output_path = (collection_root / artifact_dir).resolve(strict=False)
+    try:
+        collection_root.relative_to(root)
+        output_path.relative_to(root)
+    except ValueError:
+        return None, _('Collection source and artifact paths must stay inside the selected AWX Project checkout.')
+    try:
+        if not collection_root.is_dir():
+            return None, _('Collection path was not found in the selected AWX Project.')
+        galaxy_yml = collection_root / 'galaxy.yml'
+        if not galaxy_yml.is_file():
+            return None, _('Collection path must contain galaxy.yml.')
+        metadata = yaml.safe_load(galaxy_yml.read_text(encoding='utf-8')) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        return None, _('Could not inspect collection source: %(error)s') % {'error': exc}
+    if not isinstance(metadata, dict):
+        return None, _('galaxy.yml must be a YAML mapping.')
+
+    namespace, error = _validate_collection_token(metadata.get('namespace'), _('Namespace'))
+    if error:
+        return None, error
+    name, error = _validate_collection_token(metadata.get('name'), _('Collection name'))
+    if error:
+        return None, error
+    version, error = _validate_collection_version(metadata.get('version'))
+    if error:
+        return None, error
+
+    artifact_name = f'{namespace}-{name}-{version}.tar.gz'
+    artifact_path = output_path / artifact_name
+    return {
+        'project_id': project.pk,
+        'project_name': project.name,
+        'scm_type': project.scm_type or '',
+        'scm_url': project.scm_url or '',
+        'scm_branch': project.scm_branch or '',
+        'scm_revision': project.scm_revision or '',
+        'local_path': project.local_path or '',
+        'project_path': str(root),
+        'collection_path': collection_path,
+        'collection_root': str(collection_root),
+        'galaxy_yml': str(galaxy_yml),
+        'artifact_dir': artifact_dir,
+        'artifact_path': str(artifact_path),
+        'metadata': {
+            'namespace': namespace,
+            'name': name,
+            'version': version,
+            'description': metadata.get('description') or '',
+        },
     }, ''
 
 
@@ -600,6 +661,117 @@ class GalaxyNGExecutionEnvironmentImageBuildPlanView(APIView):
         }
         if runtime == 'docker' and insecure_registry:
             response['notes'].append(_('Docker requires the Galaxy NG registry to be configured as an insecure registry before pushing over HTTP.'))
+        return Response(response)
+
+
+class GalaxyNGCollectionImportPlanView(APIView):
+    name = _('Galaxy NG Collection Import Plan')
+    resource_purpose = 'galaxy ng project-backed collection build and publish command plan'
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, format=None):
+        if not request.user.is_superuser:
+            return Response(
+                {'detail': _('You do not have permission to generate Galaxy NG collection import plans.')},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+        if not module_enabled():
+            return Response(
+                {'detail': _('Galaxy NG module is disabled.'), 'status': 'disabled'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if connection_status() != 'configured':
+            return Response(
+                {'detail': _('Galaxy NG server URL is not configured.'), 'status': connection_status()},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = request.data if isinstance(request.data, dict) else {}
+        project, error = _project_for_build_plan(request.user, data.get('project_id') or data.get('project'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        collection_path, error = _validate_relative_cli_path(data.get('collection_path'), '.', _('Collection path'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        artifact_dir, error = _validate_relative_cli_path(data.get('artifact_dir'), 'dist', _('Artifact output path'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        project_source, error = _resolve_project_collection_source(project, collection_path, artifact_dir)
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        client = GalaxyNGClient()
+        api_root_url = client.url(client.api_path_prefix)
+        ignore_certs = not client.verify_ssl or urlparse(client.server_url).scheme == 'http'
+        metadata = project_source['metadata']
+        collection_ref = f'{metadata["namespace"]}.{metadata["name"]}:{metadata["version"]}'
+        publish_flags = ['--server', shlex.quote(api_root_url), '--api-key', '"$GALAXY_TOKEN"']
+        install_flags = ['--server', shlex.quote(api_root_url)]
+        if ignore_certs:
+            publish_flags.append('--ignore-certs')
+            install_flags.append('--ignore-certs')
+
+        response = {
+            'source': 'galaxy_ng',
+            'project': project_source,
+            'hub': {
+                'server_url': client.server_url,
+                'api_root_url': api_root_url,
+                'verify_ssl': client.verify_ssl,
+                'auth_configured': client.auth_configured,
+            },
+            'collection': {
+                'namespace': metadata['namespace'],
+                'name': metadata['name'],
+                'version': metadata['version'],
+                'fqcn': f'{metadata["namespace"]}.{metadata["name"]}',
+                'reference': collection_ref,
+                'artifact': project_source['artifact_path'],
+            },
+            'commands': [
+                {
+                    'label': _('Build collection artifact'),
+                    'command': '%s && %s'
+                    % (
+                        f'cd {shlex.quote(project_source["collection_root"])}',
+                        ' '.join(
+                            [
+                                'mkdir',
+                                '-p',
+                                shlex.quote(artifact_dir),
+                                '&&',
+                                'ansible-galaxy',
+                                'collection',
+                                'build',
+                                '--output-path',
+                                shlex.quote(artifact_dir),
+                            ]
+                        ),
+                    ),
+                    'working_directory': project_source['collection_root'],
+                },
+                {
+                    'label': _('Publish collection to Galaxy NG'),
+                    'command': ' '.join(['ansible-galaxy', 'collection', 'publish', shlex.quote(project_source['artifact_path']), *publish_flags]),
+                },
+                {
+                    'label': _('Install from Galaxy NG'),
+                    'command': ' '.join(['ansible-galaxy', 'collection', 'install', shlex.quote(collection_ref), *install_flags]),
+                },
+            ],
+            'approval': {
+                'required': 'depends_on_galaxy_ng_settings',
+                'next_url': '/galaxy-ng/collection-approvals',
+                'message': _('If Galaxy NG requires content approval, the uploaded collection will appear in Collection Approvals before it is published.'),
+            },
+            'notes': [
+                _('Set GALAXY_TOKEN to a Galaxy NG token before running the generated publish command; AWX does not print stored secret values.'),
+                _('The selected AWX Project must be synced before generating this plan so the collection source is available on disk.'),
+                _('Execution environment images remain in Project Quay; Galaxy NG stores Ansible collection content.'),
+            ],
+        }
         return Response(response)
 
 
