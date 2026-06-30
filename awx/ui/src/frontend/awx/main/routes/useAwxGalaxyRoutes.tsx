@@ -7,6 +7,7 @@ import { GalaxyNgApiToken } from '../../resources/galaxy/GalaxyNgApiToken';
 import { GalaxyNgOverview } from '../../resources/galaxy/GalaxyNgOverview';
 import { GalaxyNgProjectImports } from '../../resources/galaxy/GalaxyNgProjectImports';
 import { GalaxyNgResourceList } from '../../resources/galaxy/GalaxyNgResourceList';
+import { QuayExecutionEnvironmentImages } from '../../resources/quay/QuayExecutionEnvironmentImages';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxGalaxyRoutes() {
@@ -44,6 +45,18 @@ export function useAwxGalaxyRoutes() {
           element: <GalaxyNgProjectImports />,
         },
         {
+          id: AwxRoute.GalaxyNGExecutionEnvironments,
+          label: t('Execution Environments'),
+          path: 'execution-environments',
+          element: <QuayExecutionEnvironmentImages />,
+        },
+        {
+          id: AwxRoute.GalaxyNGSignatureKeys,
+          label: t('Signature Keys'),
+          path: 'signature-keys',
+          element: <GalaxyNgResourceList resource="signature-keys" />,
+        },
+        {
           id: AwxRoute.GalaxyNGRepositories,
           label: t('Repositories'),
           path: 'repositories',
@@ -56,16 +69,10 @@ export function useAwxGalaxyRoutes() {
           element: <GalaxyNgResourceList resource="remote-registries" />,
         },
         {
-          id: AwxRoute.GalaxyNGRemotes,
-          label: t('Remotes'),
-          path: 'remotes',
-          element: <GalaxyNgResourceList resource="remotes" />,
-        },
-        {
-          id: AwxRoute.GalaxyNGSignatureKeys,
-          label: t('Signature Keys'),
-          path: 'signature-keys',
-          element: <GalaxyNgResourceList resource="signature-keys" />,
+          id: AwxRoute.GalaxyNGTasks,
+          label: t('Task Management'),
+          path: 'tasks',
+          element: <GalaxyNgResourceList resource="tasks" />,
         },
         {
           id: AwxRoute.GalaxyNGCollectionApprovals,
@@ -74,10 +81,10 @@ export function useAwxGalaxyRoutes() {
           element: <GalaxyNgResourceList resource="collection-approvals" />,
         },
         {
-          id: AwxRoute.GalaxyNGTasks,
-          label: t('Task Management'),
-          path: 'tasks',
-          element: <GalaxyNgResourceList resource="tasks" />,
+          id: AwxRoute.GalaxyNGRemotes,
+          label: t('Remotes'),
+          path: 'remotes',
+          element: <GalaxyNgResourceList resource="remotes" />,
         },
         {
           id: AwxRoute.GalaxyNGApiToken,

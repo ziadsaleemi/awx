@@ -148,7 +148,7 @@ awx_quay_postgres_password: "{{ lookup('env', 'QUAY_POSTGRES_PASSWORD') }}"
 awx_quay_database_secret_key: "{{ lookup('env', 'QUAY_DATABASE_SECRET_KEY') }}"
 awx_quay_secret_key: "{{ lookup('env', 'QUAY_SECRET_KEY') }}"
 awx_quay_registry_url: ""
-awx_quay_namespace: awx
+awx_quay_namespace: admin
 awx_quay_api_token: "{{ lookup('env', 'QUAY_API_TOKEN') | default('', true) }}"
 awx_quay_push_username: "{{ lookup('env', 'QUAY_PUSH_USERNAME') | default('', true) }}"
 awx_quay_push_token: "{{ lookup('env', 'QUAY_PUSH_TOKEN') | default('', true) }}"

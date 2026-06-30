@@ -146,7 +146,9 @@ export function QuayExecutionEnvironmentImages() {
   const configured = Boolean(status.data?.configured && status.data.registry);
   const effectiveNamespace = namespace.trim() || status.data?.namespace || '';
   const projectOptions = projects.data?.results ?? [];
-  const shouldLoadTags = configured && Boolean(effectiveNamespace) && Boolean(imageName.trim());
+  const canLoadTags = Boolean(status.data?.auth_configured);
+  const shouldLoadTags =
+    configured && canLoadTags && Boolean(effectiveNamespace) && Boolean(imageName.trim());
   const tags = useGet<AwxItemsResponse<QuayImageTag>>(
     shouldLoadTags ? awxAPI`/quay/tags/` : undefined,
     shouldLoadTags
@@ -495,6 +497,12 @@ export function QuayExecutionEnvironmentImages() {
                   <div style={{ minHeight: 120, display: 'grid', placeItems: 'center' }}>
                     <Spinner size="md" />
                   </div>
+                ) : configured && !canLoadTags ? (
+                  <Alert isInline variant="info" title={t('Project Quay API token is not set.')}>
+                    {t(
+                      'AWX can generate build and push commands with push credentials, but it needs a Project Quay API token before it can list hosted image tags.'
+                    )}
+                  </Alert>
                 ) : tags.error ? (
                   <Alert
                     isInline

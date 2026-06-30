@@ -15,7 +15,7 @@ FEATURE_BUILD_SUPPORT: false
 AUTHENTICATION_TYPE: Database
 SECRET_KEY: {{ awx_quay_secret_key | quote }}
 DATABASE_SECRET_KEY: {{ awx_quay_database_secret_key | quote }}
-DB_URI: {{ ('postgresql://' ~ awx_quay_postgres_user ~ ':' ~ awx_quay_postgres_password ~ '@postgres:5432/' ~ awx_quay_postgres_database) | quote }}
+DB_URI: {{ ('postgresql://' ~ (awx_quay_postgres_user | urlencode | replace('/', '%2F')) ~ ':' ~ (awx_quay_postgres_password | urlencode | replace('/', '%2F')) ~ '@postgres:5432/' ~ (awx_quay_postgres_database | urlencode | replace('/', '%2F'))) | quote }}
 BUILDLOGS_REDIS:
   host: redis
   port: 6379

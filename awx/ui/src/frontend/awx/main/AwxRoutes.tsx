@@ -198,6 +198,7 @@ export enum AwxRoute {
   GalaxyNGOverview = 'awx-galaxy-ng-overview',
   GalaxyNGNamespaces = 'awx-galaxy-ng-namespaces',
   GalaxyNGCollections = 'awx-galaxy-ng-collections',
+  GalaxyNGExecutionEnvironments = 'awx-galaxy-ng-execution-environments',
   GalaxyNGProjectImports = 'awx-galaxy-ng-project-imports',
   GalaxyNGRepositories = 'awx-galaxy-ng-repositories',
   GalaxyNGRemotes = 'awx-galaxy-ng-remotes',

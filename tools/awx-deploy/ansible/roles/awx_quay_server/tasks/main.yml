@@ -85,6 +85,26 @@
     state: restarted
     enabled: true
 
+- name: Ensure Project Quay PostgreSQL pg_trgm extension
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }}
+      exec -T postgres psql -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+  register: awx_quay_pg_trgm
+  retries: 30
+  delay: 5
+  until: awx_quay_pg_trgm.rc == 0
+  changed_when:
+    - "'CREATE EXTENSION' in awx_quay_pg_trgm.stdout"
+    - "'already exists' not in awx_quay_pg_trgm.stderr"
+
+- name: Restart Project Quay application after database extension changes
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }} restart quay"
+  changed_when: true
+  when: awx_quay_pg_trgm is changed
+
 - name: Check firewalld state for Project Quay
   ansible.builtin.command:
     cmd: systemctl is-active firewalld

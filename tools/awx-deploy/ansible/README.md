@@ -238,6 +238,27 @@ are omitted on Kubernetes, the role reuses existing secrets or generates new
 database/signing secrets once. The role can initialize the first Quay admin user
 when `awx_quay_initialize_admin=true` and `QUAY_ADMIN_PASSWORD` is set.
 
+For Docker Desktop or other single-node local Kubernetes testing, expose Quay
+through NodePort so the local AWX dev container can reach it without a
+long-running port-forward:
+
+```bash
+QUAY_ADMIN_PASSWORD=password ansible-playbook -i localhost, -c local \
+  playbooks/deploy-quay-k8s.yml \
+  -e awx_quay_service_type=NodePort \
+  -e awx_quay_postgres_storage_size=2Gi \
+  -e awx_quay_registry_storage_size=5Gi
+
+curl http://127.0.0.1:30881/health/instance
+docker exec tools_awx_1 curl http://host.docker.internal:30881/health/instance
+```
+
+The k3s/k8s role URL-encodes database credentials in Quay's `DB_URI`, creates
+the PostgreSQL `pg_trgm` extension required by Quay, and rolls the Quay pod when
+the generated configuration changes. The default Quay namespace is `admin`
+because the role initializes that first user; override `awx_quay_namespace` when
+you create a dedicated Quay organization such as `awx`.
+
 ## Quick Start: OPA on Server VM
 
 For direct server AWX deployments, put OPA on a dedicated VM in the `awx_opa`

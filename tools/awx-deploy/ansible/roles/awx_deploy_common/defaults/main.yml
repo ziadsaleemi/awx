@@ -191,7 +191,7 @@ awx_quay_k8s_namespace: quay
 awx_quay_name: awx-quay
 awx_quay_image: quay.io/projectquay/quay
 awx_quay_image_tag: latest
-awx_quay_namespace: awx
+awx_quay_namespace: admin
 awx_quay_registry_url: ""
 awx_quay_public_port: 8081
 awx_quay_k8s_url: "http://{{ awx_quay_name }}.{{ awx_quay_k8s_namespace }}.svc.cluster.local:{{ awx_quay_public_port }}"

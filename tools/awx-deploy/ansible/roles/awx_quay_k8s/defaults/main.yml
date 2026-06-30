@@ -11,7 +11,7 @@ awx_quay_admin_password: "{{ lookup('env', 'QUAY_ADMIN_PASSWORD') | default(look
 awx_quay_admin_email: admin@example.com
 awx_quay_initialize_admin: true
 awx_quay_init_image: docker.io/curlimages/curl:8.8.0
-awx_quay_namespace: awx
+awx_quay_namespace: admin
 awx_quay_postgres_database: quay
 awx_quay_postgres_user: quay
 awx_quay_postgres_password: "{{ lookup('env', 'QUAY_POSTGRES_PASSWORD') }}"

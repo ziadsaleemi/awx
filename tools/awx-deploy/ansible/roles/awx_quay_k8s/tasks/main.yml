@@ -132,6 +132,26 @@
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }}-postgres --timeout=300s"
   changed_when: false
 
+- name: Ensure Project Quay PostgreSQL pg_trgm extension
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} exec deployment/{{ awx_quay_name }}-postgres --
+      psql -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
+  register: awx_quay_pg_trgm
+  retries: 30
+  delay: 5
+  until: awx_quay_pg_trgm.rc == 0
+  changed_when:
+    - "'CREATE EXTENSION' in awx_quay_pg_trgm.stdout"
+    - "'already exists' not in awx_quay_pg_trgm.stderr"
+
+- name: Restart Project Quay after database extension changes
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout restart deployment/{{ awx_quay_name }}"
+  changed_when: true
+  when: awx_quay_pg_trgm is changed
+
 - name: Wait for Project Quay Redis deployment
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }}-redis --timeout=180s"

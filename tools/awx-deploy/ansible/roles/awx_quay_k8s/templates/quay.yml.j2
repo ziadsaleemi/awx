@@ -32,7 +32,7 @@ stringData:
     AUTHENTICATION_TYPE: Database
     SECRET_KEY: {{ awx_quay_effective_secret_key | quote }}
     DATABASE_SECRET_KEY: {{ awx_quay_effective_database_secret_key | quote }}
-    DB_URI: {{ ('postgresql://' ~ awx_quay_postgres_user ~ ':' ~ awx_quay_effective_postgres_password ~ '@' ~ awx_quay_name ~ '-postgres:5432/' ~ awx_quay_postgres_database) | quote }}
+    DB_URI: {{ ('postgresql://' ~ (awx_quay_postgres_user | urlencode | replace('/', '%2F')) ~ ':' ~ (awx_quay_effective_postgres_password | urlencode | replace('/', '%2F')) ~ '@' ~ awx_quay_name ~ '-postgres:5432/' ~ (awx_quay_postgres_database | urlencode | replace('/', '%2F'))) | quote }}
     BUILDLOGS_REDIS:
       host: {{ awx_quay_name }}-redis
       port: 6379
@@ -185,6 +185,8 @@ spec:
       app.kubernetes.io/name: {{ awx_quay_name }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ (awx_quay_effective_server_hostname ~ awx_quay_preferred_url_scheme ~ awx_quay_registry_title ~ awx_quay_admin_user ~ awx_quay_admin_password ~ awx_quay_admin_email ~ awx_quay_effective_secret_key ~ awx_quay_effective_database_secret_key ~ awx_quay_postgres_user ~ awx_quay_effective_postgres_password ~ awx_quay_postgres_database ~ awx_quay_public_port | string) | hash('sha256') | quote }}
       labels:
         app.kubernetes.io/name: {{ awx_quay_name }}
     spec:

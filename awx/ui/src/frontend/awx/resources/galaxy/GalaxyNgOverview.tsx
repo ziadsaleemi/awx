@@ -173,9 +173,9 @@ export function GalaxyNgOverview() {
     <PageDashboard sectionStyle={{ padding: 16 }}>
       <PageDashboardCard
         id="galaxy-ng-control-plane"
-        title={t('Galaxy NG')}
+        title={t('Automation Hub')}
         subtitle={t(
-          'Private automation hub for collections, namespaces, repositories, and import tasks'
+          'Galaxy NG private automation hub for collections, namespaces, repositories, and import tasks'
         )}
         width="full"
         height="sm"
@@ -332,8 +332,8 @@ export function GalaxyNgOverview() {
 
       <PageDashboardCard
         id="galaxy-ng-workflows"
-        title={t('Content workflows')}
-        subtitle={t('Use Galaxy NG as AWX private automation hub content source')}
+        title={t('Automation Hub workflows')}
+        subtitle={t('Use Galaxy NG as the AWX private automation hub content source')}
         width="half"
         height="sm"
       >
@@ -355,14 +355,22 @@ export function GalaxyNgOverview() {
               description={t('Build and publish collection artifacts from synced AWX Projects.')}
             />
             <QuickLink
+              to={
+                getPageUrl(AwxRoute.GalaxyNGExecutionEnvironments) ||
+                '/galaxy-ng/execution-environments'
+              }
+              label={t('Execution Environments')}
+              description={t('Build EE images from AWX Projects and host them in Project Quay.')}
+            />
+            <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys) || '/galaxy-ng/signature-keys'}
+              label={t('Signature Keys')}
+              description={t('Review signing services used to verify automation content.')}
+            />
+            <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGRepositories) || '/galaxy-ng/repositories'}
               label={t('Repositories')}
               description={t('Inspect Pulp Ansible repositories backing content distribution.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRemotes) || '/galaxy-ng/remotes'}
-              label={t('Remotes')}
-              description={t('Inspect remote Automation Hub sources used for collection sync.')}
             />
             <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGRemoteRegistries) || '/galaxy-ng/remote-registries'}
@@ -372,9 +380,9 @@ export function GalaxyNgOverview() {
               )}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys) || '/galaxy-ng/signature-keys'}
-              label={t('Signature Keys')}
-              description={t('Review signing services used to verify automation content.')}
+              to={getPageUrl(AwxRoute.GalaxyNGTasks) || '/galaxy-ng/tasks'}
+              label={t('Task Management')}
+              description={t('Track import, sync, copy, and publish task state.')}
             />
             <QuickLink
               to={
@@ -387,22 +395,14 @@ export function GalaxyNgOverview() {
               )}
             />
             <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGTasks) || '/galaxy-ng/tasks'}
-              label={t('Tasks')}
-              description={t('Track import, sync, copy, and publish task state.')}
+              to={getPageUrl(AwxRoute.GalaxyNGRemotes) || '/galaxy-ng/remotes'}
+              label={t('Remotes')}
+              description={t('Inspect remote Automation Hub sources used for collection sync.')}
             />
             <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGApiToken) || '/galaxy-ng/api-token'}
               label={t('API Token')}
               description={t('See how AWX authenticates to Galaxy NG APIs.')}
-            />
-            <QuickLink
-              to={
-                getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) ||
-                '/quay/execution-environment-images'
-              }
-              label={t('Execution Environments')}
-              description={t('Use Project Quay for AWX execution environment image hosting.')}
             />
             <QuickLink
               href={getBrowserUrl(getApiBrowserUrl(data?.api_root_url))}
