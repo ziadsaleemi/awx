@@ -96,6 +96,10 @@ export interface Config {
       enabled: boolean;
       settings_url?: string;
     };
+    quay?: {
+      enabled: boolean;
+      settings_url?: string;
+    };
     settings_url?: string;
   };
 }

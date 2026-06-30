@@ -36,6 +36,10 @@ export interface AwxNavigationCapabilities {
   canManageCloud: boolean;
   canViewPolicy: boolean;
   canManagePolicy: boolean;
+  canViewGalaxy: boolean;
+  canManageGalaxy: boolean;
+  canViewQuay: boolean;
+  canManageQuay: boolean;
   canViewEda: boolean;
   canOperateEda: boolean;
   canManageEda: boolean;
@@ -206,6 +210,16 @@ export function buildAwxNavigationCapabilities(
   const canManageCloud =
     hasAnyPermission(permissionSet, 'cloudproviderconnection', ['add', 'change', 'delete']) ||
     hasAnyPermission(permissionSet, 'cloudproviderstate', ['add', 'change', 'delete']);
+  const canViewGalaxy =
+    canViewProjects || canViewExecutionEnvironments || canViewCredentials || canViewOrganizations;
+  const canManageGalaxy =
+    hasAnyPermission(permissionSet, 'project', ['update', 'add', 'change', 'delete']) ||
+    hasAnyPermission(permissionSet, 'credential', ['add', 'change', 'delete']) ||
+    hasAnyPermission(permissionSet, 'executionenvironment', ['add', 'change', 'delete']);
+  const canViewQuay = canViewExecutionEnvironments || canViewProjects;
+  const canManageQuay =
+    hasAnyPermission(permissionSet, 'executionenvironment', ['add', 'change', 'delete']) ||
+    hasAnyPermission(permissionSet, 'project', ['update', 'add', 'change', 'delete']);
   const canViewPolicy =
     permissionSet.has('awx.view_policyascode') ||
     permissionSet.has('shared.view_policyascode') ||
@@ -271,6 +285,10 @@ export function buildAwxNavigationCapabilities(
     canManageCloud,
     canViewPolicy,
     canManagePolicy,
+    canViewGalaxy,
+    canManageGalaxy,
+    canViewQuay,
+    canManageQuay,
     canViewEda,
     canOperateEda,
     canManageEda,

@@ -27,6 +27,7 @@ import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard
 import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
+import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { AwxRoute } from '../../main/AwxRoutes';
 
 export interface GalaxyNgStatus {
@@ -48,6 +49,10 @@ export interface GalaxyNgStatus {
     namespaces: number;
     collections: number;
     repositories: number;
+    remotes: number;
+    remote_registries: number;
+    signature_keys: number;
+    collection_approvals: number;
     tasks: number;
   };
   pulp_status: Record<string, unknown>;
@@ -130,6 +135,32 @@ function QuickLink(props: { href?: string; to?: string; label: string; descripti
   );
 }
 
+function getBrowserUrl(url?: string) {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (
+      parsed.hostname === 'host.docker.internal' &&
+      (currentHost === 'localhost' || currentHost === '127.0.0.1')
+    ) {
+      parsed.hostname = currentHost;
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function getApiBrowserUrl(apiRootUrl?: string) {
+  if (!apiRootUrl) return undefined;
+  try {
+    return new URL('v3/swagger-ui/', apiRootUrl).toString();
+  } catch {
+    return apiRootUrl;
+  }
+}
+
 export function GalaxyNgOverview() {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
@@ -165,6 +196,21 @@ export function GalaxyNgOverview() {
                 enabled={online}
                 enabledText={t('Hub connected')}
                 disabledText={t('Hub not connected')}
+              />
+            </FlexItem>
+            <FlexItem>
+              <ModuleAIAssistantAction
+                module="galaxy_ng"
+                page={t('Galaxy NG overview')}
+                prompt={t(
+                  'Review this Galaxy NG Automation Hub overview for AWX. Explain connection health, content counts, missing setup, and next actions for collections, repositories, remotes, approvals, signing, and API token access.'
+                )}
+                context={{
+                  configured: data?.configured,
+                  server_url: data?.server_url,
+                  counts: data?.counts,
+                  controller_error: data?.controller_error,
+                }}
               />
             </FlexItem>
           </Flex>
@@ -206,6 +252,26 @@ export function GalaxyNgOverview() {
                     label={t('Repositories')}
                     value={data?.counts.repositories ?? 0}
                     detail={t('Pulp Ansible repositories')}
+                  />
+                  <MetricTile
+                    label={t('Remotes')}
+                    value={data?.counts.remotes ?? 0}
+                    detail={t('External collection sources')}
+                  />
+                  <MetricTile
+                    label={t('Remote registries')}
+                    value={data?.counts.remote_registries ?? 0}
+                    detail={t('External container sources')}
+                  />
+                  <MetricTile
+                    label={t('Signature keys')}
+                    value={data?.counts.signature_keys ?? 0}
+                    detail={t('Signing services')}
+                  />
+                  <MetricTile
+                    label={t('Approvals')}
+                    value={data?.counts.collection_approvals ?? 0}
+                    detail={t('Collections waiting in staging')}
                   />
                   <MetricTile
                     label={t('Import tasks')}
@@ -274,6 +340,11 @@ export function GalaxyNgOverview() {
         <CardBody>
           <Gallery hasGutter minWidths={{ default: '220px' }}>
             <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGNamespaces) || '/galaxy-ng/namespaces'}
+              label={t('Namespaces')}
+              description={t('Review private automation hub namespaces visible to AWX.')}
+            />
+            <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGCollections) || '/galaxy-ng/collections'}
               label={t('Collections')}
               description={t('Review private automation hub collections visible to AWX.')}
@@ -284,14 +355,54 @@ export function GalaxyNgOverview() {
               description={t('Inspect Pulp Ansible repositories backing content distribution.')}
             />
             <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGRemotes) || '/galaxy-ng/remotes'}
+              label={t('Remotes')}
+              description={t('Inspect remote Automation Hub sources used for collection sync.')}
+            />
+            <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGRemoteRegistries) || '/galaxy-ng/remote-registries'}
+              label={t('Remote Registries')}
+              description={t(
+                'Inspect external registries Galaxy NG can pull container content from.'
+              )}
+            />
+            <QuickLink
+              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys) || '/galaxy-ng/signature-keys'}
+              label={t('Signature Keys')}
+              description={t('Review signing services used to verify automation content.')}
+            />
+            <QuickLink
+              to={
+                getPageUrl(AwxRoute.GalaxyNGCollectionApprovals) ||
+                '/galaxy-ng/collection-approvals'
+              }
+              label={t('Collection Approvals')}
+              description={t(
+                'Review staged collection versions before promotion to approved content.'
+              )}
+            />
+            <QuickLink
               to={getPageUrl(AwxRoute.GalaxyNGTasks) || '/galaxy-ng/tasks'}
               label={t('Tasks')}
               description={t('Track import, sync, copy, and publish task state.')}
             />
             <QuickLink
-              href={data?.ui_url}
-              label={t('Open Galaxy NG UI')}
-              description={t('Open the upstream hub UI for actions AWX has not yet implemented.')}
+              to={getPageUrl(AwxRoute.GalaxyNGApiToken) || '/galaxy-ng/api-token'}
+              label={t('API Token')}
+              description={t('See how AWX authenticates to Galaxy NG APIs.')}
+            />
+            <QuickLink
+              to={
+                getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) ||
+                '/quay/execution-environment-images'
+              }
+              label={t('Execution Environment Images')}
+              description={t('Use Project Quay for AWX execution environment image hosting.')}
+            />
+            <QuickLink
+              href={getBrowserUrl(getApiBrowserUrl(data?.api_root_url))}
+              label={t('Open Galaxy NG API')}
+              description={t('Open the live Galaxy NG API browser for direct hub operations.')}
             />
           </Gallery>
         </CardBody>

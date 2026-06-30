@@ -82,7 +82,7 @@ def test_eda_settings_category_is_registered(api_request):
 
 @pytest.mark.django_db
 def test_galaxy_ng_settings_category_is_registered(api_request):
-    response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'galaxy_ng'}))
+    response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'galaxy-ng'}))
     assert response.status_code == 200
     assert response.data['GALAXY_NG_SERVER_URL'] == ''
     assert response.data['GALAXY_NG_AUTH_TOKEN'] == ''
@@ -95,13 +95,27 @@ def test_galaxy_ng_settings_category_is_registered(api_request):
 
 
 @pytest.mark.django_db
+def test_quay_settings_category_is_registered(api_request):
+    response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'quay'}))
+    assert response.status_code == 200
+    assert response.data['QUAY_REGISTRY_URL'] == 'https://quay.io'
+    assert response.data['QUAY_NAMESPACE'] == ''
+    assert response.data['QUAY_API_TOKEN'] == ''
+    assert response.data['QUAY_PUSH_USERNAME'] == ''
+    assert response.data['QUAY_PUSH_TOKEN'] == ''
+    assert response.data['QUAY_VERIFY_SSL'] is True
+    assert response.data['QUAY_REQUEST_TIMEOUT'] == 10
+
+
+@pytest.mark.django_db
 def test_module_settings_category_is_registered(api_request):
     response = api_request('get', reverse('api:setting_singleton_detail', kwargs={'category_slug': 'modules'}))
     assert response.status_code == 200
     assert response.data['MODULE_EDA_ENABLED'] is True
     assert response.data['MODULE_OPA_ENABLED'] is True
     assert response.data['MODULE_GATEKEEPER_ENABLED'] is True
-    assert response.data['MODULE_GALAXY_NG_ENABLED'] is False
+    assert response.data['MODULE_GALAXY_NG_ENABLED'] is True
+    assert response.data['MODULE_QUAY_ENABLED'] is True
 
 
 @pytest.mark.django_db
@@ -111,8 +125,10 @@ def test_config_exposes_module_switches(api_request):
     assert response.data['modules']['eda']['enabled'] is True
     assert response.data['modules']['opa']['enabled'] is True
     assert response.data['modules']['gatekeeper']['enabled'] is True
-    assert response.data['modules']['galaxy_ng']['enabled'] is False
-    assert response.data['modules']['galaxy_ng']['settings_url'].endswith('/api/v2/settings/galaxy_ng/')
+    assert response.data['modules']['galaxy_ng']['enabled'] is True
+    assert response.data['modules']['galaxy_ng']['settings_url'].endswith('/api/v2/settings/galaxy-ng/')
+    assert response.data['modules']['quay']['enabled'] is True
+    assert response.data['modules']['quay']['settings_url'].endswith('/api/v2/settings/quay/')
     assert response.data['modules']['settings_url'].endswith('/api/v2/settings/modules/')
 
 

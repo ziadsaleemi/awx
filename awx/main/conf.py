@@ -246,9 +246,19 @@ register(
 register(
     'MODULE_GALAXY_NG_ENABLED',
     field_class=fields.BooleanField,
-    default=False,
+    default=True,
     label=_('Enable Galaxy NG module'),
     help_text=_('Expose Galaxy NG integration after a Galaxy NG server has been configured.'),
+    category=_('Modules'),
+    category_slug='modules',
+)
+
+register(
+    'MODULE_QUAY_ENABLED',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Enable Project Quay module'),
+    help_text=_('Expose Project Quay integration for execution environment image hosting.'),
     category=_('Modules'),
     category_slug='modules',
 )
@@ -263,7 +273,7 @@ register(
     label=_('Galaxy NG server URL'),
     help_text=_('Base URL for Galaxy NG / private automation hub.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -275,7 +285,7 @@ register(
     label=_('Galaxy NG API token'),
     help_text=_('Bearer token used to read Galaxy NG APIs.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -286,7 +296,7 @@ register(
     label=_('Galaxy NG username'),
     help_text=_('Username used for basic authentication when API token is not set.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -298,7 +308,7 @@ register(
     label=_('Galaxy NG password'),
     help_text=_('Password used for basic authentication when API token is not set.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -308,7 +318,7 @@ register(
     label=_('Verify Galaxy NG SSL'),
     help_text=_('Verify TLS certificates when AWX connects to Galaxy NG.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -319,7 +329,7 @@ register(
     label=_('Galaxy NG request timeout'),
     help_text=_('Maximum seconds to wait when AWX requests Galaxy NG API data.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -330,7 +340,7 @@ register(
     label=_('Galaxy NG API path prefix'),
     help_text=_('Path prefix for Galaxy NG APIs.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
 )
 
 register(
@@ -341,7 +351,87 @@ register(
     label=_('Galaxy NG content path prefix'),
     help_text=_('Path prefix for Galaxy NG/Pulp content downloads.'),
     category=_('Galaxy NG'),
-    category_slug='galaxy_ng',
+    category_slug='galaxy-ng',
+)
+
+register(
+    'QUAY_REGISTRY_URL',
+    field_class=fields.URLField,
+    default='https://quay.io',
+    allow_blank=True,
+    schemes=('http', 'https'),
+    allow_plain_hostname=True,
+    label=_('Project Quay registry URL'),
+    help_text=_('Base URL for the Project Quay registry that hosts AWX execution environment images.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_NAMESPACE',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('Project Quay namespace'),
+    help_text=_('Default Quay organization or user namespace used for AWX execution environment images.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_API_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Project Quay API token'),
+    help_text=_('OAuth access token used by AWX to read Project Quay repositories and tags.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_PUSH_USERNAME',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    label=_('Project Quay push username'),
+    help_text=_('Username or robot account name operators should use when pushing execution environment images.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_PUSH_TOKEN',
+    field_class=fields.CharField,
+    default='',
+    allow_blank=True,
+    encrypted=True,
+    label=_('Project Quay push token'),
+    help_text=_('Encrypted robot account token used for generated push workflows. The token value is never shown in generated commands.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_VERIFY_SSL',
+    field_class=fields.BooleanField,
+    default=True,
+    label=_('Verify Project Quay SSL'),
+    help_text=_('Verify TLS certificates when AWX connects to Project Quay.'),
+    category=_('Project Quay'),
+    category_slug='quay',
+)
+
+register(
+    'QUAY_REQUEST_TIMEOUT',
+    field_class=fields.IntegerField,
+    default=10,
+    min_value=1,
+    label=_('Project Quay request timeout'),
+    help_text=_('Maximum seconds to wait when AWX requests Project Quay API data.'),
+    category=_('Project Quay'),
+    category_slug='quay',
 )
 
 register(

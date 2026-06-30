@@ -3,8 +3,10 @@ import { buildAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { AwxRoute } from './AwxRoutes';
 import {
   filterCatalogRoutesByPermissions,
+  filterGalaxyRoutesByPermissions,
   filterPolicyRoutesByModules,
   filterPolicyRoutesByPermissions,
+  filterQuayRoutesByPermissions,
   profileRoutesOnly,
 } from './useAwxNavigation';
 
@@ -115,6 +117,21 @@ describe('AWX navigation capabilities', () => {
     expect(capabilities.canViewActivityStream).to.equal(true);
   });
 
+  it('maps Automation Hub and Quay permissions to separate module capabilities', () => {
+    const projectCapabilities = buildAwxNavigationCapabilities(['awx.view_project']);
+    const eeCapabilities = buildAwxNavigationCapabilities(['awx.view_executionenvironment']);
+    const eeAdminCapabilities = buildAwxNavigationCapabilities(['awx.change_executionenvironment']);
+
+    expect(projectCapabilities.canViewGalaxy).to.equal(true);
+    expect(projectCapabilities.canViewQuay).to.equal(true);
+    expect(projectCapabilities.canManageGalaxy).to.equal(false);
+    expect(projectCapabilities.canManageQuay).to.equal(false);
+    expect(eeCapabilities.canViewGalaxy).to.equal(true);
+    expect(eeCapabilities.canViewQuay).to.equal(true);
+    expect(eeAdminCapabilities.canManageGalaxy).to.equal(true);
+    expect(eeAdminCapabilities.canManageQuay).to.equal(true);
+  });
+
   it('maps organization membership to users navigation without granting it to catalog roles', () => {
     const catalogCapabilities = buildAwxNavigationCapabilities(['awx.view_catalogitem']);
     const organizationCapabilities = buildAwxNavigationCapabilities([
@@ -215,6 +232,85 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.PolicyAsCodeOpaDecisions,
       AwxRoute.PolicyAsCodeOpaViolations,
       AwxRoute.PolicyAsCodeOpaTester,
+      undefined,
+    ]);
+  });
+
+  it('removes Galaxy NG admin routes when the user cannot manage hub content', () => {
+    const galaxyRoutes: PageNavigationItem = {
+      id: AwxRoute.GalaxyNG,
+      label: 'Galaxy NG',
+      path: 'galaxy-ng',
+      children: [
+        { id: AwxRoute.GalaxyNGOverview, path: 'overview', element: <div /> },
+        { id: AwxRoute.GalaxyNGNamespaces, path: 'namespaces', element: <div /> },
+        { id: AwxRoute.GalaxyNGCollections, path: 'collections', element: <div /> },
+        { id: AwxRoute.GalaxyNGRepositories, path: 'repositories', element: <div /> },
+        { id: AwxRoute.GalaxyNGRemotes, path: 'remotes', element: <div /> },
+        { id: AwxRoute.GalaxyNGRemoteRegistries, path: 'remote-registries', element: <div /> },
+        { id: AwxRoute.GalaxyNGSignatureKeys, path: 'signature-keys', element: <div /> },
+        {
+          id: AwxRoute.GalaxyNGCollectionApprovals,
+          path: 'collection-approvals',
+          element: <div />,
+        },
+        { id: AwxRoute.GalaxyNGTasks, path: 'tasks', element: <div /> },
+        { id: AwxRoute.GalaxyNGApiToken, path: 'api-token', element: <div /> },
+        { path: '', element: <div /> },
+      ],
+    };
+
+    expect(childIds(filterGalaxyRoutesByPermissions(galaxyRoutes, false))).to.deep.equal([
+      AwxRoute.GalaxyNGOverview,
+      AwxRoute.GalaxyNGNamespaces,
+      AwxRoute.GalaxyNGCollections,
+      AwxRoute.GalaxyNGRepositories,
+      AwxRoute.GalaxyNGRemotes,
+      AwxRoute.GalaxyNGRemoteRegistries,
+      AwxRoute.GalaxyNGSignatureKeys,
+      undefined,
+    ]);
+    expect(childIds(filterGalaxyRoutesByPermissions(galaxyRoutes, true))).to.deep.equal([
+      AwxRoute.GalaxyNGOverview,
+      AwxRoute.GalaxyNGNamespaces,
+      AwxRoute.GalaxyNGCollections,
+      AwxRoute.GalaxyNGRepositories,
+      AwxRoute.GalaxyNGRemotes,
+      AwxRoute.GalaxyNGRemoteRegistries,
+      AwxRoute.GalaxyNGSignatureKeys,
+      AwxRoute.GalaxyNGCollectionApprovals,
+      AwxRoute.GalaxyNGTasks,
+      AwxRoute.GalaxyNGApiToken,
+      undefined,
+    ]);
+  });
+
+  it('removes Project Quay build routes when the user cannot manage execution environment images', () => {
+    const quayRoutes: PageNavigationItem = {
+      id: AwxRoute.Quay,
+      label: 'Project Quay',
+      path: 'quay',
+      children: [
+        { id: AwxRoute.QuayOverview, path: 'overview', element: <div /> },
+        { id: AwxRoute.QuayRepositories, path: 'repositories', element: <div /> },
+        {
+          id: AwxRoute.QuayExecutionEnvironmentImages,
+          path: 'execution-environment-images',
+          element: <div />,
+        },
+        { path: '', element: <div /> },
+      ],
+    };
+
+    expect(childIds(filterQuayRoutesByPermissions(quayRoutes, false))).to.deep.equal([
+      AwxRoute.QuayOverview,
+      AwxRoute.QuayRepositories,
+      undefined,
+    ]);
+    expect(childIds(filterQuayRoutesByPermissions(quayRoutes, true))).to.deep.equal([
+      AwxRoute.QuayOverview,
+      AwxRoute.QuayRepositories,
+      AwxRoute.QuayExecutionEnvironmentImages,
       undefined,
     ]);
   });

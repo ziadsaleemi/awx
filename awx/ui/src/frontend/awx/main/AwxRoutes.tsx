@@ -199,7 +199,18 @@ export enum AwxRoute {
   GalaxyNGNamespaces = 'awx-galaxy-ng-namespaces',
   GalaxyNGCollections = 'awx-galaxy-ng-collections',
   GalaxyNGRepositories = 'awx-galaxy-ng-repositories',
+  GalaxyNGRemotes = 'awx-galaxy-ng-remotes',
+  GalaxyNGRemoteRegistries = 'awx-galaxy-ng-remote-registries',
+  GalaxyNGSignatureKeys = 'awx-galaxy-ng-signature-keys',
+  GalaxyNGCollectionApprovals = 'awx-galaxy-ng-collection-approvals',
   GalaxyNGTasks = 'awx-galaxy-ng-tasks',
+  GalaxyNGApiToken = 'awx-galaxy-ng-api-token',
+
+  // Project Quay
+  Quay = 'awx-quay',
+  QuayOverview = 'awx-quay-overview',
+  QuayRepositories = 'awx-quay-repositories',
+  QuayExecutionEnvironmentImages = 'awx-quay-execution-environment-images',
 
   // Cloud
   Cloud = 'awx-cloud',
@@ -395,6 +406,7 @@ export enum AwxRoute {
   SettingsAiAssistant = 'awx-settings-ai-assistant',
   SettingsEda = 'awx-settings-eda',
   SettingsGalaxyNG = 'awx-settings-galaxy-ng',
+  SettingsQuay = 'awx-settings-quay',
   SettingsOther = 'awx-settings-other',
   SettingsAuthentication = 'awx-settings-authentication',
   SettingsCategory = 'awx-settings-category',

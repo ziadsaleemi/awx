@@ -50,6 +50,7 @@ import { useAwxOrganizationRoutes } from './routes/useAwxOrganizationsRoutes';
 import { useAwxProjectRoutes } from './routes/useAwxProjectRoutes';
 import { useAwxPolicyRoutes } from './routes/useAwxPolicyRoutes';
 import { useAwxGalaxyRoutes } from './routes/useAwxGalaxyRoutes';
+import { useAwxQuayRoutes } from './routes/useAwxQuayRoutes';
 import { useAwxSchedulesRoutes } from './routes/useAwxSchedulesRoutes';
 import { useAwxTerraformRoutes } from './routes/useAwxTerraformRoutes';
 import { useAwxCatalogRoutes } from './routes/useAwxCatalogRoutes';
@@ -131,6 +132,40 @@ export function filterPolicyRoutesByPermissions(
         : child
     ),
   };
+}
+
+export function filterGalaxyRoutesByPermissions(
+  galaxyRoutes: PageNavigationItem,
+  canManageGalaxy: boolean
+) {
+  if (canManageGalaxy) {
+    return galaxyRoutes;
+  }
+  return filterRouteChildrenById(
+    galaxyRoutes,
+    new Set([
+      AwxRoute.GalaxyNGOverview,
+      AwxRoute.GalaxyNGNamespaces,
+      AwxRoute.GalaxyNGCollections,
+      AwxRoute.GalaxyNGRepositories,
+      AwxRoute.GalaxyNGRemotes,
+      AwxRoute.GalaxyNGRemoteRegistries,
+      AwxRoute.GalaxyNGSignatureKeys,
+    ])
+  );
+}
+
+export function filterQuayRoutesByPermissions(
+  quayRoutes: PageNavigationItem,
+  canManageQuay: boolean
+) {
+  if (canManageQuay) {
+    return quayRoutes;
+  }
+  return filterRouteChildrenById(
+    quayRoutes,
+    new Set([AwxRoute.QuayOverview, AwxRoute.QuayRepositories])
+  );
 }
 
 export function filterPolicyRoutesByModules(
@@ -241,6 +276,7 @@ export function useAwxNavigation() {
   const awxCloudRoutes = useAwxCloudRoutes();
   const awxPolicyRoutes = useAwxPolicyRoutes();
   const awxGalaxyRoutes = useAwxGalaxyRoutes();
+  const awxQuayRoutes = useAwxQuayRoutes();
   const awxEdaRoutes = useAwxEdaRoutes();
   const awxCredentialRoutes = useAwxCredentialRoutes();
   const awxTemplateRoutes = useAwxTemplateRoutes();
@@ -263,7 +299,8 @@ export function useAwxNavigation() {
   const moduleEdaEnabled = awxConfig?.modules?.eda?.enabled !== false;
   const moduleOpaEnabled = awxConfig?.modules?.opa?.enabled !== false;
   const moduleGatekeeperEnabled = awxConfig?.modules?.gatekeeper?.enabled !== false;
-  const moduleGalaxyNgEnabled = awxConfig?.modules?.galaxy_ng?.enabled === true;
+  const moduleGalaxyNgEnabled = awxConfig?.modules?.galaxy_ng?.enabled !== false;
+  const moduleQuayEnabled = awxConfig?.modules?.quay?.enabled !== false;
   const modulePolicyEnabled = moduleOpaEnabled || moduleGatekeeperEnabled;
   const awxPolicyRoutesForModules = filterPolicyRoutesByModules(
     awxPolicyRoutes,
@@ -696,11 +733,26 @@ export function useAwxNavigation() {
           children: [
             {
               path: 'edit',
-              element: <AwxSettingsCategoryForm categoryId="galaxy_ng" key="galaxy_ng" />,
+              element: <AwxSettingsCategoryForm categoryId="galaxy-ng" key="galaxy-ng" />,
             },
             {
               path: '',
-              element: <AwxSettingsCategoryDetailsPage categoryId="galaxy_ng" key="galaxy_ng" />,
+              element: <AwxSettingsCategoryDetailsPage categoryId="galaxy-ng" key="galaxy-ng" />,
+            },
+          ],
+        },
+        {
+          id: AwxRoute.SettingsQuay,
+          label: t('Project Quay'),
+          path: 'quay',
+          children: [
+            {
+              path: 'edit',
+              element: <AwxSettingsCategoryForm categoryId="quay" key="quay" />,
+            },
+            {
+              path: '',
+              element: <AwxSettingsCategoryDetailsPage categoryId="quay" key="quay" />,
             },
           ],
         },
@@ -802,8 +854,23 @@ export function useAwxNavigation() {
             ),
           ]
         : []),
-      ...(moduleGalaxyNgEnabled && capabilities.canViewCatalog
-        ? [withNavigationDetails(awxGalaxyRoutes, t('Galaxy NG'), t('Private automation hub'))]
+      ...(moduleGalaxyNgEnabled && capabilities.canViewGalaxy
+        ? [
+            withNavigationDetails(
+              filterGalaxyRoutesByPermissions(awxGalaxyRoutes, capabilities.canManageGalaxy),
+              t('Galaxy NG'),
+              t('Private automation hub')
+            ),
+          ]
+        : []),
+      ...(moduleQuayEnabled && capabilities.canViewQuay
+        ? [
+            withNavigationDetails(
+              filterQuayRoutesByPermissions(awxQuayRoutes, capabilities.canManageQuay),
+              t('Project Quay'),
+              t('Execution environment registry')
+            ),
+          ]
         : []),
       ...(capabilities.canViewCloud
         ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
@@ -874,6 +941,15 @@ export function useAwxNavigation() {
     withNavigationDetails(awxCatalogRoutes, t('Automation Content'), t('Service Catalog')),
     ...(moduleGalaxyNgEnabled
       ? [withNavigationDetails(awxGalaxyRoutes, t('Galaxy NG'), t('Private automation hub'))]
+      : []),
+    ...(moduleQuayEnabled
+      ? [
+          withNavigationDetails(
+            awxQuayRoutes,
+            t('Project Quay'),
+            t('Execution environment registry')
+          ),
+        ]
       : []),
     ...(activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]

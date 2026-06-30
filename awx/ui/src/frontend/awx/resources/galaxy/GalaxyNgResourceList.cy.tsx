@@ -14,12 +14,16 @@ const status = {
   request_timeout: 10,
   api_path_prefix: '/api/galaxy/',
   content_path_prefix: '/pulp/content/',
-  settings_url: '/api/v2/settings/galaxy_ng/',
+  settings_url: '/api/v2/settings/galaxy-ng/',
   message: 'Galaxy NG server URL is configured.',
   counts: {
     namespaces: 1,
     collections: 1,
     repositories: 1,
+    remotes: 1,
+    remote_registries: 1,
+    signature_keys: 1,
+    collection_approvals: 1,
     tasks: 1,
   },
   pulp_status: {},
@@ -98,5 +102,95 @@ describe('GalaxyNgResourceList', () => {
       .its('request.body')
       .should('deep.equal', { repository: 'published' });
     cy.get('[data-cy="alert-toaster"]').should('contain', 'sync-task-1');
+  });
+
+  it('renders Galaxy NG remotes', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/galaxy_ng/remotes/`}*`, {
+      count: 1,
+      next: null,
+      previous: null,
+      source: 'galaxy_ng',
+      resource: 'remotes',
+      controller_error: '',
+      results: [
+        {
+          id: 1,
+          name: 'community',
+          url: 'https://galaxy.ansible.com/api/',
+          policy: 'immediate',
+        },
+      ],
+    }).as('remotes');
+
+    cy.mount(<GalaxyNgResourceList resource="remotes" />);
+    cy.wait('@status');
+    cy.wait('@remotes');
+
+    cy.get('table[aria-label="Simple table"]').should('contain', 'community');
+    cy.get('table[aria-label="Simple table"]').should('contain', 'https://galaxy.ansible.com/api/');
+    cy.get('table[aria-label="Simple table"]').should('contain', 'immediate');
+  });
+
+  it('renders Galaxy NG remote registries', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/galaxy_ng/remote-registries/`}*`, {
+      count: 1,
+      next: null,
+      previous: null,
+      source: 'galaxy_ng',
+      resource: 'remote-registries',
+      controller_error: '',
+      results: [
+        {
+          id: 1,
+          name: 'quay-remote',
+          url: 'https://quay.io',
+          tls_validation: true,
+          rate_limit: 8,
+        },
+      ],
+    }).as('remoteRegistries');
+
+    cy.mount(<GalaxyNgResourceList resource="remote-registries" />);
+    cy.wait('@status');
+    cy.wait('@remoteRegistries');
+
+    cy.get('table[aria-label="Simple table"]').should('contain', 'quay-remote');
+    cy.get('table[aria-label="Simple table"]').should('contain', 'https://quay.io');
+    cy.get('table[aria-label="Simple table"]').should('contain', 'Enabled');
+  });
+
+  it('renders Galaxy NG collection approvals from staging', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/galaxy_ng/collection-approvals/`}*`, {
+      count: 1,
+      next: null,
+      previous: null,
+      source: 'galaxy_ng',
+      resource: 'collection-approvals',
+      controller_error: '',
+      results: [
+        {
+          id: 1,
+          namespace: 'infra',
+          name: 'network',
+          version: '1.0.0',
+          sign_state: 'unsigned',
+          repository_list: ['staging'],
+        },
+      ],
+    }).as('collectionApprovals');
+
+    cy.mount(<GalaxyNgResourceList resource="collection-approvals" />);
+    cy.wait('@status');
+    cy.wait('@collectionApprovals');
+
+    cy.get('table[aria-label="Simple table"]').should('contain', 'infra.network');
+    cy.get('table[aria-label="Simple table"]').should('contain', '1.0.0');
+    cy.get('table[aria-label="Simple table"]').should('contain', 'unsigned');
   });
 });

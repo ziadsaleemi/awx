@@ -107,8 +107,11 @@ class GalaxyNGClient:
     def pulp_status(self):
         return self.get(f'{self.api_path_prefix.rstrip("/")}/pulp/api/v3/status/')
 
-    def count(self, path):
-        data = self.get(path, params={'limit': 1})
+    def count(self, path, params=None):
+        count_params = {'limit': 1}
+        if params:
+            count_params.update(params)
+        data = self.get(path, params=count_params)
         if isinstance(data, dict):
             if isinstance(data.get('count'), int):
                 return data['count']

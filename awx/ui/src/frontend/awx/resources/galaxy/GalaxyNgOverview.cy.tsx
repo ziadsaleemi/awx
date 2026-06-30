@@ -18,12 +18,16 @@ const status = {
   request_timeout: 10,
   api_path_prefix: '/api/galaxy/',
   content_path_prefix: '/pulp/content/',
-  settings_url: '/api/v2/settings/galaxy_ng/',
+  settings_url: '/api/v2/settings/galaxy-ng/',
   message: 'Galaxy NG server URL is configured.',
   counts: {
     namespaces: 2,
     collections: 12,
     repositories: 3,
+    remotes: 2,
+    remote_registries: 1,
+    signature_keys: 1,
+    collection_approvals: 2,
     tasks: 4,
   },
   pulp_status: {
@@ -44,6 +48,21 @@ function SeedNavigation(props: { children: ReactNode }) {
       {
         id: AwxRoute.Projects,
         path: 'projects',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGRemoteRegistries,
+        path: 'galaxy-ng/remote-registries',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.GalaxyNGCollectionApprovals,
+        path: 'galaxy-ng/collection-approvals',
+        element: <div />,
+      } as PageNavigationItem,
+      {
+        id: AwxRoute.QuayExecutionEnvironmentImages,
+        path: 'quay/execution-environment-images',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -72,7 +91,37 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-control-plane').should('contain', 'Hub connected');
     cy.get('#galaxy-ng-control-plane').should('contain', '12');
     cy.get('#galaxy-ng-connection').should('contain', 'https://hub.example.test');
-    cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG UI');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Remotes');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Remote Registries');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Signature Keys');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Collection Approvals');
+    cy.get('#galaxy-ng-workflows').should('contain', 'API Token');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Execution Environment Images');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG API');
     cy.get('#galaxy-ng-status').should('contain', 'Pulp API responded.');
+  });
+
+  it('uses a browser-safe URL for local Docker Desktop Galaxy NG links', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/galaxy_ng/status/`, {
+      ...status,
+      server_url: 'http://host.docker.internal:5001',
+      api_root_url: 'http://host.docker.internal:5001/api/galaxy/',
+      content_url: 'http://host.docker.internal:5001/pulp/content/',
+      ui_url: 'http://host.docker.internal:5001/ui/',
+    }).as('status');
+
+    cy.mount(
+      <SeedNavigation>
+        <GalaxyNgOverview />
+      </SeedNavigation>
+    );
+    cy.wait('@status');
+
+    cy.contains('#galaxy-ng-workflows a', 'Open Galaxy NG API').should(
+      'have.attr',
+      'href',
+      'http://localhost:5001/api/galaxy/v3/swagger-ui/'
+    );
   });
 });

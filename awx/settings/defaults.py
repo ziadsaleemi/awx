@@ -1247,7 +1247,8 @@ INDIRECT_HOST_AUDIT_RECORD_MAX_AGE_DAYS = 7
 MODULE_EDA_ENABLED = True
 MODULE_OPA_ENABLED = True
 MODULE_GATEKEEPER_ENABLED = True
-MODULE_GALAXY_NG_ENABLED = False
+MODULE_GALAXY_NG_ENABLED = True
+MODULE_QUAY_ENABLED = True
 
 # Optional Galaxy NG / private automation hub integration.
 GALAXY_NG_SERVER_URL = ''
@@ -1258,6 +1259,15 @@ GALAXY_NG_VERIFY_SSL = True
 GALAXY_NG_REQUEST_TIMEOUT = 10
 GALAXY_NG_API_PATH_PREFIX = '/api/galaxy/'
 GALAXY_NG_CONTENT_PATH_PREFIX = '/pulp/content/'
+
+# Optional Project Quay / execution environment registry integration.
+QUAY_REGISTRY_URL = 'https://quay.io'
+QUAY_NAMESPACE = ''
+QUAY_API_TOKEN = ''
+QUAY_PUSH_USERNAME = ''
+QUAY_PUSH_TOKEN = ''
+QUAY_VERIFY_SSL = True
+QUAY_REQUEST_TIMEOUT = 10
 
 # setting for Policy as Code feature
 FEATURE_POLICY_AS_CODE_ENABLED = False

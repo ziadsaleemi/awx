@@ -20,11 +20,20 @@ import { StatusCell } from '../../../common/Status';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
+import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxView } from '../../common/useAwxView';
 import { GalaxyNgStatus } from './GalaxyNgOverview';
 
-export type GalaxyNgResourceKind = 'namespaces' | 'collections' | 'repositories' | 'tasks';
+export type GalaxyNgResourceKind =
+  | 'namespaces'
+  | 'collections'
+  | 'repositories'
+  | 'remotes'
+  | 'remote-registries'
+  | 'signature-keys'
+  | 'collection-approvals'
+  | 'tasks';
 
 interface GalaxyNgRecord {
   id: number;
@@ -39,8 +48,23 @@ interface GalaxyNgRecord {
   latest_version?: {
     version?: string;
   };
+  metadata?: {
+    description?: string;
+    tags?: string[];
+    signatures?: unknown[];
+  };
+  contents?: unknown[];
+  repository_list?: string[];
+  sign_state?: string;
   repository?: string;
   remote?: string;
+  url?: string;
+  policy?: string;
+  tls_validation?: boolean;
+  rate_limit?: number;
+  download_concurrency?: number;
+  script?: string;
+  pubkey_fingerprint?: string;
   created_at?: string;
   updated_at?: string;
   pulp_created?: string;
@@ -64,6 +88,10 @@ const resourceTitles: Record<GalaxyNgResourceKind, string> = {
   namespaces: 'Namespaces',
   collections: 'Collections',
   repositories: 'Repositories',
+  remotes: 'Remotes',
+  'remote-registries': 'Remote Registries',
+  'signature-keys': 'Signature Keys',
+  'collection-approvals': 'Collection Approvals',
   tasks: 'Tasks',
 };
 
@@ -71,6 +99,11 @@ const resourceDescriptions: Record<GalaxyNgResourceKind, string> = {
   namespaces: 'Collection namespaces available in the private automation hub.',
   collections: 'Collections available to AWX project updates and execution environments.',
   repositories: 'Pulp Ansible repositories backing Galaxy NG content distribution.',
+  remotes: 'Remote Automation Hub sources Galaxy NG can sync collections from.',
+  'remote-registries':
+    'Remote container registries Galaxy NG can sync execution environment content from.',
+  'signature-keys': 'Signing services used to sign and verify Automation Hub content.',
+  'collection-approvals': 'Staged collection versions waiting for review before promotion.',
   tasks: 'Galaxy NG and Pulp import, sync, copy, and publish tasks.',
 };
 
@@ -179,7 +212,25 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
 
   return (
     <PageLayout>
-      <PageHeader title={title} description={description} />
+      <PageHeader
+        title={title}
+        description={description}
+        headerActions={
+          <ModuleAIAssistantAction
+            module="galaxy_ng"
+            page={title}
+            prompt={t(
+              'Help me review this Galaxy NG resource page for AWX. Explain what this resource does, what looks missing or unhealthy, and what actions should be taken next.'
+            )}
+            context={{
+              resource,
+              configured: status.data?.configured,
+              server_url: status.data?.server_url,
+              controller_error: status.data?.controller_error,
+            }}
+          />
+        }
+      />
       {status.data && !status.data.configured ? (
         <Alert
           isInline
@@ -260,6 +311,117 @@ function useGalaxyNgColumns(resource: GalaxyNgResourceKind): ITableColumn<Galaxy
           header: t('Updated'),
           cell: (record) => <DateTimeCell value={getDate(record)} />,
           sort: 'pulp_last_updated',
+        },
+      ];
+    }
+
+    if (resource === 'remotes') {
+      return [
+        {
+          header: t('Name'),
+          cell: (record) => <TextCell text={record.name || record.pulp_href || '-'} />,
+          sort: 'name',
+          card: 'name',
+          list: 'name',
+        },
+        {
+          header: t('URL'),
+          cell: (record) => <TextCell text={record.url || '-'} />,
+        },
+        {
+          header: t('Policy'),
+          cell: (record) => <TextCell text={record.policy || '-'} />,
+        },
+        {
+          header: t('Updated'),
+          cell: (record) => <DateTimeCell value={getDate(record)} />,
+          sort: 'pulp_last_updated',
+        },
+      ];
+    }
+
+    if (resource === 'remote-registries') {
+      return [
+        {
+          header: t('Name'),
+          cell: (record) => <TextCell text={record.name || record.pulp_href || '-'} />,
+          sort: 'name',
+          card: 'name',
+          list: 'name',
+        },
+        {
+          header: t('URL'),
+          cell: (record) => <TextCell text={record.url || '-'} />,
+        },
+        {
+          header: t('TLS validation'),
+          cell: (record) => (
+            <TextCell text={record.tls_validation === false ? t('Disabled') : t('Enabled')} />
+          ),
+        },
+        {
+          header: t('Rate limit'),
+          cell: (record) => <TextCell text={record.rate_limit ? String(record.rate_limit) : '-'} />,
+        },
+        {
+          header: t('Updated'),
+          cell: (record) => <DateTimeCell value={getDate(record)} />,
+          sort: 'updated_at',
+        },
+      ];
+    }
+
+    if (resource === 'signature-keys') {
+      return [
+        {
+          header: t('Name'),
+          cell: (record) => <TextCell text={record.name || record.pulp_href || '-'} />,
+          sort: 'name',
+          card: 'name',
+          list: 'name',
+        },
+        {
+          header: t('Fingerprint'),
+          cell: (record) => <TextCell text={record.pubkey_fingerprint || '-'} />,
+        },
+        {
+          header: t('Script'),
+          cell: (record) => <TextCell text={record.script || '-'} />,
+        },
+        {
+          header: t('Updated'),
+          cell: (record) => <DateTimeCell value={getDate(record)} />,
+          sort: 'pulp_last_updated',
+        },
+      ];
+    }
+
+    if (resource === 'collection-approvals') {
+      return [
+        {
+          header: t('Collection'),
+          cell: (record) => <TextCell text={collectionName(record)} />,
+          sort: 'name',
+          card: 'name',
+          list: 'name',
+        },
+        {
+          header: t('Version'),
+          cell: (record) => <TextCell text={record.version || '-'} />,
+          sort: 'version',
+        },
+        {
+          header: t('Signature'),
+          cell: (record) => <StatusCell status={record.sign_state || 'unknown'} />,
+        },
+        {
+          header: t('Repositories'),
+          cell: (record) => <TextCell text={record.repository_list?.join(', ') || 'staging'} />,
+        },
+        {
+          header: t('Created'),
+          cell: (record) => <DateTimeCell value={getDate(record)} />,
+          sort: 'pulp_created',
         },
       ];
     }

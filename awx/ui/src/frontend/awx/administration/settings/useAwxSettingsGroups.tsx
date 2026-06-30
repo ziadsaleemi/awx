@@ -117,6 +117,20 @@ export function useAwxSettingsGroupsBase() {
         categories: [],
       },
       {
+        id: 'galaxy-ng',
+        name: t('Galaxy NG'),
+        description: t('Configure Automation Hub content API access for AWX.'),
+        defaultSlugs: ['galaxy-ng'],
+        categories: [],
+      },
+      {
+        id: 'quay',
+        name: t('Project Quay'),
+        description: t('Configure execution environment image registry access for AWX.'),
+        defaultSlugs: ['quay'],
+        categories: [],
+      },
+      {
         id: 'other',
         name: t('Other'),
         categories: [],

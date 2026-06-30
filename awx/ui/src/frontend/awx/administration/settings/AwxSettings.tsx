@@ -36,6 +36,8 @@ const settingsGroupRoutes: Partial<Record<string, AwxRoute>> = {
   gatekeeper: AwxRoute.SettingsGatekeeper,
   'ai-assistant': AwxRoute.SettingsAiAssistant,
   eda: AwxRoute.SettingsEda,
+  'galaxy-ng': AwxRoute.SettingsGalaxyNG,
+  quay: AwxRoute.SettingsQuay,
 };
 
 const SettingsCardsSection = styled(PageSection)`

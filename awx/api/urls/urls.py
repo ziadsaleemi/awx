@@ -85,6 +85,7 @@ from .catalog import catalog_item_urls, catalog_deployment_urls, catalog_cloud_u
 from .ai import ai_urls
 from .eda import eda_urls
 from .galaxy_ng import galaxy_ng_urls
+from .quay import quay_urls
 from .mcp import mcp_urls
 from .opa import opa_urls
 from .external_automation import external_automation_urls
@@ -164,6 +165,7 @@ v2_urls = [
     re_path(r'^ai/', include(ai_urls)),
     re_path(r'^eda/', include(eda_urls)),
     re_path(r'^galaxy_ng/', include(galaxy_ng_urls)),
+    re_path(r'^quay/', include(quay_urls)),
     re_path(r'^mcp/', include(mcp_urls)),
     re_path(r'^opa/', include(opa_urls)),
     re_path(r'^external_automation/', include(external_automation_urls)),

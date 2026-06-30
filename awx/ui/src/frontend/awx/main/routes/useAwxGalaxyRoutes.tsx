@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
+import { GalaxyNgApiToken } from '../../resources/galaxy/GalaxyNgApiToken';
 import { GalaxyNgOverview } from '../../resources/galaxy/GalaxyNgOverview';
 import { GalaxyNgResourceList } from '../../resources/galaxy/GalaxyNgResourceList';
 import { AwxRoute } from '../AwxRoutes';
@@ -42,10 +43,40 @@ export function useAwxGalaxyRoutes() {
           element: <GalaxyNgResourceList resource="repositories" />,
         },
         {
+          id: AwxRoute.GalaxyNGRemotes,
+          label: t('Remotes'),
+          path: 'remotes',
+          element: <GalaxyNgResourceList resource="remotes" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGRemoteRegistries,
+          label: t('Remote Registries'),
+          path: 'remote-registries',
+          element: <GalaxyNgResourceList resource="remote-registries" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGSignatureKeys,
+          label: t('Signature Keys'),
+          path: 'signature-keys',
+          element: <GalaxyNgResourceList resource="signature-keys" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGCollectionApprovals,
+          label: t('Collection Approvals'),
+          path: 'collection-approvals',
+          element: <GalaxyNgResourceList resource="collection-approvals" />,
+        },
+        {
           id: AwxRoute.GalaxyNGTasks,
-          label: t('Tasks'),
+          label: t('Task Management'),
           path: 'tasks',
           element: <GalaxyNgResourceList resource="tasks" />,
+        },
+        {
+          id: AwxRoute.GalaxyNGApiToken,
+          label: t('API Token'),
+          path: 'api-token',
+          element: <GalaxyNgApiToken />,
         },
         {
           path: '',
