@@ -103,6 +103,26 @@ GALAXY_NG_API_PATH_PREFIX = {{ awx_galaxy_ng_api_path_prefix | to_json }}
 GALAXY_NG_CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }}
 {% endif %}
 
+MODULE_QUAY_ENABLED = {{ 'True' if awx_quay_module_enabled | bool else 'False' }}
+{% if awx_quay_configure_awx_settings | bool %}
+{% set effective_quay_registry_url = awx_quay_registry_url %}
+{% if not effective_quay_registry_url %}
+{% if awx_deploy_method in ['k8s', 'k3s'] %}
+{% set effective_quay_registry_url = awx_quay_k8s_url %}
+{% elif awx_quay_server_inventory_host %}
+{% set quay_host = hostvars.get(awx_quay_server_inventory_host, {}).get('ansible_host', awx_quay_server_inventory_host) %}
+{% set effective_quay_registry_url = 'http://' ~ quay_host ~ ':' ~ awx_quay_public_port %}
+{% endif %}
+{% endif %}
+QUAY_REGISTRY_URL = {{ effective_quay_registry_url | to_json }}
+QUAY_NAMESPACE = {{ awx_quay_namespace | to_json }}
+QUAY_API_TOKEN = {{ awx_quay_api_token | to_json }}
+QUAY_PUSH_USERNAME = {{ awx_quay_push_username | to_json }}
+QUAY_PUSH_TOKEN = {{ awx_quay_push_token | to_json }}
+QUAY_VERIFY_SSL = {{ 'True' if awx_quay_verify_ssl | bool else 'False' }}
+QUAY_REQUEST_TIMEOUT = {{ awx_quay_request_timeout | int }}
+{% endif %}
+
 MODULE_OPA_ENABLED = {{ 'True' if awx_opa_module_enabled | bool else 'False' }}
 MODULE_GATEKEEPER_ENABLED = {{ 'True' if awx_gatekeeper_module_enabled | bool else 'False' }}
 {% if awx_opa_configure_awx_settings | bool %}

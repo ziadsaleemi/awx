@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: AWX
+  description: Deploy Project Quay as the AWX execution environment image registry
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

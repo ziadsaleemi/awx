@@ -1,0 +1,294 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ awx_quay_name }}-secret
+  namespace: {{ awx_quay_k8s_namespace }}
+type: Opaque
+stringData:
+  POSTGRES_USER: {{ awx_quay_postgres_user | quote }}
+  POSTGRES_PASSWORD: {{ awx_quay_effective_postgres_password | quote }}
+  POSTGRES_DB: {{ awx_quay_postgres_database | quote }}
+  ADMIN_USERNAME: {{ awx_quay_admin_user | quote }}
+  ADMIN_PASSWORD: {{ awx_quay_admin_password | quote }}
+  ADMIN_EMAIL: {{ awx_quay_admin_email | quote }}
+  DATABASE_SECRET_KEY: {{ awx_quay_effective_database_secret_key | quote }}
+  SECRET_KEY: {{ awx_quay_effective_secret_key | quote }}
+  config.yaml: |
+    SERVER_HOSTNAME: {{ awx_quay_effective_server_hostname | quote }}
+    PREFERRED_URL_SCHEME: {{ awx_quay_preferred_url_scheme | quote }}
+    REGISTRY_TITLE: {{ awx_quay_registry_title | quote }}
+    SETUP_COMPLETE: true
+    SUPER_USERS:
+      - {{ awx_quay_admin_user | quote }}
+    FEATURE_USER_CREATION: true
+    FEATURE_USER_INITIALIZE: true
+    FEATURE_DIRECT_LOGIN: true
+    BROWSER_API_CALLS_XHR_ONLY: false
+    FEATURE_MAILING: false
+    FEATURE_PROXY_STORAGE: false
+    FEATURE_REPO_MIRROR: false
+    FEATURE_BUILD_SUPPORT: false
+    AUTHENTICATION_TYPE: Database
+    SECRET_KEY: {{ awx_quay_effective_secret_key | quote }}
+    DATABASE_SECRET_KEY: {{ awx_quay_effective_database_secret_key | quote }}
+    DB_URI: {{ ('postgresql://' ~ awx_quay_postgres_user ~ ':' ~ awx_quay_effective_postgres_password ~ '@' ~ awx_quay_name ~ '-postgres:5432/' ~ awx_quay_postgres_database) | quote }}
+    BUILDLOGS_REDIS:
+      host: {{ awx_quay_name }}-redis
+      port: 6379
+      ssl: false
+    USER_EVENTS_REDIS:
+      host: {{ awx_quay_name }}-redis
+      port: 6379
+      ssl: false
+    DISTRIBUTED_STORAGE_CONFIG:
+      default:
+        - LocalStorage
+        - storage_path: /datastorage/registry
+    DISTRIBUTED_STORAGE_DEFAULT_LOCATIONS: []
+    DISTRIBUTED_STORAGE_PREFERENCE:
+      - default
+    USERFILES_LOCATION: default
+    DEFAULT_TAG_EXPIRATION: 2w
+    CREATE_PRIVATE_REPO_ON_PUSH: true
+    ALLOW_PULLS_WITHOUT_STRICT_LOGGING: true
+    LOGS_MODEL: database
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ awx_quay_name }}-postgres
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  accessModes:
+    - {{ awx_quay_postgres_access_mode }}
+{% if awx_quay_storage_class | length > 0 %}
+  storageClassName: {{ awx_quay_storage_class | quote }}
+{% endif %}
+  resources:
+    requests:
+      storage: {{ awx_quay_postgres_storage_size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ awx_quay_name }}-storage
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  accessModes:
+    - {{ awx_quay_storage_access_mode }}
+{% if awx_quay_storage_class | length > 0 %}
+  storageClassName: {{ awx_quay_storage_class | quote }}
+{% endif %}
+  resources:
+    requests:
+      storage: {{ awx_quay_registry_storage_size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_quay_name }}-postgres
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_quay_name }}-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_quay_name }}-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ awx_quay_postgres_image }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: POSTGRES_DB
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ awx_quay_name }}-postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_quay_name }}-postgres
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app.kubernetes.io/name: {{ awx_quay_name }}-postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_quay_name }}-redis
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_quay_name }}-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_quay_name }}-redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ awx_quay_redis_image }}
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_quay_name }}-redis
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    app.kubernetes.io/name: {{ awx_quay_name }}-redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_quay_name }}
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  replicas: {{ awx_quay_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_quay_name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_quay_name }}
+    spec:
+      containers:
+        - name: quay
+          image: {{ awx_quay_image }}:{{ awx_quay_image_tag }}
+          ports:
+            - containerPort: {{ awx_quay_container_port }}
+          volumeMounts:
+            - name: config
+              mountPath: /conf/stack/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: storage
+              mountPath: /datastorage
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ awx_quay_name }}-secret
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ awx_quay_name }}-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_quay_name }}
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  type: {{ awx_quay_service_type }}
+  ports:
+    - name: http
+      port: {{ awx_quay_public_port }}
+      targetPort: {{ awx_quay_container_port }}
+{% if awx_quay_service_type == 'NodePort' and (awx_quay_node_port | int) > 0 %}
+      nodePort: {{ awx_quay_node_port }}
+{% endif %}
+  selector:
+    app.kubernetes.io/name: {{ awx_quay_name }}
+{% if awx_quay_initialize_admin | bool and awx_quay_admin_password | length > 0 %}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ awx_quay_name }}-initialize-admin
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: initialize-admin
+          image: {{ awx_quay_init_image }}
+          env:
+            - name: QUAY_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: ADMIN_USERNAME
+            - name: QUAY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: ADMIN_PASSWORD
+            - name: QUAY_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ awx_quay_name }}-secret
+                  key: ADMIN_EMAIL
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              payload=$(printf '{"username":"%s","password":"%s","email":"%s","access_token":true}' "$QUAY_ADMIN_USERNAME" "$QUAY_ADMIN_PASSWORD" "$QUAY_ADMIN_EMAIL")
+              attempt=1
+              while [ "$attempt" -le 72 ]; do
+                code=$(curl -k -sS -o /tmp/quay-initialize-admin.json -w "%{http_code}" -H "Content-Type: application/json" -X POST --data "$payload" "http://{{ awx_quay_name }}:{{ awx_quay_public_port }}/api/v1/user/initialize" || true)
+                if [ "$code" = "200" ] || [ "$code" = "400" ]; then
+                  exit 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 5
+              done
+              exit 1
+{% endif %}
+{% if awx_quay_ingress_enabled | bool %}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ awx_quay_name }}
+  namespace: {{ awx_quay_k8s_namespace }}
+spec:
+  rules:
+    - host: {{ awx_quay_ingress_host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ awx_quay_name }}
+                port:
+                  number: {{ awx_quay_public_port }}
+{% endif %}

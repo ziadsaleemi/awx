@@ -12,3 +12,5 @@
       when: awx_eda_enabled | default(false) | bool
     - role: awx_galaxy_ng_k8s
       when: awx_galaxy_ng_enabled | default(false) | bool
+    - role: awx_quay_k8s
+      when: awx_quay_enabled | default(false) | bool

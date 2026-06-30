@@ -69,7 +69,7 @@ describe('QuayOverview', () => {
     cy.get('#quay-control-plane').should('contain', '2');
     cy.get('#quay-connection').should('contain', 'https://quay.example.test');
     cy.get('#quay-workflows').should('contain', 'Repositories');
-    cy.get('#quay-workflows').should('contain', 'Execution environment images');
+    cy.get('#quay-workflows').should('contain', 'Execution Environments');
     cy.get('#quay-status').should('contain', 'Project Quay is ready');
   });
 });

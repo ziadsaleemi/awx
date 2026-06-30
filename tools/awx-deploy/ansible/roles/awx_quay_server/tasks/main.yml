@@ -1,0 +1,151 @@
+---
+- name: Validate Project Quay server secrets
+  ansible.builtin.assert:
+    that:
+      - awx_quay_postgres_password | length > 0
+      - awx_quay_database_secret_key | length > 0
+      - awx_quay_secret_key | length > 0
+    fail_msg: >-
+      Project Quay server deploy needs QUAY_POSTGRES_PASSWORD,
+      QUAY_DATABASE_SECRET_KEY, and QUAY_SECRET_KEY.
+  no_log: true
+
+- name: Install Project Quay server host packages
+  ansible.builtin.package:
+    name: "{{ awx_quay_packages }}"
+    state: present
+  when: awx_quay_install_packages | bool
+
+- name: Enable Docker for Project Quay compose
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: "'docker' in awx_quay_compose_command"
+
+- name: Resolve Project Quay public URL
+  ansible.builtin.set_fact:
+    awx_quay_effective_public_url: >-
+      {{ awx_quay_public_url
+        if awx_quay_public_url | length > 0
+        else awx_quay_preferred_url_scheme ~ '://' ~ (ansible_host | default(inventory_hostname)) ~ ':' ~ (awx_quay_public_port | string) }}
+
+- name: Resolve Project Quay server hostname
+  ansible.builtin.set_fact:
+    awx_quay_effective_server_hostname: "{{ awx_quay_effective_public_url | regex_replace('^https?://', '') | regex_replace('/.*$', '') }}"
+
+- name: Create Project Quay directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ awx_quay_base_dir }}"
+    - "{{ awx_quay_config_dir }}"
+    - "{{ awx_quay_data_dir }}"
+    - "{{ awx_quay_data_dir }}/postgres"
+    - "{{ awx_quay_data_dir }}/redis"
+    - "{{ awx_quay_data_dir }}/storage"
+
+- name: Render Project Quay config bundle
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ awx_quay_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render Project Quay compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ awx_quay_compose_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render Project Quay systemd service
+  ansible.builtin.template:
+    src: awx-quay.service.j2
+    dest: /etc/systemd/system/awx-quay.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Flush systemd handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Project Quay
+  ansible.builtin.service:
+    name: awx-quay
+    state: restarted
+    enabled: true
+
+- name: Check firewalld state for Project Quay
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_quay_firewalld_state
+  changed_when: false
+  failed_when: false
+
+- name: Check Project Quay firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_quay_public_port }}/tcp"
+  register: awx_quay_firewalld_port
+  changed_when: false
+  failed_when: false
+  when: awx_quay_firewalld_state.stdout == "active"
+
+- name: Open Project Quay firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_quay_public_port }}/tcp"
+  register: awx_quay_firewalld_open
+  changed_when: true
+  when:
+    - awx_quay_firewalld_state.stdout == "active"
+    - awx_quay_firewalld_port.rc != 0
+
+- name: Reload firewalld for Project Quay
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_quay_firewalld_state.stdout == "active"
+    - awx_quay_firewalld_open is changed
+
+- name: Wait for Project Quay health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_quay_public_port }}{{ awx_quay_health_path }}"
+    method: GET
+    status_code:
+      - 200
+      - 204
+  register: awx_quay_health
+  until: awx_quay_health.status in [200, 204]
+  retries: 90
+  delay: 10
+  when: awx_quay_wait_for_health | bool
+
+- name: Initialize Project Quay admin user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_quay_public_port }}/api/v1/user/initialize"
+    method: POST
+    body_format: json
+    body:
+      username: "{{ awx_quay_admin_user }}"
+      password: "{{ awx_quay_admin_password }}"
+      email: "{{ awx_quay_admin_email }}"
+      access_token: true
+    status_code:
+      - 200
+      - 400
+  register: awx_quay_initialize_user
+  changed_when: awx_quay_initialize_user.status == 200
+  when:
+    - awx_quay_initialize_admin | bool
+    - awx_quay_admin_password | length > 0
+  no_log: true

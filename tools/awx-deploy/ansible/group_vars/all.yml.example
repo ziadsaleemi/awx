@@ -130,6 +130,41 @@ awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
 awx_galaxy_ng_postgres_storage_size: 20Gi
 awx_galaxy_ng_pulp_storage_size: 50Gi
 
+# Project Quay / execution environment image registry integration.
+# Galaxy NG stores collection content. Project Quay stores container images for
+# AWX execution environments built from AWX Projects.
+# For k3s/k8s, enabling this deploys Project Quay beside AWX and configures AWX
+# to talk to the in-cluster Quay service. For server deployments, deploy Quay on
+# hosts in [awx_quay], then set awx_quay_configure_awx_settings=true.
+awx_quay_enabled: false
+awx_quay_configure_awx_settings: "{{ awx_quay_enabled }}"
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_admin_user: admin
+awx_quay_admin_password: "{{ lookup('env', 'QUAY_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
+awx_quay_admin_email: admin@example.com
+awx_quay_initialize_admin: true
+awx_quay_postgres_password: "{{ lookup('env', 'QUAY_POSTGRES_PASSWORD') }}"
+awx_quay_database_secret_key: "{{ lookup('env', 'QUAY_DATABASE_SECRET_KEY') }}"
+awx_quay_secret_key: "{{ lookup('env', 'QUAY_SECRET_KEY') }}"
+awx_quay_registry_url: ""
+awx_quay_namespace: awx
+awx_quay_api_token: "{{ lookup('env', 'QUAY_API_TOKEN') | default('', true) }}"
+awx_quay_push_username: "{{ lookup('env', 'QUAY_PUSH_USERNAME') | default('', true) }}"
+awx_quay_push_token: "{{ lookup('env', 'QUAY_PUSH_TOKEN') | default('', true) }}"
+awx_quay_verify_ssl: false
+awx_quay_public_port: 8081
+
+# k3s/k8s Project Quay path.
+awx_quay_k8s_namespace: quay
+awx_quay_name: awx-quay
+awx_quay_service_type: ClusterIP
+awx_quay_node_port: 30881
+awx_quay_postgres_access_mode: ReadWriteOnce
+awx_quay_storage_access_mode: ReadWriteOnce
+awx_quay_postgres_storage_size: 20Gi
+awx_quay_registry_storage_size: 50Gi
+
 # Policy as Code integration.
 # OPA is standalone and can run on a dedicated VM/container host or any external
 # OPA URL. Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or

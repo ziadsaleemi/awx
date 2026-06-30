@@ -1,0 +1,190 @@
+---
+- name: Resolve kubectl command for Project Quay
+  ansible.builtin.set_fact:
+    awx_k8s_kubectl: >-
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness for Project Quay
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} get --raw=/readyz"
+  register: awx_quay_k8s_readyz
+  retries: 60
+  delay: 5
+  until: awx_quay_k8s_readyz.rc == 0
+  changed_when: false
+
+- name: Create Project Quay namespace
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} create namespace {{ awx_quay_k8s_namespace }}"
+  register: awx_quay_namespace_create
+  changed_when: awx_quay_namespace_create.rc == 0
+  failed_when:
+    - awx_quay_namespace_create.rc != 0
+    - "'AlreadyExists' not in awx_quay_namespace_create.stderr"
+
+- name: Read existing Project Quay secret
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} get secret {{ awx_quay_name }}-secret -o json"
+  register: awx_quay_existing_secret
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Generate Project Quay PostgreSQL password when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 24
+  register: awx_quay_generated_postgres_password
+  changed_when: false
+  when:
+    - awx_quay_postgres_password | length == 0
+    - awx_quay_existing_secret.rc != 0
+  no_log: true
+
+- name: Generate Project Quay database secret key when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 32
+  register: awx_quay_generated_database_secret_key
+  changed_when: false
+  when:
+    - awx_quay_database_secret_key | length == 0
+    - awx_quay_existing_secret.rc != 0
+  no_log: true
+
+- name: Generate Project Quay secret key when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 48
+  register: awx_quay_generated_secret_key
+  changed_when: false
+  when:
+    - awx_quay_secret_key | length == 0
+    - awx_quay_existing_secret.rc != 0
+  no_log: true
+
+- name: Resolve existing Project Quay Kubernetes secret data
+  ansible.builtin.set_fact:
+    awx_quay_existing_secret_data: "{{ (awx_quay_existing_secret.stdout | default('{}', true) | from_json).data | default({}) }}"
+  no_log: true
+
+- name: Resolve Project Quay Kubernetes secrets
+  ansible.builtin.set_fact:
+    awx_quay_effective_postgres_password: >-
+      {{ awx_quay_postgres_password
+        if awx_quay_postgres_password | length > 0
+        else (awx_quay_existing_secret_data.POSTGRES_PASSWORD | default('') | b64decode
+          if awx_quay_existing_secret_data.POSTGRES_PASSWORD | default('') | length > 0
+          else awx_quay_generated_postgres_password.stdout) }}
+    awx_quay_effective_database_secret_key: >-
+      {{ awx_quay_database_secret_key
+        if awx_quay_database_secret_key | length > 0
+        else (awx_quay_existing_secret_data.DATABASE_SECRET_KEY | default('') | b64decode
+          if awx_quay_existing_secret_data.DATABASE_SECRET_KEY | default('') | length > 0
+          else awx_quay_generated_database_secret_key.stdout) }}
+    awx_quay_effective_secret_key: >-
+      {{ awx_quay_secret_key
+        if awx_quay_secret_key | length > 0
+        else (awx_quay_existing_secret_data.SECRET_KEY | default('') | b64decode
+          if awx_quay_existing_secret_data.SECRET_KEY | default('') | length > 0
+          else awx_quay_generated_secret_key.stdout) }}
+  no_log: true
+
+- name: Remove previous Project Quay admin initialization job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} delete job {{ awx_quay_name }}-initialize-admin --ignore-not-found=true"
+  register: awx_quay_initialize_job_delete
+  changed_when: "'deleted' in awx_quay_initialize_job_delete.stdout"
+  when:
+    - awx_quay_initialize_admin | bool
+    - awx_quay_admin_password | length > 0
+  no_log: true
+
+- name: Resolve Project Quay public URL for Kubernetes
+  ansible.builtin.set_fact:
+    awx_quay_effective_public_url: >-
+      {{ awx_quay_public_url
+        if awx_quay_public_url | length > 0
+        else awx_quay_preferred_url_scheme ~ '://' ~ awx_quay_name ~ '.' ~ awx_quay_k8s_namespace ~ '.svc.cluster.local:' ~ (awx_quay_public_port | string) }}
+
+- name: Resolve Project Quay server hostname for Kubernetes
+  ansible.builtin.set_fact:
+    awx_quay_effective_server_hostname: "{{ awx_quay_effective_public_url | regex_replace('^https?://', '') | regex_replace('/.*$', '') }}"
+
+- name: Create Project Quay manifest workspace
+  ansible.builtin.file:
+    path: "{{ awx_quay_work_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Render Project Quay Kubernetes manifest
+  ansible.builtin.template:
+    src: quay.yml.j2
+    dest: "{{ awx_quay_work_dir }}/quay.yml"
+    mode: "0600"
+  no_log: true
+
+- name: Apply Project Quay Kubernetes resources
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_quay_work_dir }}/quay.yml"
+  register: awx_quay_k8s_apply
+  changed_when: "'created' in awx_quay_k8s_apply.stdout or 'configured' in awx_quay_k8s_apply.stdout"
+
+- name: Wait for Project Quay PostgreSQL deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }}-postgres --timeout=300s"
+  changed_when: false
+
+- name: Wait for Project Quay Redis deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }}-redis --timeout=180s"
+  changed_when: false
+
+- name: Wait for Project Quay deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }} --timeout=600s"
+  changed_when: false
+  when: awx_quay_wait_for_service | bool
+
+- name: Wait for Project Quay admin initialization job
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} wait --for=condition=complete job/{{ awx_quay_name }}-initialize-admin --timeout=360s"
+  changed_when: false
+  when:
+    - awx_quay_initialize_admin | bool
+    - awx_quay_admin_password | length > 0
+  no_log: true
+
+- name: Check firewalld state for Project Quay NodePort
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_quay_k8s_firewalld_state
+  changed_when: false
+  failed_when: false
+  when: awx_quay_service_type == "NodePort"
+
+- name: Check Project Quay NodePort firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_quay_node_port }}/tcp"
+  register: awx_quay_k8s_firewalld_port
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_quay_service_type == "NodePort"
+    - awx_quay_k8s_firewalld_state.stdout == "active"
+
+- name: Open Project Quay NodePort in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_quay_node_port }}/tcp"
+  register: awx_quay_k8s_firewalld_open
+  changed_when: true
+  when:
+    - awx_quay_service_type == "NodePort"
+    - awx_quay_k8s_firewalld_state.stdout == "active"
+    - awx_quay_k8s_firewalld_port.rc != 0
+
+- name: Reload firewalld for Project Quay NodePort
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_quay_service_type == "NodePort"
+    - awx_quay_k8s_firewalld_state.stdout == "active"
+    - awx_quay_k8s_firewalld_open is changed

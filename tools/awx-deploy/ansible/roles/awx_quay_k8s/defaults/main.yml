@@ -1,0 +1,39 @@
+---
+awx_quay_enabled: false
+awx_quay_k8s_namespace: quay
+awx_quay_name: awx-quay
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_postgres_image: docker.io/library/postgres:16
+awx_quay_redis_image: docker.io/library/redis:7
+awx_quay_admin_user: admin
+awx_quay_admin_password: "{{ lookup('env', 'QUAY_ADMIN_PASSWORD') | default(lookup('env', 'AWX_ADMIN_PASSWORD'), true) }}"
+awx_quay_admin_email: admin@example.com
+awx_quay_initialize_admin: true
+awx_quay_init_image: docker.io/curlimages/curl:8.8.0
+awx_quay_namespace: awx
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay
+awx_quay_postgres_password: "{{ lookup('env', 'QUAY_POSTGRES_PASSWORD') }}"
+awx_quay_database_secret_key: "{{ lookup('env', 'QUAY_DATABASE_SECRET_KEY') }}"
+awx_quay_secret_key: "{{ lookup('env', 'QUAY_SECRET_KEY') }}"
+awx_quay_public_port: 8081
+awx_quay_container_port: 8080
+awx_quay_public_url: ""
+awx_quay_preferred_url_scheme: http
+awx_quay_registry_title: AWX Project Quay
+awx_quay_service_type: ClusterIP
+awx_quay_node_port: 30881
+awx_quay_ingress_enabled: false
+awx_quay_ingress_host: ""
+awx_quay_storage_class: ""
+awx_quay_postgres_access_mode: ReadWriteOnce
+awx_quay_storage_access_mode: ReadWriteOnce
+awx_quay_postgres_storage_size: 20Gi
+awx_quay_registry_storage_size: 50Gi
+awx_quay_replicas: 1
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_work_dir: /tmp/awx-k8s
+awx_quay_work_dir: "{{ awx_k8s_work_dir }}/quay"
+awx_quay_wait_for_service: true

@@ -183,6 +183,30 @@ awx_galaxy_ng_postgres_access_mode: ReadWriteOnce
 awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
 awx_galaxy_ng_k8s_url: "http://{{ awx_galaxy_ng_name }}.{{ awx_galaxy_ng_namespace }}.svc.cluster.local:{{ awx_galaxy_ng_public_port }}"
 
+awx_quay_enabled: false
+awx_quay_configure_awx_settings: "{{ awx_quay_enabled }}"
+awx_quay_module_enabled: "{{ awx_quay_enabled or awx_quay_configure_awx_settings }}"
+awx_quay_server_inventory_host: "{{ groups.get('awx_quay', []) | first | default('') }}"
+awx_quay_k8s_namespace: quay
+awx_quay_name: awx-quay
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_namespace: awx
+awx_quay_registry_url: ""
+awx_quay_public_port: 8081
+awx_quay_k8s_url: "http://{{ awx_quay_name }}.{{ awx_quay_k8s_namespace }}.svc.cluster.local:{{ awx_quay_public_port }}"
+awx_quay_api_token: "{{ lookup('env', 'QUAY_API_TOKEN') | default('', true) }}"
+awx_quay_push_username: "{{ lookup('env', 'QUAY_PUSH_USERNAME') | default('', true) }}"
+awx_quay_push_token: "{{ lookup('env', 'QUAY_PUSH_TOKEN') | default('', true) }}"
+awx_quay_verify_ssl: false
+awx_quay_request_timeout: 10
+awx_quay_service_type: ClusterIP
+awx_quay_node_port: 30881
+awx_quay_postgres_access_mode: ReadWriteOnce
+awx_quay_storage_access_mode: ReadWriteOnce
+awx_quay_postgres_storage_size: 20Gi
+awx_quay_registry_storage_size: 50Gi
+
 awx_opa_enabled: false
 awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
 awx_opa_module_enabled: "{{ awx_opa_enabled or awx_opa_configure_awx_settings }}"

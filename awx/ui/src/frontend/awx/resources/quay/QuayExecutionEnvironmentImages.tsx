@@ -204,14 +204,14 @@ export function QuayExecutionEnvironmentImages() {
   return (
     <PageLayout>
       <PageHeader
-        title={t('Execution environment images')}
+        title={t('Execution Environments')}
         description={t(
           'Build AWX execution environment images from AWX Projects and host them in Project Quay.'
         )}
         headerActions={
           <ModuleAIAssistantAction
             module="quay"
-            page={t('Project Quay execution environment images')}
+            page={t('Project Quay Execution Environments')}
             prompt={t(
               'Help with Project Quay execution environment images in AWX. Use the selected project, namespace, repository, generated commands, and my AWX permissions. Explain how to build, push, tag, and use the image as an AWX execution environment.'
             )}
@@ -503,7 +503,7 @@ export function QuayExecutionEnvironmentImages() {
                   />
                 ) : tags.data?.results?.length ? (
                   <Table
-                    aria-label={t('Project Quay hosted execution environment images')}
+                    aria-label={t('Project Quay hosted Execution Environments')}
                     variant="compact"
                   >
                     <Thead>

@@ -2,5 +2,5 @@
 - name: Deploy Galaxy NG to Kubernetes
   hosts: all
   gather_facts: false
-roles:
-  - awx_galaxy_ng_k8s
+  roles:
+    - awx_galaxy_ng_k8s

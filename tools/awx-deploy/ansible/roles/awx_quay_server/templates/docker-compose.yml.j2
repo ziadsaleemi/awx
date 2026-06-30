@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: "{{ awx_quay_redis_image }}"
+    restart: unless-stopped
+    volumes:
+      - "{{ awx_quay_data_dir }}/redis:/data:Z"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: "{{ awx_quay_postgres_image }}"
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "{{ awx_quay_postgres_user }}"
+      POSTGRES_PASSWORD: "{{ awx_quay_postgres_password }}"
+      POSTGRES_DB: "{{ awx_quay_postgres_database }}"
+    volumes:
+      - "{{ awx_quay_data_dir }}/postgres:/var/lib/postgresql/data:Z"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "{{ awx_quay_postgres_user }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  quay:
+    image: "{{ awx_quay_image }}:{{ awx_quay_image_tag }}"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "{{ awx_quay_public_port }}:{{ awx_quay_container_port }}"
+    volumes:
+      - "{{ awx_quay_config_dir }}:/conf/stack:Z"
+      - "{{ awx_quay_data_dir }}/storage:/datastorage:Z"

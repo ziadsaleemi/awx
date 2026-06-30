@@ -12,6 +12,8 @@ Supported paths:
 - `eda-k8s`: deploy EDA beside AWX in k3s or Kubernetes.
 - `galaxy-ng-server`: deploy Galaxy NG/private automation hub on a dedicated VM.
 - `galaxy-ng-k8s`: deploy Galaxy NG/private automation hub beside AWX in k3s or Kubernetes.
+- `quay-server`: deploy Project Quay/EE image registry on a dedicated VM.
+- `quay-k8s`: deploy Project Quay/EE image registry beside AWX in k3s or Kubernetes.
 - `opa-server`: deploy standalone OPA on a dedicated VM/container host.
 - `gatekeeper-k8s`: deploy Gatekeeper into k3s or Kubernetes.
 
@@ -50,6 +52,15 @@ runs as API/content/worker/nginx/PostgreSQL/Redis pods beside AWX. For direct
 server deployments, it runs on hosts in the `awx_galaxy_ng` inventory group as
 its own Docker Compose/systemd stack. AWX stores only connection settings and
 uses Galaxy NG as private automation hub inventory/content source.
+
+Project Quay is intentionally a separate execution environment image registry.
+Galaxy NG handles collection content; Project Quay handles container images
+built from AWX Projects and referenced by AWX execution environments. For
+k3s/k8s, Quay runs as Quay/PostgreSQL/Redis pods beside AWX. For direct server
+deployments, it runs on hosts in the `awx_quay` inventory group as its own
+Docker Compose/systemd stack. The default local-storage configuration is for
+local, lab, and proof-of-concept installs; production deployments should replace
+it with durable object or shared storage supported by Project Quay.
 
 VMware/vCenter provisioning is intentionally separate from the AWX deployment
 roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
@@ -181,6 +192,51 @@ Galaxy NG mounts shared Pulp content into API, content, and worker pods. The
 default `awx_galaxy_ng_pulp_access_mode: ReadWriteOnce` works for single-node
 k3s/local clusters. Use `ReadWriteMany` with a compatible storage class for
 multi-node Kubernetes or when scaling Galaxy NG replicas.
+
+## Quick Start: Project Quay on Server VM
+
+For direct server AWX deployments, put Project Quay on a dedicated VM in the
+`awx_quay` inventory group:
+
+```bash
+cd tools/awx-deploy/ansible
+export QUAY_ADMIN_PASSWORD='change-me'
+export QUAY_POSTGRES_PASSWORD='change-me'
+export QUAY_DATABASE_SECRET_KEY="$(openssl rand -base64 32)"
+export QUAY_SECRET_KEY="$(openssl rand -base64 48)"
+ansible-playbook -i inventories/example.ini playbooks/deploy-quay-server.yml
+```
+
+Then configure AWX to point at that VM and rerun the AWX server deployment or
+upgrade. `QUAY_API_TOKEN` is used for read/list calls, while
+`QUAY_PUSH_USERNAME` and `QUAY_PUSH_TOKEN` are used only to generate image push
+commands without printing stored tokens:
+
+```bash
+export QUAY_API_TOKEN='token-from-quay'
+export QUAY_PUSH_USERNAME='awx+robot'
+export QUAY_PUSH_TOKEN='robot-token'
+ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
+  -e awx_quay_enabled=true \
+  -e awx_quay_configure_awx_settings=true
+```
+
+## Quick Start: Project Quay on k3s/Kubernetes
+
+```bash
+cd tools/awx-deploy/ansible
+export KUBECONFIG=/path/to/kubeconfig
+export QUAY_ADMIN_PASSWORD='change-me'
+ansible-playbook -i localhost, playbooks/deploy-quay-k8s.yml
+ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
+  -e awx_quay_enabled=true \
+  -e awx_quay_configure_awx_settings=true
+```
+
+For k3s, use `playbooks/deploy-k3s.yml` with the same variables. If secret vars
+are omitted on Kubernetes, the role reuses existing secrets or generates new
+database/signing secrets once. The role can initialize the first Quay admin user
+when `awx_quay_initialize_admin=true` and `QUAY_ADMIN_PASSWORD` is set.
 
 ## Quick Start: OPA on Server VM
 

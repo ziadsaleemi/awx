@@ -1,0 +1,35 @@
+---
+awx_quay_enabled: false
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_postgres_image: docker.io/library/postgres:16
+awx_quay_redis_image: docker.io/library/redis:7
+awx_quay_admin_user: admin
+awx_quay_admin_password: "{{ lookup('env', 'QUAY_ADMIN_PASSWORD') | default(lookup('env', 'AWX_ADMIN_PASSWORD'), true) }}"
+awx_quay_admin_email: admin@example.com
+awx_quay_initialize_admin: true
+awx_quay_namespace: awx
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay
+awx_quay_postgres_password: "{{ lookup('env', 'QUAY_POSTGRES_PASSWORD') }}"
+awx_quay_database_secret_key: "{{ lookup('env', 'QUAY_DATABASE_SECRET_KEY') }}"
+awx_quay_secret_key: "{{ lookup('env', 'QUAY_SECRET_KEY') }}"
+awx_quay_base_dir: /opt/quay
+awx_quay_data_dir: /var/lib/quay
+awx_quay_config_dir: "{{ awx_quay_base_dir }}/config"
+awx_quay_config_file: "{{ awx_quay_config_dir }}/config.yaml"
+awx_quay_compose_file: "{{ awx_quay_base_dir }}/docker-compose.yml"
+awx_quay_compose_project: awx-quay
+awx_quay_compose_command: /usr/bin/docker compose
+awx_quay_install_packages: true
+awx_quay_packages:
+  - docker
+  - docker-compose-plugin
+awx_quay_public_port: 8081
+awx_quay_container_port: 8080
+awx_quay_public_url: ""
+awx_quay_preferred_url_scheme: http
+awx_quay_registry_title: AWX Project Quay
+awx_quay_verify_ssl: false
+awx_quay_wait_for_health: true
+awx_quay_health_path: /health/instance

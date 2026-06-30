@@ -3,5 +3,5 @@
   hosts: awx_galaxy_ng
   gather_facts: true
   become: true
-roles:
-  - awx_galaxy_ng_server
+  roles:
+    - awx_galaxy_ng_server

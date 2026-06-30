@@ -1,0 +1,15 @@
+[Unit]
+Description=AWX Project Quay
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ awx_quay_base_dir }}
+ExecStart={{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }} up -d --remove-orphans
+ExecStop={{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }} down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

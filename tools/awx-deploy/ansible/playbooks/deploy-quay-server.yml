@@ -1,0 +1,9 @@
+---
+- name: Deploy Project Quay to dedicated servers
+  hosts: awx_quay
+  gather_facts: true
+  become: true
+  vars:
+    awx_deploy_method: server
+  roles:
+    - awx_quay_server
