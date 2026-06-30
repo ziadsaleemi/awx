@@ -319,6 +319,85 @@ def test_galaxy_ng_collection_approvals_list_scopes_to_staging(get, admin_user, 
 
 
 @pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_collection_approval_approve_moves_to_published(post, admin_user, mocker):
+    post_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.post',
+        return_value=galaxy_response(mocker, {'copy_task_id': 42, 'remove_task_id': 42}),
+    )
+
+    response = post(
+        reverse('api:galaxy_ng_collection_approval_approve'),
+        data={'namespace': 'infra', 'name': 'network', 'version': '1.0.0'},
+        user=admin_user,
+        expect=202,
+    )
+
+    assert response.data['source'] == 'galaxy_ng'
+    assert response.data['action'] == 'approve'
+    assert response.data['destination_repository'] == 'published'
+    assert response.data['task'] == 42
+    assert response.data['remove_task'] == 42
+    assert post_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/v3/collections/infra/network/versions/1.0.0/move/staging/published/'
+    assert post_mock.call_args.kwargs['json'] == {}
+    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_collection_approval_reject_moves_to_rejected(post, admin_user, mocker):
+    post_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.post',
+        return_value=galaxy_response(mocker, {'copy_task_id': 'reject-task', 'remove_task_id': 'reject-task'}),
+    )
+
+    response = post(
+        reverse('api:galaxy_ng_collection_approval_reject'),
+        data={'namespace': 'infra', 'name': 'network', 'version': '1.0.0+build.1'},
+        user=admin_user,
+        expect=202,
+    )
+
+    assert response.data['source'] == 'galaxy_ng'
+    assert response.data['action'] == 'reject'
+    assert response.data['destination_repository'] == 'rejected'
+    assert response.data['task'] == 'reject-task'
+    assert post_mock.call_args.args[0] == ('https://hub.example.test/api/galaxy/v3/collections/infra/network/versions/1.0.0%2Bbuild.1/move/staging/rejected/')
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_collection_approval_requires_system_admin(post, rando):
+    post(
+        reverse('api:galaxy_ng_collection_approval_approve'),
+        data={'namespace': 'infra', 'name': 'network', 'version': '1.0.0'},
+        user=rando,
+        expect=403,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_collection_approval_rejects_unsafe_version(post, admin_user):
+    response = post(
+        reverse('api:galaxy_ng_collection_approval_approve'),
+        data={'namespace': 'infra', 'name': 'network', 'version': '../1.0.0'},
+        user=admin_user,
+        expect=400,
+    )
+
+    assert response.data['status'] == 'bad_request'
+
+
+@pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
 def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, mocker):
     mocker.patch(

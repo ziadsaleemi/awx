@@ -4,7 +4,7 @@
 import re
 import shlex
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from django.utils.translation import gettext_lazy as _
 from rest_framework.permissions import IsAuthenticated
@@ -36,6 +36,8 @@ GALAXY_NG_RESOURCE_PATHS = {
 }
 
 GALAXY_NG_DISTRIBUTION_PATH_CHARS = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-')
+GALAXY_NG_COLLECTION_TOKEN_RE = re.compile(r'^[A-Za-z0-9_]+$')
+GALAXY_NG_COLLECTION_VERSION_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$')
 GALAXY_NG_IMAGE_NAME_RE = re.compile(r'^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$')
 GALAXY_NG_IMAGE_TAG_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
 GALAXY_NG_CONTAINER_RUNTIMES = ('podman', 'docker')
@@ -98,6 +100,26 @@ def _validate_distribution_path(value):
         return '', _('Distribution path may contain only letters, numbers, dots, underscores, and hyphens.')
     if value in ('.', '..'):
         return '', _('Distribution path is invalid.')
+    return value, ''
+
+
+def _validate_collection_token(value, field_name):
+    value = str(value or '').strip()
+    if not value:
+        return '', _('%s is required.') % field_name
+    if len(value) > 128:
+        return '', _('%s is too long.') % field_name
+    if not GALAXY_NG_COLLECTION_TOKEN_RE.match(value):
+        return '', _('%s may contain only letters, numbers, and underscores.') % field_name
+    return value, ''
+
+
+def _validate_collection_version(value):
+    value = str(value or '').strip()
+    if not value:
+        return '', _('Version is required.')
+    if not GALAXY_NG_COLLECTION_VERSION_RE.match(value):
+        return '', _('Version may contain only letters, numbers, dots, underscores, hyphens, and plus signs.')
     return value, ''
 
 
@@ -357,6 +379,85 @@ class GalaxyNGSignatureKeysListView(GalaxyNGResourceListView):
 class GalaxyNGCollectionApprovalsListView(GalaxyNGResourceListView):
     name = _('Galaxy NG Collection Approvals')
     resource = 'collection-approvals'
+
+
+class GalaxyNGCollectionApprovalActionView(APIView):
+    name = _('Galaxy NG Collection Approval Action')
+    resource_purpose = 'galaxy ng private automation hub collection approval action'
+    permission_classes = (IsAuthenticated,)
+
+    action = ''
+
+    def post(self, request, format=None):
+        if not request.user.is_superuser:
+            return Response(
+                {'detail': _('You do not have permission to approve or reject Galaxy NG collections.')},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+        if self.action not in ('approve', 'reject'):
+            return Response({'detail': _('Unsupported Galaxy NG approval action.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        if not module_enabled():
+            return Response(
+                {'detail': _('Galaxy NG module is disabled.'), 'status': 'disabled'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if connection_status() != 'configured':
+            return Response(
+                {'detail': _('Galaxy NG server URL is not configured.'), 'status': connection_status()},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = request.data if isinstance(request.data, dict) else {}
+        namespace, error = _validate_collection_token(data.get('namespace'), _('Namespace'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        name, error = _validate_collection_token(data.get('name'), _('Collection name'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        version, error = _validate_collection_version(data.get('version'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        source = 'staging'
+        destination = 'published' if self.action == 'approve' else 'rejected'
+        client = GalaxyNGClient()
+        api_prefix = client.api_path_prefix.rstrip('/')
+        move_path = (
+            f'{api_prefix}/v3/collections/{quote(namespace, safe="")}/{quote(name, safe="")}/versions/'
+            f'{quote(version, safe="")}/move/{source}/{destination}/'
+        )
+        try:
+            payload = client.post(move_path)
+        except GalaxyNGControllerError as exc:
+            return _galaxy_ng_error_response(exc)
+
+        task = payload.get('copy_task_id') or payload.get('task') or payload.get('task_id') if isinstance(payload, dict) else None
+        remove_task = payload.get('remove_task_id') if isinstance(payload, dict) else None
+        return Response(
+            {
+                'source': 'galaxy_ng',
+                'action': self.action,
+                'namespace': namespace,
+                'name': name,
+                'version': version,
+                'source_repository': source,
+                'destination_repository': destination,
+                'task': task,
+                'remove_task': remove_task,
+                'response': payload,
+            },
+            status=http_status.HTTP_202_ACCEPTED,
+        )
+
+
+class GalaxyNGCollectionApprovalApproveView(GalaxyNGCollectionApprovalActionView):
+    name = _('Approve Galaxy NG Collection')
+    action = 'approve'
+
+
+class GalaxyNGCollectionApprovalRejectView(GalaxyNGCollectionApprovalActionView):
+    name = _('Reject Galaxy NG Collection')
+    action = 'reject'
 
 
 class GalaxyNGTasksListView(GalaxyNGResourceListView):

@@ -163,7 +163,7 @@ describe('GalaxyNgResourceList', () => {
     cy.get('table[aria-label="Simple table"]').should('contain', 'Enabled');
   });
 
-  it('renders Galaxy NG collection approvals from staging', () => {
+  it('approves and rejects Galaxy NG collection approvals from staging', () => {
     cy.viewport(1920, 1080);
     cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/galaxy_ng/collection-approvals/`}*`, {
@@ -184,6 +184,32 @@ describe('GalaxyNgResourceList', () => {
         },
       ],
     }).as('collectionApprovals');
+    cy.intercept('POST', awxAPI`/galaxy_ng/collection-approvals/approve/`, {
+      statusCode: 202,
+      body: {
+        source: 'galaxy_ng',
+        action: 'approve',
+        namespace: 'infra',
+        name: 'network',
+        version: '1.0.0',
+        source_repository: 'staging',
+        destination_repository: 'published',
+        task: 'approval-task-1',
+      },
+    }).as('approveCollection');
+    cy.intercept('POST', awxAPI`/galaxy_ng/collection-approvals/reject/`, {
+      statusCode: 202,
+      body: {
+        source: 'galaxy_ng',
+        action: 'reject',
+        namespace: 'infra',
+        name: 'network',
+        version: '1.0.0',
+        source_repository: 'staging',
+        destination_repository: 'rejected',
+        task: 'rejection-task-1',
+      },
+    }).as('rejectCollection');
 
     cy.mount(<GalaxyNgResourceList resource="collection-approvals" />);
     cy.wait('@status');
@@ -192,5 +218,19 @@ describe('GalaxyNgResourceList', () => {
     cy.get('table[aria-label="Simple table"]').should('contain', 'infra.network');
     cy.get('table[aria-label="Simple table"]').should('contain', '1.0.0');
     cy.get('table[aria-label="Simple table"]').should('contain', 'unsigned');
+
+    cy.get('[data-cy="actions-dropdown"]').click();
+    cy.get('[data-cy="approve"]').click();
+    cy.wait('@approveCollection')
+      .its('request.body')
+      .should('deep.equal', { namespace: 'infra', name: 'network', version: '1.0.0' });
+    cy.get('[data-cy="alert-toaster"]').should('contain', 'approval-task-1');
+
+    cy.get('[data-cy="actions-dropdown"]').click();
+    cy.get('[data-cy="reject"]').click();
+    cy.wait('@rejectCollection')
+      .its('request.body')
+      .should('deep.equal', { namespace: 'infra', name: 'network', version: '1.0.0' });
+    cy.get('[data-cy="alert-toaster"]').should('contain', 'rejection-task-1');
   });
 });

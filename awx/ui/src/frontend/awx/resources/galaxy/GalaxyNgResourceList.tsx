@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert } from '@patternfly/react-core';
-import { SyncAltIcon } from '@patternfly/react-icons';
+import { CheckCircleIcon, SyncAltIcon, TimesCircleIcon } from '@patternfly/react-icons';
 import {
   DateTimeCell,
   IPageAction,
@@ -84,6 +84,19 @@ interface GalaxyNgSyncResponse {
   response?: Record<string, unknown>;
 }
 
+interface GalaxyNgApprovalResponse {
+  source: string;
+  action: 'approve' | 'reject';
+  namespace: string;
+  name: string;
+  version: string;
+  source_repository: string;
+  destination_repository: string;
+  task?: string | number | null;
+  remove_task?: string | number | null;
+  response?: Record<string, unknown>;
+}
+
 const resourceTitles: Record<GalaxyNgResourceKind, string> = {
   namespaces: 'Namespaces',
   collections: 'Collections',
@@ -142,7 +155,7 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
   const { activeAwxUser } = useAwxActiveUser();
-  const canSyncRepositories = Boolean(activeAwxUser?.is_superuser);
+  const canManageGalaxy = Boolean(activeAwxUser?.is_superuser);
   const tableColumns = useGalaxyNgColumns(resource);
   const toolbarFilters = useGalaxyNgFilters();
   const status = useGet<GalaxyNgStatus>(awxAPI`/galaxy_ng/status/`);
@@ -179,33 +192,99 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
     [alertToaster, t, view]
   );
 
-  const rowActions = useMemo<IPageAction<GalaxyNgRecord>[]>(
-    () =>
-      resource === 'repositories'
-        ? [
-            {
-              type: PageActionType.Button,
-              selection: PageActionSelection.Single,
-              icon: SyncAltIcon,
-              label: t('Sync'),
-              isDisabled: (record) => {
-                if (!canSyncRepositories) {
-                  return t(
-                    'You need system administrator permissions to sync Galaxy NG repositories.'
-                  );
-                }
-                const repository = record.base_path || record.name || record.repository;
-                if (!repository) {
-                  return t('This repository does not include a syncable name.');
-                }
-                return undefined;
-              },
-              onClick: (record) => void syncRepository(record),
-            },
-          ]
-        : [],
-    [canSyncRepositories, resource, syncRepository, t]
+  const moveCollectionApproval = useCallback(
+    async (record: GalaxyNgRecord, action: 'approve' | 'reject') => {
+      try {
+        const result = await postRequest<
+          GalaxyNgApprovalResponse,
+          { namespace: string; name: string; version: string }
+        >(awxAPI`/galaxy_ng/collection-approvals/${action}/`, {
+          namespace: record.namespace || '',
+          name: record.name || '',
+          version: record.version || '',
+        });
+        alertToaster.addAlert({
+          variant: 'success',
+          title: result.task
+            ? t('Galaxy NG collection {{action}} requested. Task: {{task}}', {
+                action: action === 'approve' ? t('approval') : t('rejection'),
+                task: result.task,
+              })
+            : t('Galaxy NG collection {{action}} requested.', {
+                action: action === 'approve' ? t('approval') : t('rejection'),
+              }),
+          timeout: 4000,
+        });
+        await view.refresh();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title:
+            action === 'approve'
+              ? t('Failed to approve Galaxy NG collection')
+              : t('Failed to reject Galaxy NG collection'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, t, view]
   );
+
+  const rowActions = useMemo<IPageAction<GalaxyNgRecord>[]>(() => {
+    if (resource === 'repositories') {
+      return [
+        {
+          type: PageActionType.Button,
+          selection: PageActionSelection.Single,
+          icon: SyncAltIcon,
+          label: t('Sync'),
+          isDisabled: (record) => {
+            if (!canManageGalaxy) {
+              return t('You need system administrator permissions to sync Galaxy NG repositories.');
+            }
+            const repository = record.base_path || record.name || record.repository;
+            if (!repository) {
+              return t('This repository does not include a syncable name.');
+            }
+            return undefined;
+          },
+          onClick: (record) => void syncRepository(record),
+        },
+      ];
+    }
+
+    if (resource === 'collection-approvals') {
+      const disableApprovalAction = (record: GalaxyNgRecord) => {
+        if (!canManageGalaxy) {
+          return t('You need system administrator permissions to approve or reject collections.');
+        }
+        if (!record.namespace || !record.name || !record.version) {
+          return t('This staged collection does not include namespace, name, and version.');
+        }
+        return undefined;
+      };
+      return [
+        {
+          type: PageActionType.Button,
+          selection: PageActionSelection.Single,
+          icon: CheckCircleIcon,
+          label: t('Approve'),
+          isDisabled: disableApprovalAction,
+          onClick: (record) => void moveCollectionApproval(record, 'approve'),
+        },
+        {
+          type: PageActionType.Button,
+          selection: PageActionSelection.Single,
+          icon: TimesCircleIcon,
+          label: t('Reject'),
+          isDisabled: disableApprovalAction,
+          onClick: (record) => void moveCollectionApproval(record, 'reject'),
+        },
+      ];
+    }
+
+    return [];
+  }, [canManageGalaxy, moveCollectionApproval, resource, syncRepository, t]);
 
   const title = t(resourceTitles[resource]);
   const description = t(resourceDescriptions[resource]);
