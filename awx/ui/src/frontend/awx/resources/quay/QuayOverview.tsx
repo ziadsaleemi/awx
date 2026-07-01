@@ -8,24 +8,27 @@ import {
   DescriptionListTerm,
   Flex,
   FlexItem,
-  Label,
   Spinner,
   Stack,
   StackItem,
   Text,
   TextContent,
   TextVariants,
-  Title,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, CubesIcon, TimesCircleIcon } from '@patternfly/react-icons';
+import { CubesIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 import { useGetPageUrl } from '../../../../framework';
 import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
 import { useGet } from '../../../common/crud/useGet';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
+import {
+  ContentStatusLabel,
+  ContentStatusStrip,
+  ContentSummaryGrid,
+  ContentWorkflowGroups,
+} from '../content/ContentManagementCards';
 import { AwxRoute } from '../../main/AwxRoutes';
 
 export interface QuayStatus {
@@ -53,70 +56,6 @@ export interface QuayStatus {
   controller_error: string;
 }
 
-function StatusLabel(props: { enabled: boolean; enabledText: string; disabledText: string }) {
-  return props.enabled ? (
-    <Label color="green" icon={<CheckCircleIcon />}>
-      {props.enabledText}
-    </Label>
-  ) : (
-    <Label color="grey" icon={<TimesCircleIcon />}>
-      {props.disabledText}
-    </Label>
-  );
-}
-
-function MetricTile(props: { label: string; value: string | number; detail?: string }) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-        minHeight: 112,
-        minWidth: 0,
-        padding: 16,
-        width: '100%',
-      }}
-    >
-      <Stack hasGutter>
-        <StackItem>
-          <Title
-            headingLevel="h3"
-            size="2xl"
-            style={{ lineHeight: 1.15, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-          >
-            {props.value}
-          </Title>
-        </StackItem>
-        <StackItem>
-          <TextContent>
-            <Text component={TextVariants.small}>{props.label}</Text>
-            {props.detail ? (
-              <Text
-                component={TextVariants.small}
-                style={{ opacity: 0.75, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-              >
-                {props.detail}
-              </Text>
-            ) : null}
-          </TextContent>
-        </StackItem>
-      </Stack>
-    </div>
-  );
-}
-
-function QuickLink(props: { to?: string; label: string; description: string }) {
-  return (
-    <Stack hasGutter>
-      <StackItem>{props.to ? <Link to={props.to}>{props.label}</Link> : props.label}</StackItem>
-      <StackItem>
-        <TextContent>
-          <Text component={TextVariants.small}>{props.description}</Text>
-        </TextContent>
-      </StackItem>
-    </Stack>
-  );
-}
-
 export function QuayOverview() {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
@@ -134,27 +73,26 @@ export function QuayOverview() {
   );
 
   return (
-    <PageDashboard sectionStyle={{ padding: 16 }}>
+    <PageDashboard sectionStyle={{ padding: 24 }}>
       <PageDashboardCard
         id="quay-control-plane"
         title={t('Project Quay')}
         subtitle={t('Container registry for AWX execution environment images')}
         width="full"
-        height="sm"
         headerControls={
           <Flex
             spaceItems={{ default: 'spaceItemsSm' }}
             alignItems={{ default: 'alignItemsCenter' }}
           >
             <FlexItem>
-              <StatusLabel
+              <ContentStatusLabel
                 enabled={Boolean(data?.enabled)}
                 enabledText={t('Module enabled')}
                 disabledText={t('Module disabled')}
               />
             </FlexItem>
             <FlexItem>
-              <StatusLabel
+              <ContentStatusLabel
                 enabled={ready}
                 enabledText={t('Quay connected')}
                 disabledText={t('Quay not ready')}
@@ -180,7 +118,15 @@ export function QuayOverview() {
       >
         <CardBody>
           {status.isLoading ? (
-            <Spinner size="md" />
+            <div
+              style={{
+                alignItems: 'center',
+                display: 'flex',
+                minHeight: 120,
+              }}
+            >
+              <Spinner size="md" />
+            </div>
           ) : status.error ? (
             <Alert variant="warning" isInline title={t('Could not load Project Quay status.')} />
           ) : (
@@ -193,34 +139,54 @@ export function QuayOverview() {
                 </StackItem>
               ) : null}
               <StackItem>
-                <div
-                  style={{
-                    display: 'grid',
-                    gap: 16,
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
-                  }}
-                >
-                  <MetricTile
-                    label={t('Registry')}
-                    value={data?.registry || t('Not configured')}
-                    detail={data?.server_url || t('No registry URL configured')}
-                  />
-                  <MetricTile
-                    label={t('Namespace')}
-                    value={data?.namespace || t('Not set')}
-                    detail={t('Default organization or user namespace')}
-                  />
-                  <MetricTile
-                    label={t('Repositories')}
-                    value={data?.counts.repositories ?? 0}
-                    detail={t('Readable from Project Quay API')}
-                  />
-                  <MetricTile
-                    label={t('Push credentials')}
-                    value={data?.push_configured ? t('Ready') : t('Missing')}
-                    detail={t('Robot account or username/token for image pushes')}
-                  />
-                </div>
+                <ContentSummaryGrid
+                  metrics={[
+                    {
+                      label: t('Registry'),
+                      value: data?.registry || t('Not configured'),
+                      detail: data?.server_url || t('No registry URL configured'),
+                    },
+                    {
+                      label: t('Namespace'),
+                      value: data?.namespace || t('Not set'),
+                      detail: t('Default Quay organization or user'),
+                    },
+                    {
+                      label: t('Repositories'),
+                      value: data?.counts.repositories ?? 0,
+                      detail: t('Visible through the Quay API'),
+                    },
+                    {
+                      label: t('Image push'),
+                      value: data?.push_configured ? t('Ready') : t('Missing'),
+                      detail: t('Used by AWX build and push plans'),
+                    },
+                  ]}
+                />
+              </StackItem>
+              <StackItem>
+                <ContentStatusStrip
+                  items={[
+                    {
+                      label: t('API token'),
+                      value: data?.auth_configured ? t('Configured') : t('Missing'),
+                      ok: Boolean(data?.auth_configured),
+                    },
+                    {
+                      label: t('Management'),
+                      value: data?.management_configured ? t('Enabled') : t('Read only'),
+                      ok: Boolean(data?.management_configured),
+                    },
+                    {
+                      label: t('TLS verify'),
+                      value: data?.verify_ssl ? t('Enabled') : t('Disabled'),
+                    },
+                    {
+                      label: t('Timeout'),
+                      value: t('{{seconds}}s', { seconds: data?.request_timeout ?? 0 }),
+                    },
+                  ]}
+                />
               </StackItem>
             </Stack>
           )}
@@ -231,8 +197,7 @@ export function QuayOverview() {
         id="quay-connection"
         title={t('Connection')}
         subtitle={t('AWX settings used to read Project Quay and generate push commands')}
-        width="half"
-        height="sm"
+        width="full"
         linkText={t('Open settings')}
         to={settingsUrl}
       >
@@ -274,52 +239,69 @@ export function QuayOverview() {
 
       <PageDashboardCard
         id="quay-workflows"
-        title={t('Execution environment workflows')}
-        subtitle={t('Build images from AWX Projects and host them in Project Quay')}
-        width="half"
-        height="sm"
+        title={t('Registry workspace')}
+        subtitle={t('Build, govern, and use execution environment images from AWX')}
+        width="full"
       >
         <CardBody>
-          <Stack hasGutter>
-            <QuickLink
-              to={repositoriesUrl}
-              label={t('Repositories')}
-              description={t('Inspect Project Quay repositories visible to AWX.')}
-            />
-            {repositoryPermissionsUrl ? (
-              <QuickLink
-                to={repositoryPermissionsUrl}
-                label={t('Repository Permissions')}
-                description={t('Grant user, team, and robot access to Quay repositories.')}
-              />
-            ) : null}
-            {robotsUrl ? (
-              <QuickLink
-                to={robotsUrl}
-                label={t('Robot Accounts')}
-                description={t('Create and rotate robot accounts used by AWX image workflows.')}
-              />
-            ) : null}
-            <QuickLink
-              to={imagesUrl}
-              label={t('Execution Environments')}
-              description={t('Generate build and push commands from an AWX Project checkout.')}
-            />
-            <QuickLink
-              to={settingsUrl}
-              label={t('Credentials and defaults')}
-              description={t('Configure registry URL, namespace, API token, and push credentials.')}
-            />
-            {apiTokenUrl ? (
-              <QuickLink
-                to={apiTokenUrl}
-                label={t('API Token')}
-                description={t(
-                  'Generate and validate the scoped Quay API token AWX needs for management.'
-                )}
-              />
-            ) : null}
-          </Stack>
+          <ContentWorkflowGroups
+            groups={[
+              {
+                title: t('Operate images'),
+                description: t('Inventory and build paths used by AWX execution environments.'),
+                links: [
+                  {
+                    to: repositoriesUrl,
+                    label: t('Repositories'),
+                    description: t('Inspect repositories visible to AWX.'),
+                  },
+                  {
+                    to: imagesUrl,
+                    label: t('Execution Environments'),
+                    description: t('Build and push images from an AWX Project checkout.'),
+                  },
+                ],
+              },
+              {
+                title: t('Secure access'),
+                description: t('Management surfaces for repository and robot access.'),
+                links: [
+                  ...(repositoryPermissionsUrl
+                    ? [
+                        {
+                          to: repositoryPermissionsUrl,
+                          label: t('Repository Permissions'),
+                          description: t('Grant user, team, and robot repository access.'),
+                        },
+                      ]
+                    : []),
+                  ...(robotsUrl
+                    ? [
+                        {
+                          to: robotsUrl,
+                          label: t('Robot Accounts'),
+                          description: t('Create and rotate robot accounts.'),
+                        },
+                      ]
+                    : []),
+                  {
+                    to: settingsUrl,
+                    label: t('Credentials and defaults'),
+                    description: t('Configure registry, namespace, API token, and push token.'),
+                  },
+                  ...(apiTokenUrl
+                    ? [
+                        {
+                          to: apiTokenUrl,
+                          label: t('API Token'),
+                          description: t('Generate and validate the scoped Quay API token.'),
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            ]}
+          />
         </CardBody>
       </PageDashboardCard>
 
@@ -328,7 +310,6 @@ export function QuayOverview() {
         title={t('Registry status')}
         subtitle={t('Current Project Quay integration state')}
         width="full"
-        height="xs"
       >
         <CardBody>
           <Flex

@@ -9,7 +9,6 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
-  Divider,
   Form,
   FormGroup,
   FormSelect,
@@ -31,7 +30,6 @@ import {
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
-  HistoryIcon,
   PencilAltIcon,
   PlusCircleIcon,
   SecurityIcon,
@@ -60,6 +58,7 @@ import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
+import { ContentSummaryGrid } from '../content/ContentManagementCards';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { useAwxBulkConfirmation } from '../../common/useAwxBulkConfirmation';
 import { useAwxView } from '../../common/useAwxView';
@@ -205,34 +204,6 @@ function useQuayRepositoryColumns(): ITableColumn<QuayRepository>[] {
   );
 }
 
-function QuayRepositoryStat(props: { label: string; value: string | number; detail?: string }) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-        minHeight: 112,
-        padding: 16,
-        overflowWrap: 'anywhere',
-      }}
-    >
-      <div style={{ fontSize: 24, fontWeight: 600, lineHeight: 1.2 }}>{props.value}</div>
-      <div style={{ marginTop: 12, color: 'var(--pf-v5-global--Color--200)' }}>{props.label}</div>
-      {props.detail ? (
-        <div
-          style={{
-            marginTop: 12,
-            color: 'var(--pf-v5-global--Color--300)',
-            fontSize: '0.875rem',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {props.detail}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function QuayTagTable(props: {
   tags: QuayImageTag[];
   isLoading?: boolean;
@@ -346,7 +317,7 @@ function QuayRepositoryConsole(props: {
   const modified = lastModified(repository);
 
   return (
-    <PageSection style={{ padding: 24 }}>
+    <PageSection style={{ padding: '16px 24px 20px' }}>
       <Stack hasGutter>
         <StackItem>
           <div
@@ -380,40 +351,33 @@ function QuayRepositoryConsole(props: {
           </div>
         </StackItem>
         <StackItem>
-          <Grid hasGutter>
-            <GridItem sm={12} md={6} lg={3}>
-              <QuayRepositoryStat
-                label={t('Repository')}
-                value={repository.name || '-'}
-                detail={namespace || '-'}
-              />
-            </GridItem>
-            <GridItem sm={12} md={6} lg={3}>
-              <QuayRepositoryStat
-                label={t('Latest tag')}
-                value={latestTag}
-                detail={
-                  tagItems.length
-                    ? t('{{count}} tags loaded', { count: tagItems.length })
-                    : t('Tag inventory')
-                }
-              />
-            </GridItem>
-            <GridItem sm={12} md={6} lg={3}>
-              <QuayRepositoryStat
-                label={t('Registry')}
-                value={props.statusData?.registry || '-'}
-                detail={props.statusData?.server_url || '-'}
-              />
-            </GridItem>
-            <GridItem sm={12} md={6} lg={3}>
-              <QuayRepositoryStat
-                label={t('Last modified')}
-                value={modified ? t('Reported') : '-'}
-                detail={modified || t('No timestamp reported')}
-              />
-            </GridItem>
-          </Grid>
+          <ContentSummaryGrid
+            minWidth={160}
+            metrics={[
+              {
+                label: t('Repository'),
+                value: repository.name || '-',
+                detail: namespace || '-',
+              },
+              {
+                label: t('Latest tag'),
+                value: latestTag,
+                detail: tagItems.length
+                  ? t('{{count}} tags loaded', { count: tagItems.length })
+                  : t('Tag inventory'),
+              },
+              {
+                label: t('Registry'),
+                value: props.statusData?.registry || '-',
+                detail: props.statusData?.server_url || '-',
+              },
+              {
+                label: t('Last modified'),
+                value: modified ? t('Reported') : '-',
+                detail: modified || t('No timestamp reported'),
+              },
+            ]}
+          />
         </StackItem>
         <StackItem>
           <PageTabs>
@@ -595,34 +559,6 @@ function QuayRepositoryConsole(props: {
               </div>
             </PageTab>
           </PageTabs>
-        </StackItem>
-        <StackItem>
-          <Divider />
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-              paddingTop: 16,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-            }}
-          >
-            <Button component="a" href={eeImagesUrl} variant="link" isInline icon={<TagIcon />}>
-              {t('Build or push image')}
-            </Button>
-            <Button
-              component="a"
-              href={permissionsUrl}
-              variant="link"
-              isInline
-              icon={<SecurityIcon />}
-            >
-              {t('Repository permissions')}
-            </Button>
-            <span style={{ color: 'var(--pf-v5-global--Color--300)' }}>
-              <HistoryIcon /> {t('Selected rows in the table update this workspace.')}
-            </span>
-          </div>
         </StackItem>
       </Stack>
     </PageSection>

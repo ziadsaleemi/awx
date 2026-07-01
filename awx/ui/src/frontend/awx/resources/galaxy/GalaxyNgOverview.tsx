@@ -8,26 +8,27 @@ import {
   DescriptionListTerm,
   Flex,
   FlexItem,
-  Gallery,
-  GalleryItem,
-  Label,
   Spinner,
   Stack,
   StackItem,
   Text,
   TextContent,
   TextVariants,
-  Title,
 } from '@patternfly/react-core';
-import { CheckCircleIcon, CubesIcon, TimesCircleIcon } from '@patternfly/react-icons';
+import { CubesIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 import { useGetPageUrl } from '../../../../framework';
 import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
 import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
+import {
+  ContentStatusLabel,
+  ContentStatusStrip,
+  ContentSummaryGrid,
+  ContentWorkflowGroups,
+} from '../content/ContentManagementCards';
 import { AwxRoute } from '../../main/AwxRoutes';
 
 export interface GalaxyNgStatus {
@@ -58,85 +59,6 @@ export interface GalaxyNgStatus {
   };
   pulp_status: Record<string, unknown>;
   controller_error: string;
-}
-
-function StatusLabel(props: { enabled: boolean; enabledText: string; disabledText: string }) {
-  return props.enabled ? (
-    <Label color="green" icon={<CheckCircleIcon />}>
-      {props.enabledText}
-    </Label>
-  ) : (
-    <Label color="grey" icon={<TimesCircleIcon />}>
-      {props.disabledText}
-    </Label>
-  );
-}
-
-function MetricTile(props: { label: string; value: string | number; detail?: string }) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-        minHeight: 112,
-        minWidth: 0,
-        padding: 16,
-        width: '100%',
-      }}
-    >
-      <Stack hasGutter>
-        <StackItem>
-          <Title
-            headingLevel="h3"
-            size="2xl"
-            style={{ lineHeight: 1.15, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-          >
-            {props.value}
-          </Title>
-        </StackItem>
-        <StackItem>
-          <TextContent>
-            <Text component={TextVariants.small}>{props.label}</Text>
-            {props.detail ? (
-              <Text
-                component={TextVariants.small}
-                style={{ opacity: 0.75, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-              >
-                {props.detail}
-              </Text>
-            ) : null}
-          </TextContent>
-        </StackItem>
-      </Stack>
-    </div>
-  );
-}
-
-function QuickLink(props: { href?: string; to?: string; label: string; description: string }) {
-  if (!props.href && !props.to) {
-    return null;
-  }
-  return (
-    <GalleryItem>
-      <Stack hasGutter>
-        <StackItem>
-          {props.to ? (
-            <Link to={props.to}>{props.label}</Link>
-          ) : props.href ? (
-            <a href={props.href} target="_blank" rel="noreferrer">
-              {props.label}
-            </a>
-          ) : (
-            props.label
-          )}
-        </StackItem>
-        <StackItem>
-          <TextContent>
-            <Text component={TextVariants.small}>{props.description}</Text>
-          </TextContent>
-        </StackItem>
-      </Stack>
-    </GalleryItem>
-  );
 }
 
 function getBrowserUrl(url?: string) {
@@ -174,7 +96,7 @@ export function GalaxyNgOverview() {
   const online = Boolean(data?.enabled && data.configured && !data.controller_error);
 
   return (
-    <PageDashboard sectionStyle={{ padding: 16 }}>
+    <PageDashboard sectionStyle={{ padding: 24 }}>
       <PageDashboardCard
         id="galaxy-ng-control-plane"
         title={t('Automation Hub')}
@@ -182,21 +104,20 @@ export function GalaxyNgOverview() {
           'Galaxy NG private automation hub for collections, namespaces, repositories, and import tasks'
         )}
         width="full"
-        height="sm"
         headerControls={
           <Flex
             spaceItems={{ default: 'spaceItemsSm' }}
             alignItems={{ default: 'alignItemsCenter' }}
           >
             <FlexItem>
-              <StatusLabel
+              <ContentStatusLabel
                 enabled={Boolean(data?.enabled)}
                 enabledText={t('Module enabled')}
                 disabledText={t('Module disabled')}
               />
             </FlexItem>
             <FlexItem>
-              <StatusLabel
+              <ContentStatusLabel
                 enabled={online}
                 enabledText={t('Hub connected')}
                 disabledText={t('Hub not connected')}
@@ -222,7 +143,15 @@ export function GalaxyNgOverview() {
       >
         <CardBody>
           {status.isLoading ? (
-            <Spinner size="md" />
+            <div
+              style={{
+                alignItems: 'center',
+                display: 'flex',
+                minHeight: 120,
+              }}
+            >
+              <Spinner size="md" />
+            </div>
           ) : status.error ? (
             <Alert variant="warning" isInline title={t('Could not load Galaxy NG status.')} />
           ) : (
@@ -234,55 +163,76 @@ export function GalaxyNgOverview() {
                   </Alert>
                 </StackItem>
               ) : null}
+              {!online ? (
+                <StackItem>
+                  <Alert
+                    variant="warning"
+                    isInline
+                    title={t('Galaxy NG is not ready for AWX content workflows')}
+                  >
+                    {data?.message || t('Configure Galaxy NG settings before using this module.')}
+                  </Alert>
+                </StackItem>
+              ) : null}
               <StackItem>
-                <div
-                  style={{
-                    display: 'grid',
-                    gap: 16,
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
-                  }}
-                >
-                  <MetricTile
-                    label={t('Namespaces')}
-                    value={data?.counts.namespaces ?? 0}
-                    detail={data?.server_url || t('No server configured')}
-                  />
-                  <MetricTile
-                    label={t('Collections')}
-                    value={data?.counts.collections ?? 0}
-                    detail={t('Synced from Galaxy NG API')}
-                  />
-                  <MetricTile
-                    label={t('Repositories')}
-                    value={data?.counts.repositories ?? 0}
-                    detail={t('Pulp Ansible repositories')}
-                  />
-                  <MetricTile
-                    label={t('Remotes')}
-                    value={data?.counts.remotes ?? 0}
-                    detail={t('External collection sources')}
-                  />
-                  <MetricTile
-                    label={t('Remote registries')}
-                    value={data?.counts.remote_registries ?? 0}
-                    detail={t('External container sources')}
-                  />
-                  <MetricTile
-                    label={t('Signature keys')}
-                    value={data?.counts.signature_keys ?? 0}
-                    detail={t('Signing services')}
-                  />
-                  <MetricTile
-                    label={t('Approvals')}
-                    value={data?.counts.collection_approvals ?? 0}
-                    detail={t('Collections waiting in staging')}
-                  />
-                  <MetricTile
-                    label={t('Import tasks')}
-                    value={data?.counts.tasks ?? 0}
-                    detail={data?.auth_configured ? t('Authenticated') : t('Anonymous/API public')}
-                  />
-                </div>
+                <ContentSummaryGrid
+                  metrics={[
+                    {
+                      label: t('Collections'),
+                      value: data?.counts.collections ?? 0,
+                      detail: t('Available automation content'),
+                    },
+                    {
+                      label: t('Namespaces'),
+                      value: data?.counts.namespaces ?? 0,
+                      detail: data?.server_url || t('No server configured'),
+                    },
+                    {
+                      label: t('Repositories'),
+                      value: data?.counts.repositories ?? 0,
+                      detail: t('Pulp Ansible repositories'),
+                    },
+                    {
+                      label: t('Remotes'),
+                      value: data?.counts.remotes ?? 0,
+                      detail: t('External collection sources'),
+                    },
+                    {
+                      label: t('Approvals'),
+                      value: data?.counts.collection_approvals ?? 0,
+                      detail: t('Staged versions waiting review'),
+                    },
+                    {
+                      label: t('Tasks'),
+                      value: data?.counts.tasks ?? 0,
+                      detail: t('Import, sync, copy, and publish activity'),
+                    },
+                  ]}
+                  minWidth={135}
+                />
+              </StackItem>
+              <StackItem>
+                <ContentStatusStrip
+                  items={[
+                    {
+                      label: t('API auth'),
+                      value: data?.auth_configured ? t('Configured') : t('Public only'),
+                      ok: Boolean(data?.auth_configured),
+                    },
+                    {
+                      label: t('Remote registries'),
+                      value: data?.counts.remote_registries ?? 0,
+                    },
+                    {
+                      label: t('Signature keys'),
+                      value: data?.counts.signature_keys ?? 0,
+                    },
+                    {
+                      label: t('TLS verify'),
+                      value: data?.verify_ssl ? t('Enabled') : t('Disabled'),
+                    },
+                  ]}
+                />
               </StackItem>
             </Stack>
           )}
@@ -293,8 +243,7 @@ export function GalaxyNgOverview() {
         id="galaxy-ng-connection"
         title={t('Connection')}
         subtitle={t('AWX connection settings used to reach Galaxy NG')}
-        width="half"
-        height="sm"
+        width="full"
         linkText={t('Open settings')}
         to={settingsUrl}
       >
@@ -336,80 +285,95 @@ export function GalaxyNgOverview() {
 
       <PageDashboardCard
         id="galaxy-ng-workflows"
-        title={t('Automation Hub workflows')}
-        subtitle={t('Use Galaxy NG as the AWX private automation hub content source')}
-        width="half"
-        height="sm"
+        title={t('Automation Hub workspace')}
+        subtitle={t('Manage content lifecycle, distribution, trust, and operations')}
+        width="full"
       >
         <CardBody>
-          <Gallery hasGutter minWidths={{ default: '220px' }}>
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGNamespaces)}
-              label={t('Namespaces')}
-              description={t('Review private automation hub namespaces visible to AWX.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGCollections)}
-              label={t('Collections')}
-              description={t('Review private automation hub collections visible to AWX.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGProjectImports)}
-              label={t('Project Imports')}
-              description={t('Build and publish collection artifacts from synced AWX Projects.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.QuayExecutionEnvironmentImages)}
-              label={t('Project Quay Execution Environments')}
-              description={t(
-                'Build EE images from AWX Projects in the separate Project Quay module.'
-              )}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGSignatureKeys)}
-              label={t('Signature Keys')}
-              description={t('Review signing services used to verify automation content.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRepositories)}
-              label={t('Repositories')}
-              description={t('Inspect Pulp Ansible repositories backing content distribution.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRemoteRegistries)}
-              label={t('Remote Registries')}
-              description={t(
-                'Inspect external registries Galaxy NG can pull container content from.'
-              )}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGTasks)}
-              label={t('Task Management')}
-              description={t('Track import, sync, copy, and publish task state.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGCollectionApprovals)}
-              label={t('Collection Approvals')}
-              description={t(
-                'Review staged collection versions before promotion to approved content.'
-              )}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGRemotes)}
-              label={t('Remotes')}
-              description={t('Inspect remote Automation Hub sources used for collection sync.')}
-            />
-            <QuickLink
-              to={getPageUrl(AwxRoute.GalaxyNGApiToken)}
-              label={t('API Token')}
-              description={t('See how AWX authenticates to Galaxy NG APIs.')}
-            />
-            <QuickLink
-              href={getBrowserUrl(data?.api_browser_url || getApiBrowserUrl(data?.api_root_url))}
-              label={t('Open Galaxy NG API')}
-              description={t('Open the live Galaxy NG API browser for direct hub operations.')}
-            />
-          </Gallery>
+          <ContentWorkflowGroups
+            groups={[
+              {
+                title: t('Content lifecycle'),
+                description: t('Author, import, approve, and consume automation collections.'),
+                links: [
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGNamespaces),
+                    label: t('Namespaces'),
+                    description: t('Review private automation hub namespaces.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGCollections),
+                    label: t('Collections'),
+                    description: t('Browse collections available to AWX.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGProjectImports),
+                    label: t('Project Imports'),
+                    description: t('Build and publish collection artifacts from AWX Projects.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGCollectionApprovals),
+                    label: t('Collection Approvals'),
+                    description: t('Promote staged versions into approved content.'),
+                  },
+                ],
+              },
+              {
+                title: t('Distribution'),
+                description: t('Sync, mirror, and serve collection and image sources.'),
+                links: [
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGRepositories),
+                    label: t('Repositories'),
+                    description: t('Inspect Pulp Ansible repositories.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGRemotes),
+                    label: t('Remotes'),
+                    description: t('Inspect remote Automation Hub collection sources.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGRemoteRegistries),
+                    label: t('Remote Registries'),
+                    description: t('Inspect external container registries.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.QuayExecutionEnvironmentImages),
+                    label: t('Project Quay Execution Environments'),
+                    description: t('Build EE images in the separate Project Quay module.'),
+                  },
+                ],
+              },
+              {
+                title: t('Trust and operations'),
+                description: t('Signing, task state, and live API access.'),
+                links: [
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGSignatureKeys),
+                    label: t('Signature Keys'),
+                    description: t('Review signing services for automation content.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGTasks),
+                    label: t('Task Management'),
+                    description: t('Track import, sync, copy, and publish task state.'),
+                  },
+                  {
+                    to: getPageUrl(AwxRoute.GalaxyNGApiToken),
+                    label: t('API Token'),
+                    description: t('Review AWX authentication for Galaxy NG APIs.'),
+                  },
+                  {
+                    href: getBrowserUrl(
+                      data?.api_browser_url || getApiBrowserUrl(data?.api_root_url)
+                    ),
+                    label: t('Open Galaxy NG API'),
+                    description: t('Open the live API browser for direct hub operations.'),
+                  },
+                ],
+              },
+            ]}
+          />
         </CardBody>
       </PageDashboardCard>
 
@@ -418,7 +382,6 @@ export function GalaxyNgOverview() {
         title={t('Pulp status')}
         subtitle={t('Live status returned by the Galaxy NG/Pulp API')}
         width="full"
-        height="xs"
       >
         <CardBody>
           <Flex
