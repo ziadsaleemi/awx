@@ -183,7 +183,7 @@ export function GalaxyNgOverview() {
                     {
                       label: t('Namespaces'),
                       value: data?.counts.namespaces ?? 0,
-                      detail: data?.server_url || t('No server configured'),
+                      detail: t('Private hub namespaces'),
                     },
                     {
                       label: t('Repositories'),

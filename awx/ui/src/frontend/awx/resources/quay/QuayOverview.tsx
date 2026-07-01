@@ -140,9 +140,9 @@ export function QuayOverview() {
                 <ContentSummaryGrid
                   metrics={[
                     {
-                      label: t('Registry'),
-                      value: data?.registry || t('Not configured'),
-                      detail: data?.server_url || t('No registry URL configured'),
+                      label: t('Repositories'),
+                      value: data?.counts.repositories ?? 0,
+                      detail: t('Visible through the Quay API'),
                     },
                     {
                       label: t('Namespace'),
@@ -150,9 +150,9 @@ export function QuayOverview() {
                       detail: t('Default Quay organization or user'),
                     },
                     {
-                      label: t('Repositories'),
-                      value: data?.counts.repositories ?? 0,
-                      detail: t('Visible through the Quay API'),
+                      label: t('Tags'),
+                      value: data?.counts.tags ?? 0,
+                      detail: t('Hosted image versions'),
                     },
                     {
                       label: t('Image push'),

@@ -90,7 +90,6 @@ describe('QuayOverview', () => {
 
     cy.get('#quay-control-plane').should('contain', 'Project Quay');
     cy.get('#quay-control-plane').should('contain', 'Quay connected');
-    cy.get('#quay-control-plane').should('contain', 'quay.example.test');
     cy.get('#quay-control-plane').should('contain', '2');
     cy.get('#quay-control-plane input[value="https://quay.example.test"]').should('exist');
     cy.get('#quay-control-plane').should('contain', 'Project Quay is ready');
