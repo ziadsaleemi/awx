@@ -11,8 +11,6 @@ import {
   FormGroup,
   FormSelect,
   FormSelectOption,
-  Grid,
-  GridItem,
   Label,
   Modal,
   ModalVariant,
@@ -35,6 +33,7 @@ import {
   TagIcon,
   TrashIcon,
 } from '@patternfly/react-icons';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { DropdownPosition } from '@patternfly/react-core/deprecated';
 import {
   DateTimeCell,
@@ -102,6 +101,7 @@ type QuayPrincipalType = 'user' | 'team';
 
 const QUAY_PRINCIPAL_USER: QuayPrincipalType = 'user';
 const QUAY_PRINCIPAL_TEAM: QuayPrincipalType = 'team';
+const QUAY_REPO_ADMIN_SCOPE = 'repo:admin';
 
 interface QuayImageTag {
   id: number;
@@ -355,6 +355,7 @@ function QuayTagTable(props: {
   isLoading?: boolean;
   error?: Error;
   emptyText: string;
+  ariaLabel?: string;
 }) {
   const { t } = useTranslation();
 
@@ -369,34 +370,34 @@ function QuayTagTable(props: {
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="pf-v5-c-table pf-m-compact pf-m-grid-md">
-        <thead>
-          <tr>
-            <th>{t('Tag')}</th>
-            <th>{t('Digest')}</th>
-            <th>{t('Size')}</th>
-            <th>{t('Last modified')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.tags.map((tag) => (
-            <tr key={tag._awx_key || tag.name || tag.id}>
-              <td>
-                <Label color="blue" icon={<TagIcon />}>
-                  {tag.name || '-'}
-                </Label>
-              </td>
-              <td style={{ overflowWrap: 'anywhere' }}>{tag.manifest_digest || '-'}</td>
-              <td>{formatBytes(tag.size)}</td>
-              <td>
-                <DateTimeCell value={tagTimestamp(tag)} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table variant="compact" aria-label={props.ariaLabel || t('Project Quay repository tags')}>
+      <Thead>
+        <Tr>
+          <Th>{t('Tag')}</Th>
+          <Th>{t('Digest')}</Th>
+          <Th>{t('Size')}</Th>
+          <Th>{t('Last modified')}</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {props.tags.map((tag) => (
+          <Tr key={tag._awx_key || tag.name || tag.id}>
+            <Td dataLabel={t('Tag')}>
+              <Label color="blue" icon={<TagIcon />}>
+                {tag.name || '-'}
+              </Label>
+            </Td>
+            <Td dataLabel={t('Digest')} style={{ overflowWrap: 'anywhere' }}>
+              {tag.manifest_digest || '-'}
+            </Td>
+            <Td dataLabel={t('Size')}>{formatBytes(tag.size)}</Td>
+            <Td dataLabel={t('Last modified')}>
+              <DateTimeCell value={tagTimestamp(tag)} />
+            </Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
   );
 }
 
@@ -418,43 +419,45 @@ function QuayPermissionTable(props: {
       </StackItem>
       <StackItem>
         {props.items.length ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table
-              className="pf-v5-c-table pf-m-compact pf-m-grid-md"
-              aria-label={
-                props.type === QUAY_PRINCIPAL_USER
-                  ? t('Quay user and robot permissions')
-                  : t('Quay team permissions')
-              }
-            >
-              <thead>
-                <tr>
-                  <th>{props.type === QUAY_PRINCIPAL_USER ? t('User or robot') : t('Team')}</th>
-                  <th>{t('Role')}</th>
-                  <th>{t('Actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {props.items.map((permission) => (
-                  <tr key={permission._awx_key || permission.id}>
-                    <td>{permissionPrincipal(permission, props.type)}</td>
-                    <td>{permission.role || '-'}</td>
-                    <td>
-                      <Button
-                        variant="link"
-                        icon={<TrashIcon />}
-                        isDanger
-                        isDisabled={!props.canManage}
-                        onClick={() => props.onDelete(permission, props.type)}
-                      >
-                        {t('Remove')}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table
+            variant="compact"
+            aria-label={
+              props.type === QUAY_PRINCIPAL_USER
+                ? t('Quay user and robot permissions')
+                : t('Quay team permissions')
+            }
+          >
+            <Thead>
+              <Tr>
+                <Th>{props.type === QUAY_PRINCIPAL_USER ? t('User or robot') : t('Team')}</Th>
+                <Th>{t('Role')}</Th>
+                <Th>{t('Actions')}</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {props.items.map((permission) => (
+                <Tr key={permission._awx_key || permission.id}>
+                  <Td
+                    dataLabel={props.type === QUAY_PRINCIPAL_USER ? t('User or robot') : t('Team')}
+                  >
+                    {permissionPrincipal(permission, props.type)}
+                  </Td>
+                  <Td dataLabel={t('Role')}>{permission.role || '-'}</Td>
+                  <Td dataLabel={t('Actions')}>
+                    <Button
+                      variant="link"
+                      icon={<TrashIcon />}
+                      isDanger
+                      isDisabled={!props.canManage}
+                      onClick={() => props.onDelete(permission, props.type)}
+                    >
+                      {t('Remove')}
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
         ) : (
           <Alert
             isInline
@@ -617,6 +620,7 @@ function QuayRepositoryConsole(props: {
   const latestTag = latestKnownTag(repository, tagItems);
   const image = imageReference(props.statusData?.registry, repository, latestTag);
   const isPublic = Boolean(repository.is_public);
+  const latestTagTimestamp = tagItems[0] ? tagTimestamp(tagItems[0]) : undefined;
 
   return (
     <>
@@ -647,14 +651,14 @@ function QuayRepositoryConsole(props: {
             </TabTitleText>
           }
         />
-        <Tab eventKey="details" title={t('Details')} />
-        <Tab eventKey="tags" title={t('Tags')} />
-        <Tab eventKey="activity" title={t('Activity')} />
-        <Tab eventKey="permissions" title={t('Permissions')} />
-        <Tab eventKey="settings" title={t('Settings')} />
+        <Tab eventKey="details" title={<TabTitleText>{t('Details')}</TabTitleText>} />
+        <Tab eventKey="tags" title={<TabTitleText>{t('Tags')}</TabTitleText>} />
+        <Tab eventKey="activity" title={<TabTitleText>{t('Activity')}</TabTitleText>} />
+        <Tab eventKey="permissions" title={<TabTitleText>{t('Permissions')}</TabTitleText>} />
+        <Tab eventKey="settings" title={<TabTitleText>{t('Settings')}</TabTitleText>} />
       </Tabs>
       {activeTab === 'details' ? (
-        <PageDetails>
+        <PageDetails numberOfColumns="multiple">
           <PageDetail label={t('Name')}>{repository.name || '-'}</PageDetail>
           <PageDetail label={t('Description')}>{repository.description || '-'}</PageDetail>
           <PageDetail label={t('Namespace')}>{namespace || '-'}</PageDetail>
@@ -688,7 +692,7 @@ function QuayRepositoryConsole(props: {
         </PageDetails>
       ) : null}
       {activeTab === 'tags' ? (
-        <PageSection style={{ padding: 24 }}>
+        <PageSection variant="light">
           {!props.statusData?.auth_configured ? (
             <Alert
               isInline
@@ -706,197 +710,239 @@ function QuayRepositoryConsole(props: {
               isLoading={tags.isLoading}
               error={tags.error}
               emptyText={t('No image tags were reported for this repository.')}
+              ariaLabel={t('Project Quay repository tags for {{repository}}', {
+                repository: repository.name,
+              })}
             />
           )}
         </PageSection>
       ) : null}
       {activeTab === 'activity' ? (
-        <PageSection style={{ padding: 24 }}>
-          <Grid hasGutter>
-            <GridItem sm={12} lg={6}>
-              <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
-                {t('Recent tag activity')}
-              </Title>
-              <QuayTagTable
-                tags={tagItems.slice(0, 5)}
-                isLoading={tags.isLoading}
-                error={tags.error}
-                emptyText={t('No recent tag activity was reported by Project Quay.')}
-              />
-            </GridItem>
-            <GridItem sm={12} lg={6}>
-              <Alert isInline variant="info" title={t('Usage logs need Quay event data')}>
-                {t(
-                  'AWX can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
-                )}
-              </Alert>
-            </GridItem>
-          </Grid>
-        </PageSection>
-      ) : null}
-      {activeTab === 'permissions' ? (
-        <PageSection style={{ padding: 24 }}>
-          <Stack hasGutter>
-            {!canManagePermissions ? (
+        <>
+          <PageDetails numberOfColumns="multiple">
+            <PageDetail label={t('Repository')}>{`${namespace}/${repository.name}`}</PageDetail>
+            <PageDetail label={t('Registry')}>{props.statusData?.registry || '-'}</PageDetail>
+            <PageDetail label={t('Tags loaded')}>{String(tagItems.length)}</PageDetail>
+            <PageDetail label={t('Latest tag')}>{latestTag || '-'}</PageDetail>
+            <PageDetail label={t('Latest tag update')}>
+              <DateTimeCell value={latestTagTimestamp} />
+            </PageDetail>
+            <PageDetail label={t('Usage log source')}>
+              {t('Project Quay usage logs are not exposed by the current AWX API.')}
+            </PageDetail>
+          </PageDetails>
+          <PageSection variant="light">
+            <Stack hasGutter>
               <StackItem>
-                <Alert
-                  isInline
-                  variant="warning"
-                  title={t('Project Quay permission management needs an API token.')}
-                  actionLinks={
-                    <Button component="a" variant="link" href={apiTokenUrl}>
-                      {t('Open API token plan')}
-                    </Button>
-                  }
-                >
+                <Alert isInline variant="info" title={t('Usage logs need Quay event data')}>
                   {t(
-                    'Configure QUAY_API_TOKEN with repo:admin scope before managing repository permissions from AWX.'
+                    'AWX can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
                   )}
                 </Alert>
               </StackItem>
-            ) : (
-              <>
+              <StackItem>
+                <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
+                  {t('Recent tag activity')}
+                </Title>
+                <QuayTagTable
+                  tags={tagItems.slice(0, 5)}
+                  isLoading={tags.isLoading}
+                  error={tags.error}
+                  emptyText={t('No recent tag activity was reported by Project Quay.')}
+                  ariaLabel={t('Recent Project Quay repository tag activity')}
+                />
+              </StackItem>
+            </Stack>
+          </PageSection>
+        </>
+      ) : null}
+      {activeTab === 'permissions' ? (
+        <>
+          <PageDetails numberOfColumns="multiple">
+            <PageDetail label={t('Repository')}>{`${namespace}/${repository.name}`}</PageDetail>
+            <PageDetail label={t('Permission source')}>
+              {t('Project Quay repository API')}
+            </PageDetail>
+            <PageDetail label={t('User or robot permissions')}>
+              {String(permissions.data?.users?.length ?? 0)}
+            </PageDetail>
+            <PageDetail label={t('Team permissions')}>
+              {String(permissions.data?.teams?.length ?? 0)}
+            </PageDetail>
+            <PageDetail label={t('Required token scope')}>{QUAY_REPO_ADMIN_SCOPE}</PageDetail>
+            <PageDetail label={t('Management token')}>
+              {canManagePermissions ? t('Configured') : t('Not configured')}
+            </PageDetail>
+          </PageDetails>
+          <PageSection variant="light">
+            <Stack hasGutter>
+              {!canManagePermissions ? (
                 <StackItem>
-                  <Form>
-                    <div
-                      style={{
-                        alignItems: 'end',
-                        display: 'grid',
-                        gap: 16,
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
-                      }}
-                    >
-                      <FormGroup label={t('Principal type')} fieldId="quay-permission-type">
-                        <FormSelect
-                          id="quay-permission-type"
-                          value={principalType}
-                          onChange={(_event, value) => setPrincipalType(value as QuayPrincipalType)}
-                        >
-                          <FormSelectOption value="user" label={t('User or robot')} />
-                          <FormSelectOption value="team" label={t('Team')} />
-                        </FormSelect>
-                      </FormGroup>
-                      <FormGroup label={t('Name')} fieldId="quay-permission-principal" isRequired>
-                        <TextInput
-                          id="quay-permission-principal"
-                          value={principal}
-                          placeholder={
-                            principalType === QUAY_PRINCIPAL_USER
-                              ? t('username or org+robot')
-                              : t('team name')
-                          }
-                          onChange={(_event, value) => setPrincipal(value)}
-                        />
-                      </FormGroup>
-                      <FormGroup label={t('Role')} fieldId="quay-permission-role">
-                        <FormSelect
-                          id="quay-permission-role"
-                          value={role}
-                          onChange={(_event, value) => setRole(value as QuayPermissionRole)}
-                        >
-                          <FormSelectOption value="read" label={t('Read')} />
-                          <FormSelectOption value="write" label={t('Write')} />
-                          <FormSelectOption value="admin" label={t('Admin')} />
-                        </FormSelect>
-                      </FormGroup>
-                      <Button
-                        variant="primary"
-                        icon={<PlusCircleIcon />}
-                        isDisabled={!principal.trim()}
-                        onClick={() => void setPermission()}
-                      >
-                        {t('Save permission')}
+                  <Alert
+                    isInline
+                    variant="warning"
+                    title={t('Project Quay permission management needs an API token.')}
+                    actionLinks={
+                      <Button component="a" variant="link" href={apiTokenUrl}>
+                        {t('Open API token plan')}
                       </Button>
-                    </div>
-                  </Form>
+                    }
+                  >
+                    {t(
+                      'Configure QUAY_API_TOKEN with repo:admin scope before managing repository permissions from AWX.'
+                    )}
+                  </Alert>
                 </StackItem>
-                <StackItem>
-                  {permissions.isLoading ? (
-                    <Text component={TextVariants.p}>{t('Loading repository permissions...')}</Text>
-                  ) : permissions.error ? (
-                    <Alert
-                      isInline
-                      variant="warning"
-                      title={t('Could not load Project Quay permissions.')}
-                    />
-                  ) : (
-                    <Grid hasGutter>
-                      <GridItem sm={12} lg={6}>
-                        <QuayPermissionTable
-                          items={permissions.data?.users ?? []}
-                          type={QUAY_PRINCIPAL_USER}
-                          canManage={canManagePermissions}
-                          onDelete={(permission, type) => void deletePermission(permission, type)}
-                        />
-                      </GridItem>
-                      <GridItem sm={12} lg={6}>
-                        <QuayPermissionTable
-                          items={permissions.data?.teams ?? []}
-                          type={QUAY_PRINCIPAL_TEAM}
-                          canManage={canManagePermissions}
-                          onDelete={(permission, type) => void deletePermission(permission, type)}
-                        />
-                      </GridItem>
-                    </Grid>
-                  )}
-                </StackItem>
-              </>
-            )}
-          </Stack>
-        </PageSection>
+              ) : (
+                <>
+                  <StackItem>
+                    <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
+                      {t('Add repository permission')}
+                    </Title>
+                    <Form>
+                      <div
+                        style={{
+                          alignItems: 'end',
+                          display: 'grid',
+                          gap: 16,
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+                        }}
+                      >
+                        <FormGroup label={t('Principal type')} fieldId="quay-permission-type">
+                          <FormSelect
+                            id="quay-permission-type"
+                            value={principalType}
+                            onChange={(_event, value) =>
+                              setPrincipalType(value as QuayPrincipalType)
+                            }
+                          >
+                            <FormSelectOption value="user" label={t('User or robot')} />
+                            <FormSelectOption value="team" label={t('Team')} />
+                          </FormSelect>
+                        </FormGroup>
+                        <FormGroup label={t('Name')} fieldId="quay-permission-principal" isRequired>
+                          <TextInput
+                            id="quay-permission-principal"
+                            value={principal}
+                            placeholder={
+                              principalType === QUAY_PRINCIPAL_USER
+                                ? t('username or org+robot')
+                                : t('team name')
+                            }
+                            onChange={(_event, value) => setPrincipal(value)}
+                          />
+                        </FormGroup>
+                        <FormGroup label={t('Role')} fieldId="quay-permission-role">
+                          <FormSelect
+                            id="quay-permission-role"
+                            value={role}
+                            onChange={(_event, value) => setRole(value as QuayPermissionRole)}
+                          >
+                            <FormSelectOption value="read" label={t('Read')} />
+                            <FormSelectOption value="write" label={t('Write')} />
+                            <FormSelectOption value="admin" label={t('Admin')} />
+                          </FormSelect>
+                        </FormGroup>
+                        <Button
+                          variant="primary"
+                          icon={<PlusCircleIcon />}
+                          isDisabled={!principal.trim()}
+                          onClick={() => void setPermission()}
+                        >
+                          {t('Save permission')}
+                        </Button>
+                      </div>
+                    </Form>
+                  </StackItem>
+                  <StackItem>
+                    {permissions.isLoading ? (
+                      <Text component={TextVariants.p}>
+                        {t('Loading repository permissions...')}
+                      </Text>
+                    ) : permissions.error ? (
+                      <Alert
+                        isInline
+                        variant="warning"
+                        title={t('Could not load Project Quay permissions.')}
+                      />
+                    ) : (
+                      <Stack hasGutter>
+                        <StackItem>
+                          <QuayPermissionTable
+                            items={permissions.data?.users ?? []}
+                            type={QUAY_PRINCIPAL_USER}
+                            canManage={canManagePermissions}
+                            onDelete={(permission, type) => void deletePermission(permission, type)}
+                          />
+                        </StackItem>
+                        <StackItem>
+                          <QuayPermissionTable
+                            items={permissions.data?.teams ?? []}
+                            type={QUAY_PRINCIPAL_TEAM}
+                            canManage={canManagePermissions}
+                            onDelete={(permission, type) => void deletePermission(permission, type)}
+                          />
+                        </StackItem>
+                      </Stack>
+                    )}
+                  </StackItem>
+                </>
+              )}
+            </Stack>
+          </PageSection>
+        </>
       ) : null}
       {activeTab === 'settings' ? (
-        <PageSection style={{ padding: 24 }}>
-          <Grid hasGutter>
-            <GridItem sm={12} lg={6}>
-              <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
-                {t('Repository management')}
-              </Title>
-              <Stack hasGutter>
-                <StackItem>
-                  <Button
-                    variant="secondary"
-                    icon={<PencilAltIcon />}
-                    onClick={() => props.onEdit(repository)}
-                    isDisabled={!props.canManageRepositories}
-                  >
-                    {t('Edit description')}
-                  </Button>
-                </StackItem>
-                <StackItem>
-                  <Button
-                    variant="secondary"
-                    onClick={() => props.onChangeVisibility(repository, !isPublic)}
-                    isDisabled={!props.canManageRepositories}
-                  >
-                    {isPublic ? t('Make private') : t('Make public')}
-                  </Button>
-                </StackItem>
-              </Stack>
-            </GridItem>
-            <GridItem sm={12} lg={6}>
-              <Alert
-                isInline
-                variant="danger"
-                title={t('Delete repository')}
-                actionLinks={
-                  <Button
-                    variant="link"
-                    isDanger
-                    onClick={() => props.onDelete(repository)}
-                    isDisabled={!props.canManageRepositories}
-                  >
-                    {t('Delete repository')}
-                  </Button>
-                }
+        <>
+          <PageDetails numberOfColumns="multiple">
+            <PageDetail label={t('Repository')}>{`${namespace}/${repository.name}`}</PageDetail>
+            <PageDetail label={t('Visibility')}>
+              <Label color={isPublic ? 'blue' : 'grey'}>{visibility(repository)}</Label>
+            </PageDetail>
+            <PageDetail label={t('Description')}>{repository.description || '-'}</PageDetail>
+            <PageDetail label={t('State')}>{repository.state || '-'}</PageDetail>
+            <PageDetail label={t('Edit description')}>
+              <Button
+                variant="secondary"
+                icon={<PencilAltIcon />}
+                onClick={() => props.onEdit(repository)}
+                isDisabled={!props.canManageRepositories}
               >
-                {t(
-                  'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from AWX.'
-                )}
-              </Alert>
-            </GridItem>
-          </Grid>
-        </PageSection>
+                {t('Edit description')}
+              </Button>
+            </PageDetail>
+            <PageDetail label={t('Repository visibility')}>
+              <Button
+                variant="secondary"
+                onClick={() => props.onChangeVisibility(repository, !isPublic)}
+                isDisabled={!props.canManageRepositories}
+              >
+                {isPublic ? t('Make private') : t('Make public')}
+              </Button>
+            </PageDetail>
+          </PageDetails>
+          <PageSection variant="light">
+            <Alert
+              isInline
+              variant="danger"
+              title={t('Delete repository')}
+              actionLinks={
+                <Button
+                  variant="link"
+                  isDanger
+                  onClick={() => props.onDelete(repository)}
+                  isDisabled={!props.canManageRepositories}
+                >
+                  {t('Delete repository')}
+                </Button>
+              }
+            >
+              {t(
+                'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from AWX.'
+              )}
+            </Alert>
+          </PageSection>
+        </>
       ) : null}
     </>
   );

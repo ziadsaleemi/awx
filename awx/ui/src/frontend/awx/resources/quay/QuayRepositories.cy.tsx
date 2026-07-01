@@ -200,7 +200,8 @@ describe('QuayRepositories', () => {
       teamname: 'platform-team',
     });
     cy.contains('button', 'Settings').click();
-    cy.contains('Repository management').should('be.visible');
+    cy.contains('Repository visibility').should('be.visible');
+    cy.contains('Delete repository').should('be.visible');
     cy.contains('Manage repository permissions').should('not.exist');
   });
 
