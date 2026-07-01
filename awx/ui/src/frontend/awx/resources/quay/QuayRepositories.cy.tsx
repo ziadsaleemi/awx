@@ -54,11 +54,33 @@ const repositories = {
   ],
 };
 
+const tags = {
+  count: 1,
+  next: null,
+  previous: null,
+  source: 'quay',
+  resource: 'tags',
+  namespace: 'awx',
+  repository: 'custom-ee',
+  controller_error: '',
+  results: [
+    {
+      id: 1,
+      _awx_key: 'latest',
+      name: 'latest',
+      manifest_digest: 'sha256:abc123',
+      size: 817,
+      last_modified: '2026-06-30T15:48:00Z',
+    },
+  ],
+};
+
 describe('QuayRepositories', () => {
   it('allows Quay managers to create repositories from AWX', () => {
     cy.viewport(1920, 1080);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
     cy.intercept('POST', awxAPI`/quay/repositories/create/`, {
       statusCode: 201,
       body: {
@@ -73,6 +95,17 @@ describe('QuayRepositories', () => {
 
     cy.mount(<QuayRepositories />);
     cy.wait(['@status', '@repositories']);
+    cy.wait('@tags');
+
+    cy.contains('awx/custom-ee').should('be.visible');
+    cy.get('input[value="podman pull quay.example.test/awx/custom-ee:latest"]').should('exist');
+    cy.get('input[value="docker pull quay.example.test/awx/custom-ee:latest"]').should('exist');
+    cy.contains('button', 'Tags').click();
+    cy.contains('sha256:abc123').should('be.visible');
+    cy.contains('button', 'Activity').click();
+    cy.contains('Usage logs need Quay event data').should('be.visible');
+    cy.contains('button', 'Settings').click();
+    cy.contains('Manage repository permissions').should('be.visible');
 
     cy.contains('button', 'Create repository').click();
     cy.get('#quay-repository-name').type('new-ee');
@@ -92,6 +125,7 @@ describe('QuayRepositories', () => {
     cy.viewport(1920, 1080);
     cy.intercept('GET', awxAPI`/quay/status/`, { ...status, can_manage: false }).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
 
     cy.mount(<QuayRepositories />);
     cy.wait(['@status', '@repositories']);
@@ -107,6 +141,7 @@ describe('QuayRepositories', () => {
       'status'
     );
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
 
     cy.mount(<QuayRepositories />);
     cy.wait(['@status', '@repositories']);
