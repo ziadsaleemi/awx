@@ -103,6 +103,36 @@ def test_galaxy_ng_status_reads_live_counts(get, admin_user, mocker):
 
 
 @pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_status_caches_live_counts(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        side_effect=[
+            galaxy_response(mocker, {'database_connection': {'connected': True}}),
+            galaxy_response(mocker, {'count': 2, 'results': []}),
+            galaxy_response(mocker, {'count': 5, 'results': []}),
+            galaxy_response(mocker, {'count': 3, 'results': []}),
+            galaxy_response(mocker, {'count': 4, 'results': []}),
+            galaxy_response(mocker, {'count': 6, 'results': []}),
+            galaxy_response(mocker, {'count': 1, 'results': []}),
+            galaxy_response(mocker, {'count': 7, 'results': []}),
+            galaxy_response(mocker, {'count': 8, 'results': []}),
+        ],
+    )
+
+    first_response = get(reverse('api:galaxy_ng_status'), user=admin_user, expect=200)
+    second_response = get(reverse('api:galaxy_ng_status'), user=admin_user, expect=200)
+
+    assert first_response.data['counts']['collections'] == 5
+    assert second_response.data['counts']['collections'] == 5
+    assert request_mock.call_count == 9
+
+
+@pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
 def test_galaxy_ng_status_fails_soft_when_controller_unreachable(get, admin_user, mocker):
     mocker.patch('awx.main.utils.galaxy_ng.requests.get', side_effect=requests.Timeout('boom'))

@@ -1,12 +1,14 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import hashlib
 import re
 import shlex
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, urlparse
 
 import yaml
+from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status as http_status
@@ -47,6 +49,21 @@ GALAXY_NG_COLLECTION_VERSION_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127
 GALAXY_NG_IMAGE_NAME_RE = re.compile(r'^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$')
 GALAXY_NG_IMAGE_TAG_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
 GALAXY_NG_CONTAINER_RUNTIMES = ('podman', 'docker')
+GALAXY_NG_STATUS_CACHE_TIMEOUT = 15
+
+
+def _galaxy_ng_status_cache_key(client, server_url):
+    fingerprint = '|'.join(
+        [
+            server_url or '',
+            client.api_path_prefix or '',
+            client.content_path_prefix or '',
+            str(client.verify_ssl),
+            str(client.timeout),
+            str(client.auth_configured),
+        ]
+    )
+    return f'awx:galaxy-ng:status:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -350,16 +367,38 @@ class GalaxyNGStatusView(APIView):
             'collection_approvals': f'{api_prefix}/_ui/v1/collection-versions/',
             'tasks': f'{api_prefix}/pulp/api/v3/tasks/',
         }
-        try:
-            response['pulp_status'] = client.pulp_status()
-            for key, path in count_paths.items():
-                try:
-                    params = {'repository': 'staging'} if key == 'collection_approvals' else None
-                    response['counts'][key] = client.count(path, params=params)
-                except GalaxyNGControllerError as exc:
-                    response['controller_error'] = str(exc)
-        except GalaxyNGControllerError as exc:
-            response['controller_error'] = str(exc)
+        cache_key = _galaxy_ng_status_cache_key(client, server_url)
+        live_status = None if request.query_params.get('refresh') else cache.get(cache_key)
+        if live_status is None:
+            live_status = {
+                'counts': {
+                    'namespaces': 0,
+                    'collections': 0,
+                    'repositories': 0,
+                    'remotes': 0,
+                    'remote_registries': 0,
+                    'signature_keys': 0,
+                    'collection_approvals': 0,
+                    'tasks': 0,
+                },
+                'pulp_status': {},
+                'controller_error': '',
+            }
+            try:
+                live_status['pulp_status'] = client.pulp_status()
+                for key, path in count_paths.items():
+                    try:
+                        params = {'repository': 'staging'} if key == 'collection_approvals' else None
+                        live_status['counts'][key] = client.count(path, params=params)
+                    except GalaxyNGControllerError as exc:
+                        live_status['controller_error'] = str(exc)
+            except GalaxyNGControllerError as exc:
+                live_status['controller_error'] = str(exc)
+            cache.set(cache_key, live_status, GALAXY_NG_STATUS_CACHE_TIMEOUT)
+
+        response['counts'].update(live_status.get('counts') or {})
+        response['pulp_status'] = live_status.get('pulp_status') or {}
+        response['controller_error'] = live_status.get('controller_error') or ''
 
         return Response(response)
 

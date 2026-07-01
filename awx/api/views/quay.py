@@ -1,9 +1,11 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import hashlib
 import shlex
 from urllib.parse import urlparse
 
+from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
@@ -36,6 +38,20 @@ QUAY_CONTAINER_RUNTIMES = ('podman', 'docker')
 QUAY_REPOSITORY_VISIBILITIES = ('public', 'private')
 QUAY_REPOSITORY_ROLES = ('read', 'write', 'admin')
 QUAY_ROBOT_NAMESPACE_KINDS = ('user', 'organization')
+QUAY_STATUS_CACHE_TIMEOUT = 15
+
+
+def _quay_status_cache_key(client, server_url, namespace):
+    fingerprint = '|'.join(
+        [
+            server_url or '',
+            namespace or '',
+            str(client.verify_ssl),
+            str(client.timeout),
+            str(client.auth_configured),
+        ]
+    )
+    return f'awx:quay:status:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -232,11 +248,25 @@ class QuayStatusView(APIView):
                 response['controller_error'] = _('Project Quay namespace is not configured.')
             return Response(response)
 
-        try:
-            repositories = normalize_repository_list(client.repositories(namespace=namespace, params={'limit': 100}))
-            response['counts']['repositories'] = repositories['count']
-        except QuayControllerError as exc:
-            response['controller_error'] = str(exc)
+        cache_key = _quay_status_cache_key(client, server_url, namespace)
+        live_status = None if request.query_params.get('refresh') else cache.get(cache_key)
+        if live_status is None:
+            live_status = {
+                'counts': {
+                    'repositories': 0,
+                    'tags': 0,
+                },
+                'controller_error': '',
+            }
+            try:
+                repositories = normalize_repository_list(client.repositories(namespace=namespace, params={'limit': 100}))
+                live_status['counts']['repositories'] = repositories['count']
+            except QuayControllerError as exc:
+                live_status['controller_error'] = str(exc)
+            cache.set(cache_key, live_status, QUAY_STATUS_CACHE_TIMEOUT)
+
+        response['counts'].update(live_status.get('counts') or {})
+        response['controller_error'] = live_status.get('controller_error') or ''
 
         return Response(response)
 

@@ -75,6 +75,31 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
     QUAY_NAMESPACE='awx',
     QUAY_API_TOKEN='quay-token',
 )
+def test_quay_status_caches_live_repository_count(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.get',
+        return_value=quay_response(mocker, {'repositories': [{'name': 'custom-ee'}]}),
+    )
+
+    first_response = get(reverse('api:quay_status'), user=admin_user, expect=200)
+    second_response = get(reverse('api:quay_status'), user=admin_user, expect=200)
+
+    assert first_response.data['counts']['repositories'] == 1
+    assert second_response.data['counts']['repositories'] == 1
+    assert request_mock.call_count == 1
+
+    get(reverse('api:quay_status') + '?refresh=1', user=admin_user, expect=200)
+
+    assert request_mock.call_count == 2
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
 def test_quay_api_token_plan_returns_scopes_and_commands(get, admin_user):
     response = get(reverse('api:quay_api_token_plan'), user=admin_user, expect=200)
 
