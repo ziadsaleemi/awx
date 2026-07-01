@@ -358,6 +358,7 @@ describe('AWX navigation capabilities', () => {
           id: AwxRoute.QuayRepositoryPermissions,
           path: 'repository-permissions',
           element: <div />,
+          hidden: true,
         },
         { id: AwxRoute.QuayRobots, path: 'robots', element: <div /> },
         {

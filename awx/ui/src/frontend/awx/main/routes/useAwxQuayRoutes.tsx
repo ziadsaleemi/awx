@@ -7,7 +7,6 @@ import { QuayApiToken } from '../../resources/quay/QuayApiToken';
 import { QuayExecutionEnvironmentImages } from '../../resources/quay/QuayExecutionEnvironmentImages';
 import { QuayOverview } from '../../resources/quay/QuayOverview';
 import { QuayRepositories, QuayRepositoryDetails } from '../../resources/quay/QuayRepositories';
-import { QuayRepositoryPermissions } from '../../resources/quay/QuayRepositoryPermissions';
 import { QuayRobots } from '../../resources/quay/QuayRobots';
 import { AwxRoute } from '../AwxRoutes';
 
@@ -41,9 +40,9 @@ export function useAwxQuayRoutes() {
         },
         {
           id: AwxRoute.QuayRepositoryPermissions,
-          label: t('Repository Permissions'),
           path: 'repository-permissions',
-          element: <QuayRepositoryPermissions />,
+          element: <Navigate to="../repositories" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.QuayRobots,

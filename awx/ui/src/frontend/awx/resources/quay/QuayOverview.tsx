@@ -59,7 +59,6 @@ export function QuayOverview() {
   const data = status.data;
   const settingsUrl = getPageUrl(AwxRoute.SettingsQuay) || '/settings/quay';
   const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
-  const repositoryPermissionsUrl = getPageUrl(AwxRoute.QuayRepositoryPermissions);
   const robotsUrl = getPageUrl(AwxRoute.QuayRobots);
   const apiTokenUrl = getPageUrl(AwxRoute.QuayApiToken);
   const imagesUrl =
@@ -256,15 +255,13 @@ export function QuayOverview() {
                 title: t('Secure access'),
                 description: t('Management surfaces for repository and robot access.'),
                 links: [
-                  ...(repositoryPermissionsUrl
-                    ? [
-                        {
-                          to: repositoryPermissionsUrl,
-                          label: t('Repository Permissions'),
-                          description: t('Grant user, team, and robot repository access.'),
-                        },
-                      ]
-                    : []),
+                  {
+                    to: repositoriesUrl,
+                    label: t('Repository permissions'),
+                    description: t(
+                      'Open a repository details page to grant user, team, and robot access.'
+                    ),
+                  },
                   ...(robotsUrl
                     ? [
                         {

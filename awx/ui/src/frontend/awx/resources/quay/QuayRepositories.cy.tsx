@@ -75,9 +75,20 @@ const tags = {
   ],
 };
 
+const permissions = {
+  source: 'quay',
+  resource: 'repository_permissions',
+  namespace: 'awx',
+  repository: 'custom-ee',
+  users: [{ id: 1, _awx_key: 'awx+builder', username: 'awx+builder', role: 'write' }],
+  teams: [{ id: 1, _awx_key: 'platform-team', teamname: 'platform-team', role: 'read' }],
+  count: 2,
+  controller_error: '',
+};
+
 describe('QuayRepositories', () => {
   it('shows the repository list without embedding repository details', () => {
-    cy.viewport(1920, 1080);
+    cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
     cy.intercept('POST', awxAPI`/quay/repositories/create/`, {
@@ -117,10 +128,28 @@ describe('QuayRepositories', () => {
   });
 
   it('shows repository console content on the details route', () => {
-    cy.viewport(1920, 1080);
+    cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
     cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/permissions/`}*`, permissions).as(
+      'permissions'
+    );
+    cy.intercept('POST', awxAPI`/quay/repositories/permissions/user/set/`, {
+      source: 'quay',
+      action: 'set_user_permission',
+      namespace: 'awx',
+      repository: 'custom-ee',
+      username: 'awx+deployer',
+      role: 'write',
+    }).as('setUserPermission');
+    cy.intercept('POST', awxAPI`/quay/repositories/permissions/team/delete/`, {
+      source: 'quay',
+      action: 'delete_team_permission',
+      namespace: 'awx',
+      repository: 'custom-ee',
+      teamname: 'platform-team',
+    }).as('deleteTeamPermission');
 
     cy.mount(<QuayRepositoryDetails />, {
       path: '/quay/repositories/:namespace/:repository',
@@ -145,12 +174,56 @@ describe('QuayRepositories', () => {
     cy.contains('sha256:abc123').should('be.visible');
     cy.contains('button', 'Activity').click();
     cy.contains('Usage logs need Quay event data').should('be.visible');
+    cy.contains('button', 'Permissions').click();
+    cy.wait('@permissions');
+    cy.contains('td', 'awx+builder').should('be.visible');
+    cy.contains('td', 'platform-team').should('be.visible');
+    cy.get('#quay-permission-principal').type('awx+deployer');
+    cy.get('#quay-permission-role').then(($select) => {
+      const select = $select[0] as HTMLSelectElement;
+      select.value = 'write';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    cy.contains('button', 'Save permission').click();
+    cy.wait('@setUserPermission').its('request.body').should('deep.equal', {
+      namespace: 'awx',
+      repository: 'custom-ee',
+      role: 'write',
+      username: 'awx+deployer',
+    });
+    cy.contains('tr', 'platform-team').within(() => {
+      cy.contains('button', 'Remove').click();
+    });
+    cy.wait('@deleteTeamPermission').its('request.body').should('deep.equal', {
+      namespace: 'awx',
+      repository: 'custom-ee',
+      teamname: 'platform-team',
+    });
     cy.contains('button', 'Settings').click();
-    cy.contains('Manage repository permissions').should('be.visible');
+    cy.contains('Repository management').should('be.visible');
+    cy.contains('Manage repository permissions').should('not.exist');
+  });
+
+  it('shows repository permission guidance until a Quay API token is configured', () => {
+    cy.viewport(1280, 800);
+    cy.intercept('GET', awxAPI`/quay/status/`, { ...status, management_configured: false }).as(
+      'status'
+    );
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
+
+    cy.mount(<QuayRepositoryDetails />, {
+      path: '/quay/repositories/:namespace/:repository',
+      initialEntries: ['/quay/repositories/awx/custom-ee'],
+    });
+    cy.wait(['@status', '@repositories']);
+    cy.contains('button', 'Permissions').click();
+    cy.contains('Project Quay permission management needs an API token.').should('be.visible');
+    cy.contains('button', 'Save permission').should('not.exist');
   });
 
   it('keeps repository management controls hidden for read-only users', () => {
-    cy.viewport(1920, 1080);
+    cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, { ...status, can_manage: false }).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
     cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
@@ -164,7 +237,7 @@ describe('QuayRepositories', () => {
   });
 
   it('keeps repository management controls hidden until Quay API token is configured', () => {
-    cy.viewport(1920, 1080);
+    cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, { ...status, management_configured: false }).as(
       'status'
     );

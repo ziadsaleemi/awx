@@ -52,11 +52,6 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
-        id: AwxRoute.QuayRepositoryPermissions,
-        path: 'quay/repository-permissions',
-        element: <div />,
-      } as PageNavigationItem,
-      {
         id: AwxRoute.QuayRobots,
         path: 'quay/robots',
         element: <div />,
@@ -78,7 +73,7 @@ function SeedNavigation(props: { children: ReactNode }) {
 
 describe('QuayOverview', () => {
   it('renders Project Quay status and workflow links', () => {
-    cy.viewport(1920, 1080);
+    cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
 
     cy.mount(
@@ -94,7 +89,7 @@ describe('QuayOverview', () => {
     cy.get('#quay-control-plane input[value="https://quay.example.test"]').should('exist');
     cy.get('#quay-control-plane').should('contain', 'Project Quay is ready');
     cy.get('#quay-workflows').should('contain', 'Repositories');
-    cy.get('#quay-workflows').should('contain', 'Repository Permissions');
+    cy.get('#quay-workflows').should('contain', 'Repository permissions');
     cy.get('#quay-workflows').should('contain', 'Robot Accounts');
     cy.get('#quay-workflows').should('contain', 'Execution Environments');
     cy.get('#quay-workflows').should('contain', 'API Token');
