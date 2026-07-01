@@ -66,6 +66,11 @@ function SeedNavigation(props: { children: ReactNode }) {
         path: 'quay/execution-environment-images',
         element: <div />,
       } as PageNavigationItem,
+      {
+        id: AwxRoute.QuayApiToken,
+        path: 'quay/api-token',
+        element: <div />,
+      } as PageNavigationItem,
     ]);
   }, [setNavigation]);
   return <>{props.children}</>;
@@ -92,6 +97,7 @@ describe('QuayOverview', () => {
     cy.get('#quay-workflows').should('contain', 'Repository Permissions');
     cy.get('#quay-workflows').should('contain', 'Robot Accounts');
     cy.get('#quay-workflows').should('contain', 'Execution Environments');
+    cy.get('#quay-workflows').should('contain', 'API Token');
     cy.get('#quay-status').should('contain', 'Project Quay is ready');
   });
 });

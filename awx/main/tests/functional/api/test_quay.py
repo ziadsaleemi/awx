@@ -75,6 +75,36 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
     QUAY_NAMESPACE='awx',
     QUAY_API_TOKEN='quay-token',
 )
+def test_quay_api_token_plan_returns_scopes_and_commands(get, admin_user):
+    response = get(reverse('api:quay_api_token_plan'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'quay'
+    assert response.data['configured'] is True
+    assert response.data['auth_configured'] is True
+    assert response.data['token_setting'] == 'QUAY_API_TOKEN'
+    assert response.data['required_scopes'] == ['repo:read', 'repo:create', 'repo:write', 'repo:admin', 'user:admin', 'org:admin']
+    assert response.data['oauth_application']['create_url'] == 'https://quay.example.test/api/v1/organization/awx/applications'
+    assert response.data['app_specific_token']['create_url'] == 'https://quay.example.test/api/v1/user/apptoken'
+    assert response.data['validation_commands'][0]['command'] == (
+        'curl -fsS -H "Authorization: Bearer $QUAY_API_TOKEN" ' "'https://quay.example.test/api/v1/repository?namespace=awx&limit=1'"
+    )
+    assert response.data['settings_url'].endswith('/api/v2/settings/quay/')
+
+
+@pytest.mark.django_db
+def test_quay_api_token_plan_requires_quay_management_permission(get, rando):
+    response = get(reverse('api:quay_api_token_plan'), user=rando, expect=403)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
 def test_quay_repositories_list_normalizes_repository_payload(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.quay.requests.get',

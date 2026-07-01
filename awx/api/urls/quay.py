@@ -4,6 +4,7 @@
 from django.urls import re_path
 
 from awx.api.views.quay import (
+    QuayApiTokenPlanView,
     QuayExecutionEnvironmentImageBuildPlanView,
     QuayRepositoryPermissionsView,
     QuayRepositoryChangeVisibilityView,
@@ -26,6 +27,7 @@ from awx.api.views.quay import (
 
 quay_urls = [
     re_path(r'^status/$', QuayStatusView.as_view(), name='quay_status'),
+    re_path(r'^api-token-plan/$', QuayApiTokenPlanView.as_view(), name='quay_api_token_plan'),
     re_path(r'^repositories/$', QuayRepositoriesListView.as_view(), name='quay_repositories_list'),
     re_path(r'^repositories/create/$', QuayRepositoryCreateView.as_view(), name='quay_repository_create'),
     re_path(r'^repositories/update/$', QuayRepositoryUpdateView.as_view(), name='quay_repository_update'),

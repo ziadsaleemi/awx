@@ -214,6 +214,7 @@ export enum AwxRoute {
   QuayRepositoryPermissions = 'awx-quay-repository-permissions',
   QuayRobots = 'awx-quay-robots',
   QuayExecutionEnvironmentImages = 'awx-quay-execution-environment-images',
+  QuayApiToken = 'awx-quay-api-token',
 
   // Cloud
   Cloud = 'awx-cloud',

@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
+import { QuayApiToken } from '../../resources/quay/QuayApiToken';
 import { QuayExecutionEnvironmentImages } from '../../resources/quay/QuayExecutionEnvironmentImages';
 import { QuayOverview } from '../../resources/quay/QuayOverview';
 import { QuayRepositories } from '../../resources/quay/QuayRepositories';
@@ -49,6 +50,12 @@ export function useAwxQuayRoutes() {
           label: t('Execution Environments'),
           path: 'execution-environment-images',
           element: <QuayExecutionEnvironmentImages />,
+        },
+        {
+          id: AwxRoute.QuayApiToken,
+          label: t('API Token'),
+          path: 'api-token',
+          element: <QuayApiToken />,
         },
         {
           path: '',

@@ -126,6 +126,7 @@ export function QuayOverview() {
   const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
   const repositoryPermissionsUrl = getPageUrl(AwxRoute.QuayRepositoryPermissions);
   const robotsUrl = getPageUrl(AwxRoute.QuayRobots);
+  const apiTokenUrl = getPageUrl(AwxRoute.QuayApiToken);
   const imagesUrl =
     getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) || '/quay/execution-environment-images';
   const ready = Boolean(
@@ -309,6 +310,15 @@ export function QuayOverview() {
               label={t('Credentials and defaults')}
               description={t('Configure registry URL, namespace, API token, and push credentials.')}
             />
+            {apiTokenUrl ? (
+              <QuickLink
+                to={apiTokenUrl}
+                label={t('API Token')}
+                description={t(
+                  'Generate and validate the scoped Quay API token AWX needs for management.'
+                )}
+              />
+            ) : null}
           </Stack>
         </CardBody>
       </PageDashboardCard>

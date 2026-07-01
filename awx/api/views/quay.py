@@ -241,6 +241,82 @@ class QuayStatusView(APIView):
         return Response(response)
 
 
+class QuayApiTokenPlanView(APIView):
+    name = _("Project Quay API Token Plan")
+    resource_purpose = "project quay OAuth and API token setup plan"
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get(self, request, format=None):
+        client = QuayClient()
+        server_url = configured_url()
+        namespace = configured_namespace()
+        registry_status = connection_status(server_url)
+        required_scopes = ["repo:read", "repo:create", "repo:write", "repo:admin", "user:admin", "org:admin"]
+        response = {
+            "source": "quay",
+            "configured": registry_status == "configured",
+            "status": registry_status,
+            "server_url": server_url,
+            "namespace": namespace,
+            "auth_configured": client.auth_configured,
+            "settings_url": reverse("api:setting_singleton_detail", kwargs={"category_slug": "quay"}, request=request),
+            "required_scopes": required_scopes,
+            "token_setting": "QUAY_API_TOKEN",
+            "push_settings": ["QUAY_PUSH_USERNAME", "QUAY_PUSH_TOKEN"],
+            "oauth_application": {
+                "name": "AWX Project Quay Management",
+                "description": _("OAuth application used by AWX to manage Project Quay repositories, robots, permissions, and tags."),
+                "create_method": "POST",
+                "create_url": f"{server_url}/api/v1/organization/{namespace}/applications" if registry_status == "configured" and namespace else "",
+                "payload": {
+                    "name": "AWX Project Quay Management",
+                    "description": "AWX-managed Project Quay integration",
+                    "application_uri": server_url,
+                    "redirect_uri": server_url,
+                },
+            },
+            "app_specific_token": {
+                "create_method": "POST",
+                "create_url": f"{server_url}/api/v1/user/apptoken" if registry_status == "configured" else "",
+                "payload": {"friendlyName": "AWX Project Quay Management"},
+            },
+            "validation_commands": [],
+            "notes": [
+                _("Store only the final token value in QUAY_API_TOKEN. AWX does not display stored secret values."),
+                _("Use robot push credentials separately for image push commands; QUAY_API_TOKEN is for Quay API management."),
+            ],
+        }
+        if registry_status == "configured":
+            response["validation_commands"] = [
+                {
+                    "label": _("Validate repository read access"),
+                    "command": (
+                        'curl -fsS -H "Authorization: Bearer $QUAY_API_TOKEN" '
+                        f"{shlex.quote(f'{server_url}/api/v1/repository?namespace={namespace}&limit=1')}"
+                    ),
+                },
+                {
+                    "label": _("Validate robot management scope"),
+                    "command": (
+                        (
+                            'curl -fsS -H "Authorization: Bearer $QUAY_API_TOKEN" '
+                            f"{shlex.quote(f'{server_url}/api/v1/organization/{namespace}/robots?token=false&permissions=true')}"
+                        )
+                        if namespace
+                        else ""
+                    ),
+                },
+                {
+                    "label": _("Validate user token scope"),
+                    "command": (
+                        'curl -fsS -H "Authorization: Bearer $QUAY_API_TOKEN" '
+                        f"{shlex.quote(f'{server_url}/api/v1/user/robots?token=false&permissions=true')}"
+                    ),
+                },
+            ]
+        return Response(response)
+
+
 class QuayRepositoryCreateView(APIView):
     name = _('Project Quay Repository Create')
     resource_purpose = 'create project quay repository'

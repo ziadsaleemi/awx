@@ -359,6 +359,7 @@ describe('AWX navigation capabilities', () => {
           path: 'execution-environment-images',
           element: <div />,
         },
+        { id: AwxRoute.QuayApiToken, path: 'api-token', element: <div /> },
         { path: '', element: <div /> },
       ],
     };
@@ -374,6 +375,7 @@ describe('AWX navigation capabilities', () => {
       AwxRoute.QuayRepositoryPermissions,
       AwxRoute.QuayRobots,
       AwxRoute.QuayExecutionEnvironmentImages,
+      AwxRoute.QuayApiToken,
       undefined,
     ]);
   });
