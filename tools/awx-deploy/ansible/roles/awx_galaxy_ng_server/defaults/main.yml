@@ -3,6 +3,10 @@ awx_galaxy_ng_enabled: false
 awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
 awx_galaxy_ng_image_tag: latest
 awx_galaxy_ng_nginx_image: docker.io/library/nginx:1.27
+awx_galaxy_ng_ui_enabled: true
+awx_galaxy_ng_ui_image: quay.io/pulp/galaxy-web
+awx_galaxy_ng_ui_image_tag: "4.9.2"
+awx_galaxy_ng_ui_port: 8080
 awx_galaxy_ng_postgres_image: docker.io/library/postgres:16
 awx_galaxy_ng_redis_image: docker.io/library/redis:7
 awx_galaxy_ng_admin_user: admin

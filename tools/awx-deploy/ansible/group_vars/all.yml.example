@@ -111,6 +111,10 @@ awx_galaxy_ng_enabled: false
 awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
 awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
 awx_galaxy_ng_image_tag: latest
+awx_galaxy_ng_ui_enabled: true
+awx_galaxy_ng_ui_image: quay.io/pulp/galaxy-web
+awx_galaxy_ng_ui_image_tag: "4.9.2"
+awx_galaxy_ng_ui_port: 8080
 awx_galaxy_ng_admin_user: admin
 awx_galaxy_ng_admin_password: "{{ lookup('env', 'GALAXY_NG_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
 awx_galaxy_ng_postgres_password: "{{ lookup('env', 'GALAXY_NG_POSTGRES_PASSWORD') }}"
@@ -129,6 +133,7 @@ awx_galaxy_ng_postgres_access_mode: ReadWriteOnce
 awx_galaxy_ng_pulp_access_mode: ReadWriteOnce
 awx_galaxy_ng_postgres_storage_size: 20Gi
 awx_galaxy_ng_pulp_storage_size: 50Gi
+awx_galaxy_ng_ui_replicas: 1
 
 # Project Quay / execution environment image registry integration.
 # Galaxy NG stores collection content. Project Quay stores container images for

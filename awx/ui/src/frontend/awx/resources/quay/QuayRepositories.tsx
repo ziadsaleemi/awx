@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
@@ -9,6 +10,8 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  Flex,
+  FlexItem,
   Form,
   FormGroup,
   FormSelect,
@@ -29,18 +32,19 @@ import {
   Title,
 } from '@patternfly/react-core';
 import {
-  CheckCircleIcon,
   PencilAltIcon,
   PlusCircleIcon,
   SecurityIcon,
   TagIcon,
   TrashIcon,
 } from '@patternfly/react-icons';
+import { DropdownPosition } from '@patternfly/react-core/deprecated';
 import {
   DateTimeCell,
   IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageActions,
   PageActionSelection,
   PageActionType,
   PageHeader,
@@ -58,7 +62,6 @@ import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
-import { ContentSummaryGrid } from '../content/ContentManagementCards';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { useAwxBulkConfirmation } from '../../common/useAwxBulkConfirmation';
 import { useAwxView } from '../../common/useAwxView';
@@ -115,9 +118,10 @@ function repositoryKey(repository?: QuayRepository, defaultNamespace = '') {
   );
 }
 
-function repositoryPath(repository?: QuayRepository, defaultNamespace = '') {
-  if (!repository?.name) return '-';
-  return `${repository.namespace || defaultNamespace}/${repository.name}`;
+function repositoryDetailsPath(repository: QuayRepository, defaultNamespace = '') {
+  const namespace = encodeURIComponent(repository.namespace || defaultNamespace);
+  const repositoryName = encodeURIComponent(repository.name || '');
+  return `/quay/repositories/${namespace}/${repositoryName}`;
 }
 
 function visibility(repository: QuayRepository) {
@@ -173,13 +177,27 @@ function useQuayFilters(): IToolbarFilter[] {
   );
 }
 
-function useQuayRepositoryColumns(): ITableColumn<QuayRepository>[] {
+function useQuayRepositoryColumns(defaultNamespace = ''): ITableColumn<QuayRepository>[] {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   return useMemo(
     () => [
       {
         header: t('Repository'),
-        cell: (repository) => <TextCell text={repository.name || '-'} />,
+        cell: (repository) => {
+          const detailsUrl =
+            getPageUrl(AwxRoute.QuayRepositoryDetails, {
+              params: {
+                namespace: repository.namespace || defaultNamespace,
+                repository: repository.name,
+              },
+            }) || repositoryDetailsPath(repository, defaultNamespace);
+          return repository.name ? (
+            <Link to={detailsUrl}>{repository.name}</Link>
+          ) : (
+            <TextCell text="-" />
+          );
+        },
         card: 'name',
         list: 'name',
       },
@@ -200,7 +218,96 @@ function useQuayRepositoryColumns(): ITableColumn<QuayRepository>[] {
         cell: (repository) => <DateTimeCell value={lastModified(repository)} />,
       },
     ],
-    [t]
+    [defaultNamespace, getPageUrl, t]
+  );
+}
+
+function QuayRepositoryModal(props: {
+  modalMode?: QuayRepositoryModalMode;
+  repositoryForm: QuayRepositoryForm;
+  setRepositoryForm: Dispatch<SetStateAction<QuayRepositoryForm>>;
+  isSubmitting: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Modal
+      variant={ModalVariant.medium}
+      title={
+        props.modalMode === 'create'
+          ? t('Create Project Quay repository')
+          : t('Edit Project Quay repository')
+      }
+      isOpen={Boolean(props.modalMode)}
+      onClose={props.onClose}
+      actions={[
+        <Button
+          key="submit"
+          variant="primary"
+          onClick={props.onSubmit}
+          isDisabled={
+            props.isSubmitting ||
+            !props.repositoryForm.repository.trim() ||
+            !props.repositoryForm.namespace.trim()
+          }
+        >
+          {props.modalMode === 'create' ? t('Create repository') : t('Save')}
+        </Button>,
+        <Button key="cancel" variant="link" onClick={props.onClose} isDisabled={props.isSubmitting}>
+          {t('Cancel')}
+        </Button>,
+      ]}
+    >
+      <Form>
+        <FormGroup label={t('Namespace')} fieldId="quay-repository-namespace" isRequired>
+          <TextInput
+            id="quay-repository-namespace"
+            value={props.repositoryForm.namespace}
+            onChange={(_event, value) =>
+              props.setRepositoryForm((current) => ({ ...current, namespace: value }))
+            }
+          />
+        </FormGroup>
+        <FormGroup label={t('Repository')} fieldId="quay-repository-name" isRequired>
+          <TextInput
+            id="quay-repository-name"
+            value={props.repositoryForm.repository}
+            isDisabled={props.modalMode === 'edit'}
+            onChange={(_event, value) =>
+              props.setRepositoryForm((current) => ({ ...current, repository: value }))
+            }
+          />
+        </FormGroup>
+        {props.modalMode === 'create' ? (
+          <FormGroup label={t('Visibility')} fieldId="quay-repository-visibility">
+            <FormSelect
+              id="quay-repository-visibility"
+              value={props.repositoryForm.visibility}
+              onChange={(_event, value) =>
+                props.setRepositoryForm((current) => ({
+                  ...current,
+                  visibility: value as 'public' | 'private',
+                }))
+              }
+            >
+              <FormSelectOption value="private" label={t('Private')} />
+              <FormSelectOption value="public" label={t('Public')} />
+            </FormSelect>
+          </FormGroup>
+        ) : null}
+        <FormGroup label={t('Description')} fieldId="quay-repository-description">
+          <TextArea
+            id="quay-repository-description"
+            value={props.repositoryForm.description}
+            onChange={(_event, value) =>
+              props.setRepositoryForm((current) => ({ ...current, description: value }))
+            }
+          />
+        </FormGroup>
+      </Form>
+    </Modal>
   );
 }
 
@@ -312,73 +419,11 @@ function QuayRepositoryConsole(props: {
 
   const latestTag = latestKnownTag(repository, tagItems);
   const image = imageReference(props.statusData?.registry, repository, latestTag);
-  const path = repositoryPath(repository, props.defaultNamespace);
   const isPublic = Boolean(repository.is_public);
-  const modified = lastModified(repository);
 
   return (
     <PageSection style={{ padding: '16px 24px 20px' }}>
       <Stack hasGutter>
-        <StackItem>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            <TextContent>
-              <Title headingLevel="h2" size="xl" style={{ overflowWrap: 'anywhere' }}>
-                {path}
-              </Title>
-              <Text component={TextVariants.p}>
-                {repository.description ||
-                  t('Execution environment image repository managed through Project Quay.')}
-              </Text>
-            </TextContent>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Label color={isPublic ? 'blue' : 'grey'} icon={<SecurityIcon />}>
-                {isPublic ? t('Public') : t('Private')}
-              </Label>
-              <Label color="green" icon={<CheckCircleIcon />}>
-                {props.statusData?.management_configured
-                  ? t('Managed from AWX')
-                  : t('Read-only in AWX')}
-              </Label>
-            </div>
-          </div>
-        </StackItem>
-        <StackItem>
-          <ContentSummaryGrid
-            minWidth={160}
-            metrics={[
-              {
-                label: t('Repository'),
-                value: repository.name || '-',
-                detail: namespace || '-',
-              },
-              {
-                label: t('Latest tag'),
-                value: latestTag,
-                detail: tagItems.length
-                  ? t('{{count}} tags loaded', { count: tagItems.length })
-                  : t('Tag inventory'),
-              },
-              {
-                label: t('Registry'),
-                value: props.statusData?.registry || '-',
-                detail: props.statusData?.server_url || '-',
-              },
-              {
-                label: t('Last modified'),
-                value: modified ? t('Reported') : '-',
-                detail: modified || t('No timestamp reported'),
-              },
-            ]}
-          />
-        </StackItem>
         <StackItem>
           <PageTabs>
             <PageTab label={t('Overview')}>
@@ -565,26 +610,55 @@ function QuayRepositoryConsole(props: {
   );
 }
 
-export function QuayRepositories() {
+function decodeRouteParam(value?: string) {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+export function QuayRepositoryDetails() {
   const { t } = useTranslation();
+  const params = useParams<{ namespace: string; repository: string }>();
+  const navigate = useNavigate();
+  const getPageUrl = useGetPageUrl();
   const alertToaster = usePageAlertToaster();
-  const toolbarFilters = useQuayFilters();
-  const tableColumns = useQuayRepositoryColumns();
-  const view = useAwxView<QuayRepository>({
-    url: awxAPI`/quay/repositories/`,
-    toolbarFilters,
-    tableColumns,
-  });
+  const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
   const status = useGet<QuayStatus>(awxAPI`/quay/status/`);
   const statusData = status.data;
-  const canManageQuay = Boolean(statusData?.can_manage);
+  const defaultNamespace = statusData?.namespace || '';
+  const routeNamespace = decodeRouteParam(params.namespace);
+  const routeRepository = decodeRouteParam(params.repository);
+  const namespace = routeNamespace || defaultNamespace;
+  const tableColumns = useQuayRepositoryColumns(defaultNamespace);
+  const bulkAction = useAwxBulkConfirmation<QuayRepository>();
+  const repositoryQuery = useGet<AwxItemsResponse<QuayRepository>>(
+    routeRepository ? awxAPI`/quay/repositories/` : undefined,
+    routeRepository
+      ? {
+          namespace,
+          search: routeRepository,
+          page_size: 100,
+        }
+      : undefined,
+    { revalidateOnFocus: false }
+  );
+  const repository = useMemo(() => {
+    const results = repositoryQuery.data?.results ?? [];
+    return (
+      results.find(
+        (item) => item.name === routeRepository && (item.namespace || namespace) === namespace
+      ) ||
+      results.find((item) => item.name === routeRepository) ||
+      results[0]
+    );
+  }, [namespace, repositoryQuery.data?.results, routeRepository]);
   const canManageRepositories = Boolean(
     statusData?.can_manage && statusData?.management_configured
   );
-  const defaultNamespace = statusData?.namespace || '';
-  const bulkAction = useAwxBulkConfirmation<QuayRepository>();
   const [modalMode, setModalMode] = useState<QuayRepositoryModalMode>();
-  const [selectedRepository, setSelectedRepository] = useState<QuayRepository>();
   const [repositoryForm, setRepositoryForm] = useState<QuayRepositoryForm>({
     repository: '',
     namespace: '',
@@ -593,24 +667,280 @@ export function QuayRepositories() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    const pageItems = view.pageItems ?? [];
-    if (!pageItems.length) {
-      if (selectedRepository) setSelectedRepository(undefined);
-      return;
-    }
+  const closeModal = useCallback(() => {
+    setModalMode(undefined);
+    setIsSubmitting(false);
+  }, []);
 
-    const selectedKey = repositoryKey(selectedRepository, defaultNamespace);
-    const matchingRepository = pageItems.find(
-      (repository) => repositoryKey(repository, defaultNamespace) === selectedKey
-    );
+  const openEditModal = useCallback(
+    (repository: QuayRepository) => {
+      setRepositoryForm({
+        repository: repository.name || '',
+        namespace: repository.namespace || defaultNamespace,
+        description: repository.description || '',
+        visibility: repository.is_public ? 'public' : 'private',
+      });
+      setModalMode('edit');
+    },
+    [defaultNamespace]
+  );
 
-    if (!matchingRepository) {
-      setSelectedRepository(pageItems[0]);
-    } else if (matchingRepository !== selectedRepository) {
-      setSelectedRepository(matchingRepository);
+  const refreshQuay = useCallback(() => {
+    repositoryQuery.refresh();
+    status.refresh();
+  }, [repositoryQuery, status]);
+
+  const submitRepositoryForm = useCallback(async () => {
+    if (!modalMode) return;
+    setIsSubmitting(true);
+    try {
+      const result = await postRequest<QuayRepositoryActionResponse, QuayRepositoryForm>(
+        awxAPI`/quay/repositories/update/`,
+        repositoryForm
+      );
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('Project Quay repository {{repository}} updated.', {
+          repository: result.repository_path,
+        }),
+        timeout: 4000,
+      });
+      closeModal();
+      refreshQuay();
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Failed to update Project Quay repository'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+      setIsSubmitting(false);
     }
-  }, [defaultNamespace, selectedRepository, view.pageItems]);
+  }, [alertToaster, closeModal, modalMode, refreshQuay, repositoryForm, t]);
+
+  const changeVisibility = useCallback(
+    async (repository: QuayRepository, enabled: boolean) => {
+      try {
+        const result = await postRequest<
+          QuayRepositoryActionResponse,
+          { repository: string; namespace: string; visibility: 'public' | 'private' }
+        >(awxAPI`/quay/repositories/change-visibility/`, {
+          repository: repository.name || '',
+          namespace: repository.namespace || defaultNamespace,
+          visibility: enabled ? 'public' : 'private',
+        });
+        alertToaster.addAlert({
+          variant: 'success',
+          title: t('Project Quay repository {{repository}} visibility updated.', {
+            repository: result.repository_path,
+          }),
+          timeout: 4000,
+        });
+        refreshQuay();
+      } catch (err) {
+        alertToaster.addAlert({
+          variant: 'danger',
+          title: t('Failed to update Project Quay repository visibility'),
+          children: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [alertToaster, defaultNamespace, refreshQuay, t]
+  );
+
+  const deleteRepositories = useCallback(
+    (repositories: QuayRepository[]) => {
+      bulkAction({
+        title: t('Delete Project Quay repositories', { count: repositories.length }),
+        confirmText: t(
+          'Yes, I confirm that I want to delete these {{count}} Project Quay repositories.',
+          {
+            count: repositories.length,
+          }
+        ),
+        actionButtonText: t('Delete repositories', { count: repositories.length }),
+        items: repositories,
+        keyFn: (repository) => repositoryKey(repository, defaultNamespace),
+        isDanger: true,
+        confirmationColumns: tableColumns,
+        actionColumns: tableColumns.slice(0, 1),
+        onComplete: () => {
+          void refreshQuay();
+          navigate(repositoriesUrl);
+        },
+        actionFn: (repository, signal) =>
+          postRequest<QuayRepositoryActionResponse, { repository: string; namespace: string }>(
+            awxAPI`/quay/repositories/delete/`,
+            {
+              repository: repository.name || '',
+              namespace: repository.namespace || defaultNamespace,
+            },
+            signal
+          ),
+      });
+    },
+    [bulkAction, defaultNamespace, navigate, refreshQuay, repositoriesUrl, t, tableColumns]
+  );
+
+  const detailActions = useMemo<IPageAction<QuayRepository>[]>(
+    () =>
+      canManageRepositories
+        ? [
+            {
+              type: PageActionType.Button,
+              selection: PageActionSelection.Single,
+              icon: PencilAltIcon,
+              isPinned: true,
+              label: t('Edit description'),
+              onClick: openEditModal,
+              variant: ButtonVariant.secondary,
+            },
+            {
+              type: PageActionType.Button,
+              selection: PageActionSelection.Single,
+              icon: TrashIcon,
+              label: t('Delete repository'),
+              onClick: (repository) => deleteRepositories([repository]),
+              isDanger: true,
+            },
+          ]
+        : [],
+    [canManageRepositories, deleteRepositories, openEditModal, t]
+  );
+
+  const pageTitle =
+    routeNamespace && routeRepository
+      ? `${routeNamespace}/${routeRepository}`
+      : t('Repository details');
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={pageTitle}
+        description={t('Project Quay repository details, tags, activity, and settings.')}
+        breadcrumbs={[{ label: t('Repositories'), to: repositoriesUrl }, { label: pageTitle }]}
+        headerActions={
+          repository ? (
+            <Flex
+              flexWrap={{ default: 'nowrap' }}
+              spaceItems={{ default: 'spaceItemsSm' }}
+              justifyContent={{ default: 'justifyContentFlexEnd' }}
+            >
+              <FlexItem>
+                <ModuleAIAssistantAction
+                  module="quay"
+                  page={t('Project Quay repository details')}
+                  prompt={t(
+                    'Review this Project Quay repository for AWX execution environment use. Explain tag health, pull commands, visibility, repository settings, and any cleanup or access risks.'
+                  )}
+                  context={{
+                    namespace: repository.namespace || defaultNamespace,
+                    repository: repository.name,
+                    visibility: visibility(repository),
+                    state: repository.state,
+                    registry: statusData?.registry,
+                    can_manage: statusData?.can_manage,
+                    management_configured: statusData?.management_configured,
+                  }}
+                />
+              </FlexItem>
+              {detailActions.length ? (
+                <FlexItem>
+                  <PageActions<QuayRepository>
+                    actions={detailActions}
+                    selectedItem={repository}
+                    position={DropdownPosition.right}
+                    collapse="md"
+                  />
+                </FlexItem>
+              ) : null}
+            </Flex>
+          ) : undefined
+        }
+      />
+      {statusData && (!statusData.configured || statusData.controller_error) ? (
+        <Alert
+          isInline
+          variant="warning"
+          title={t('Project Quay is not ready')}
+          style={{ margin: '0 24px 16px' }}
+        >
+          {statusData.controller_error || statusData.message}
+        </Alert>
+      ) : null}
+      {repositoryQuery.error ? (
+        <PageSection style={{ padding: 24 }}>
+          <Alert isInline variant="danger" title={t('Unable to load Project Quay repository')}>
+            {repositoryQuery.error.message}
+          </Alert>
+        </PageSection>
+      ) : repositoryQuery.isLoading ? (
+        <PageSection style={{ padding: 24 }}>
+          <Text component={TextVariants.p}>{t('Loading Project Quay repository...')}</Text>
+        </PageSection>
+      ) : repository ? (
+        <QuayRepositoryConsole
+          repository={repository}
+          statusData={statusData}
+          defaultNamespace={defaultNamespace}
+          canManageRepositories={canManageRepositories}
+          onEdit={openEditModal}
+          onDelete={(repository) => deleteRepositories([repository])}
+          onChangeVisibility={(repository, enabled) => void changeVisibility(repository, enabled)}
+        />
+      ) : (
+        <PageSection style={{ padding: 24 }}>
+          <Alert
+            isInline
+            variant="info"
+            title={t('Project Quay repository was not found')}
+            actionLinks={
+              <Button component="a" variant="link" href={repositoriesUrl}>
+                {t('Back to repositories')}
+              </Button>
+            }
+          >
+            {t('Refresh the repositories list or verify the namespace and repository name.')}
+          </Alert>
+        </PageSection>
+      )}
+      <QuayRepositoryModal
+        modalMode={modalMode}
+        repositoryForm={repositoryForm}
+        setRepositoryForm={setRepositoryForm}
+        isSubmitting={isSubmitting}
+        onClose={closeModal}
+        onSubmit={() => void submitRepositoryForm()}
+      />
+    </PageLayout>
+  );
+}
+
+export function QuayRepositories() {
+  const { t } = useTranslation();
+  const alertToaster = usePageAlertToaster();
+  const toolbarFilters = useQuayFilters();
+  const status = useGet<QuayStatus>(awxAPI`/quay/status/`);
+  const statusData = status.data;
+  const canManageQuay = Boolean(statusData?.can_manage);
+  const canManageRepositories = Boolean(
+    statusData?.can_manage && statusData?.management_configured
+  );
+  const defaultNamespace = statusData?.namespace || '';
+  const tableColumns = useQuayRepositoryColumns(defaultNamespace);
+  const view = useAwxView<QuayRepository>({
+    url: awxAPI`/quay/repositories/`,
+    toolbarFilters,
+    tableColumns,
+  });
+  const bulkAction = useAwxBulkConfirmation<QuayRepository>();
+  const [modalMode, setModalMode] = useState<QuayRepositoryModalMode>();
+  const [repositoryForm, setRepositoryForm] = useState<QuayRepositoryForm>({
+    repository: '',
+    namespace: '',
+    description: '',
+    visibility: 'private',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const closeModal = useCallback(() => {
     setModalMode(undefined);
@@ -732,10 +1062,7 @@ export function QuayRepositories() {
         isDanger: true,
         confirmationColumns: tableColumns,
         actionColumns: tableColumns.slice(0, 1),
-        onComplete: () => {
-          setSelectedRepository(undefined);
-          void refreshQuay();
-        },
+        onComplete: () => void refreshQuay(),
         actionFn: (repository, signal) =>
           postRequest<QuayRepositoryActionResponse, { repository: string; namespace: string }>(
             awxAPI`/quay/repositories/delete/`,
@@ -887,93 +1214,16 @@ export function QuayRepositories() {
         emptyStateDescription={t(
           'Configure Project Quay settings or push an execution environment image to populate this view.'
         )}
-        onSelect={setSelectedRepository}
-        topContent={
-          <QuayRepositoryConsole
-            repository={selectedRepository}
-            statusData={statusData}
-            defaultNamespace={defaultNamespace}
-            canManageRepositories={canManageRepositories}
-            onEdit={openEditModal}
-            onDelete={(repository) => deleteRepositories([repository])}
-            onChangeVisibility={(repository, enabled) => void changeVisibility(repository, enabled)}
-          />
-        }
         {...view}
       />
-      <Modal
-        variant={ModalVariant.medium}
-        title={
-          modalMode === 'create'
-            ? t('Create Project Quay repository')
-            : t('Edit Project Quay repository')
-        }
-        isOpen={Boolean(modalMode)}
+      <QuayRepositoryModal
+        modalMode={modalMode}
+        repositoryForm={repositoryForm}
+        setRepositoryForm={setRepositoryForm}
+        isSubmitting={isSubmitting}
         onClose={closeModal}
-        actions={[
-          <Button
-            key="submit"
-            variant="primary"
-            onClick={() => void submitRepositoryForm()}
-            isDisabled={
-              isSubmitting || !repositoryForm.repository.trim() || !repositoryForm.namespace.trim()
-            }
-          >
-            {modalMode === 'create' ? t('Create repository') : t('Save')}
-          </Button>,
-          <Button key="cancel" variant="link" onClick={closeModal} isDisabled={isSubmitting}>
-            {t('Cancel')}
-          </Button>,
-        ]}
-      >
-        <Form>
-          <FormGroup label={t('Namespace')} fieldId="quay-repository-namespace" isRequired>
-            <TextInput
-              id="quay-repository-namespace"
-              value={repositoryForm.namespace}
-              onChange={(_event, value) =>
-                setRepositoryForm((current) => ({ ...current, namespace: value }))
-              }
-            />
-          </FormGroup>
-          <FormGroup label={t('Repository')} fieldId="quay-repository-name" isRequired>
-            <TextInput
-              id="quay-repository-name"
-              value={repositoryForm.repository}
-              isDisabled={modalMode === 'edit'}
-              onChange={(_event, value) =>
-                setRepositoryForm((current) => ({ ...current, repository: value }))
-              }
-            />
-          </FormGroup>
-          {modalMode === 'create' ? (
-            <FormGroup label={t('Visibility')} fieldId="quay-repository-visibility">
-              <FormSelect
-                id="quay-repository-visibility"
-                value={repositoryForm.visibility}
-                onChange={(_event, value) =>
-                  setRepositoryForm((current) => ({
-                    ...current,
-                    visibility: value as 'public' | 'private',
-                  }))
-                }
-              >
-                <FormSelectOption value="private" label={t('Private')} />
-                <FormSelectOption value="public" label={t('Public')} />
-              </FormSelect>
-            </FormGroup>
-          ) : null}
-          <FormGroup label={t('Description')} fieldId="quay-repository-description">
-            <TextArea
-              id="quay-repository-description"
-              value={repositoryForm.description}
-              onChange={(_event, value) =>
-                setRepositoryForm((current) => ({ ...current, description: value }))
-              }
-            />
-          </FormGroup>
-        </Form>
-      </Modal>
+        onSubmit={() => void submitRepositoryForm()}
+      />
     </PageLayout>
   );
 }

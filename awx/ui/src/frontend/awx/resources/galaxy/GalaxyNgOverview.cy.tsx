@@ -131,7 +131,8 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-control-plane').should('contain', 'Galaxy NG');
     cy.get('#galaxy-ng-control-plane').should('contain', 'Hub connected');
     cy.get('#galaxy-ng-control-plane').should('contain', '12');
-    cy.get('#galaxy-ng-connection').should('contain', 'https://hub.example.test');
+    cy.get('#galaxy-ng-control-plane').should('contain', 'https://hub.example.test');
+    cy.get('#galaxy-ng-control-plane').should('contain', 'Pulp API responded.');
     cy.get('#galaxy-ng-workflows').should('contain', 'Remotes');
     cy.get('#galaxy-ng-workflows').should('contain', 'Remote Registries');
     cy.get('#galaxy-ng-workflows').should('contain', 'Project Imports');
@@ -139,8 +140,8 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-workflows').should('contain', 'Collection Approvals');
     cy.get('#galaxy-ng-workflows').should('contain', 'API Token');
     cy.get('#galaxy-ng-workflows').should('contain', 'Project Quay Execution Environments');
+    cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG UI');
     cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG API');
-    cy.get('#galaxy-ng-status').should('contain', 'Pulp API responded.');
   });
 
   it('uses a browser-safe URL for local Docker Desktop Galaxy NG links', () => {
@@ -165,6 +166,11 @@ describe('GalaxyNgOverview', () => {
       'have.attr',
       'href',
       'http://localhost:5001/api/galaxy/v3/swagger-ui/'
+    );
+    cy.contains('#galaxy-ng-workflows a', 'Open Galaxy NG UI').should(
+      'have.attr',
+      'href',
+      'http://localhost:5001/ui/'
     );
   });
 });

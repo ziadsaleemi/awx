@@ -51,19 +51,17 @@ export function ContentSummaryGrid(props: { metrics: ContentSummaryMetric[]; min
             borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
             borderInlineEnd: '1px solid var(--pf-v5-global--BorderColor--100)',
             minWidth: 0,
-            padding: '14px 18px',
+            padding: '12px 16px',
           }}
         >
           <TextContent>
             <Title
               headingLevel="h3"
-              size="xl"
+              size="lg"
               title={typeof metric.value === 'string' ? metric.value : undefined}
               style={{
                 lineHeight: 1.25,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                overflowWrap: 'anywhere',
               }}
             >
               {metric.value}
@@ -76,9 +74,7 @@ export function ContentSummaryGrid(props: { metrics: ContentSummaryMetric[]; min
                 component={TextVariants.small}
                 style={{
                   opacity: 0.62,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  overflowWrap: 'anywhere',
                 }}
                 title={typeof metric.detail === 'string' ? metric.detail : undefined}
               >
@@ -144,8 +140,8 @@ export function ContentWorkflowGroups(props: { groups: ContentWorkflowGroup[] })
     <div
       style={{
         display: 'grid',
-        gap: 24,
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))',
+        gap: 20,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))',
       }}
     >
       {props.groups.map((group) => (
@@ -169,7 +165,7 @@ export function ContentWorkflowGroups(props: { groups: ContentWorkflowGroup[] })
                   key={`${group.title}-${link.label}`}
                   style={{
                     borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-                    padding: '10px 0',
+                    padding: '8px 0',
                   }}
                 >
                   <TextContent>

@@ -11,11 +11,7 @@ import {
   Spinner,
   Stack,
   StackItem,
-  Text,
-  TextContent,
-  TextVariants,
 } from '@patternfly/react-core';
-import { CubesIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useGetPageUrl } from '../../../../framework';
 import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard';
@@ -104,6 +100,8 @@ export function GalaxyNgOverview() {
           'Galaxy NG private automation hub for collections, namespaces, repositories, and import tasks'
         )}
         width="full"
+        linkText={t('Open settings')}
+        to={settingsUrl}
         headerControls={
           <Flex
             spaceItems={{ default: 'spaceItemsSm' }}
@@ -234,52 +232,44 @@ export function GalaxyNgOverview() {
                   ]}
                 />
               </StackItem>
+              <StackItem>
+                <DescriptionList isHorizontal isCompact>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Server')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.server_url ? (
+                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                          {data.server_url}
+                        </ClipboardCopy>
+                      ) : (
+                        t('Not configured')
+                      )}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('API root')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.api_root_url || t('Not configured')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Content root')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.content_url || t('Not configured')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Status')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.pulp_status && Object.keys(data.pulp_status).length
+                        ? t('Pulp API responded.')
+                        : data?.message || t('No Pulp status payload available.')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                </DescriptionList>
+              </StackItem>
             </Stack>
           )}
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard
-        id="galaxy-ng-connection"
-        title={t('Connection')}
-        subtitle={t('AWX connection settings used to reach Galaxy NG')}
-        width="full"
-        linkText={t('Open settings')}
-        to={settingsUrl}
-      >
-        <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Server')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.server_url ? (
-                  <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                    {data.server_url}
-                  </ClipboardCopy>
-                ) : (
-                  t('Not configured')
-                )}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('API root')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.api_root_url || t('Not configured')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Content root')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.content_url || t('Not configured')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('TLS verify')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.verify_ssl ? t('Enabled') : t('Disabled')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          </DescriptionList>
         </CardBody>
       </PageDashboardCard>
 
@@ -364,6 +354,11 @@ export function GalaxyNgOverview() {
                     description: t('Review AWX authentication for Galaxy NG APIs.'),
                   },
                   {
+                    href: getBrowserUrl(data?.ui_url),
+                    label: t('Open Galaxy NG UI'),
+                    description: t('Open the live Automation Hub UI served by the deploy stack.'),
+                  },
+                  {
                     href: getBrowserUrl(
                       data?.api_browser_url || getApiBrowserUrl(data?.api_root_url)
                     ),
@@ -374,36 +369,6 @@ export function GalaxyNgOverview() {
               },
             ]}
           />
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard
-        id="galaxy-ng-status"
-        title={t('Pulp status')}
-        subtitle={t('Live status returned by the Galaxy NG/Pulp API')}
-        width="full"
-      >
-        <CardBody>
-          <Flex
-            alignItems={{ default: 'alignItemsCenter' }}
-            spaceItems={{ default: 'spaceItemsMd' }}
-          >
-            <FlexItem>
-              <CubesIcon />
-            </FlexItem>
-            <FlexItem grow={{ default: 'grow' }}>
-              <TextContent>
-                <Text component={TextVariants.p}>
-                  {data?.message || t('Loading Galaxy NG status.')}
-                </Text>
-                <Text component={TextVariants.small}>
-                  {data?.pulp_status && Object.keys(data.pulp_status).length
-                    ? t('Pulp API responded.')
-                    : t('No Pulp status payload available.')}
-                </Text>
-              </TextContent>
-            </FlexItem>
-          </Flex>
         </CardBody>
       </PageDashboardCard>
     </PageDashboard>

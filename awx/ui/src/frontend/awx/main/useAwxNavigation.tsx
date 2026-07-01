@@ -173,7 +173,7 @@ export function filterQuayRoutesByPermissions(
   }
   return filterRouteChildrenById(
     quayRoutes,
-    new Set([AwxRoute.QuayOverview, AwxRoute.QuayRepositories])
+    new Set([AwxRoute.QuayOverview, AwxRoute.QuayRepositories, AwxRoute.QuayRepositoryDetails])
   );
 }
 

@@ -11,11 +11,7 @@ import {
   Spinner,
   Stack,
   StackItem,
-  Text,
-  TextContent,
-  TextVariants,
 } from '@patternfly/react-core';
-import { CubesIcon } from '@patternfly/react-icons';
 import { useTranslation } from 'react-i18next';
 import { useGetPageUrl } from '../../../../framework';
 import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard';
@@ -79,6 +75,8 @@ export function QuayOverview() {
         title={t('Project Quay')}
         subtitle={t('Container registry for AWX execution environment images')}
         width="full"
+        linkText={t('Open settings')}
+        to={settingsUrl}
         headerControls={
           <Flex
             spaceItems={{ default: 'spaceItemsSm' }}
@@ -188,52 +186,44 @@ export function QuayOverview() {
                   ]}
                 />
               </StackItem>
+              <StackItem>
+                <DescriptionList isHorizontal isCompact>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Registry URL')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.server_url ? (
+                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                          {data.server_url}
+                        </ClipboardCopy>
+                      ) : (
+                        t('Not configured')
+                      )}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.namespace || t('Not set')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Push credentials')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {data?.push_configured ? t('Configured') : t('Not configured')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Status')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {ready
+                        ? t('Project Quay is ready for AWX execution environment image workflows.')
+                        : data?.message || t('Complete Project Quay settings before use.')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                </DescriptionList>
+              </StackItem>
             </Stack>
           )}
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard
-        id="quay-connection"
-        title={t('Connection')}
-        subtitle={t('AWX settings used to read Project Quay and generate push commands')}
-        width="full"
-        linkText={t('Open settings')}
-        to={settingsUrl}
-      >
-        <CardBody>
-          <DescriptionList isHorizontal isCompact>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Registry URL')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.server_url ? (
-                  <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                    {data.server_url}
-                  </ClipboardCopy>
-                ) : (
-                  t('Not configured')
-                )}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.namespace || t('Not set')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('API token')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.auth_configured ? t('Configured') : t('Not configured')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('TLS verify')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {data?.verify_ssl ? t('Enabled') : t('Disabled')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          </DescriptionList>
         </CardBody>
       </PageDashboardCard>
 
@@ -302,36 +292,6 @@ export function QuayOverview() {
               },
             ]}
           />
-        </CardBody>
-      </PageDashboardCard>
-
-      <PageDashboardCard
-        id="quay-status"
-        title={t('Registry status')}
-        subtitle={t('Current Project Quay integration state')}
-        width="full"
-      >
-        <CardBody>
-          <Flex
-            alignItems={{ default: 'alignItemsCenter' }}
-            spaceItems={{ default: 'spaceItemsMd' }}
-          >
-            <FlexItem>
-              <CubesIcon />
-            </FlexItem>
-            <FlexItem grow={{ default: 'grow' }}>
-              <TextContent>
-                <Text component={TextVariants.p}>
-                  {data?.message || t('Loading Project Quay status.')}
-                </Text>
-                <Text component={TextVariants.small}>
-                  {ready
-                    ? t('Project Quay is ready for AWX execution environment image workflows.')
-                    : t('Complete Project Quay settings before building or pushing images.')}
-                </Text>
-              </TextContent>
-            </FlexItem>
-          </Flex>
         </CardBody>
       </PageDashboardCard>
     </PageDashboard>

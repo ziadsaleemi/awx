@@ -92,12 +92,12 @@ describe('QuayOverview', () => {
     cy.get('#quay-control-plane').should('contain', 'Quay connected');
     cy.get('#quay-control-plane').should('contain', 'quay.example.test');
     cy.get('#quay-control-plane').should('contain', '2');
-    cy.get('#quay-connection input[value="https://quay.example.test"]').should('exist');
+    cy.get('#quay-control-plane input[value="https://quay.example.test"]').should('exist');
+    cy.get('#quay-control-plane').should('contain', 'Project Quay is ready');
     cy.get('#quay-workflows').should('contain', 'Repositories');
     cy.get('#quay-workflows').should('contain', 'Repository Permissions');
     cy.get('#quay-workflows').should('contain', 'Robot Accounts');
     cy.get('#quay-workflows').should('contain', 'Execution Environments');
     cy.get('#quay-workflows').should('contain', 'API Token');
-    cy.get('#quay-status').should('contain', 'Project Quay is ready');
   });
 });

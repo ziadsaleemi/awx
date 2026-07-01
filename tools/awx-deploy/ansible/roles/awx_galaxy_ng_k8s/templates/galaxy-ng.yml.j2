@@ -68,17 +68,116 @@ data:
         upstream galaxy_api {
             server {{ awx_galaxy_ng_name }}-api:{{ awx_galaxy_ng_api_port }};
         }
+{% if awx_galaxy_ng_ui_enabled | bool %}
+        upstream galaxy_ui {
+            server {{ awx_galaxy_ng_name }}-ui:{{ awx_galaxy_ng_ui_port }};
+        }
+{% endif %}
         server {
             listen 5001 default_server;
             server_name _;
             client_max_body_size 0;
             keepalive_timeout 5;
+{% if awx_galaxy_ng_ui_enabled | bool %}
+            location = / {
+                return 302 /ui/;
+            }
+            location = /ui {
+                return 302 /ui/;
+            }
+            location /ui/ {
+                rewrite ^/ui/.*$ /index.html break;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_ui;
+            }
+            location /static/galaxy_ng/ {
+                rewrite ^/static/galaxy_ng/(.*)$ /$1 break;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_ui;
+            }
+{% else %}
+            location = / {
+                return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
+            }
+            location = /ui/ {
+                return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
+            }
+{% endif %}
             location {{ awx_galaxy_ng_content_path_prefix }} {
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 proxy_set_header Host $http_host;
                 proxy_redirect off;
                 proxy_pass http://galaxy_content;
+            }
+            location {{ awx_galaxy_ng_api_path_prefix }} {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /api/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /pulp/api/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /pulp_ansible/galaxy/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /pulp/container/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /auth/login/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /token/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /v2/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
+            }
+            location /extensions/v2/ {
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Host $http_host;
+                proxy_redirect off;
+                proxy_pass http://galaxy_api;
             }
             location / {
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -372,6 +471,54 @@ spec:
   selector:
     app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
 ---
+{% if awx_galaxy_ng_ui_enabled | bool %}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_galaxy_ng_name }}-ui
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  replicas: {{ awx_galaxy_ng_ui_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-ui
+    spec:
+      containers:
+        - name: ui
+          image: {{ awx_galaxy_ng_ui_image }}:{{ awx_galaxy_ng_ui_image_tag }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ awx_galaxy_ng_ui_port }}
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: {{ awx_galaxy_ng_ui_port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /index.html
+              port: {{ awx_galaxy_ng_ui_port }}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_galaxy_ng_name }}-ui
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: {{ awx_galaxy_ng_ui_port }}
+      targetPort: {{ awx_galaxy_ng_ui_port }}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-ui
+---
+{% endif %}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

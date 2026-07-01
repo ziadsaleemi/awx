@@ -48,10 +48,12 @@ server AWX install is explicitly configured to manage a remote Kubernetes API.
 See `docs/policy_deployment_topology.md`.
 
 Galaxy NG is intentionally a separate content hub workload. For k3s/k8s, it
-runs as API/content/worker/nginx/PostgreSQL/Redis pods beside AWX. For direct
+runs as API/content/worker/UI/nginx/PostgreSQL/Redis pods beside AWX. For direct
 server deployments, it runs on hosts in the `awx_galaxy_ng` inventory group as
-its own Docker Compose/systemd stack. AWX stores only connection settings and
-uses Galaxy NG as private automation hub inventory/content source.
+its own Docker Compose/systemd stack with a real Galaxy NG UI at `/ui/`. AWX
+stores only connection settings and uses Galaxy NG as private automation hub
+inventory/content source. Set `awx_galaxy_ng_ui_enabled=false` only for API-only
+lab stacks.
 
 Project Quay is intentionally a separate execution environment image registry.
 Galaxy NG handles collection content; Project Quay handles container images

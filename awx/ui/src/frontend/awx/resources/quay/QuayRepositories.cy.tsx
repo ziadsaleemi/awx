@@ -1,5 +1,5 @@
 import { awxAPI } from '../../common/api/awx-utils';
-import { QuayRepositories } from './QuayRepositories';
+import { QuayRepositories, QuayRepositoryDetails } from './QuayRepositories';
 
 const status = {
   enabled: true,
@@ -76,11 +76,10 @@ const tags = {
 };
 
 describe('QuayRepositories', () => {
-  it('allows Quay managers to create repositories from AWX', () => {
+  it('shows the repository list without embedding repository details', () => {
     cy.viewport(1920, 1080);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
-    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
     cy.intercept('POST', awxAPI`/quay/repositories/create/`, {
       statusCode: 201,
       body: {
@@ -95,17 +94,13 @@ describe('QuayRepositories', () => {
 
     cy.mount(<QuayRepositories />);
     cy.wait(['@status', '@repositories']);
-    cy.wait('@tags');
 
-    cy.contains('awx/custom-ee').should('be.visible');
-    cy.get('input[value="podman pull quay.example.test/awx/custom-ee:latest"]').should('exist');
-    cy.get('input[value="docker pull quay.example.test/awx/custom-ee:latest"]').should('exist');
-    cy.contains('button', 'Tags').click();
-    cy.contains('sha256:abc123').should('be.visible');
-    cy.contains('button', 'Activity').click();
-    cy.contains('Usage logs need Quay event data').should('be.visible');
-    cy.contains('button', 'Settings').click();
-    cy.contains('Manage repository permissions').should('be.visible');
+    cy.contains('custom-ee').should('be.visible');
+    cy.contains('a', 'custom-ee')
+      .should('have.attr', 'href')
+      .and('include', '/quay/repositories/awx/custom-ee');
+    cy.contains('Pull commands').should('not.exist');
+    cy.contains('button', 'Tags').should('not.exist');
 
     cy.contains('button', 'Create repository').click();
     cy.get('#quay-repository-name').type('new-ee');
@@ -119,6 +114,30 @@ describe('QuayRepositories', () => {
       description: 'New EE image repository',
       visibility: 'private',
     });
+  });
+
+  it('shows repository console content on the details route', () => {
+    cy.viewport(1920, 1080);
+    cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
+
+    cy.mount(<QuayRepositoryDetails />, {
+      path: '/quay/repositories/:namespace/:repository',
+      initialEntries: ['/quay/repositories/awx/custom-ee'],
+    });
+    cy.wait(['@status', '@repositories']);
+    cy.wait('@tags');
+
+    cy.contains('awx/custom-ee').should('be.visible');
+    cy.get('input[value="podman pull quay.example.test/awx/custom-ee:latest"]').should('exist');
+    cy.get('input[value="docker pull quay.example.test/awx/custom-ee:latest"]').should('exist');
+    cy.contains('button', 'Tags').click();
+    cy.contains('sha256:abc123').should('be.visible');
+    cy.contains('button', 'Activity').click();
+    cy.contains('Usage logs need Quay event data').should('be.visible');
+    cy.contains('button', 'Settings').click();
+    cy.contains('Manage repository permissions').should('be.visible');
   });
 
   it('keeps repository management controls hidden for read-only users', () => {

@@ -349,6 +349,12 @@ describe('AWX navigation capabilities', () => {
         { id: AwxRoute.QuayOverview, path: 'overview', element: <div /> },
         { id: AwxRoute.QuayRepositories, path: 'repositories', element: <div /> },
         {
+          id: AwxRoute.QuayRepositoryDetails,
+          path: 'repositories/:namespace/:repository',
+          element: <div />,
+          hidden: true,
+        },
+        {
           id: AwxRoute.QuayRepositoryPermissions,
           path: 'repository-permissions',
           element: <div />,
@@ -367,11 +373,13 @@ describe('AWX navigation capabilities', () => {
     expect(childIds(filterQuayRoutesByPermissions(quayRoutes, false))).to.deep.equal([
       AwxRoute.QuayOverview,
       AwxRoute.QuayRepositories,
+      AwxRoute.QuayRepositoryDetails,
       undefined,
     ]);
     expect(childIds(filterQuayRoutesByPermissions(quayRoutes, true))).to.deep.equal([
       AwxRoute.QuayOverview,
       AwxRoute.QuayRepositories,
+      AwxRoute.QuayRepositoryDetails,
       AwxRoute.QuayRepositoryPermissions,
       AwxRoute.QuayRobots,
       AwxRoute.QuayExecutionEnvironmentImages,

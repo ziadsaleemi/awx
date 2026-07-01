@@ -150,6 +150,12 @@
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-content --timeout=300s"
   changed_when: false
 
+- name: Wait for Galaxy NG UI deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-ui --timeout=300s"
+  changed_when: false
+  when: awx_galaxy_ng_ui_enabled | bool
+
 - name: Wait for Galaxy NG worker deployment
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-worker --timeout=300s"

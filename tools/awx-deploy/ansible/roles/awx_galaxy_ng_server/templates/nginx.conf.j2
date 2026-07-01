@@ -16,6 +16,12 @@ http {
     upstream galaxy_api {
         server api:{{ awx_galaxy_ng_api_port }};
     }
+{% if awx_galaxy_ng_ui_enabled | bool %}
+
+    upstream galaxy_ui {
+        server ui:{{ awx_galaxy_ng_ui_port }};
+    }
+{% endif %}
 
     server {
         listen 5001 default_server;
@@ -23,6 +29,33 @@ http {
         client_max_body_size 0;
         keepalive_timeout 5;
 
+{% if awx_galaxy_ng_ui_enabled | bool %}
+        location = / {
+            return 302 /ui/;
+        }
+
+        location = /ui {
+            return 302 /ui/;
+        }
+
+        location /ui/ {
+            rewrite ^/ui/.*$ /index.html break;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_ui;
+        }
+
+        location /static/galaxy_ng/ {
+            rewrite ^/static/galaxy_ng/(.*)$ /$1 break;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_ui;
+        }
+{% else %}
         location = / {
             return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
         }
@@ -30,14 +63,7 @@ http {
         location = /ui/ {
             return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
         }
-
-        location = /ui/login {
-            return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
-        }
-
-        location = /static/galaxy_ng/index.html {
-            return 302 {{ awx_galaxy_ng_api_path_prefix | regex_replace('/+$', '') }}/v3/swagger-ui/;
-        }
+{% endif %}
 
         location {{ awx_galaxy_ng_content_path_prefix }} {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -45,6 +71,78 @@ http {
             proxy_set_header Host $http_host;
             proxy_redirect off;
             proxy_pass http://galaxy_content;
+        }
+
+        location {{ awx_galaxy_ng_api_path_prefix }} {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /api/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /pulp/api/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /pulp_ansible/galaxy/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /pulp/container/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /auth/login/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /token/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /v2/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
+        }
+
+        location /extensions/v2/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://galaxy_api;
         }
 
         location / {

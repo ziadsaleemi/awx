@@ -98,12 +98,24 @@ services:
       - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
     command: ["run", "worker"]
 
+{% if awx_galaxy_ng_ui_enabled | bool %}
+  ui:
+    image: "{{ awx_galaxy_ng_ui_image }}:{{ awx_galaxy_ng_ui_image_tag }}"
+    restart: unless-stopped
+    depends_on:
+      - api
+      - content
+{% endif %}
+
   nginx:
     image: "{{ awx_galaxy_ng_nginx_image }}"
     restart: unless-stopped
     depends_on:
       - api
       - content
+{% if awx_galaxy_ng_ui_enabled | bool %}
+      - ui
+{% endif %}
     ports:
       - "{{ awx_galaxy_ng_public_port }}:5001"
     volumes:
