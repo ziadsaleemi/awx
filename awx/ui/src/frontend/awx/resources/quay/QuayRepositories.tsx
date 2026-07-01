@@ -1,10 +1,12 @@
-import { Dispatch, SetStateAction, useCallback, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
   ButtonVariant,
+  ClipboardCopy,
+  ClipboardCopyVariant,
   Flex,
   FlexItem,
   Form,
@@ -15,6 +17,8 @@ import {
   Modal,
   ModalVariant,
   PageSection,
+  Progress,
+  ProgressSize,
   Stack,
   StackItem,
   Tab,
@@ -30,6 +34,8 @@ import {
   CaretLeftIcon,
   PencilAltIcon,
   PlusCircleIcon,
+  RocketIcon,
+  SyncAltIcon,
   TagIcon,
   TrashIcon,
 } from '@patternfly/react-icons';
@@ -55,7 +61,7 @@ import {
 } from '../../../../framework';
 import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
-import { postRequest } from '../../../common/crud/Data';
+import { postRequest, requestGet } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
@@ -95,9 +101,10 @@ interface QuayRepositoryActionResponse {
 }
 
 type QuayRepositoryModalMode = 'create' | 'edit';
-type QuayRepositoryTabKey = 'details' | 'tags' | 'activity' | 'permissions' | 'settings';
+type QuayRepositoryTabKey = 'details' | 'builds' | 'tags' | 'activity' | 'permissions' | 'settings';
 type QuayPermissionRole = 'read' | 'write' | 'admin';
 type QuayPrincipalType = 'user' | 'team';
+type QuayContainerRuntime = 'podman' | 'docker';
 
 const QUAY_PRINCIPAL_USER: QuayPrincipalType = 'user';
 const QUAY_PRINCIPAL_TEAM: QuayPrincipalType = 'team';
@@ -144,6 +151,53 @@ interface QuayPermissionActionResponse {
   role?: QuayPermissionRole;
 }
 
+interface AwxProject {
+  id: number;
+  name: string;
+  local_path?: string;
+  scm_revision?: string;
+  status?: string;
+}
+
+interface QuayImageBuild {
+  id: number;
+  created?: string;
+  modified?: string;
+  created_by?: string;
+  project?: {
+    id?: number;
+    name?: string;
+    path?: string;
+    scm_revision?: string;
+  };
+  namespace: string;
+  repository: string;
+  repository_path: string;
+  tag: string;
+  image: string;
+  registry: string;
+  runtime: QuayContainerRuntime;
+  definition_file: string;
+  context: string;
+  status: 'pending' | 'running' | 'successful' | 'failed' | 'canceled';
+  progress: number;
+  started?: string;
+  finished?: string;
+  error?: string;
+  log?: string;
+  command_summary?: Array<{ label: string; command: string; working_directory?: string }>;
+}
+
+interface QuayImageBuildPayload {
+  project_id: number;
+  namespace: string;
+  repository: string;
+  tag: string;
+  runtime: QuayContainerRuntime;
+  definition_file: string;
+  context: string;
+}
+
 function repositoryKey(repository?: QuayRepository, defaultNamespace = '') {
   if (!repository) return '';
   return (
@@ -186,6 +240,14 @@ function formatBytes(value?: number) {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MiB`;
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GiB`;
+}
+
+function buildStatusColor(status?: QuayImageBuild['status']) {
+  if (status === 'successful') return 'green';
+  if (status === 'failed') return 'red';
+  if (status === 'running') return 'blue';
+  if (status === 'pending') return 'orange';
+  return 'grey';
 }
 
 function imageReference(registry: string | undefined, repository: QuayRepository, tag: string) {
@@ -474,6 +536,353 @@ function QuayPermissionTable(props: {
   );
 }
 
+function QuayRepositoryBuildsTab(props: {
+  repository: QuayRepository;
+  namespace: string;
+  statusData?: QuayStatus;
+  canManageRepositories: boolean;
+}) {
+  const { t } = useTranslation();
+  const alertToaster = usePageAlertToaster();
+  const projects = useGet<AwxItemsResponse<AwxProject>>(
+    awxAPI`/projects/`,
+    { page_size: 200, order_by: 'name' },
+    { revalidateOnFocus: false }
+  );
+  const projectOptions = projects.data?.results ?? [];
+  const builds = useGet<AwxItemsResponse<QuayImageBuild>>(
+    awxAPI`/quay/execution-environment-images/builds/`,
+    {
+      namespace: props.namespace,
+      repository: props.repository.name || '',
+      page_size: 10,
+    },
+    { revalidateOnFocus: false, refreshInterval: 3000 }
+  );
+  const buildItems = builds.data?.results ?? [];
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [tag, setTag] = useState('latest');
+  const [runtime, setRuntime] = useState<QuayContainerRuntime>('podman');
+  const [definitionFile, setDefinitionFile] = useState('execution-environment.yml');
+  const [contextPath, setContextPath] = useState('.');
+  const [selectedBuildId, setSelectedBuildId] = useState<number>();
+  const [selectedBuildDetail, setSelectedBuildDetail] = useState<QuayImageBuild>();
+  const [isLoadingBuildDetail, setIsLoadingBuildDetail] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const selectedBuildUrl = selectedBuildId
+    ? `${awxAPI`/quay/execution-environment-images/builds/`}${selectedBuildId}/`
+    : undefined;
+  const activeBuild =
+    selectedBuildDetail && ['pending', 'running'].includes(selectedBuildDetail.status)
+      ? selectedBuildDetail
+      : buildItems.find((build) => ['pending', 'running'].includes(build.status));
+  const visibleBuild = selectedBuildDetail || activeBuild || buildItems[0];
+  const canStartBuild = Boolean(
+    props.canManageRepositories &&
+      props.statusData?.push_configured &&
+      props.repository.name &&
+      props.namespace
+  );
+
+  useEffect(() => {
+    if (!selectedProjectId && projectOptions.length) {
+      setSelectedProjectId(String(projectOptions[0].id));
+    }
+  }, [projectOptions, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedBuildId && buildItems.length) {
+      setSelectedBuildId(buildItems[0].id);
+    }
+  }, [buildItems, selectedBuildId]);
+
+  const loadSelectedBuild = useCallback(
+    async (showLoading = false) => {
+      if (!selectedBuildUrl) {
+        setSelectedBuildDetail(undefined);
+        return;
+      }
+      if (showLoading) setIsLoadingBuildDetail(true);
+      try {
+        const build = await requestGet<QuayImageBuild>(selectedBuildUrl);
+        setSelectedBuildDetail(build);
+      } catch {
+        // Keep the last known build state if a polling request misses during refresh.
+      } finally {
+        if (showLoading) setIsLoadingBuildDetail(false);
+      }
+    },
+    [selectedBuildUrl]
+  );
+
+  useEffect(() => {
+    if (!selectedBuildUrl) {
+      setSelectedBuildDetail(undefined);
+      return;
+    }
+    void loadSelectedBuild(true);
+    const interval = window.setInterval(() => void loadSelectedBuild(false), 3000);
+    return () => window.clearInterval(interval);
+  }, [loadSelectedBuild, selectedBuildUrl]);
+
+  const startBuild = useCallback(async () => {
+    if (!selectedProjectId || !props.repository.name) return;
+    setIsLaunching(true);
+    try {
+      const build = await postRequest<QuayImageBuild, QuayImageBuildPayload>(
+        awxAPI`/quay/execution-environment-images/builds/`,
+        {
+          project_id: Number(selectedProjectId),
+          namespace: props.namespace,
+          repository: props.repository.name,
+          tag: tag.trim() || 'latest',
+          runtime,
+          definition_file: definitionFile.trim() || 'execution-environment.yml',
+          context: contextPath.trim() || '.',
+        }
+      );
+      setSelectedBuildId(build.id);
+      setSelectedBuildDetail(build);
+      await builds.refresh();
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('Project Quay image build queued.'),
+        timeout: 3000,
+      });
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Unable to start Project Quay image build'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsLaunching(false);
+    }
+  }, [
+    alertToaster,
+    builds,
+    contextPath,
+    definitionFile,
+    props.namespace,
+    props.repository.name,
+    runtime,
+    selectedProjectId,
+    t,
+    tag,
+  ]);
+
+  return (
+    <PageSection variant="light">
+      <Stack hasGutter>
+        {!props.statusData?.push_configured ? (
+          <StackItem>
+            <Alert
+              isInline
+              variant="warning"
+              title={t('Project Quay push credentials are required to run builds from AWX.')}
+            >
+              {t('Configure QUAY_PUSH_USERNAME and QUAY_PUSH_TOKEN before launching builds.')}
+            </Alert>
+          </StackItem>
+        ) : null}
+        <StackItem>
+          <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
+            {t('Build execution environment image')}
+          </Title>
+          <Form>
+            <div
+              style={{
+                alignItems: 'end',
+                display: 'grid',
+                gap: 16,
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+              }}
+            >
+              <FormGroup label={t('AWX Project')} fieldId="quay-build-project" isRequired>
+                <FormSelect
+                  id="quay-build-project"
+                  value={selectedProjectId}
+                  onChange={(_event, value) => setSelectedProjectId(value)}
+                  isDisabled={projects.isLoading}
+                >
+                  <FormSelectOption value="" label={t('Select project')} />
+                  {projectOptions.map((project) => (
+                    <FormSelectOption
+                      key={project.id}
+                      value={String(project.id)}
+                      label={project.name}
+                    />
+                  ))}
+                </FormSelect>
+              </FormGroup>
+              <FormGroup label={t('Tag')} fieldId="quay-build-tag" isRequired>
+                <TextInput
+                  id="quay-build-tag"
+                  value={tag}
+                  onChange={(_event, value) => setTag(value)}
+                />
+              </FormGroup>
+              <FormGroup label={t('Runtime')} fieldId="quay-build-runtime">
+                <FormSelect
+                  id="quay-build-runtime"
+                  value={runtime}
+                  onChange={(_event, value) => setRuntime(value as QuayContainerRuntime)}
+                >
+                  <FormSelectOption value="podman" label={t('Podman')} />
+                  <FormSelectOption value="docker" label={t('Docker')} />
+                </FormSelect>
+              </FormGroup>
+              <FormGroup label={t('Definition file')} fieldId="quay-build-definition">
+                <TextInput
+                  id="quay-build-definition"
+                  value={definitionFile}
+                  onChange={(_event, value) => setDefinitionFile(value)}
+                />
+              </FormGroup>
+              <FormGroup label={t('Build context')} fieldId="quay-build-context">
+                <TextInput
+                  id="quay-build-context"
+                  value={contextPath}
+                  onChange={(_event, value) => setContextPath(value)}
+                />
+              </FormGroup>
+              <Button
+                variant="primary"
+                icon={<RocketIcon />}
+                isLoading={isLaunching}
+                isDisabled={!canStartBuild || !selectedProjectId || isLaunching}
+                onClick={() => void startBuild()}
+              >
+                {t('Start build')}
+              </Button>
+            </div>
+          </Form>
+        </StackItem>
+        {visibleBuild ? (
+          <StackItem>
+            <PageDetails numberOfColumns="multiple">
+              <PageDetail label={t('Selected build')}>#{visibleBuild.id}</PageDetail>
+              <PageDetail label={t('Status')}>
+                <Label color={buildStatusColor(visibleBuild.status)}>{visibleBuild.status}</Label>
+              </PageDetail>
+              <PageDetail label={t('Image')} fullWidth>
+                <span style={{ overflowWrap: 'anywhere' }}>{visibleBuild.image}</span>
+              </PageDetail>
+              <PageDetail label={t('Project')}>{visibleBuild.project?.name || '-'}</PageDetail>
+              <PageDetail label={t('Runtime')}>{visibleBuild.runtime}</PageDetail>
+              <PageDetail label={t('Started')}>
+                <DateTimeCell value={visibleBuild.started} />
+              </PageDetail>
+              <PageDetail label={t('Finished')}>
+                <DateTimeCell value={visibleBuild.finished} />
+              </PageDetail>
+            </PageDetails>
+            <Progress
+              value={visibleBuild.progress || 0}
+              size={ProgressSize.sm}
+              title={t('Build progress')}
+            />
+            {visibleBuild.error ? (
+              <Alert
+                isInline
+                variant="danger"
+                title={t('Latest build failed')}
+                style={{ marginTop: 16 }}
+              >
+                {visibleBuild.error}
+              </Alert>
+            ) : null}
+          </StackItem>
+        ) : null}
+        <StackItem>
+          <Flex
+            alignItems={{ default: 'alignItemsCenter' }}
+            justifyContent={{ default: 'justifyContentSpaceBetween' }}
+            style={{ marginBottom: 12 }}
+          >
+            <FlexItem>
+              <Title headingLevel="h3" size="lg">
+                {t('Recent builds')}
+              </Title>
+            </FlexItem>
+            <FlexItem>
+              <Button
+                variant="secondary"
+                icon={<SyncAltIcon />}
+                onClick={() => {
+                  void builds.refresh();
+                  void loadSelectedBuild(true);
+                }}
+              >
+                {t('Refresh')}
+              </Button>
+            </FlexItem>
+          </Flex>
+          {builds.isLoading ? (
+            <Text component={TextVariants.p}>{t('Loading image builds...')}</Text>
+          ) : buildItems.length ? (
+            <Table variant="compact" aria-label={t('Project Quay image builds')}>
+              <Thead>
+                <Tr>
+                  <Th>{t('Build')}</Th>
+                  <Th>{t('Status')}</Th>
+                  <Th>{t('Tag')}</Th>
+                  <Th>{t('Project')}</Th>
+                  <Th>{t('Started')}</Th>
+                  <Th>{t('Finished')}</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {buildItems.map((build) => (
+                  <Tr key={build.id}>
+                    <Td dataLabel={t('Build')}>
+                      <Button variant="link" isInline onClick={() => setSelectedBuildId(build.id)}>
+                        #{build.id}
+                      </Button>
+                    </Td>
+                    <Td dataLabel={t('Status')}>
+                      <Label color={buildStatusColor(build.status)}>{build.status}</Label>
+                    </Td>
+                    <Td dataLabel={t('Tag')}>{build.tag}</Td>
+                    <Td dataLabel={t('Project')}>{build.project?.name || '-'}</Td>
+                    <Td dataLabel={t('Started')}>
+                      <DateTimeCell value={build.started} />
+                    </Td>
+                    <Td dataLabel={t('Finished')}>
+                      <DateTimeCell value={build.finished} />
+                    </Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          ) : (
+            <Alert
+              isInline
+              variant="info"
+              title={t('No image builds have run for this repository.')}
+            />
+          )}
+        </StackItem>
+        <StackItem>
+          <Title headingLevel="h3" size="lg" style={{ marginBottom: 12 }}>
+            {t('Build output')}
+          </Title>
+          <ClipboardCopy
+            isReadOnly
+            hoverTip={t('Copy')}
+            clickTip={t('Copied')}
+            variant={ClipboardCopyVariant.expansion}
+          >
+            {isLoadingBuildDetail
+              ? t('Loading build output...')
+              : selectedBuildDetail?.log || t('Select or start a build to view output.')}
+          </ClipboardCopy>
+        </StackItem>
+      </Stack>
+    </PageSection>
+  );
+}
+
 function QuayRepositoryConsole(props: {
   repository?: QuayRepository;
   statusData?: QuayStatus;
@@ -652,6 +1061,7 @@ function QuayRepositoryConsole(props: {
           }
         />
         <Tab eventKey="details" title={<TabTitleText>{t('Details')}</TabTitleText>} />
+        <Tab eventKey="builds" title={<TabTitleText>{t('Builds')}</TabTitleText>} />
         <Tab eventKey="tags" title={<TabTitleText>{t('Tags')}</TabTitleText>} />
         <Tab eventKey="activity" title={<TabTitleText>{t('Activity')}</TabTitleText>} />
         <Tab eventKey="permissions" title={<TabTitleText>{t('Permissions')}</TabTitleText>} />
@@ -690,6 +1100,14 @@ function QuayRepositoryConsole(props: {
             toggleLanguage={false}
           />
         </PageDetails>
+      ) : null}
+      {activeTab === 'builds' ? (
+        <QuayRepositoryBuildsTab
+          repository={repository}
+          namespace={namespace}
+          statusData={props.statusData}
+          canManageRepositories={props.canManageRepositories}
+        />
       ) : null}
       {activeTab === 'tags' ? (
         <PageSection variant="light">

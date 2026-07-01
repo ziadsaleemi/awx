@@ -6,6 +6,7 @@ import shlex
 from urllib.parse import urlparse
 
 from django.core.cache import cache
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
@@ -22,6 +23,8 @@ from awx.api.views.galaxy_ng import (
     _validate_image_tag,
     _validate_relative_cli_path,
 )
+from awx.main.models import QuayImageBuild
+from awx.main.tasks.quay import run_quay_image_build
 from awx.main.utils.quay import (
     QuayClient,
     QuayControllerError,
@@ -200,6 +203,171 @@ def _normalize_permissions(payload, principal_key):
         normalized.setdefault('_awx_key', str(normalized['id']))
         results.append(normalized)
     return {'count': len(results), 'next': None, 'previous': None, 'results': results}
+
+
+def _quay_image_build_plan_for_request(request):
+    if not module_enabled():
+        return None, Response(
+            {'detail': _('Project Quay module is disabled.'), 'status': 'disabled'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    if connection_status() != 'configured':
+        return None, Response(
+            {'detail': _('Project Quay registry URL is not configured.'), 'status': connection_status()},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = request.data if isinstance(request.data, dict) else {}
+    project, error = _project_for_build_plan(request.user, data.get('project_id') or data.get('project'))
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+    namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
+    if not namespace:
+        return None, Response({'detail': _('Project Quay namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+    image_name, error = _validate_image_name(data.get('image_name') or data.get('repository') or 'custom-ee')
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    image_tag, error = _validate_image_tag(data.get('tag') or data.get('image_tag') or 'latest')
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+    runtime = str(data.get('runtime') or 'podman').strip().lower()
+    if runtime not in QUAY_CONTAINER_RUNTIMES:
+        return None, Response(
+            {'detail': _('Container runtime must be podman or docker.'), 'status': 'bad_request'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    definition_file, error = _validate_relative_cli_path(
+        data.get('definition_file') or data.get('definition'), 'execution-environment.yml', _('Definition file')
+    )
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    context_path, error = _validate_relative_cli_path(data.get('context') or data.get('context_path'), '.', _('Build context'))
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+    project_source, error = _resolve_project_build_source(project, definition_file, context_path)
+    if error:
+        return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+    client = QuayClient()
+    registry = client.registry
+    if not registry:
+        return None, Response(
+            {'detail': _('Project Quay registry URL does not include a registry hostname.'), 'status': 'bad_request'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    parsed = urlparse(client.server_url)
+    insecure_registry = parsed.scheme == 'http' or not client.verify_ssl
+    repository_path = f'{namespace}/{image_name}'
+    full_image = f'{registry}/{repository_path}:{image_tag}'
+    working_directory = project_source['project_path']
+    username = client.push_username or '$QUAY_USERNAME'
+    login_command = f'echo \"$QUAY_TOKEN\" | {runtime} login {shlex.quote(registry)} --username {shlex.quote(username)} --password-stdin'
+    push_command = f'{runtime} push {shlex.quote(full_image)}'
+    if runtime == 'podman' and insecure_registry:
+        login_command = f'echo \"$QUAY_TOKEN\" | {runtime} login --tls-verify=false {shlex.quote(registry)} --username {shlex.quote(username)} --password-stdin'
+        push_command = f'{runtime} push --tls-verify=false {shlex.quote(full_image)}'
+
+    response = {
+        'source': 'quay',
+        'project': project_source,
+        'registry': {
+            'server_url': client.server_url,
+            'registry': registry,
+            'namespace': namespace,
+            'insecure': insecure_registry,
+            'api_token_configured': client.auth_configured,
+            'push_username_configured': bool(client.push_username),
+            'push_token_configured': bool(client.push_token),
+        },
+        'image': {
+            'repository': image_name,
+            'tag': image_tag,
+            'repository_path': repository_path,
+            'awx': full_image,
+            'push': full_image,
+        },
+        'commands': [
+            {
+                'label': _('Build execution environment'),
+                'command': '%s && %s'
+                % (
+                    f'cd {shlex.quote(working_directory)}',
+                    ' '.join(
+                        [
+                            'ansible-builder',
+                            'build',
+                            '--container-runtime',
+                            shlex.quote(runtime),
+                            '-f',
+                            shlex.quote(definition_file),
+                            '-t',
+                            shlex.quote(full_image),
+                            shlex.quote(context_path),
+                        ]
+                    ),
+                ),
+                'working_directory': working_directory,
+            },
+            {
+                'label': _('Log in to Project Quay'),
+                'command': login_command,
+            },
+            {
+                'label': _('Push to Project Quay'),
+                'command': push_command,
+            },
+        ],
+        'awx_execution_environment': {
+            'image': full_image,
+            'pull': 'missing',
+        },
+        'notes': [
+            _('Project Quay hosts AWX execution environment container images. Galaxy NG remains the Automation Hub for collections and related content.'),
+            _('Set QUAY_TOKEN to a robot account token before running the generated login command; AWX does not print stored secret values.'),
+            _('Use the AWX image value when creating or updating an AWX execution environment.'),
+        ],
+    }
+    if runtime == 'docker' and insecure_registry:
+        response['notes'].append(_('Docker requires the Project Quay registry to be configured as an insecure registry before pushing over HTTP.'))
+    return response, None
+
+
+def _serialize_quay_image_build(build, include_log=True):
+    return {
+        'id': build.id,
+        'type': 'quay_image_build',
+        'url': build.get_absolute_url(),
+        'created': build.created,
+        'modified': build.modified,
+        'created_by': build.created_by.username if build.created_by_id else '',
+        'project': {
+            'id': build.project_id,
+            'name': build.project_name,
+            'path': build.project_path,
+            'scm_revision': build.scm_revision,
+        },
+        'namespace': build.namespace,
+        'repository': build.repository,
+        'repository_path': build.repository_path,
+        'tag': build.tag,
+        'image': build.image,
+        'registry': build.registry,
+        'runtime': build.runtime,
+        'definition_file': build.definition_file,
+        'context': build.context_path,
+        'status': build.status,
+        'progress': build.progress,
+        'started': build.started,
+        'finished': build.finished,
+        'error': build.error,
+        'log': build.log if include_log else '',
+        'command_summary': build.command_summary or [],
+    }
 
 
 class QuayStatusView(APIView):
@@ -778,134 +946,80 @@ class QuayExecutionEnvironmentImageBuildPlanView(APIView):
     permission_classes = (IsAuthenticated, QuayManagePermission)
 
     def post(self, request, format=None):
-        if not module_enabled():
-            return Response(
-                {'detail': _('Project Quay module is disabled.'), 'status': 'disabled'},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
-        if connection_status() != 'configured':
-            return Response(
-                {'detail': _('Project Quay registry URL is not configured.'), 'status': connection_status()},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
+        plan, error_response = _quay_image_build_plan_for_request(request)
+        if error_response:
+            return error_response
+        return Response(plan)
 
-        data = request.data if isinstance(request.data, dict) else {}
-        project, error = _project_for_build_plan(request.user, data.get('project_id') or data.get('project'))
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
 
-        namespace = str(data.get('namespace') or configured_namespace()).strip().strip('/')
-        if not namespace:
-            return Response({'detail': _('Project Quay namespace is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+class QuayExecutionEnvironmentImageBuildsView(APIView):
+    name = _('Project Quay Execution Environment Image Builds')
+    resource_purpose = 'project quay execution environment image build runs'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
 
-        image_name, error = _validate_image_name(data.get('image_name') or data.get('repository') or 'custom-ee')
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
-        image_tag, error = _validate_image_tag(data.get('tag') or data.get('image_tag') or 'latest')
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
-
-        runtime = str(data.get('runtime') or 'podman').strip().lower()
-        if runtime not in QUAY_CONTAINER_RUNTIMES:
-            return Response(
-                {'detail': _('Container runtime must be podman or docker.'), 'status': 'bad_request'},
-                status=http_status.HTTP_400_BAD_REQUEST,
-            )
-
-        definition_file, error = _validate_relative_cli_path(
-            data.get('definition_file') or data.get('definition'), 'execution-environment.yml', _('Definition file')
+    def get(self, request, format=None):
+        page = _parse_positive_int(request.query_params.get('page'), 1)
+        page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
+        queryset = QuayImageBuild.objects.select_related('project', 'created_by').all()
+        namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
+        repository = str(request.query_params.get('repository') or '').strip().strip('/')
+        if namespace:
+            queryset = queryset.filter(namespace=namespace)
+        if repository:
+            queryset = queryset.filter(repository=repository)
+        count = queryset.count()
+        offset = (page - 1) * page_size
+        items = queryset[offset : offset + page_size]
+        return Response(
+            {
+                'count': count,
+                'next': None,
+                'previous': None,
+                'source': 'quay',
+                'resource': 'image_builds',
+                'results': [_serialize_quay_image_build(build, include_log=False) for build in items],
+            }
         )
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
-        context_path, error = _validate_relative_cli_path(data.get('context') or data.get('context_path'), '.', _('Build context'))
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
-        project_source, error = _resolve_project_build_source(project, definition_file, context_path)
-        if error:
-            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
 
-        client = QuayClient()
-        registry = client.registry
-        if not registry:
+    def post(self, request, format=None):
+        plan, error_response = _quay_image_build_plan_for_request(request)
+        if error_response:
+            return error_response
+        if not plan['registry']['push_username_configured'] or not plan['registry']['push_token_configured']:
             return Response(
-                {'detail': _('Project Quay registry URL does not include a registry hostname.'), 'status': 'bad_request'},
+                {'detail': _('Project Quay push credentials are required before AWX can launch an image build.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
-        parsed = urlparse(client.server_url)
-        insecure_registry = parsed.scheme == 'http' or not client.verify_ssl
-        repository_path = f'{namespace}/{image_name}'
-        full_image = f'{registry}/{repository_path}:{image_tag}'
-        working_directory = project_source['project_path']
-        username = client.push_username or '$QUAY_USERNAME'
-        login_command = f'echo \"$QUAY_TOKEN\" | {runtime} login {shlex.quote(registry)} --username {shlex.quote(username)} --password-stdin'
-        push_command = f'{runtime} push {shlex.quote(full_image)}'
-        if runtime == 'podman' and insecure_registry:
-            login_command = (
-                f'echo \"$QUAY_TOKEN\" | {runtime} login --tls-verify=false {shlex.quote(registry)} --username {shlex.quote(username)} --password-stdin'
-            )
-            push_command = f'{runtime} push --tls-verify=false {shlex.quote(full_image)}'
+        project_data = plan['project']
+        image_data = plan['image']
+        registry_data = plan['registry']
+        build = QuayImageBuild.objects.create(
+            project_id=project_data['project_id'],
+            project_name=project_data['project_name'],
+            project_path=project_data['project_path'],
+            scm_revision=project_data['scm_revision'],
+            namespace=registry_data['namespace'],
+            repository=image_data['repository'],
+            tag=image_data['tag'],
+            image=image_data['awx'],
+            registry=registry_data['registry'],
+            runtime=str((request.data or {}).get('runtime') or 'podman').strip().lower(),
+            definition_file=project_data['definition_file'],
+            context_path=project_data['context'],
+            command_summary=[{**command, 'label': str(command.get('label') or '')} for command in plan['commands']],
+        )
+        transaction.on_commit(lambda: run_quay_image_build.delay(build.id))
+        return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED)
 
-        response = {
-            'source': 'quay',
-            'project': project_source,
-            'registry': {
-                'server_url': client.server_url,
-                'registry': registry,
-                'namespace': namespace,
-                'insecure': insecure_registry,
-                'api_token_configured': client.auth_configured,
-                'push_username_configured': bool(client.push_username),
-                'push_token_configured': bool(client.push_token),
-            },
-            'image': {
-                'repository': image_name,
-                'tag': image_tag,
-                'repository_path': repository_path,
-                'awx': full_image,
-                'push': full_image,
-            },
-            'commands': [
-                {
-                    'label': _('Build execution environment'),
-                    'command': '%s && %s'
-                    % (
-                        f'cd {shlex.quote(working_directory)}',
-                        ' '.join(
-                            [
-                                'ansible-builder',
-                                'build',
-                                '--container-runtime',
-                                shlex.quote(runtime),
-                                '-f',
-                                shlex.quote(definition_file),
-                                '-t',
-                                shlex.quote(full_image),
-                                shlex.quote(context_path),
-                            ]
-                        ),
-                    ),
-                    'working_directory': working_directory,
-                },
-                {
-                    'label': _('Log in to Project Quay'),
-                    'command': login_command,
-                },
-                {
-                    'label': _('Push to Project Quay'),
-                    'command': push_command,
-                },
-            ],
-            'awx_execution_environment': {
-                'image': full_image,
-                'pull': 'missing',
-            },
-            'notes': [
-                _('Project Quay hosts AWX execution environment container images. Galaxy NG remains the Automation Hub for collections and related content.'),
-                _('Set QUAY_TOKEN to a robot account token before running the generated login command; AWX does not print stored secret values.'),
-                _('Use the AWX image value when creating or updating an AWX execution environment.'),
-            ],
-        }
-        if runtime == 'docker' and insecure_registry:
-            response['notes'].append(_('Docker requires the Project Quay registry to be configured as an insecure registry before pushing over HTTP.'))
-        return Response(response)
+
+class QuayExecutionEnvironmentImageBuildDetailView(APIView):
+    name = _('Project Quay Execution Environment Image Build Detail')
+    resource_purpose = 'project quay execution environment image build run detail'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get(self, request, pk, format=None):
+        build = QuayImageBuild.objects.select_related('project', 'created_by').filter(pk=pk).first()
+        if build is None:
+            return Response({'detail': _('Project Quay image build was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        return Response(_serialize_quay_image_build(build))

@@ -539,6 +539,82 @@ def test_quay_execution_environment_image_build_plan_handles_awx_project_source(
 
 
 @pytest.mark.django_db
+def test_quay_execution_environment_image_build_create_queues_dispatcher_task(post, get, admin_user, organization, tmp_path, mocker):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project', scm_revision='abc123')
+    task_delay = mocker.patch('awx.api.views.quay.run_quay_image_build.delay')
+    on_commit = mocker.patch('awx.api.views.quay.transaction.on_commit', side_effect=lambda callback, *args, **kwargs: callback())
+
+    with override_settings(
+        MODULE_QUAY_ENABLED=True,
+        QUAY_REGISTRY_URL='https://quay.example.test',
+        QUAY_NAMESPACE='awx',
+        QUAY_PUSH_USERNAME='awx+robot',
+        QUAY_PUSH_TOKEN='push-token',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:quay_image_builds'),
+            data={
+                'project_id': project.pk,
+                'repository': 'custom-ee',
+                'tag': 'v1',
+                'runtime': 'podman',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=admin_user,
+            expect=202,
+        )
+        list_response = get(reverse('api:quay_image_builds') + '?repository=custom-ee', user=admin_user, expect=200)
+
+    assert response.data['status'] == 'pending'
+    assert response.data['progress'] == 0
+    assert response.data['image'] == 'quay.example.test/awx/custom-ee:v1'
+    assert response.data['project']['name'] == 'EE Project'
+    assert response.data['project']['scm_revision'] == 'abc123'
+    assert response.data['command_summary'][0]['label'] == 'Build execution environment'
+    assert on_commit.called is True
+    assert task_delay.call_args.args == (response.data['id'],)
+    assert list_response.data['count'] == 1
+    assert list_response.data['results'][0]['log'] == ''
+    assert list_response.data['results'][0]['repository_path'] == 'awx/custom-ee'
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_image_build_requires_push_credentials(post, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
+
+    with override_settings(
+        MODULE_QUAY_ENABLED=True,
+        QUAY_REGISTRY_URL='https://quay.example.test',
+        QUAY_NAMESPACE='awx',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:quay_image_builds'),
+            data={
+                'project_id': project.pk,
+                'repository': 'custom-ee',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['status'] == 'bad_request'
+    assert response.data['detail'] == 'Project Quay push credentials are required before AWX can launch an image build.'
+
+
+@pytest.mark.django_db
 def test_quay_execution_environment_image_build_plan_requires_quay_management_permission(post, rando):
     response = post(
         reverse('api:quay_execution_environment_image_build_plan'),

@@ -86,6 +86,59 @@ const permissions = {
   controller_error: '',
 };
 
+const projects = {
+  count: 1,
+  next: null,
+  previous: null,
+  results: [
+    {
+      id: 7,
+      name: 'EE Project',
+      local_path: 'ee-project',
+      scm_revision: 'abc123',
+      status: 'successful',
+    },
+  ],
+};
+
+const builds = {
+  count: 1,
+  next: null,
+  previous: null,
+  source: 'quay',
+  resource: 'image_builds',
+  results: [
+    {
+      id: 42,
+      created: '2026-07-01T12:00:00Z',
+      modified: '2026-07-01T12:01:00Z',
+      created_by: 'admin',
+      project: { id: 7, name: 'EE Project', path: '/tmp/ee-project', scm_revision: 'abc123' },
+      namespace: 'awx',
+      repository: 'custom-ee',
+      repository_path: 'awx/custom-ee',
+      tag: 'latest',
+      image: 'quay.example.test/awx/custom-ee:latest',
+      registry: 'quay.example.test',
+      runtime: 'podman',
+      definition_file: 'execution-environment.yml',
+      context: '.',
+      status: 'successful',
+      progress: 100,
+      started: '2026-07-01T12:00:00Z',
+      finished: '2026-07-01T12:01:00Z',
+      error: '',
+      log: '',
+      command_summary: [],
+    },
+  ],
+};
+
+const buildDetail = {
+  ...builds.results[0],
+  log: 'Starting Project Quay image build quay.example.test/awx/custom-ee:latest\nBuild completed successfully.\n',
+};
+
 describe('QuayRepositories', () => {
   it('shows the repository list without embedding repository details', () => {
     cy.viewport(1280, 800);
@@ -135,6 +188,9 @@ describe('QuayRepositories', () => {
     cy.intercept('GET', `${awxAPI`/quay/repositories/permissions/`}*`, permissions).as(
       'permissions'
     );
+    cy.intercept('GET', `${awxAPI`/quay/repositories/permissions/`}*`, permissions).as(
+      'permissions'
+    );
     cy.intercept('POST', awxAPI`/quay/repositories/permissions/user/set/`, {
       source: 'quay',
       action: 'set_user_permission',
@@ -170,6 +226,7 @@ describe('QuayRepositories', () => {
     cy.contains('podman pull quay.example.test/awx/custom-ee:latest').should('be.visible');
     cy.contains('Docker pull command').should('be.visible');
     cy.contains('docker pull quay.example.test/awx/custom-ee:latest').should('be.visible');
+    cy.contains('button', 'Builds').should('be.visible');
     cy.contains('button', 'Tags').click();
     cy.contains('sha256:abc123').should('be.visible');
     cy.contains('button', 'Activity').click();
@@ -203,6 +260,70 @@ describe('QuayRepositories', () => {
     cy.contains('Repository visibility').should('be.visible');
     cy.contains('Delete repository').should('be.visible');
     cy.contains('Manage repository permissions').should('not.exist');
+  });
+
+  it('starts and tracks a repository image build from the Builds tab', () => {
+    cy.viewport(1280, 800);
+    cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
+    cy.intercept('GET', `${awxAPI`/projects/`}*`, projects).as('projects');
+    cy.intercept(
+      {
+        method: 'GET',
+        pathname: awxAPI`/quay/execution-environment-images/builds/`,
+      },
+      builds
+    ).as('builds');
+    cy.intercept('GET', awxAPI`/quay/execution-environment-images/builds/42/`, {
+      statusCode: 200,
+      body: buildDetail,
+    }).as('buildDetail');
+    cy.intercept('POST', awxAPI`/quay/execution-environment-images/builds/`, {
+      statusCode: 202,
+      body: {
+        ...buildDetail,
+        id: 43,
+        status: 'pending',
+        progress: 0,
+        log: '',
+      },
+    }).as('startBuild');
+
+    cy.mount(<QuayRepositoryDetails />, {
+      path: '/quay/repositories/:namespace/:repository',
+      initialEntries: ['/quay/repositories/awx/custom-ee'],
+    });
+    cy.wait(['@status', '@repositories']);
+    cy.contains('button', 'Builds').click();
+    cy.wait(['@projects', '@builds']);
+    cy.contains('Build execution environment image').should('be.visible');
+    cy.contains('Recent builds').should('be.visible');
+    cy.contains('quay.example.test/awx/custom-ee:latest').should('be.visible');
+    cy.contains('button', '#42').click();
+    cy.wait('@buildDetail')
+      .its('response.body.log')
+      .should('contain', 'Starting Project Quay image build');
+    cy.get('.pf-v5-c-clipboard-copy')
+      .last()
+      .find('input, textarea')
+      .invoke('val')
+      .should('contain', 'Starting Project Quay image build')
+      .should('contain', 'Build completed successfully.');
+    cy.get('#quay-build-project').should('have.value', '7');
+    cy.get('#quay-build-tag').clear().type('v2');
+    cy.get('#quay-build-definition').clear().type('ee/execution-environment.yml');
+    cy.get('#quay-build-context').clear().type('ee');
+    cy.contains('button', 'Start build').click();
+    cy.wait('@startBuild').its('request.body').should('deep.equal', {
+      project_id: 7,
+      namespace: 'awx',
+      repository: 'custom-ee',
+      tag: 'v2',
+      runtime: 'podman',
+      definition_file: 'ee/execution-environment.yml',
+      context: 'ee',
+    });
   });
 
   it('shows repository permission guidance until a Quay API token is configured', () => {
