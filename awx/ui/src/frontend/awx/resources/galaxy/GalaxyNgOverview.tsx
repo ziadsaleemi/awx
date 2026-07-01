@@ -178,35 +178,24 @@ export function GalaxyNgOverview() {
                     {
                       label: t('Collections'),
                       value: data?.counts.collections ?? 0,
-                      detail: t('Available automation content'),
+                      detail: t('Published content'),
                     },
                     {
                       label: t('Namespaces'),
                       value: data?.counts.namespaces ?? 0,
-                      detail: t('Private hub namespaces'),
+                      detail: t('Private ownership'),
                     },
                     {
                       label: t('Repositories'),
                       value: data?.counts.repositories ?? 0,
-                      detail: t('Pulp Ansible repositories'),
+                      detail: t('Distribution repos'),
                     },
                     {
                       label: t('Remotes'),
                       value: data?.counts.remotes ?? 0,
-                      detail: t('External collection sources'),
-                    },
-                    {
-                      label: t('Approvals'),
-                      value: data?.counts.collection_approvals ?? 0,
-                      detail: t('Staged versions waiting review'),
-                    },
-                    {
-                      label: t('Tasks'),
-                      value: data?.counts.tasks ?? 0,
-                      detail: t('Import, sync, copy, and publish activity'),
+                      detail: t('External sources'),
                     },
                   ]}
-                  minWidth={135}
                 />
               </StackItem>
               <StackItem>
@@ -216,6 +205,14 @@ export function GalaxyNgOverview() {
                       label: t('API auth'),
                       value: data?.auth_configured ? t('Configured') : t('Public only'),
                       ok: Boolean(data?.auth_configured),
+                    },
+                    {
+                      label: t('Approvals'),
+                      value: data?.counts.collection_approvals ?? 0,
+                    },
+                    {
+                      label: t('Tasks'),
+                      value: data?.counts.tasks ?? 0,
                     },
                     {
                       label: t('Remote registries'),

@@ -34,13 +34,12 @@ export interface ContentSummaryMetric {
 }
 
 export function ContentSummaryGrid(props: { metrics: ContentSummaryMetric[]; minWidth?: number }) {
-  const minWidth = props.minWidth ?? 180;
+  const minWidth = props.minWidth ?? 200;
   return (
     <div
       style={{
-        borderInlineStart: '1px solid var(--pf-v5-global--BorderColor--100)',
-        borderTop: '1px solid var(--pf-v5-global--BorderColor--100)',
         display: 'grid',
+        gap: 12,
         gridTemplateColumns: `repeat(auto-fit, minmax(min(${minWidth}px, 100%), 1fr))`,
       }}
     >
@@ -48,10 +47,13 @@ export function ContentSummaryGrid(props: { metrics: ContentSummaryMetric[]; min
         <div
           key={`${metric.label}-${index}`}
           style={{
-            borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-            borderInlineEnd: '1px solid var(--pf-v5-global--BorderColor--100)',
+            border: '1px solid var(--pf-v5-global--BorderColor--100)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            minHeight: 104,
             minWidth: 0,
-            padding: '12px 16px',
+            padding: '14px 16px',
           }}
         >
           <TextContent>
@@ -75,6 +77,7 @@ export function ContentSummaryGrid(props: { metrics: ContentSummaryMetric[]; min
                 style={{
                   opacity: 0.62,
                   overflowWrap: 'anywhere',
+                  marginTop: 4,
                 }}
                 title={typeof metric.detail === 'string' ? metric.detail : undefined}
               >
@@ -140,8 +143,8 @@ export function ContentWorkflowGroups(props: { groups: ContentWorkflowGroup[] })
     <div
       style={{
         display: 'grid',
-        gap: 20,
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))',
+        gap: 24,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))',
       }}
     >
       {props.groups.map((group) => (
@@ -165,7 +168,7 @@ export function ContentWorkflowGroups(props: { groups: ContentWorkflowGroup[] })
                   key={`${group.title}-${link.label}`}
                   style={{
                     borderBottom: '1px solid var(--pf-v5-global--BorderColor--100)',
-                    padding: '8px 0',
+                    padding: '10px 0',
                   }}
                 >
                   <TextContent>
