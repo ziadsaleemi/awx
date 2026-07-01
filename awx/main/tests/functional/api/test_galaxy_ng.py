@@ -77,6 +77,7 @@ def test_galaxy_ng_status_reads_live_counts(get, admin_user, mocker):
     assert response.data['status'] == 'configured'
     assert response.data['server_url'] == 'https://hub.example.test'
     assert response.data['api_root_url'] == 'https://hub.example.test/api/galaxy/'
+    assert response.data['api_browser_url'] == 'https://hub.example.test/api/galaxy/v3/swagger-ui/'
     assert response.data['content_url'] == 'https://hub.example.test/pulp/content/'
     assert response.data['ui_url'] == 'https://hub.example.test/ui/'
     assert response.data['auth_configured'] is True

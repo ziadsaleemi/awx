@@ -11,6 +11,7 @@ const status = {
   status: 'configured',
   server_url: 'https://hub.example.test',
   api_root_url: 'https://hub.example.test/api/galaxy/',
+  api_browser_url: 'https://hub.example.test/api/galaxy/v3/swagger-ui/',
   content_url: 'https://hub.example.test/pulp/content/',
   ui_url: 'https://hub.example.test/ui/',
   auth_configured: true,
@@ -148,6 +149,7 @@ describe('GalaxyNgOverview', () => {
       ...status,
       server_url: 'http://host.docker.internal:5001',
       api_root_url: 'http://host.docker.internal:5001/api/galaxy/',
+      api_browser_url: 'http://host.docker.internal:5001/api/galaxy/v3/swagger-ui/',
       content_url: 'http://host.docker.internal:5001/pulp/content/',
       ui_url: 'http://host.docker.internal:5001/ui/',
     }).as('status');

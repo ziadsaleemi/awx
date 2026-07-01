@@ -7,6 +7,7 @@ const status = {
   status: 'configured',
   server_url: 'https://hub.example.test',
   api_root_url: 'https://hub.example.test/api/galaxy/',
+  api_browser_url: 'https://hub.example.test/api/galaxy/v3/swagger-ui/',
   content_url: 'https://hub.example.test/pulp/content/',
   ui_url: 'https://hub.example.test/ui/',
   auth_configured: true,

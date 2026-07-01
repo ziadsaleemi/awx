@@ -304,12 +304,15 @@ class GalaxyNGStatusView(APIView):
             'invalid': _('Galaxy NG server URL is invalid.'),
             'not_configured': _('Galaxy NG server URL is not configured.'),
         }
+        api_path_prefix = f'{client.api_path_prefix.rstrip("/")}/'
+        api_root_url = f'{server_url}{api_path_prefix}' if server_url else ''
         response = {
             'enabled': module_enabled(),
             'configured': status == 'configured',
             'status': status,
             'server_url': server_url,
-            'api_root_url': f'{server_url}{client.api_path_prefix}' if server_url else '',
+            'api_root_url': api_root_url,
+            'api_browser_url': f'{api_root_url}v3/swagger-ui/' if api_root_url else '',
             'content_url': f'{server_url}{client.content_path_prefix}' if server_url else '',
             'ui_url': f'{server_url}/ui/' if server_url else '',
             'auth_configured': client.auth_configured,

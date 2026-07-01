@@ -36,6 +36,7 @@ export interface GalaxyNgStatus {
   status: string;
   server_url: string;
   api_root_url: string;
+  api_browser_url: string;
   content_url: string;
   ui_url: string;
   auth_configured: boolean;
@@ -404,7 +405,7 @@ export function GalaxyNgOverview() {
               description={t('See how AWX authenticates to Galaxy NG APIs.')}
             />
             <QuickLink
-              href={getBrowserUrl(getApiBrowserUrl(data?.api_root_url))}
+              href={getBrowserUrl(data?.api_browser_url || getApiBrowserUrl(data?.api_root_url))}
               label={t('Open Galaxy NG API')}
               description={t('Open the live Galaxy NG API browser for direct hub operations.')}
             />
