@@ -5,11 +5,6 @@ import {
   Alert,
   Button,
   ButtonVariant,
-  ClipboardCopy,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
   Flex,
   FlexItem,
   Form,
@@ -24,14 +19,17 @@ import {
   PageSection,
   Stack,
   StackItem,
+  Tab,
+  TabTitleText,
+  Tabs,
   Text,
   TextArea,
   TextInput,
-  TextContent,
   TextVariants,
   Title,
 } from '@patternfly/react-core';
 import {
+  CaretLeftIcon,
   PencilAltIcon,
   PlusCircleIcon,
   SecurityIcon,
@@ -44,19 +42,20 @@ import {
   IPageAction,
   ITableColumn,
   IToolbarFilter,
+  PageDetail,
+  PageDetails,
   PageActions,
   PageActionSelection,
   PageActionType,
   PageHeader,
   PageLayout,
-  PageTab,
   PageTable,
-  PageTabs,
   TextCell,
   ToolbarFilterType,
   useGetPageUrl,
   usePageAlertToaster,
 } from '../../../../framework';
+import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
@@ -98,6 +97,7 @@ interface QuayRepositoryActionResponse {
 }
 
 type QuayRepositoryModalMode = 'create' | 'edit';
+type QuayRepositoryTabKey = 'details' | 'tags' | 'activity' | 'settings';
 
 interface QuayImageTag {
   id: number;
@@ -372,6 +372,9 @@ function QuayRepositoryConsole(props: {
 }) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<QuayRepositoryTabKey>('details');
+  const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
   const permissionsUrl =
     getPageUrl(AwxRoute.QuayRepositoryPermissions) || '/quay/repository-permissions';
   const eeImagesUrl =
@@ -422,191 +425,184 @@ function QuayRepositoryConsole(props: {
   const isPublic = Boolean(repository.is_public);
 
   return (
-    <PageSection style={{ padding: '16px 24px 20px' }}>
-      <Stack hasGutter>
-        <StackItem>
-          <PageTabs>
-            <PageTab label={t('Overview')}>
-              <div style={{ padding: '24px 0 0' }}>
-                <Grid hasGutter>
-                  <GridItem sm={12} lg={7}>
-                    <Stack hasGutter>
-                      <StackItem>
-                        <Title headingLevel="h3" size="lg">
-                          {t('Pull commands')}
-                        </Title>
-                      </StackItem>
-                      <StackItem>
-                        <TextContent>
-                          <Text component={TextVariants.small}>
-                            {t(
-                              'Use these image references when creating AWX execution environments.'
-                            )}
-                          </Text>
-                        </TextContent>
-                      </StackItem>
-                      <StackItem>
-                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                          {image
-                            ? `podman pull ${image}`
-                            : t('Configure registry and namespace first.')}
-                        </ClipboardCopy>
-                      </StackItem>
-                      <StackItem>
-                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                          {image
-                            ? `docker pull ${image}`
-                            : t('Configure registry and namespace first.')}
-                        </ClipboardCopy>
-                      </StackItem>
-                    </Stack>
-                  </GridItem>
-                  <GridItem sm={12} lg={5}>
-                    <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
-                      {t('Repository details')}
-                    </Title>
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
-                        <DescriptionListDescription>{namespace || '-'}</DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Visibility')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {visibility(repository)}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('State')}</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {repository.state || '-'}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>{t('Image value')}</DescriptionListTerm>
-                        <DescriptionListDescription style={{ overflowWrap: 'anywhere' }}>
-                          {image || '-'}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
-                  </GridItem>
-                </Grid>
-              </div>
-            </PageTab>
-            <PageTab label={t('Tags')}>
-              <div style={{ padding: '24px 0 0' }}>
-                {!props.statusData?.auth_configured ? (
-                  <Alert
-                    isInline
-                    variant="info"
-                    title={t('Configure a Project Quay API token to inspect hosted tags.')}
-                    actionLinks={
-                      <Button component="a" variant="link" href={apiTokenUrl}>
-                        {t('Open API token plan')}
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <QuayTagTable
-                    tags={tagItems}
-                    isLoading={tags.isLoading}
-                    error={tags.error}
-                    emptyText={t('No image tags were reported for this repository.')}
-                  />
+    <>
+      <Tabs
+        activeKey={activeTab}
+        inset={{ default: 'insetSm' }}
+        isBox
+        onSelect={(event, key) => {
+          event.preventDefault();
+          if (key === 'back') {
+            navigate(repositoriesUrl);
+            return;
+          }
+          setActiveTab(key as QuayRepositoryTabKey);
+        }}
+        style={{
+          backgroundColor: 'var(--pf-v5-c-tabs__link--BackgroundColor)',
+          flexShrink: 0,
+        }}
+      >
+        <Tab
+          eventKey="back"
+          href={repositoriesUrl}
+          title={
+            <TabTitleText>
+              <CaretLeftIcon />
+              <span style={{ marginLeft: 6 }}>{t('Back to Repositories')}</span>
+            </TabTitleText>
+          }
+        />
+        <Tab eventKey="details" title={t('Details')} />
+        <Tab eventKey="tags" title={t('Tags')} />
+        <Tab eventKey="activity" title={t('Activity')} />
+        <Tab eventKey="settings" title={t('Settings')} />
+      </Tabs>
+      {activeTab === 'details' ? (
+        <PageDetails>
+          <PageDetail label={t('Name')}>{repository.name || '-'}</PageDetail>
+          <PageDetail label={t('Description')}>{repository.description || '-'}</PageDetail>
+          <PageDetail label={t('Namespace')}>{namespace || '-'}</PageDetail>
+          <PageDetail label={t('Registry')}>{props.statusData?.registry || '-'}</PageDetail>
+          <PageDetail label={t('Latest tag')}>{latestTag || '-'}</PageDetail>
+          <PageDetail label={t('Visibility')}>
+            <Label color={isPublic ? 'blue' : 'grey'}>{visibility(repository)}</Label>
+          </PageDetail>
+          <PageDetail label={t('State')}>{repository.state || '-'}</PageDetail>
+          <PageDetail label={t('Last modified')}>
+            <DateTimeCell value={lastModified(repository)} />
+          </PageDetail>
+          <PageDetail label={t('Managed from AWX')}>
+            {props.statusData?.management_configured ? t('Yes') : t('No')}
+          </PageDetail>
+          <PageDetail label={t('Image value')} fullWidth>
+            <span style={{ overflowWrap: 'anywhere' }}>{image || '-'}</span>
+          </PageDetail>
+          <PageDetailCodeEditor
+            key={`podman-${image}`}
+            label={t('Podman pull command')}
+            value={image ? `podman pull ${image}` : t('Configure registry and namespace first.')}
+            toggleLanguage={false}
+          />
+          <PageDetailCodeEditor
+            key={`docker-${image}`}
+            label={t('Docker pull command')}
+            value={image ? `docker pull ${image}` : t('Configure registry and namespace first.')}
+            toggleLanguage={false}
+          />
+        </PageDetails>
+      ) : null}
+      {activeTab === 'tags' ? (
+        <PageSection style={{ padding: 24 }}>
+          {!props.statusData?.auth_configured ? (
+            <Alert
+              isInline
+              variant="info"
+              title={t('Configure a Project Quay API token to inspect hosted tags.')}
+              actionLinks={
+                <Button component="a" variant="link" href={apiTokenUrl}>
+                  {t('Open API token plan')}
+                </Button>
+              }
+            />
+          ) : (
+            <QuayTagTable
+              tags={tagItems}
+              isLoading={tags.isLoading}
+              error={tags.error}
+              emptyText={t('No image tags were reported for this repository.')}
+            />
+          )}
+        </PageSection>
+      ) : null}
+      {activeTab === 'activity' ? (
+        <PageSection style={{ padding: 24 }}>
+          <Grid hasGutter>
+            <GridItem sm={12} lg={6}>
+              <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
+                {t('Recent tag activity')}
+              </Title>
+              <QuayTagTable
+                tags={tagItems.slice(0, 5)}
+                isLoading={tags.isLoading}
+                error={tags.error}
+                emptyText={t('No recent tag activity was reported by Project Quay.')}
+              />
+            </GridItem>
+            <GridItem sm={12} lg={6}>
+              <Alert isInline variant="info" title={t('Usage logs need Quay event data')}>
+                {t(
+                  'AWX can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
                 )}
-              </div>
-            </PageTab>
-            <PageTab label={t('Activity')}>
-              <div style={{ padding: '24px 0 0' }}>
-                <Grid hasGutter>
-                  <GridItem sm={12} lg={6}>
-                    <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
-                      {t('Recent tag activity')}
-                    </Title>
-                    <QuayTagTable
-                      tags={tagItems.slice(0, 5)}
-                      isLoading={tags.isLoading}
-                      error={tags.error}
-                      emptyText={t('No recent tag activity was reported by Project Quay.')}
-                    />
-                  </GridItem>
-                  <GridItem sm={12} lg={6}>
-                    <Alert isInline variant="info" title={t('Usage logs need Quay event data')}>
-                      {t(
-                        'AWX can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
-                      )}
-                    </Alert>
-                  </GridItem>
-                </Grid>
-              </div>
-            </PageTab>
-            <PageTab label={t('Settings')}>
-              <div style={{ padding: '24px 0 0' }}>
-                <Grid hasGutter>
-                  <GridItem sm={12} lg={6}>
-                    <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
-                      {t('Repository management')}
-                    </Title>
-                    <Stack hasGutter>
-                      <StackItem>
-                        <Button
-                          variant="secondary"
-                          icon={<PencilAltIcon />}
-                          onClick={() => props.onEdit(repository)}
-                          isDisabled={!props.canManageRepositories}
-                        >
-                          {t('Edit description')}
-                        </Button>
-                      </StackItem>
-                      <StackItem>
-                        <Button
-                          component="a"
-                          href={permissionsUrl}
-                          variant="secondary"
-                          icon={<SecurityIcon />}
-                        >
-                          {t('Manage repository permissions')}
-                        </Button>
-                      </StackItem>
-                      <StackItem>
-                        <Button
-                          variant="secondary"
-                          onClick={() => props.onChangeVisibility(repository, !isPublic)}
-                          isDisabled={!props.canManageRepositories}
-                        >
-                          {isPublic ? t('Make private') : t('Make public')}
-                        </Button>
-                      </StackItem>
-                    </Stack>
-                  </GridItem>
-                  <GridItem sm={12} lg={6}>
-                    <Alert
-                      isInline
-                      variant="danger"
-                      title={t('Delete repository')}
-                      actionLinks={
-                        <Button
-                          variant="link"
-                          isDanger
-                          onClick={() => props.onDelete(repository)}
-                          isDisabled={!props.canManageRepositories}
-                        >
-                          {t('Delete repository')}
-                        </Button>
-                      }
-                    >
-                      {t(
-                        'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from AWX.'
-                      )}
-                    </Alert>
-                  </GridItem>
-                </Grid>
-              </div>
-            </PageTab>
-          </PageTabs>
-        </StackItem>
-      </Stack>
-    </PageSection>
+              </Alert>
+            </GridItem>
+          </Grid>
+        </PageSection>
+      ) : null}
+      {activeTab === 'settings' ? (
+        <PageSection style={{ padding: 24 }}>
+          <Grid hasGutter>
+            <GridItem sm={12} lg={6}>
+              <Title headingLevel="h3" size="lg" style={{ marginBottom: 16 }}>
+                {t('Repository management')}
+              </Title>
+              <Stack hasGutter>
+                <StackItem>
+                  <Button
+                    variant="secondary"
+                    icon={<PencilAltIcon />}
+                    onClick={() => props.onEdit(repository)}
+                    isDisabled={!props.canManageRepositories}
+                  >
+                    {t('Edit description')}
+                  </Button>
+                </StackItem>
+                <StackItem>
+                  <Button
+                    component="a"
+                    href={permissionsUrl}
+                    variant="secondary"
+                    icon={<SecurityIcon />}
+                  >
+                    {t('Manage repository permissions')}
+                  </Button>
+                </StackItem>
+                <StackItem>
+                  <Button
+                    variant="secondary"
+                    onClick={() => props.onChangeVisibility(repository, !isPublic)}
+                    isDisabled={!props.canManageRepositories}
+                  >
+                    {isPublic ? t('Make private') : t('Make public')}
+                  </Button>
+                </StackItem>
+              </Stack>
+            </GridItem>
+            <GridItem sm={12} lg={6}>
+              <Alert
+                isInline
+                variant="danger"
+                title={t('Delete repository')}
+                actionLinks={
+                  <Button
+                    variant="link"
+                    isDanger
+                    onClick={() => props.onDelete(repository)}
+                    isDisabled={!props.canManageRepositories}
+                  >
+                    {t('Delete repository')}
+                  </Button>
+                }
+              >
+                {t(
+                  'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from AWX.'
+                )}
+              </Alert>
+            </GridItem>
+          </Grid>
+        </PageSection>
+      ) : null}
+    </>
   );
 }
 
@@ -816,7 +812,6 @@ export function QuayRepositoryDetails() {
     <PageLayout>
       <PageHeader
         title={pageTitle}
-        description={t('Project Quay repository details, tags, activity, and settings.')}
         breadcrumbs={[{ label: t('Repositories'), to: repositoriesUrl }, { label: pageTitle }]}
         headerActions={
           repository ? (

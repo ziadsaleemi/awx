@@ -130,8 +130,17 @@ describe('QuayRepositories', () => {
     cy.wait('@tags');
 
     cy.contains('awx/custom-ee').should('be.visible');
-    cy.get('input[value="podman pull quay.example.test/awx/custom-ee:latest"]').should('exist');
-    cy.get('input[value="docker pull quay.example.test/awx/custom-ee:latest"]').should('exist');
+    cy.contains('Back to Repositories').should('be.visible');
+    cy.contains('button', 'Details').should('be.visible');
+    cy.contains('Project Quay repository details, tags, activity, and settings.').should(
+      'not.exist'
+    );
+    cy.contains('Name').should('be.visible');
+    cy.contains('custom-ee').should('be.visible');
+    cy.contains('Podman pull command').should('be.visible');
+    cy.contains('podman pull quay.example.test/awx/custom-ee:latest').should('be.visible');
+    cy.contains('Docker pull command').should('be.visible');
+    cy.contains('docker pull quay.example.test/awx/custom-ee:latest').should('be.visible');
     cy.contains('button', 'Tags').click();
     cy.contains('sha256:abc123').should('be.visible');
     cy.contains('button', 'Activity').click();
