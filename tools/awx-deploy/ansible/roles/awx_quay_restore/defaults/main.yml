@@ -1,0 +1,18 @@
+---
+awx_server_backup_dir: /var/backups/awx
+awx_quay_restore_confirm: false
+awx_quay_restore_path: ""
+awx_quay_restore_storage: true
+awx_quay_restore_start_after_restore: true
+awx_quay_base_dir: /opt/quay
+awx_quay_data_dir: /var/lib/quay
+awx_quay_config_dir: "{{ awx_quay_base_dir }}/config"
+awx_quay_config_file: "{{ awx_quay_config_dir }}/config.yaml"
+awx_quay_compose_file: "{{ awx_quay_base_dir }}/docker-compose.yml"
+awx_quay_compose_project: awx-quay
+awx_quay_compose_command: /usr/bin/docker compose
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay
+awx_quay_public_port: 8081
+awx_quay_health_path: /health/instance
+awx_quay_wait_for_health: true

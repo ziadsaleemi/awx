@@ -1,0 +1,15 @@
+---
+awx_quay_k8s_restore_confirm: false
+awx_quay_k8s_restore_path: ""
+awx_quay_k8s_restore_storage: true
+awx_quay_k8s_restore_start_after_restore: true
+awx_quay_k8s_restore_helper_pod: "{{ awx_quay_name }}-restore-helper"
+awx_quay_k8s_restore_helper_image: docker.io/library/busybox:1.36
+awx_quay_k8s_namespace: quay
+awx_quay_name: awx-quay
+awx_quay_replicas: 1
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay
+awx_quay_postgres_container: postgres
+awx_quay_k8s_kubectl_binary: "{{ awx_k8s_kubectl_binary | default('kubectl') }}"
+awx_quay_k8s_kubeconfig: "{{ awx_k8s_kubeconfig | default(lookup('env', 'KUBECONFIG')) }}"

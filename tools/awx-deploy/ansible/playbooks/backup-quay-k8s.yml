@@ -1,0 +1,7 @@
+---
+- name: Backup Project Quay Kubernetes deployment
+  hosts: awx_k3s_servers:awx_existing_k8s:localhost
+  gather_facts: true
+  become: true
+  roles:
+    - awx_quay_k8s_backup

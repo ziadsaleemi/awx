@@ -164,6 +164,22 @@ awx_quay_postgres_access_mode: ReadWriteOnce
 awx_quay_storage_access_mode: ReadWriteOnce
 awx_quay_postgres_storage_size: 20Gi
 awx_quay_registry_storage_size: 50Gi
+awx_quay_backup_name: "quay-{{ ansible_date_time.iso8601_basic_short }}"
+awx_quay_backup_collect_storage: true
+awx_quay_backup_owner: root
+awx_quay_backup_group: root
+awx_quay_k8s_backup_name: "quay-k8s-{{ ansible_date_time.iso8601_basic_short }}"
+awx_quay_k8s_backup_collect_storage: true
+awx_quay_k8s_backup_owner: root
+awx_quay_k8s_backup_group: root
+awx_quay_restore_confirm: false
+awx_quay_restore_path: ""
+awx_quay_k8s_restore_confirm: false
+awx_quay_k8s_restore_path: ""
+awx_quay_failback_image_tag: ""
+awx_quay_failback_restore_path: ""
+awx_quay_upgrade_skip_backup: false
+awx_quay_upgrade_skip_pull: false
 
 # Policy as Code integration.
 # OPA is standalone and can run on a dedicated VM/container host or any external

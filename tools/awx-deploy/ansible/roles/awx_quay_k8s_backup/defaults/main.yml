@@ -1,0 +1,19 @@
+---
+awx_server_backup_dir: /var/backups/awx
+awx_quay_k8s_backup_dir: "{{ awx_server_backup_dir }}"
+awx_quay_k8s_backup_name: "quay-k8s-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
+awx_quay_k8s_backup_path: "{{ awx_quay_k8s_backup_dir }}/{{ awx_quay_k8s_backup_name }}"
+awx_quay_k8s_backup_collect_storage: true
+awx_quay_k8s_backup_owner: root
+awx_quay_k8s_backup_group: root
+awx_quay_k8s_backup_helper_pod: "{{ awx_quay_name }}-backup-helper"
+awx_quay_k8s_backup_helper_image: docker.io/library/busybox:1.36
+awx_quay_k8s_namespace: quay
+awx_quay_name: awx-quay
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay
+awx_quay_postgres_container: postgres
+awx_quay_k8s_kubectl_binary: "{{ awx_k8s_kubectl_binary | default('kubectl') }}"
+awx_quay_k8s_kubeconfig: "{{ awx_k8s_kubeconfig | default(lookup('env', 'KUBECONFIG')) }}"

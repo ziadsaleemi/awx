@@ -1,0 +1,7 @@
+---
+- name: Restore Project Quay server deployment
+  hosts: awx_quay
+  gather_facts: true
+  become: true
+  roles:
+    - awx_quay_restore

@@ -1,0 +1,21 @@
+---
+awx_server_backup_dir: /var/backups/awx
+awx_quay_backup_dir: "{{ awx_server_backup_dir }}"
+awx_quay_backup_name: "quay-{{ ansible_date_time.iso8601_basic_short | default('manual') }}"
+awx_quay_backup_path: "{{ awx_quay_backup_dir }}/{{ awx_quay_backup_name }}"
+awx_quay_backup_collect_storage: true
+awx_quay_backup_owner: root
+awx_quay_backup_group: root
+awx_quay_image: quay.io/projectquay/quay
+awx_quay_image_tag: latest
+awx_quay_postgres_image: docker.io/library/postgres:16
+awx_quay_redis_image: docker.io/library/redis:7
+awx_quay_base_dir: /opt/quay
+awx_quay_data_dir: /var/lib/quay
+awx_quay_config_dir: "{{ awx_quay_base_dir }}/config"
+awx_quay_config_file: "{{ awx_quay_config_dir }}/config.yaml"
+awx_quay_compose_file: "{{ awx_quay_base_dir }}/docker-compose.yml"
+awx_quay_compose_project: awx-quay
+awx_quay_compose_command: /usr/bin/docker compose
+awx_quay_postgres_database: quay
+awx_quay_postgres_user: quay

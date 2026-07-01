@@ -260,6 +260,64 @@ the generated configuration changes. The default Quay namespace is `admin`
 because the role initializes that first user; override `awx_quay_namespace` when
 you create a dedicated Quay organization such as `awx`.
 
+## Project Quay Backup / Restore / Upgrade / Failback
+
+Project Quay lifecycle is separate from AWX lifecycle because it owns registry
+metadata and registry storage. Server backups capture `quay.sql`, rendered
+Quay config/compose files, registry storage, and a manifest. Kubernetes backups
+capture `quay.sql`, Quay secrets, resource inventory, registry PVC contents,
+and a manifest.
+
+For direct server Quay:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/backup-quay-server.yml
+
+ansible-playbook -i inventories/example.ini playbooks/restore-quay-server.yml \
+  -e awx_quay_restore_confirm=true \
+  -e awx_quay_restore_path=/var/backups/awx/quay-20260625T010101Z
+
+ansible-playbook -i inventories/example.ini playbooks/upgrade-quay-server.yml \
+  -e awx_quay_image_tag=v3.13.4
+
+ansible-playbook -i inventories/example.ini playbooks/failback-quay-server.yml \
+  -e awx_quay_failback_restore_path=/var/backups/awx/quay-20260625T010101Z \
+  -e awx_quay_failback_image_tag=v3.13.3
+```
+
+For k3s/Kubernetes Quay:
+
+```bash
+ansible-playbook -i inventories/example.ini playbooks/backup-quay-k8s.yml
+
+ansible-playbook -i inventories/example.ini playbooks/restore-quay-k8s.yml \
+  -e awx_quay_k8s_restore_confirm=true \
+  -e awx_quay_k8s_restore_path=/var/backups/awx/quay-k8s-20260625T010101Z
+
+ansible-playbook -i inventories/example.ini playbooks/upgrade-quay-k8s.yml \
+  -e awx_quay_image_tag=v3.13.4
+
+ansible-playbook -i inventories/example.ini playbooks/failback-quay-k8s.yml \
+  -e awx_quay_failback_restore_path=/var/backups/awx/quay-k8s-20260625T010101Z \
+  -e awx_quay_failback_image_tag=v3.13.3
+```
+
+For image-only failback, omit `awx_quay_failback_restore_path`. For full state
+failback, provide a restore path; if an image tag is also provided the playbook
+restores state first, then reapplies the requested image tag.
+
+For local Docker Desktop smoke tests without sudo, override the backup owner
+and write to a temporary directory:
+
+```bash
+ansible-playbook -i localhost, -c local playbooks/backup-quay-k8s.yml \
+  -e ansible_become=false \
+  -e awx_quay_k8s_backup_dir=/tmp/awx-quay-backup-smoke \
+  -e awx_quay_k8s_backup_owner="$(id -un)" \
+  -e awx_quay_k8s_backup_group="$(id -gn)" \
+  -e awx_quay_k8s_backup_collect_storage=false
+```
+
 ## Quick Start: OPA on Server VM
 
 For direct server AWX deployments, put OPA on a dedicated VM in the `awx_opa`

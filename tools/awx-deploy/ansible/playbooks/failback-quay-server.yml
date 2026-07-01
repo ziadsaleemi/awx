@@ -1,0 +1,27 @@
+---
+- name: Fail back Project Quay server deployment
+  hosts: awx_quay
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Validate Project Quay server failback target
+      ansible.builtin.assert:
+        that:
+          - awx_quay_failback_image_tag | default('') | length > 0 or awx_quay_failback_restore_path | default('') | length > 0
+        fail_msg: "Set awx_quay_failback_image_tag for image failback or awx_quay_failback_restore_path for full restore."
+
+    - name: Restore Project Quay backup for server failback
+      ansible.builtin.include_role:
+        name: awx_quay_restore
+      vars:
+        awx_quay_restore_path: "{{ awx_quay_failback_restore_path }}"
+        awx_quay_restore_confirm: true
+        awx_quay_restore_start_after_restore: "{{ awx_quay_failback_image_tag | default('') | length == 0 }}"
+      when: awx_quay_failback_restore_path | default('') | length > 0
+
+    - name: Re-run Project Quay server role for image failback
+      ansible.builtin.include_role:
+        name: awx_quay_server
+      vars:
+        awx_quay_image_tag: "{{ awx_quay_failback_image_tag }}"
+      when: awx_quay_failback_image_tag | default('') | length > 0

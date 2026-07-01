@@ -1,0 +1,21 @@
+---
+- name: Upgrade Project Quay server deployment
+  hosts: awx_quay
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Backup Project Quay before server upgrade
+      ansible.builtin.include_role:
+        name: awx_quay_backup
+      when: not awx_quay_upgrade_skip_backup | default(false) | bool
+
+    - name: Pull target Project Quay server images
+      ansible.builtin.command:
+        cmd: "{{ awx_quay_compose_command | default('/usr/bin/docker compose') }} -p {{ awx_quay_compose_project | default('awx-quay') }} -f {{ awx_quay_compose_file | default('/opt/quay/docker-compose.yml') }} pull"
+      register: awx_quay_upgrade_pull
+      changed_when: "'Downloaded newer image' in awx_quay_upgrade_pull.stdout or 'Pull complete' in awx_quay_upgrade_pull.stdout"
+      when: not awx_quay_upgrade_skip_pull | default(false) | bool
+
+    - name: Re-run Project Quay server role for upgrade
+      ansible.builtin.include_role:
+        name: awx_quay_server

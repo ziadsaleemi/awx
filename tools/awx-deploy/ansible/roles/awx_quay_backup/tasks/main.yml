@@ -1,0 +1,84 @@
+---
+- name: Create Project Quay backup directory
+  ansible.builtin.file:
+    path: "{{ awx_quay_backup_path }}"
+    state: directory
+    owner: "{{ awx_quay_backup_owner }}"
+    group: "{{ awx_quay_backup_group }}"
+    mode: "0700"
+
+- name: Validate Project Quay config file before backup
+  ansible.builtin.stat:
+    path: "{{ awx_quay_config_file }}"
+  register: awx_quay_backup_config_stat
+
+- name: Validate Project Quay compose file before backup
+  ansible.builtin.stat:
+    path: "{{ awx_quay_compose_file }}"
+  register: awx_quay_backup_compose_stat
+
+- name: Fail when Project Quay server files are missing
+  ansible.builtin.assert:
+    that:
+      - awx_quay_backup_config_stat.stat.exists
+      - awx_quay_backup_compose_stat.stat.exists
+    fail_msg: "Project Quay server files were not found; run deploy-quay-server.yml before backup."
+
+- name: Dump Project Quay PostgreSQL database
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }}
+      exec -T postgres
+      pg_dump --clean --if-exists -U {{ awx_quay_postgres_user }} {{ awx_quay_postgres_database }}
+      > {{ awx_quay_backup_path }}/quay.sql
+    executable: /bin/bash
+  changed_when: true
+
+- name: Archive Project Quay server configuration
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      tar -C / -czf {{ awx_quay_backup_path }}/config-{{ inventory_hostname }}.tar.gz
+      {{ awx_quay_config_file | regex_replace('^/', '') }}
+      {{ awx_quay_compose_file | regex_replace('^/', '') }}
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Validate Project Quay registry storage directory before backup
+  ansible.builtin.stat:
+    path: "{{ awx_quay_data_dir }}/storage"
+  register: awx_quay_backup_storage_stat
+
+- name: Archive Project Quay registry storage
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      tar -C {{ awx_quay_data_dir }} -czf {{ awx_quay_backup_path }}/storage-{{ inventory_hostname }}.tar.gz storage
+    executable: /bin/bash
+  changed_when: true
+  when:
+    - awx_quay_backup_collect_storage | bool
+    - awx_quay_backup_storage_stat.stat.isdir | default(false)
+
+- name: Write Project Quay backup manifest
+  ansible.builtin.copy:
+    dest: "{{ awx_quay_backup_path }}/manifest-{{ inventory_hostname }}.yml"
+    owner: "{{ awx_quay_backup_owner }}"
+    group: "{{ awx_quay_backup_group }}"
+    mode: "0600"
+    content: |
+      backup_name: {{ awx_quay_backup_name }}
+      host: {{ inventory_hostname }}
+      deploy_method: quay-server
+      quay_image: {{ awx_quay_image }}
+      quay_image_tag: {{ awx_quay_image_tag }}
+      postgres_image: {{ awx_quay_postgres_image }}
+      redis_image: {{ awx_quay_redis_image }}
+      compose_project: {{ awx_quay_compose_project }}
+      created_at: {{ ansible_date_time.iso8601 | default('unknown') }}
+      includes:
+        database: true
+        config: true
+        registry_storage: {{ awx_quay_backup_collect_storage | bool and awx_quay_backup_storage_stat.stat.isdir | default(false) }}

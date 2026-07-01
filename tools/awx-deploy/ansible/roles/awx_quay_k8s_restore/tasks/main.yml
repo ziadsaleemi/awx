@@ -1,0 +1,177 @@
+---
+- name: Validate Project Quay Kubernetes restore confirmation
+  ansible.builtin.assert:
+    that:
+      - awx_quay_k8s_restore_confirm | bool
+      - awx_quay_k8s_restore_path | length > 0
+    fail_msg: "Project Quay Kubernetes restore is destructive. Set awx_quay_k8s_restore_confirm=true and awx_quay_k8s_restore_path."
+
+- name: Resolve kubectl command for Project Quay Kubernetes restore
+  ansible.builtin.set_fact:
+    awx_quay_k8s_restore_kubectl: >-
+      {{ awx_quay_k8s_kubectl_binary }}{% if awx_quay_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_quay_k8s_kubeconfig }}{% endif %}
+
+- name: Validate Project Quay Kubernetes database backup file
+  ansible.builtin.stat:
+    path: "{{ awx_quay_k8s_restore_path }}/quay.sql"
+  register: awx_quay_k8s_restore_sql_stat
+
+- name: Fail when Project Quay Kubernetes database backup is missing
+  ansible.builtin.assert:
+    that:
+      - awx_quay_k8s_restore_sql_stat.stat.exists
+    fail_msg: "Project Quay database backup not found at {{ awx_quay_k8s_restore_path }}/quay.sql."
+
+- name: Wait for Kubernetes API readiness before Project Quay restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} get --raw=/readyz"
+  register: awx_quay_k8s_restore_readyz
+  retries: 60
+  delay: 5
+  until: awx_quay_k8s_restore_readyz.rc == 0
+  changed_when: false
+
+- name: Scale Project Quay down before restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} scale deployment/{{ awx_quay_name }} --replicas=0"
+  register: awx_quay_k8s_restore_scale_down
+  changed_when: "'scaled' in awx_quay_k8s_restore_scale_down.stdout"
+  failed_when: false
+
+- name: Check backed up Project Quay Kubernetes secret file
+  ansible.builtin.stat:
+    path: "{{ awx_quay_k8s_restore_path }}/k8s-secrets.yml"
+  register: awx_quay_k8s_restore_secret_stat
+
+- name: Apply backed up Project Quay Kubernetes secrets
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} apply -f {{ awx_quay_k8s_restore_path }}/k8s-secrets.yml"
+  register: awx_quay_k8s_restore_apply_secrets
+  changed_when: "'created' in awx_quay_k8s_restore_apply_secrets.stdout or 'configured' in awx_quay_k8s_restore_apply_secrets.stdout"
+  when: awx_quay_k8s_restore_secret_stat.stat.exists
+  no_log: true
+
+- name: Restart Project Quay PostgreSQL after secret restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout restart deployment/{{ awx_quay_name }}-postgres"
+  changed_when: true
+  when: awx_quay_k8s_restore_secret_stat.stat.exists
+
+- name: Wait for Project Quay PostgreSQL deployment before restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }}-postgres --timeout=300s"
+  changed_when: false
+
+- name: Resolve Project Quay PostgreSQL pod for restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_quay_name }}-postgres -o jsonpath='{.items[0].metadata.name}'"
+  register: awx_quay_k8s_restore_postgres_pod
+  changed_when: false
+
+- name: Terminate Project Quay PostgreSQL connections before restore
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      exec {{ awx_quay_k8s_restore_postgres_pod.stdout }} -c {{ awx_quay_postgres_container }}
+      -- psql -v ON_ERROR_STOP=1 -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{{ awx_quay_postgres_database }}' AND pid <> pg_backend_pid();"
+  changed_when: true
+
+- name: Restore Project Quay PostgreSQL database into Kubernetes
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_quay_k8s_restore_path }}/quay.sql |
+      {{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      exec -i {{ awx_quay_k8s_restore_postgres_pod.stdout }} -c {{ awx_quay_postgres_container }}
+      -- psql -v ON_ERROR_STOP=1 -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+    executable: /bin/bash
+  changed_when: true
+
+- name: Check Project Quay Kubernetes registry storage backup archive
+  ansible.builtin.stat:
+    path: "{{ awx_quay_k8s_restore_path }}/storage.tar.gz"
+  register: awx_quay_k8s_restore_storage_archive
+
+- name: Remove stale Project Quay restore helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} delete pod {{ awx_quay_k8s_restore_helper_pod }} --ignore-not-found=true"
+  register: awx_quay_k8s_restore_delete_helper
+  changed_when: "'deleted' in awx_quay_k8s_restore_delete_helper.stdout"
+  when:
+    - awx_quay_k8s_restore_storage | bool
+    - awx_quay_k8s_restore_storage_archive.stat.size | default(0) > 128
+
+- name: Create Project Quay restore helper pod
+  ansible.builtin.shell:
+    cmd: |
+      cat <<'EOF' | {{ awx_quay_k8s_restore_kubectl }} apply -f -
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: {{ awx_quay_k8s_restore_helper_pod }}
+        namespace: {{ awx_quay_k8s_namespace }}
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: helper
+            image: {{ awx_quay_k8s_restore_helper_image }}
+            command: ["/bin/sh", "-c", "sleep 3600"]
+            volumeMounts:
+              - name: storage
+                mountPath: /datastorage
+        volumes:
+          - name: storage
+            persistentVolumeClaim:
+              claimName: {{ awx_quay_name }}-storage
+      EOF
+    executable: /bin/bash
+  register: awx_quay_k8s_restore_create_helper
+  changed_when: "'created' in awx_quay_k8s_restore_create_helper.stdout or 'configured' in awx_quay_k8s_restore_create_helper.stdout"
+  when:
+    - awx_quay_k8s_restore_storage | bool
+    - awx_quay_k8s_restore_storage_archive.stat.size | default(0) > 128
+
+- name: Wait for Project Quay restore helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} wait --for=condition=Ready pod/{{ awx_quay_k8s_restore_helper_pod }} --timeout=180s"
+  changed_when: false
+  when:
+    - awx_quay_k8s_restore_storage | bool
+    - awx_quay_k8s_restore_storage_archive.stat.size | default(0) > 128
+
+- name: Restore Project Quay Kubernetes registry storage
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_quay_k8s_restore_path }}/storage.tar.gz |
+      {{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      exec -i {{ awx_quay_k8s_restore_helper_pod }} -c helper
+      -- sh -c 'find /datastorage -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf - -C /datastorage'
+    executable: /bin/bash
+  changed_when: true
+  when:
+    - awx_quay_k8s_restore_storage | bool
+    - awx_quay_k8s_restore_storage_archive.stat.size | default(0) > 128
+
+- name: Remove Project Quay restore helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} delete pod {{ awx_quay_k8s_restore_helper_pod }} --ignore-not-found=true"
+  register: awx_quay_k8s_restore_cleanup_helper
+  changed_when: "'deleted' in awx_quay_k8s_restore_cleanup_helper.stdout"
+  when:
+    - awx_quay_k8s_restore_storage | bool
+    - awx_quay_k8s_restore_storage_archive.stat.size | default(0) > 128
+
+- name: Scale Project Quay up after restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} scale deployment/{{ awx_quay_name }} --replicas={{ awx_quay_replicas }}"
+  register: awx_quay_k8s_restore_scale_up
+  changed_when: "'scaled' in awx_quay_k8s_restore_scale_up.stdout"
+  when: awx_quay_k8s_restore_start_after_restore | bool
+
+- name: Wait for Project Quay deployment after restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_restore_kubectl }} -n {{ awx_quay_k8s_namespace }} rollout status deployment/{{ awx_quay_name }} --timeout=600s"
+  changed_when: false
+  when: awx_quay_k8s_restore_start_after_restore | bool

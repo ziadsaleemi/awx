@@ -1,0 +1,148 @@
+---
+- name: Resolve kubectl command for Project Quay Kubernetes backup
+  ansible.builtin.set_fact:
+    awx_quay_k8s_backup_kubectl: >-
+      {{ awx_quay_k8s_kubectl_binary }}{% if awx_quay_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_quay_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness before Project Quay backup
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_backup_kubectl }} get --raw=/readyz"
+  register: awx_quay_k8s_backup_readyz
+  retries: 60
+  delay: 5
+  until: awx_quay_k8s_backup_readyz.rc == 0
+  changed_when: false
+
+- name: Create Project Quay Kubernetes backup directory
+  ansible.builtin.file:
+    path: "{{ awx_quay_k8s_backup_path }}"
+    state: directory
+    owner: "{{ awx_quay_k8s_backup_owner }}"
+    group: "{{ awx_quay_k8s_backup_group }}"
+    mode: "0700"
+
+- name: Resolve Project Quay PostgreSQL pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_quay_name }}-postgres -o jsonpath='{.items[0].metadata.name}'"
+  register: awx_quay_k8s_backup_postgres_pod
+  changed_when: false
+
+- name: Validate Project Quay PostgreSQL pod
+  ansible.builtin.assert:
+    that:
+      - awx_quay_k8s_backup_postgres_pod.stdout | length > 0
+    fail_msg: "No {{ awx_quay_name }}-postgres pod found in namespace {{ awx_quay_k8s_namespace }}."
+
+- name: Dump Project Quay PostgreSQL database from Kubernetes
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      exec {{ awx_quay_k8s_backup_postgres_pod.stdout }} -c {{ awx_quay_postgres_container }}
+      -- pg_dump --clean --if-exists -U {{ awx_quay_postgres_user }} {{ awx_quay_postgres_database }}
+      > {{ awx_quay_k8s_backup_path }}/quay.sql
+    executable: /bin/bash
+  changed_when: true
+
+- name: Export Project Quay Kubernetes secrets
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      get secret {{ awx_quay_name }}-secret -o json |
+      python3 -c 'import json, sys; data=json.load(sys.stdin); keys=("resourceVersion", "uid", "selfLink", "creationTimestamp", "managedFields"); [data.setdefault("metadata", {}).pop(key, None) for key in keys]; data.get("metadata", {}).get("annotations", {}).pop("kubectl.kubernetes.io/last-applied-configuration", None); print(json.dumps(data, indent=2, sort_keys=True))'
+      > {{ awx_quay_k8s_backup_path }}/k8s-secrets.yml
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Export Project Quay Kubernetes resource inventory
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      get all,pvc,secret,configmap,ingress -o yaml
+      > {{ awx_quay_k8s_backup_path }}/k8s-resources.yml
+    executable: /bin/bash
+  changed_when: true
+  failed_when: false
+
+- name: Remove stale Project Quay backup helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }} delete pod {{ awx_quay_k8s_backup_helper_pod }} --ignore-not-found=true"
+  register: awx_quay_k8s_backup_delete_helper
+  changed_when: "'deleted' in awx_quay_k8s_backup_delete_helper.stdout"
+  when: awx_quay_k8s_backup_collect_storage | bool
+
+- name: Create Project Quay backup helper pod
+  ansible.builtin.shell:
+    cmd: |
+      cat <<'EOF' | {{ awx_quay_k8s_backup_kubectl }} apply -f -
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: {{ awx_quay_k8s_backup_helper_pod }}
+        namespace: {{ awx_quay_k8s_namespace }}
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: helper
+            image: {{ awx_quay_k8s_backup_helper_image }}
+            command: ["/bin/sh", "-c", "sleep 3600"]
+            volumeMounts:
+              - name: storage
+                mountPath: /datastorage
+        volumes:
+          - name: storage
+            persistentVolumeClaim:
+              claimName: {{ awx_quay_name }}-storage
+      EOF
+    executable: /bin/bash
+  register: awx_quay_k8s_backup_create_helper
+  changed_when: "'created' in awx_quay_k8s_backup_create_helper.stdout or 'configured' in awx_quay_k8s_backup_create_helper.stdout"
+  when: awx_quay_k8s_backup_collect_storage | bool
+
+- name: Wait for Project Quay backup helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }} wait --for=condition=Ready pod/{{ awx_quay_k8s_backup_helper_pod }} --timeout=180s"
+  changed_when: false
+  when: awx_quay_k8s_backup_collect_storage | bool
+
+- name: Archive Project Quay Kubernetes registry storage
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }}
+      exec {{ awx_quay_k8s_backup_helper_pod }} -c helper
+      -- tar -czf - -C /datastorage .
+      > {{ awx_quay_k8s_backup_path }}/storage.tar.gz
+    executable: /bin/bash
+  changed_when: true
+  when: awx_quay_k8s_backup_collect_storage | bool
+
+- name: Remove Project Quay backup helper pod
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_k8s_backup_kubectl }} -n {{ awx_quay_k8s_namespace }} delete pod {{ awx_quay_k8s_backup_helper_pod }} --ignore-not-found=true"
+  register: awx_quay_k8s_backup_cleanup_helper
+  changed_when: "'deleted' in awx_quay_k8s_backup_cleanup_helper.stdout"
+  when: awx_quay_k8s_backup_collect_storage | bool
+
+- name: Write Project Quay Kubernetes backup manifest
+  ansible.builtin.copy:
+    dest: "{{ awx_quay_k8s_backup_path }}/manifest-{{ inventory_hostname }}.yml"
+    owner: "{{ awx_quay_k8s_backup_owner }}"
+    group: "{{ awx_quay_k8s_backup_group }}"
+    mode: "0600"
+    content: |
+      backup_name: {{ awx_quay_k8s_backup_name }}
+      host: {{ inventory_hostname }}
+      deploy_method: quay-k8s
+      namespace: {{ awx_quay_k8s_namespace }}
+      quay_name: {{ awx_quay_name }}
+      quay_image: {{ awx_quay_image }}
+      quay_image_tag: {{ awx_quay_image_tag }}
+      created_at: {{ ansible_date_time.iso8601 | default('unknown') }}
+      includes:
+        database: true
+        secrets: true
+        resources: true
+        registry_storage: {{ awx_quay_k8s_backup_collect_storage | bool }}

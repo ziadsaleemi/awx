@@ -1,0 +1,14 @@
+---
+- name: Upgrade Project Quay Kubernetes deployment
+  hosts: awx_k3s_servers:awx_existing_k8s:localhost
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Backup Project Quay before Kubernetes upgrade
+      ansible.builtin.include_role:
+        name: awx_quay_k8s_backup
+      when: not awx_quay_upgrade_skip_backup | default(false) | bool
+
+    - name: Re-run Project Quay Kubernetes role for upgrade
+      ansible.builtin.include_role:
+        name: awx_quay_k8s

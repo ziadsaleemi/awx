@@ -1,0 +1,127 @@
+---
+- name: Validate Project Quay restore confirmation
+  ansible.builtin.assert:
+    that:
+      - awx_quay_restore_confirm | bool
+      - awx_quay_restore_path | length > 0
+    fail_msg: "Project Quay restore is destructive. Set awx_quay_restore_confirm=true and awx_quay_restore_path."
+
+- name: Validate Project Quay database backup file
+  ansible.builtin.stat:
+    path: "{{ awx_quay_restore_path }}/quay.sql"
+  register: awx_quay_restore_sql_stat
+
+- name: Validate Project Quay config backup file
+  ansible.builtin.stat:
+    path: "{{ awx_quay_restore_path }}/config-{{ inventory_hostname }}.tar.gz"
+  register: awx_quay_restore_config_stat
+
+- name: Validate Project Quay storage backup file
+  ansible.builtin.stat:
+    path: "{{ awx_quay_restore_path }}/storage-{{ inventory_hostname }}.tar.gz"
+  register: awx_quay_restore_storage_stat
+
+- name: Fail when required Project Quay backup files are missing
+  ansible.builtin.assert:
+    that:
+      - awx_quay_restore_sql_stat.stat.exists
+      - awx_quay_restore_config_stat.stat.exists
+    fail_msg: "Project Quay backup must include quay.sql and config-{{ inventory_hostname }}.tar.gz."
+
+- name: Stop Project Quay before restore
+  ansible.builtin.systemd:
+    name: awx-quay
+    state: stopped
+  failed_when: false
+
+- name: Restore Project Quay server configuration
+  ansible.builtin.unarchive:
+    src: "{{ awx_quay_restore_path }}/config-{{ inventory_hostname }}.tar.gz"
+    dest: /
+    remote_src: true
+  no_log: true
+
+- name: Reload systemd after Project Quay config restore
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Recreate Project Quay registry storage directory
+  ansible.builtin.file:
+    path: "{{ awx_quay_data_dir }}/storage"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - awx_quay_restore_storage | bool
+    - awx_quay_restore_storage_stat.stat.size | default(0) > 128
+
+- name: Restore Project Quay registry storage
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      test -n {{ awx_quay_data_dir | quote }} &&
+      test {{ awx_quay_data_dir | quote }} != / &&
+      find {{ awx_quay_data_dir }}/storage -mindepth 1 -maxdepth 1 -exec rm -rf {} + &&
+      tar -C {{ awx_quay_data_dir }} -xzf {{ awx_quay_restore_path }}/storage-{{ inventory_hostname }}.tar.gz
+    executable: /bin/bash
+  changed_when: true
+  when:
+    - awx_quay_restore_storage | bool
+    - awx_quay_restore_storage_stat.stat.size | default(0) > 128
+
+- name: Start Project Quay PostgreSQL and Redis for restore
+  ansible.builtin.command:
+    cmd: "{{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }} up -d postgres redis"
+  changed_when: true
+
+- name: Wait for Project Quay PostgreSQL before restore
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }}
+      exec -T postgres pg_isready -U {{ awx_quay_postgres_user }}
+  register: awx_quay_restore_pg_ready
+  retries: 60
+  delay: 5
+  until: awx_quay_restore_pg_ready.rc == 0
+  changed_when: false
+
+- name: Terminate Project Quay PostgreSQL connections before restore
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }}
+      exec -T postgres psql -v ON_ERROR_STOP=1 -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+      -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{{ awx_quay_postgres_database }}' AND pid <> pg_backend_pid();"
+  changed_when: true
+
+- name: Restore Project Quay PostgreSQL database
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      cat {{ awx_quay_restore_path }}/quay.sql |
+      {{ awx_quay_compose_command }} -p {{ awx_quay_compose_project }} -f {{ awx_quay_compose_file }}
+      exec -T postgres psql -v ON_ERROR_STOP=1 -U {{ awx_quay_postgres_user }} -d {{ awx_quay_postgres_database }}
+    executable: /bin/bash
+  changed_when: true
+
+- name: Start Project Quay after restore
+  ansible.builtin.systemd:
+    name: awx-quay
+    state: started
+    enabled: true
+  when: awx_quay_restore_start_after_restore | bool
+
+- name: Wait for Project Quay health after restore
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_quay_public_port }}{{ awx_quay_health_path }}"
+    method: GET
+    status_code:
+      - 200
+      - 204
+  register: awx_quay_restore_health
+  until: awx_quay_restore_health.status in [200, 204]
+  retries: 90
+  delay: 10
+  when:
+    - awx_quay_restore_start_after_restore | bool
+    - awx_quay_wait_for_health | bool
