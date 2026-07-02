@@ -13,11 +13,11 @@ awx:x:`id -u`:awx
 EOF
 
 cat <<EOF > /etc/subuid
-awx:100000:50001
+awx:100000:65536
 EOF
 
 cat <<EOF > /etc/subgid
-awx:100000:50001
+awx:100000:65536
 EOF
 
 fi

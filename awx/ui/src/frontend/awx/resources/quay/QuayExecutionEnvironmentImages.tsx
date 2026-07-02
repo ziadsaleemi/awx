@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActionGroup,
@@ -9,8 +9,13 @@ import {
   FormGroup,
   FormSelect,
   FormSelectOption,
+  Label,
   PageSection,
+  Progress,
+  ProgressSize,
   Spinner,
+  Stack,
+  StackItem,
   Tab,
   Tabs,
   TabTitleText,
@@ -41,7 +46,7 @@ import {
   ToolbarFilterType,
   usePageAlertToaster,
 } from '../../../../framework';
-import { postRequest, requestDelete, requestPatch } from '../../../common/crud/Data';
+import { postRequest, requestDelete, requestGet, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
@@ -69,6 +74,7 @@ interface QuayImageBuild {
   id: number;
   url: string;
   created: string;
+  modified?: string;
   project: {
     id: number;
     name: string;
@@ -92,6 +98,12 @@ interface QuayImageBuild {
   started?: string;
   finished?: string;
   error?: string;
+  log?: string;
+  command_summary?: {
+    label?: string;
+    command?: string;
+    working_directory?: string;
+  }[];
 }
 
 interface QuayBuildTemplate {
@@ -162,6 +174,14 @@ function statusText(status?: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function buildStatusColor(status?: string): 'blue' | 'green' | 'orange' | 'red' | 'grey' {
+  if (status === 'successful') return 'green';
+  if (status === 'failed') return 'red';
+  if (status === 'canceled') return 'grey';
+  if (status === 'pending') return 'orange';
+  return 'blue';
+}
+
 export function QuayExecutionEnvironmentImages() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
@@ -194,6 +214,8 @@ export function QuayExecutionEnvironmentImages() {
   const [isSaving, setIsSaving] = useState(false);
   const [launchingTemplateId, setLaunchingTemplateId] = useState<number>();
   const [deletingTemplateId, setDeletingTemplateId] = useState<number>();
+  const [selectedBuildId, setSelectedBuildId] = useState<number>();
+  const [selectedBuildSnapshot, setSelectedBuildSnapshot] = useState<QuayImageBuild>();
 
   const configured = Boolean(status.data?.configured && status.data.registry);
   const projectOptions = projects.data?.results ?? [];
@@ -212,6 +234,17 @@ export function QuayExecutionEnvironmentImages() {
       selectedTemplateSnapshot,
     [selectedTemplateId, selectedTemplateSnapshot, templateItems]
   );
+  const selectedTemplateBuilds = useMemo(() => {
+    if (!selectedTemplate) return [];
+    const items = buildItems.filter((build) => build.template?.id === selectedTemplate.id);
+    if (
+      selectedBuildSnapshot?.template?.id === selectedTemplate.id &&
+      !items.some((build) => build.id === selectedBuildSnapshot.id)
+    ) {
+      return [selectedBuildSnapshot, ...items];
+    }
+    return items;
+  }, [buildItems, selectedBuildSnapshot, selectedTemplate]);
   const editingTemplate = useMemo(
     () =>
       templateItems.find((template) => template.id === editingTemplateId) ??
@@ -279,6 +312,10 @@ export function QuayExecutionEnvironmentImages() {
     setSelectedTemplateId(template.id);
     setSelectedTemplateSnapshot(template);
     setActiveTab(tab);
+    if (tab === 'builds' && template.latest_build?.id) {
+      setSelectedBuildId(template.latest_build.id);
+      setSelectedBuildSnapshot(template.latest_build);
+    }
     setMode('details');
   };
 
@@ -349,9 +386,14 @@ export function QuayExecutionEnvironmentImages() {
   const launchTemplate = async (template: QuayBuildTemplate) => {
     setLaunchingTemplateId(template.id);
     try {
-      await postRequest<QuayImageBuild, Record<string, never>>(template.launch_url, {});
+      const build = await postRequest<QuayImageBuild, Record<string, never>>(
+        template.launch_url,
+        {}
+      );
+      setSelectedBuildId(build.id);
+      setSelectedBuildSnapshot(build);
       await Promise.all([view.refresh(), builds.refresh()]);
-      showDetails(template, 'builds');
+      showDetails({ ...template, latest_build: build }, 'builds');
       alertToaster.addAlert({
         variant: 'success',
         title: t('EE image build queued.'),
@@ -556,9 +598,14 @@ export function QuayExecutionEnvironmentImages() {
       ) : selectedTemplate ? (
         <DetailsView
           template={selectedTemplate}
-          builds={buildItems.filter((build) => build.template?.id === selectedTemplate.id)}
+          builds={selectedTemplateBuilds}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          selectedBuildId={selectedBuildId}
+          setSelectedBuildId={setSelectedBuildId}
+          selectedBuildSnapshot={selectedBuildSnapshot}
+          setSelectedBuildSnapshot={setSelectedBuildSnapshot}
+          onRefreshBuilds={() => void builds.refresh()}
           tags={tags}
           canLoadTags={canLoadTags}
           canManageTags={canManageTags}
@@ -899,6 +946,11 @@ function DetailsView(props: {
   builds: QuayImageBuild[];
   activeTab: DetailsTabKey;
   setActiveTab: (tab: DetailsTabKey) => void;
+  selectedBuildId?: number;
+  setSelectedBuildId: (id?: number) => void;
+  selectedBuildSnapshot?: QuayImageBuild;
+  setSelectedBuildSnapshot: (build?: QuayImageBuild) => void;
+  onRefreshBuilds: () => void;
   tags: ReturnType<typeof useGet<AwxItemsResponse<QuayImageTag>>>;
   canLoadTags: boolean;
   canManageTags: boolean;
@@ -961,7 +1013,14 @@ function DetailsView(props: {
             </PageDetail>
           </PageDetails>
         ) : props.activeTab === 'builds' ? (
-          <BuildsTable builds={props.builds} />
+          <BuildsOutput
+            builds={props.builds}
+            selectedBuildId={props.selectedBuildId}
+            setSelectedBuildId={props.setSelectedBuildId}
+            selectedBuildSnapshot={props.selectedBuildSnapshot}
+            setSelectedBuildSnapshot={props.setSelectedBuildSnapshot}
+            onRefreshBuilds={props.onRefreshBuilds}
+          />
         ) : (
           <TagsTable
             tags={props.tags}
@@ -975,38 +1034,184 @@ function DetailsView(props: {
   );
 }
 
-function BuildsTable(props: { builds: QuayImageBuild[] }) {
+function BuildsOutput(props: {
+  builds: QuayImageBuild[];
+  selectedBuildId?: number;
+  setSelectedBuildId: (id?: number) => void;
+  selectedBuildSnapshot?: QuayImageBuild;
+  setSelectedBuildSnapshot: (build?: QuayImageBuild) => void;
+  onRefreshBuilds: () => void;
+}) {
   const { t } = useTranslation();
-  if (!props.builds.length) {
+  const {
+    builds,
+    selectedBuildId,
+    selectedBuildSnapshot,
+    setSelectedBuildId,
+    setSelectedBuildSnapshot,
+    onRefreshBuilds,
+  } = props;
+  const [isLoadingBuildDetail, setIsLoadingBuildDetail] = useState(false);
+  const selectedBuildUrl = selectedBuildId
+    ? `${awxAPI`/quay/execution-environment-images/builds/`}${selectedBuildId}/`
+    : undefined;
+  const selectedBuild =
+    selectedBuildSnapshot?.id === selectedBuildId ? selectedBuildSnapshot : undefined;
+  const visibleBuild =
+    selectedBuild || builds.find((build) => build.id === selectedBuildId) || builds[0];
+
+  useEffect(() => {
+    if (!selectedBuildId && builds.length) {
+      setSelectedBuildId(builds[0].id);
+      setSelectedBuildSnapshot(builds[0]);
+    }
+  }, [builds, selectedBuildId, setSelectedBuildId, setSelectedBuildSnapshot]);
+
+  const loadSelectedBuild = useCallback(
+    async (showLoading = false) => {
+      if (!selectedBuildUrl) {
+        setSelectedBuildSnapshot(undefined);
+        return;
+      }
+      if (showLoading) setIsLoadingBuildDetail(true);
+      try {
+        const build = await requestGet<QuayImageBuild>(selectedBuildUrl);
+        setSelectedBuildSnapshot(build);
+      } catch {
+        // Keep the last known build state while polling.
+      } finally {
+        if (showLoading) setIsLoadingBuildDetail(false);
+      }
+    },
+    [selectedBuildUrl, setSelectedBuildSnapshot]
+  );
+
+  useEffect(() => {
+    if (!selectedBuildUrl) return;
+    void loadSelectedBuild(true);
+    const interval = window.setInterval(() => void loadSelectedBuild(false), 3000);
+    return () => window.clearInterval(interval);
+  }, [loadSelectedBuild, selectedBuildUrl]);
+
+  if (!builds.length) {
     return <Alert isInline variant="info" title={t('No builds have run for this template.')} />;
   }
+
   return (
-    <Table aria-label={t('EE image build runs')} variant="compact">
-      <Thead>
-        <Tr>
-          <Th>{t('Run')}</Th>
-          <Th>{t('Image')}</Th>
-          <Th>{t('Status')}</Th>
-          <Th>{t('Started')}</Th>
-          <Th>{t('Finished')}</Th>
-        </Tr>
-      </Thead>
-      <Tbody>
-        {props.builds.map((build) => (
-          <Tr key={build.id}>
-            <Td>#{build.id}</Td>
-            <Td>
+    <Stack hasGutter>
+      {visibleBuild ? (
+        <StackItem>
+          <PageDetails numberOfColumns="multiple">
+            <PageDetail label={t('Selected build')}>#{visibleBuild.id}</PageDetail>
+            <PageDetail label={t('Status')}>
+              <Label color={buildStatusColor(visibleBuild.status)}>
+                {statusText(visibleBuild.status)}
+              </Label>
+            </PageDetail>
+            <PageDetail label={t('Image')} fullWidth>
               <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                {build.image}
+                {visibleBuild.image}
               </ClipboardCopy>
-            </Td>
-            <Td>{`${statusText(build.status)} (${build.progress}%)`}</Td>
-            <Td>{formatDate(build.started || build.created)}</Td>
-            <Td>{formatDate(build.finished)}</Td>
-          </Tr>
-        ))}
-      </Tbody>
-    </Table>
+            </PageDetail>
+            <PageDetail label={t('Project')}>{visibleBuild.project?.name || '-'}</PageDetail>
+            <PageDetail label={t('Runtime')}>{visibleBuild.runtime}</PageDetail>
+            <PageDetail label={t('Started')}>{formatDate(visibleBuild.started)}</PageDetail>
+            <PageDetail label={t('Finished')}>{formatDate(visibleBuild.finished)}</PageDetail>
+          </PageDetails>
+          <Progress
+            value={visibleBuild.progress || 0}
+            size={ProgressSize.sm}
+            title={t('Build progress')}
+            style={{ marginTop: 16 }}
+          />
+          {visibleBuild.error ? (
+            <Alert
+              isInline
+              variant="danger"
+              title={t('Selected build failed')}
+              style={{ marginTop: 16 }}
+            >
+              {visibleBuild.error}
+            </Alert>
+          ) : null}
+        </StackItem>
+      ) : null}
+      <StackItem>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('Build output')}</div>
+        <pre
+          aria-label={t('Selected build output')}
+          style={{
+            backgroundColor: '#030608',
+            border: '1px solid var(--pf-v5-global--BorderColor--100)',
+            color: 'var(--pf-v5-global--Color--light-100, #f0f0f0)',
+            fontFamily: 'var(--pf-v5-global--FontFamily--monospace, monospace)',
+            fontSize: 13,
+            lineHeight: 1.45,
+            margin: 0,
+            maxHeight: 520,
+            minHeight: 280,
+            overflow: 'auto',
+            padding: 16,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {isLoadingBuildDetail
+            ? t('Loading build output...')
+            : visibleBuild?.log || t('Waiting for build output...')}
+        </pre>
+      </StackItem>
+      <StackItem>
+        <Button
+          variant="secondary"
+          icon={<SyncAltIcon />}
+          onClick={() => {
+            onRefreshBuilds();
+            void loadSelectedBuild(true);
+          }}
+        >
+          {t('Refresh builds')}
+        </Button>
+      </StackItem>
+      <StackItem>
+        <Table aria-label={t('EE image build runs')} variant="compact">
+          <Thead>
+            <Tr>
+              <Th>{t('Run')}</Th>
+              <Th>{t('Status')}</Th>
+              <Th>{t('Image')}</Th>
+              <Th>{t('Started')}</Th>
+              <Th>{t('Finished')}</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {builds.map((build) => (
+              <Tr key={build.id}>
+                <Td dataLabel={t('Run')}>
+                  <Button
+                    variant="link"
+                    isInline
+                    onClick={() => {
+                      setSelectedBuildId(build.id);
+                      setSelectedBuildSnapshot(build);
+                    }}
+                  >
+                    #{build.id}
+                  </Button>
+                </Td>
+                <Td dataLabel={t('Status')}>
+                  <Label color={buildStatusColor(build.status)}>{statusText(build.status)}</Label>
+                </Td>
+                <Td dataLabel={t('Image')}>
+                  <span style={{ overflowWrap: 'anywhere' }}>{build.image}</span>
+                </Td>
+                <Td dataLabel={t('Started')}>{formatDate(build.started || build.created)}</Td>
+                <Td dataLabel={t('Finished')}>{formatDate(build.finished)}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </StackItem>
+    </Stack>
   );
 }
 

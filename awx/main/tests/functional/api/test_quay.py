@@ -528,7 +528,7 @@ def test_quay_execution_environment_image_build_plan_handles_awx_project_source(
     assert response.data['image']['repository_path'] == 'awx/custom-ee'
     assert response.data['image']['awx'] == 'quay.example.test/awx/custom-ee:v1'
     assert response.data['commands'][0]['command'] == (
-        f'cd {project_root} && ansible-builder build --container-runtime podman -f ee/execution-environment.yml -t quay.example.test/awx/custom-ee:v1 ee'
+        f'cd {project_root} && ansible-builder build --container-runtime podman -f ee/execution-environment.yml -t quay.example.test/awx/custom-ee:v1 -c ee'
     )
     assert response.data['commands'][1]['command'] == ('echo "$QUAY_TOKEN" | podman login quay.example.test --username awx+robot --password-stdin')
     assert response.data['commands'][2]['command'] == 'podman push quay.example.test/awx/custom-ee:v1'

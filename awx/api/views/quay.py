@@ -312,6 +312,7 @@ def _quay_image_build_plan_from_data(request, data):
                             shlex.quote(definition_file),
                             '-t',
                             shlex.quote(full_image),
+                            '-c',
                             shlex.quote(context_path),
                         ]
                     ),

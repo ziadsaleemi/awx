@@ -91,6 +91,8 @@ const template = {
     progress: 100,
     started: '2026-07-01T10:01:00Z',
     finished: '2026-07-01T10:04:00Z',
+    error: '',
+    log: 'Starting Project Quay image build quay.example.test/awx/platform-ee:latest\n$ ansible-builder build --container-runtime podman\nBuild completed successfully.\n',
   },
 };
 
@@ -136,9 +138,29 @@ describe('QuayExecutionEnvironmentImages', () => {
       resource: 'image_build_templates',
       results: [template],
     }).as('templates');
-    cy.intercept('GET', `${awxAPI`/quay/execution-environment-images/builds/`}*`, builds).as(
-      'builds'
-    );
+    cy.intercept(
+      {
+        method: 'GET',
+        pathname: awxAPI`/quay/execution-environment-images/builds/`,
+      },
+      builds
+    ).as('builds');
+    cy.intercept('GET', `${awxAPI`/quay/execution-environment-images/builds/`}41/`, {
+      statusCode: 200,
+      body: {
+        ...template.latest_build,
+      },
+    }).as('build41');
+    cy.intercept('GET', `${awxAPI`/quay/execution-environment-images/builds/`}42/`, {
+      statusCode: 200,
+      body: {
+        ...template.latest_build,
+        id: 42,
+        status: 'running',
+        progress: 55,
+        log: 'Starting Project Quay image build quay.example.test/awx/platform-ee:latest\n$ ansible-builder build --container-runtime podman -f ee/execution-environment.yml\n',
+      },
+    }).as('build42');
     cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
     cy.intercept('POST', awxAPI`/quay/execution-environment-images/templates/`, {
       statusCode: 201,
@@ -166,6 +188,7 @@ describe('QuayExecutionEnvironmentImages', () => {
         id: 42,
         status: 'pending',
         progress: 0,
+        log: '',
       },
     }).as('launchTemplate');
     cy.intercept('DELETE', template.url, { statusCode: 204, body: '' }).as('deleteTemplate');
@@ -204,6 +227,11 @@ describe('QuayExecutionEnvironmentImages', () => {
 
     cy.contains('button', 'Launch template').click();
     cy.wait('@launchTemplate');
+    cy.wait('@build42');
+    cy.contains('Selected build').should('be.visible');
+    cy.contains('#42').should('be.visible');
+    cy.contains('Build output').should('be.visible');
+    cy.contains('$ ansible-builder build --container-runtime podman').should('be.visible');
 
     cy.contains('Tags').click();
     cy.contains('button', 'Delete tag').click();

@@ -108,6 +108,7 @@ def run_quay_image_build(build_id):
             build.definition_file,
             '-t',
             build.image,
+            '-c',
             build.context_path,
         ]
         if _run_command(build, build_args, cwd=build.project_path) != 0:

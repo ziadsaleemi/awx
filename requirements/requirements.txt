@@ -18,6 +18,8 @@ aiosignal==1.4.0
     # via aiohttp
 ansi2html==1.9.2
     # via -r /awx_devel/requirements/requirements.in
+ansible-builder==3.1.1
+    # via -r /awx_devel/requirements/requirements.in
 # ansible-runner @ git+https://github.com/ansible/ansible-runner.git@devel  # git requirements installed separately
     # via -r /awx_devel/requirements/requirements_git.txt
 asgiref==3.11.0
@@ -66,6 +68,8 @@ azure-keyvault-keys==4.11.0
     # via azure-keyvault
 azure-keyvault-secrets==4.10.0
     # via azure-keyvault
+bindep==2.14.0
+    # via ansible-builder
 boto3==1.40.46
     # via -r /awx_devel/requirements/requirements.in
 botocore==1.40.46
@@ -124,7 +128,9 @@ defusedxml==0.7.1
 dispatcherd[pg-notify]==2026.3.25
     # via -r /awx_devel/requirements/requirements.in
 distro==1.9.0
-    # via -r /awx_devel/requirements/requirements.in
+    # via
+    #   -r /awx_devel/requirements/requirements.in
+    #   bindep
 django==5.2.8
     # via
     #   -r /awx_devel/requirements/requirements.in
@@ -346,11 +352,16 @@ opentelemetry-semantic-conventions==0.58b0
     #   opentelemetry-sdk
 packaging==25.0
     # via
+    #   ansible-builder
     #   ansible-runner
     #   django-guid
     #   opentelemetry-instrumentation
     #   setuptools-scm
     #   wheel
+parsley==1.3
+    # via bindep
+pbr==7.0.3
+    # via bindep
 pexpect==4.9.0
     # via
     #   -r /awx_devel/requirements/requirements.in
