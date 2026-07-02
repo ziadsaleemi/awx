@@ -24,6 +24,7 @@ export function useRelaunchOptions(): IPageAction<UnifiedJob>[] {
         label: t(`Relaunch job`),
         isHidden: (job: UnifiedJob) =>
           !(job.type !== 'system_job' && job.summary_fields?.user_capabilities?.start) ||
+          job.type === 'quay_image_build_job' ||
           (job.status === 'failed' && job.type === 'job'),
         onClick: (job: UnifiedJob) => void relaunchJob(job),
       },
@@ -35,6 +36,7 @@ export function useRelaunchOptions(): IPageAction<UnifiedJob>[] {
         label: t(`Relaunch using host parameters`),
         isHidden: (job: UnifiedJob) =>
           !(job.type !== 'system_job' && job.summary_fields?.user_capabilities?.start) ||
+          job.type === 'quay_image_build_job' ||
           !(job.status === 'failed' && job.type === 'job'),
         actions: [
           {

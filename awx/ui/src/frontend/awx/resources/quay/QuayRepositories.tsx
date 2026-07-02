@@ -549,7 +549,7 @@ function QuayRepositoryBuildsTab(props: {
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
-  const projectOptions = projects.data?.results ?? [];
+  const projectOptions = useMemo(() => projects.data?.results ?? [], [projects.data?.results]);
   const builds = useGet<AwxItemsResponse<QuayImageBuild>>(
     awxAPI`/quay/execution-environment-images/builds/`,
     {
@@ -559,7 +559,7 @@ function QuayRepositoryBuildsTab(props: {
     },
     { revalidateOnFocus: false, refreshInterval: 3000 }
   );
-  const buildItems = builds.data?.results ?? [];
+  const buildItems = useMemo(() => builds.data?.results ?? [], [builds.data?.results]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [tag, setTag] = useState('latest');
   const [runtime, setRuntime] = useState<QuayContainerRuntime>('podman');
@@ -643,7 +643,7 @@ function QuayRepositoryBuildsTab(props: {
       );
       setSelectedBuildId(build.id);
       setSelectedBuildDetail(build);
-      await builds.refresh();
+      builds.refresh();
       alertToaster.addAlert({
         variant: 'success',
         title: t('Project Quay image build queued.'),
@@ -898,8 +898,7 @@ function QuayRepositoryConsole(props: {
   const alertToaster = usePageAlertToaster();
   const [activeTab, setActiveTab] = useState<QuayRepositoryTabKey>('details');
   const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
-  const eeImagesUrl =
-    getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) || '/quay/execution-environment-images';
+  const eeImagesUrl = getPageUrl(AwxRoute.Templates) || '/templates';
   const apiTokenUrl = getPageUrl(AwxRoute.QuayApiToken) || '/quay/api-token';
   const repository = props.repository;
   const namespace = repository?.namespace || props.defaultNamespace;

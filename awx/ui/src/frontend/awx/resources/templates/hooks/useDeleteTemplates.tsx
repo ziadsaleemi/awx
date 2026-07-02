@@ -6,29 +6,28 @@ import { getItemKey, requestDelete } from '../../../../common/crud/Data';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxBulkConfirmation } from '../../../common/useAwxBulkConfirmation';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { QuayImageBuildTemplate } from '../../../interfaces/QuayImageBuildTemplate';
 import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import { useTemplateColumns } from './useTemplateColumns';
 
-export function useDeleteTemplates(
-  onComplete: (templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]) => void
-) {
+type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate;
+
+export function useDeleteTemplates(onComplete: (templates: Template[]) => void) {
   const { t } = useTranslation();
   const confirmationColumns = useTemplateColumns({ disableLinks: true, disableSort: true });
   const deleteActionNameColumn = useNameColumn({ disableLinks: true, disableSort: true });
   const actionColumns = useMemo(() => [deleteActionNameColumn], [deleteActionNameColumn]);
-  const bulkAction = useAwxBulkConfirmation<
-    JobTemplate | WorkflowJobTemplate | TerraformJobTemplate
-  >();
+  const bulkAction = useAwxBulkConfirmation<Template>();
   const getSingularDeleteTitle = (type: string) =>
     type === 'job_template'
       ? t('Permanently delete job template')
       : type === 'terraform_job_template'
         ? t('Permanently delete terraform template')
-        : t('Permanently delete workflow job template');
-  const deleteTemplates = (
-    templates: (JobTemplate | WorkflowJobTemplate | TerraformJobTemplate)[]
-  ) => {
+        : type === 'quay_image_build_template'
+          ? t('Permanently delete EE build template')
+          : t('Permanently delete workflow job template');
+  const deleteTemplates = (templates: Template[]) => {
     bulkAction({
       title:
         templates.length === 1
@@ -46,11 +45,16 @@ export function useDeleteTemplates(
       confirmationColumns,
       actionColumns,
       onComplete,
-      actionFn: (template: JobTemplate | WorkflowJobTemplate | TerraformJobTemplate, signal) => {
+      actionFn: (template: Template, signal) => {
         if (template.type === 'job_template') {
           return requestDelete(awxAPI`/job_templates/${template.id.toString()}/`, signal);
         } else if (template.type === 'terraform_job_template') {
           return requestDelete(awxAPI`/terraform_job_templates/${template.id.toString()}/`, signal);
+        } else if (template.type === 'quay_image_build_template') {
+          return requestDelete(
+            awxAPI`/quay/execution-environment-images/templates/${template.id.toString()}/`,
+            signal
+          );
         } else {
           return requestDelete(awxAPI`/workflow_job_templates/${template.id.toString()}/`, signal);
         }

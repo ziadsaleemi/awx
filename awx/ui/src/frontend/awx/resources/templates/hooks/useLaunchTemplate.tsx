@@ -5,6 +5,7 @@ import { requestGet } from '../../../../common/crud/Data';
 import { usePostRequest } from '../../../../common/crud/usePostRequest';
 import { awxAPI } from '../../../common/api/awx-utils';
 import type { JobTemplate } from '../../../interfaces/JobTemplate';
+import type { QuayImageBuildTemplate } from '../../../interfaces/QuayImageBuildTemplate';
 import type { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import type { UnifiedJob } from '../../../interfaces/UnifiedJob';
 import type { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
@@ -12,13 +13,21 @@ import type { JobLaunch, WorkflowJobLaunch } from '../../../interfaces/generated
 import { AwxRoute } from '../../../main/AwxRoutes';
 import { useGetJobOutputUrl } from '../../../views/jobs/useGetJobOutputUrl';
 
-type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate;
+type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate;
 type TemplateLaunch = JobLaunch & WorkflowJobLaunch;
+type QuayBuildLaunch = {
+  id: number;
+  unified_job?: {
+    id: number;
+    url: string;
+    status: string;
+  } | null;
+};
 
 export function useLaunchTemplate() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const postRequest = usePostRequest<Partial<JobTemplate | WorkflowJobTemplate>, UnifiedJob>();
+  const postRequest = usePostRequest<object, UnifiedJob | QuayBuildLaunch>();
   const alertToaster = usePageAlertToaster();
   const pageNavigate = usePageNavigate();
   const getJobOutputUrl = useGetJobOutputUrl();
@@ -31,11 +40,26 @@ export function useLaunchTemplate() {
     }
 
     try {
+      if (template.type === 'quay_image_build_template') {
+        const launchJob = await postRequest(launchEndpoint, {});
+        const jobId =
+          'unified_job' in launchJob && launchJob.unified_job
+            ? launchJob.unified_job.id
+            : launchJob.id;
+        navigate(
+          getJobOutputUrl({
+            id: jobId,
+            type: 'quay_image_build_job',
+          } as UnifiedJob)
+        );
+        return;
+      }
+
       const launchConfig = await requestGet<TemplateLaunch>(launchEndpoint);
 
       if (canLaunchWithoutPrompt(launchConfig)) {
         const launchJob = await postRequest(launchEndpoint, {});
-        navigate(getJobOutputUrl(launchJob));
+        navigate(getJobOutputUrl(launchJob as UnifiedJob));
       } else {
         const awxRoute =
           template.type === 'workflow_job_template'
@@ -91,6 +115,12 @@ export function getLaunchEndpoint(template: Template) {
     return awxAPI`/workflow_job_templates/${template.id.toString()}/launch/`;
   } else if (template.type === 'terraform_job_template') {
     return awxAPI`/terraform_job_templates/${template.id.toString()}/launch/`;
+  } else if (template.type === 'quay_image_build_template') {
+    return (
+      template.related?.launch ??
+      template.launch_url ??
+      awxAPI`/quay/execution-environment-images/templates/${template.id.toString()}/launch/`
+    );
   } else {
     return undefined;
   }

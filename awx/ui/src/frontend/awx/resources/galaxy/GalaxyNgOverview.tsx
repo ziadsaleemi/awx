@@ -325,9 +325,9 @@ export function GalaxyNgOverview() {
                     description: t('Inspect external container registries.'),
                   },
                   {
-                    to: getPageUrl(AwxRoute.QuayExecutionEnvironmentImages),
-                    label: t('Project Quay Execution Environments'),
-                    description: t('Build EE images in the separate Project Quay module.'),
+                    to: getPageUrl(AwxRoute.Templates),
+                    label: t('EE Build Templates'),
+                    description: t('Build EE images from AWX Projects and push them to Quay.'),
                   },
                 ],
               },

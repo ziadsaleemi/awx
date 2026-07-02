@@ -17,6 +17,8 @@ import { LastModifiedPageDetail } from '../../../common/LastModifiedPageDetail';
 import { Job } from '../../interfaces/Job';
 import { useVerbosityString } from '../../common/useVerbosityString';
 import { UnifiedJob } from '../../interfaces/UnifiedJob';
+import { QuayImageBuildJob } from '../../interfaces/QuayImageBuildJob';
+import { QuayImageBuildJobDetails } from '../../resources/quay/QuayImageBuildJobDetails';
 
 export function JobDetails() {
   const { t } = useTranslation();
@@ -26,6 +28,11 @@ export function JobDetails() {
   const { job } = useOutletContext<{ job: Job }>();
 
   const verbosity = useVerbosityString(job.verbosity || 0);
+
+  if (job.type === 'quay_image_build_job') {
+    return <QuayImageBuildJobDetails job={job as Job & QuayImageBuildJob} />;
+  }
+
   const timeoutDefaultText = t`No timeout specified`;
   const artifactsValue = (() => {
     const artifacts = (job as Job & { artifacts?: unknown }).artifacts;

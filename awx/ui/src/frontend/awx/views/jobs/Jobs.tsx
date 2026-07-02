@@ -42,6 +42,9 @@ export function Jobs() {
             case 'workflow_job':
               void refresh();
               break;
+            case 'quay_image_build_job':
+              void refresh();
+              break;
             case 'project_update':
               void refresh();
               break;

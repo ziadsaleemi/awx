@@ -88,8 +88,8 @@ export function useGetScheduleUrl() {
           details: { pageId: AwxRoute.QuayImageBuildTemplateScheduleDetails, params },
           create: { pageId: AwxRoute.QuayImageBuildTemplateScheduleCreate, params },
           edit: { pageId: AwxRoute.QuayImageBuildTemplateScheduleEdit, params },
-          resource: { pageId: AwxRoute.QuayExecutionEnvironmentImages, params },
-          scheduleList: { pageId: AwxRoute.QuayExecutionEnvironmentImages, params },
+          resource: { pageId: AwxRoute.QuayImageBuildTemplateDetails, params },
+          scheduleList: { pageId: AwxRoute.QuayImageBuildTemplateSchedules, params },
         }[route] as string | schedulePageUrl;
       }
       return '';

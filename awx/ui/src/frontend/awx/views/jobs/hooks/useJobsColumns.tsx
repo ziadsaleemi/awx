@@ -84,6 +84,7 @@ export function useJobsColumns(options?: { disableSort?: boolean; disableLinks?:
             system_job: t`Management job`,
             workflow_job: t`Workflow job`,
             terraform_job: t`Terraform run`,
+            quay_image_build_job: t`Project Quay image build`,
           };
           return <TextCell text={jobTypes[job.type]} />;
         },
@@ -166,17 +167,31 @@ export function useJobsColumns(options?: { disableSort?: boolean; disableLinks?:
         dashboard: 'hidden',
       },
       {
-        header: t('Job template'),
+        header: t('Template'),
         cell: (job: UnifiedJob) => (
-          <Link
-            to={getPageUrl(AwxRoute.JobTemplateDetails, {
-              params: { id: job.summary_fields?.job_template?.id },
-            })}
-          >
-            {job.summary_fields?.job_template?.name}
-          </Link>
+          <>
+            {job.summary_fields?.quay_image_build_template ? (
+              <Link
+                to={getPageUrl(AwxRoute.QuayImageBuildTemplateDetails, {
+                  params: { id: job.summary_fields.quay_image_build_template.id },
+                })}
+              >
+                {job.summary_fields.quay_image_build_template.name}
+              </Link>
+            ) : (
+              <Link
+                to={getPageUrl(AwxRoute.JobTemplateDetails, {
+                  params: { id: job.summary_fields?.job_template?.id },
+                })}
+              >
+                {job.summary_fields?.job_template?.name}
+              </Link>
+            )}
+          </>
         ),
-        value: (job: UnifiedJob) => job.summary_fields?.job_template?.name,
+        value: (job: UnifiedJob) =>
+          job.summary_fields?.quay_image_build_template?.name ||
+          job.summary_fields?.job_template?.name,
         table: ColumnTableOption.expanded,
         card: 'hidden',
         list: 'hidden',

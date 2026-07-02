@@ -61,8 +61,7 @@ export function QuayOverview() {
   const repositoriesUrl = getPageUrl(AwxRoute.QuayRepositories) || '/quay/repositories';
   const robotsUrl = getPageUrl(AwxRoute.QuayRobots);
   const apiTokenUrl = getPageUrl(AwxRoute.QuayApiToken);
-  const imagesUrl =
-    getPageUrl(AwxRoute.QuayExecutionEnvironmentImages) || '/quay/execution-environment-images';
+  const imagesUrl = getPageUrl(AwxRoute.Templates) || '/templates';
   const ready = Boolean(
     data?.enabled && data.configured && data.namespace && !data.controller_error
   );
@@ -246,7 +245,7 @@ export function QuayOverview() {
                   },
                   {
                     to: imagesUrl,
-                    label: t('Execution Environments'),
+                    label: t('EE Build Templates'),
                     description: t('Build and push images from an AWX Project checkout.'),
                   },
                 ],

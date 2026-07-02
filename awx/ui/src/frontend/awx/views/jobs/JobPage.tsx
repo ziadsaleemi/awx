@@ -46,6 +46,7 @@ export function useGetJob(id?: string, type?: string) {
     command: 'ad_hoc_commands',
     management: 'system_jobs',
     workflow: 'workflow_jobs',
+    'quay-image-build': 'quay/execution-environment-images/jobs',
   };
   const path = type ? apiPaths[type] : 'jobs';
   const {

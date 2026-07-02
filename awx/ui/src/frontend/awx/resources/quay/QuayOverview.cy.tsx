@@ -57,8 +57,8 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
-        id: AwxRoute.QuayExecutionEnvironmentImages,
-        path: 'quay/execution-environment-images',
+        id: AwxRoute.Templates,
+        path: 'templates',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -91,7 +91,7 @@ describe('QuayOverview', () => {
     cy.get('#quay-workflows').should('contain', 'Repositories');
     cy.get('#quay-workflows').should('contain', 'Repository permissions');
     cy.get('#quay-workflows').should('contain', 'Robot Accounts');
-    cy.get('#quay-workflows').should('contain', 'Execution Environments');
+    cy.get('#quay-workflows').should('contain', 'EE Build Templates');
     cy.get('#quay-workflows').should('contain', 'API Token');
   });
 });

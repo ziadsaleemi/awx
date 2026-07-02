@@ -31,4 +31,5 @@ const jobPaths: { [key: string]: string } = {
   ad_hoc_command: 'command',
   system_job: 'management',
   workflow_job: 'workflow',
+  quay_image_build_job: 'quay-image-build',
 };

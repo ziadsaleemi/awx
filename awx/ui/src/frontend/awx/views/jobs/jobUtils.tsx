@@ -17,6 +17,8 @@ export function getJobsAPIUrl(type: string) {
       return awxAPI`/system_jobs/`;
     case 'workflow_job':
       return awxAPI`/workflow_jobs/`;
+    case 'quay_image_build_job':
+      return awxAPI`/quay/execution-environment-images/jobs/`;
     default:
       return awxAPI`/jobs/`;
   }
@@ -92,6 +94,11 @@ export function useGetScheduleUrl() {
             break;
           case 'workflow_job':
             scheduleUrl = getPageUrl(AwxRoute.WorkflowJobTemplateScheduleDetails, {
+              params: { id: templateId, schedule_id: scheduleId },
+            });
+            break;
+          case 'quay_image_build_job':
+            scheduleUrl = getPageUrl(AwxRoute.QuayImageBuildTemplateScheduleDetails, {
               params: { id: templateId, schedule_id: scheduleId },
             });
             break;

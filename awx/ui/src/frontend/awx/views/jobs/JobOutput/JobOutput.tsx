@@ -16,6 +16,8 @@ import { WorkflowOutput } from '../WorkflowOutput/WorkflowOutput';
 import { awxAPI } from '../../../common/api/awx-utils';
 import { useAwxGetAllPages } from '../../../common/useAwxGetAllPages';
 import { WorkflowNode } from '../../../interfaces/WorkflowNode';
+import { QuayImageBuildJob } from '../../../interfaces/QuayImageBuildJob';
+import { QuayImageBuildJobOutput } from '../../../resources/quay/QuayImageBuildJobOutput';
 
 const Section = styled(PageSection)<{ $fullScreen?: boolean }>`
   display: flex;
@@ -54,6 +56,9 @@ export function JobOutputInner(props: { job: Job; reloadJob: () => void }) {
 
   if (!job) {
     return <Skeleton />;
+  }
+  if (job.type === 'quay_image_build_job') {
+    return <QuayImageBuildJobOutput job={job as Job & QuayImageBuildJob} />;
   }
   return (
     <Section variant="light" $fullScreen={isFullScreen}>

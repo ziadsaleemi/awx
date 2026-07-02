@@ -155,6 +155,17 @@ export interface JobSummaryFields {
     name: string;
     description: string;
   };
+  quay_image_build_template?: {
+    id: number;
+    name: string;
+    description: string;
+  };
+  repository?: {
+    namespace: string;
+    repository: string;
+    repository_path: string;
+    tag: string;
+  };
   unified_job_template?: {
     id: number;
     name: string;

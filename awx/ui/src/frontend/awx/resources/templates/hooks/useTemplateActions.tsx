@@ -15,6 +15,7 @@ import {
   useGetPageUrl,
 } from '../../../../../framework';
 import { JobTemplate } from '../../../interfaces/JobTemplate';
+import { QuayImageBuildTemplate } from '../../../interfaces/QuayImageBuildTemplate';
 import { TerraformJobTemplate } from '../../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../../interfaces/WorkflowJobTemplate';
 import { AwxRoute } from '../../../main/AwxRoutes';
@@ -23,7 +24,7 @@ import { useLaunchTemplate } from './useLaunchTemplate';
 import { useCopyTemplate } from './useCopyTemplate';
 import { missingResources } from './useTemplateColumns';
 
-type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate;
+type Template = JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate;
 type TemplateActionOptions = {
   onTemplatesDeleted: (templates: Template[]) => void;
   onTemplateCopied?: () => unknown;
@@ -83,7 +84,9 @@ export function useTemplateActions({
               ? AwxRoute.EditJobTemplate
               : template.type === 'terraform_job_template'
                 ? AwxRoute.EditTerraformTemplate
-                : AwxRoute.EditWorkflowJobTemplate,
+                : template.type === 'quay_image_build_template'
+                  ? AwxRoute.EditQuayImageBuildTemplate
+                  : AwxRoute.EditWorkflowJobTemplate,
             { params: { id: template?.id.toString() } }
           ),
       },
@@ -92,9 +95,14 @@ export function useTemplateActions({
         selection: PageActionSelection.Single,
         icon: CopyIcon,
         label: t('Copy template'),
-        isHidden: (template) => template?.type === 'terraform_job_template',
+        isHidden: (template) =>
+          template?.type === 'terraform_job_template' ||
+          template?.type === 'quay_image_build_template',
         onClick: (template: Template) => {
-          if (template.type !== 'terraform_job_template') {
+          if (
+            template.type !== 'terraform_job_template' &&
+            template.type !== 'quay_image_build_template'
+          ) {
             copyTemplate(template);
           }
         },

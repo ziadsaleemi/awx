@@ -19,11 +19,11 @@ export function Templates() {
         title={t('Templates')}
         titleHelpTitle={t('Templates')}
         titleHelp={t(
-          'A job template is a definition and set of parameters for running an Ansible job. Job templates are useful to execute the same job many times. Job templates also encourage the reuse of Ansible playbook content and collaboration between teams.'
+          'Templates are reusable definitions for automation work. AWX supports Ansible job templates, workflow templates, Terraform templates, and Project Quay execution environment build templates.'
         )}
         titleDocLink={useGetDocsUrl(config, 'templates')}
         description={t(
-          'A job template is a definition and set of parameters for running an Ansible job.'
+          'Reusable definitions for running Ansible, Terraform, workflow, and EE image build jobs.'
         )}
         headerActions={
           <ActivityStreamIcon

@@ -13,6 +13,7 @@ import {
 import { usePersistentFilters } from '../../../common/PersistentFilters';
 import { useAwxView } from '../../common/useAwxView';
 import { JobTemplate } from '../../interfaces/JobTemplate';
+import { QuayImageBuildTemplate } from '../../interfaces/QuayImageBuildTemplate';
 import { TerraformJobTemplate } from '../../interfaces/TerraformJobTemplate';
 import { WorkflowJobTemplate } from '../../interfaces/WorkflowJobTemplate';
 import { AwxRoute } from '../../main/AwxRoutes';
@@ -49,7 +50,7 @@ export function TemplatesList(props: {
     executionEnvironmentId?: string
   ) => {
     const templateQueryParams: { [key: string]: string } = {
-      type: 'job_template,workflow_job_template,terraform_job_template',
+      type: 'job_template,workflow_job_template,terraform_job_template,quay_image_build_template',
       // order_by: '-last_job_run',
     };
     if (projectId) {
@@ -66,7 +67,9 @@ export function TemplatesList(props: {
     }
     return templateQueryParams;
   };
-  const view = useAwxView<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>({
+  const view = useAwxView<
+    JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate
+  >({
     url: props.url ? props.url : awxAPI`/unified_job_templates/`,
     queryParams: getQueryParams(
       props.projectId,
@@ -90,6 +93,10 @@ export function TemplatesList(props: {
     awxAPI`/terraform_job_templates/`
   );
 
+  const { data: quayTemplateActions } = useOptions<OptionsResponse<ActionsResponse>>(
+    awxAPI`/quay/execution-environment-images/templates/`
+  );
+
   const canCreateJobTemplate = Boolean(
     jobTemplateActions && jobTemplateActions.actions && jobTemplateActions.actions['POST']
   );
@@ -104,11 +111,15 @@ export function TemplatesList(props: {
       terraformTemplateActions.actions['POST']
   );
 
+  const canCreateQuayTemplate = Boolean(
+    quayTemplateActions && (!quayTemplateActions.actions || quayTemplateActions.actions['POST'])
+  );
+
   usePersistentFilters('templates');
   const deleteTemplates = useDeleteTemplates(view.unselectItemsAndRefresh);
 
   const toolbarActions = useMemo<
-    IPageAction<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>[]
+    IPageAction<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate>[]
   >(
     () => [
       {
@@ -117,7 +128,10 @@ export function TemplatesList(props: {
         isPinned: true,
         label: t('Create template'),
         isDisabled:
-          canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
+          canCreateJobTemplate ||
+          canCreateWFJobTemplate ||
+          canCreateTerraformTemplate ||
+          canCreateQuayTemplate
             ? undefined
             : t(
                 'You do not have permission to create a template. Please contact your organization administrator if there is an issue with your access.'
@@ -152,6 +166,15 @@ export function TemplatesList(props: {
               : 'You do not have permission to create a terraform template. Please contact your organization administrator if there is an issue with your access.',
             href: getPageUrl(AwxRoute.CreateTerraformTemplate),
           },
+          {
+            type: PageActionType.Link,
+            selection: PageActionSelection.None,
+            label: t('Create EE build template'),
+            isDisabled: canCreateQuayTemplate
+              ? undefined
+              : 'You do not have permission to create an EE build template. Please contact your organization administrator if there is an issue with your access.',
+            href: getPageUrl(AwxRoute.CreateQuayImageBuildTemplate),
+          },
         ],
       },
       {
@@ -167,6 +190,7 @@ export function TemplatesList(props: {
       canCreateJobTemplate,
       canCreateWFJobTemplate,
       canCreateTerraformTemplate,
+      canCreateQuayTemplate,
       deleteTemplates,
       getPageUrl,
       t,
@@ -178,8 +202,21 @@ export function TemplatesList(props: {
     onTemplateCopied: view.refresh,
   });
 
+  const canCreateAnyTemplate =
+    canCreateJobTemplate ||
+    canCreateWFJobTemplate ||
+    canCreateTerraformTemplate ||
+    canCreateQuayTemplate;
+  const createRoute = canCreateJobTemplate
+    ? AwxRoute.CreateJobTemplate
+    : canCreateWFJobTemplate
+      ? AwxRoute.CreateWorkflowJobTemplate
+      : canCreateTerraformTemplate
+        ? AwxRoute.CreateTerraformTemplate
+        : AwxRoute.CreateQuayImageBuildTemplate;
+
   return (
-    <PageTable<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate>
+    <PageTable<JobTemplate | WorkflowJobTemplate | TerraformJobTemplate | QuayImageBuildTemplate>
       id="awx-job-templates-table"
       toolbarFilters={toolbarFilters}
       toolbarActions={toolbarActions}
@@ -187,28 +224,20 @@ export function TemplatesList(props: {
       rowActions={rowActions}
       errorStateTitle={t('Error loading templates')}
       emptyStateTitle={
-        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
+        canCreateAnyTemplate
           ? t('No templates yet')
           : t('You do not have permission to create a template')
       }
       emptyStateDescription={
-        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
+        canCreateAnyTemplate
           ? t('Please create a template by using the button below.')
           : t(
               'Please contact your organization administrator if there is an issue with your access.'
             )
       }
       emptyStateButtonIcon={<PlusCircleIcon />}
-      emptyStateButtonText={
-        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
-          ? t('Create template')
-          : undefined
-      }
-      emptyStateButtonClick={
-        canCreateJobTemplate || canCreateWFJobTemplate || canCreateTerraformTemplate
-          ? () => pageNavigate(AwxRoute.CreateJobTemplate)
-          : undefined
-      }
+      emptyStateButtonText={canCreateAnyTemplate ? t('Create template') : undefined}
+      emptyStateButtonClick={canCreateAnyTemplate ? () => pageNavigate(createRoute) : undefined}
       {...view}
       defaultSubtitle={t('Template')}
     />

@@ -61,7 +61,12 @@ function useQuayTemplateAccessWizard(tab: 'team-access' | 'user-access') {
   const returnToAccessTab = (templateId?: number) => {
     const id = templateId ?? template?.id;
     navigate(
-      `${getPageUrl(AwxRoute.QuayExecutionEnvironmentImages)}?template=${id ?? ''}&tab=${tab}`
+      getPageUrl(
+        tab === 'team-access'
+          ? AwxRoute.QuayImageBuildTemplateTeamAccess
+          : AwxRoute.QuayImageBuildTemplateUserAccess,
+        { params: { id: id ?? '' } }
+      )
     );
   };
 
@@ -154,14 +159,12 @@ export function QuayImageBuildTemplateAddTeams() {
       <PageHeader
         title={t('Add roles')}
         breadcrumbs={[
-          { label: t('Project Quay'), to: getPageUrl(AwxRoute.QuayOverview) },
-          {
-            label: t('Execution Environments'),
-            to: getPageUrl(AwxRoute.QuayExecutionEnvironmentImages),
-          },
+          { label: t('Templates'), to: getPageUrl(AwxRoute.Templates) },
           {
             label: template.name,
-            to: `${getPageUrl(AwxRoute.QuayExecutionEnvironmentImages)}?template=${template.id}&tab=team-access`,
+            to: getPageUrl(AwxRoute.QuayImageBuildTemplateTeamAccess, {
+              params: { id: template.id },
+            }),
           },
           { label: t('Add roles') },
         ]}
@@ -263,14 +266,12 @@ export function QuayImageBuildTemplateAddUsers() {
       <PageHeader
         title={t('Add roles')}
         breadcrumbs={[
-          { label: t('Project Quay'), to: getPageUrl(AwxRoute.QuayOverview) },
-          {
-            label: t('Execution Environments'),
-            to: getPageUrl(AwxRoute.QuayExecutionEnvironmentImages),
-          },
+          { label: t('Templates'), to: getPageUrl(AwxRoute.Templates) },
           {
             label: template.name,
-            to: `${getPageUrl(AwxRoute.QuayExecutionEnvironmentImages)}?template=${template.id}&tab=user-access`,
+            to: getPageUrl(AwxRoute.QuayImageBuildTemplateUserAccess, {
+              params: { id: template.id },
+            }),
           },
           { label: t('Add roles') },
         ]}

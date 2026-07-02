@@ -67,8 +67,8 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       } as PageNavigationItem,
       {
-        id: AwxRoute.QuayExecutionEnvironmentImages,
-        path: 'quay/execution-environment-images',
+        id: AwxRoute.Templates,
+        path: 'templates',
         element: <div />,
       } as PageNavigationItem,
       {
@@ -139,7 +139,7 @@ describe('GalaxyNgOverview', () => {
     cy.get('#galaxy-ng-workflows').should('contain', 'Signature Keys');
     cy.get('#galaxy-ng-workflows').should('contain', 'Collection Approvals');
     cy.get('#galaxy-ng-workflows').should('contain', 'API Token');
-    cy.get('#galaxy-ng-workflows').should('contain', 'Project Quay Execution Environments');
+    cy.get('#galaxy-ng-workflows').should('contain', 'EE Build Templates');
     cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG UI');
     cy.get('#galaxy-ng-workflows').should('contain', 'Open Galaxy NG API');
   });

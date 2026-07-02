@@ -24,6 +24,22 @@ import { ScheduleDetails } from '../../views/schedules/SchedulePage/ScheduleDeta
 import { SchedulePage } from '../../views/schedules/SchedulePage/SchedulePage';
 import { AwxRoute } from '../AwxRoutes';
 import { ResourceNotifications } from '../../resources/notifications/ResourceNotifications';
+import {
+  CreateQuayImageBuildTemplate,
+  EditQuayImageBuildTemplate,
+} from '../../resources/quay/QuayImageBuildTemplateForm';
+import { QuayImageBuildTemplatePage } from '../../resources/quay/QuayImageBuildTemplatePage';
+import { QuayImageBuildTemplateDetails } from '../../resources/quay/QuayImageBuildTemplateDetails';
+import {
+  QuayImageBuildTemplateTeamAccess,
+  QuayImageBuildTemplateUserAccess,
+} from '../../resources/quay/QuayImageBuildTemplateAccess';
+import { QuayImageBuildTemplateJobs } from '../../resources/quay/QuayImageBuildTemplateJobs';
+import { QuayImageBuildTemplateTags } from '../../resources/quay/QuayImageBuildTemplateTags';
+import {
+  QuayImageBuildTemplateAddTeams,
+  QuayImageBuildTemplateAddUsers,
+} from '../../resources/quay/QuayImageBuildTemplateAddAccess';
 import { TemplateTeamAccess } from '../../resources/templates/TemplatePage/TemplateTeamAccess';
 import { TemplateUserAccess } from '../../resources/templates/TemplatePage/TemplateUserAccess';
 import { JobTemplateAddTeams } from '../../resources/templates/JobTemplateAddTeams';
@@ -318,6 +334,137 @@ export function useAwxTemplateRoutes() {
               id: AwxRoute.WorkflowJobTemplateLaunchWizard,
               path: ':id/launch',
               element: <LaunchTemplate jobType="workflow_job_templates" />,
+            },
+          ],
+        },
+        {
+          path: 'ee-build-template',
+          children: [
+            {
+              id: AwxRoute.CreateQuayImageBuildTemplate,
+              path: 'create',
+              element: <CreateQuayImageBuildTemplate />,
+            },
+            {
+              id: AwxRoute.EditQuayImageBuildTemplate,
+              path: ':id/edit',
+              element: <EditQuayImageBuildTemplate />,
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplateScheduleCreate,
+              path: ':id/schedules/create',
+              element: (
+                <ScheduleAddWizard
+                  resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+                />
+              ),
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplateScheduleEdit,
+              path: ':id/schedules/:schedule_id/edit',
+              element: (
+                <ScheduleEditWizard
+                  resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+                />
+              ),
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplateSchedulePage,
+              path: ':id/schedules/:schedule_id',
+              element: (
+                <SchedulePage
+                  resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+                  initialBreadCrumbs={[
+                    { label: t('Templates'), to: AwxRoute.Templates },
+                    { id: 'data', to: AwxRoute.QuayImageBuildTemplatePage },
+                    {
+                      label: t('Schedules'),
+                      id: 'schedules',
+                      to: AwxRoute.QuayImageBuildTemplateSchedules,
+                    },
+                  ]}
+                  backTab={{
+                    label: t('Back to Schedules'),
+                    page: AwxRoute.QuayImageBuildTemplateSchedules,
+                    persistentFilterKey: 'quay-image-build-template-schedules',
+                  }}
+                  tabs={[
+                    {
+                      label: t('Details'),
+                      page: AwxRoute.QuayImageBuildTemplateScheduleDetails,
+                    },
+                  ]}
+                />
+              ),
+              children: [
+                {
+                  id: AwxRoute.QuayImageBuildTemplateScheduleDetails,
+                  path: 'details',
+                  element: <ScheduleDetails />,
+                },
+              ],
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplatePage,
+              path: ':id',
+              element: <QuayImageBuildTemplatePage />,
+              children: [
+                {
+                  id: AwxRoute.QuayImageBuildTemplateDetails,
+                  path: 'details',
+                  element: <QuayImageBuildTemplateDetails />,
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateTeamAccess,
+                  path: 'team-access',
+                  element: <QuayImageBuildTemplateTeamAccess />,
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateUserAccess,
+                  path: 'user-access',
+                  element: <QuayImageBuildTemplateUserAccess />,
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateSchedules,
+                  path: 'schedules',
+                  element: (
+                    <SchedulesList
+                      createSchedulePageId={AwxRoute.QuayImageBuildTemplateScheduleCreate}
+                      resourceType="quay-image-build-template"
+                      sublistEndpoint={awxAPI`/quay/execution-environment-images/templates`}
+                    />
+                  ),
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateJobs,
+                  path: 'jobs',
+                  element: <QuayImageBuildTemplateJobs />,
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateNotifications,
+                  path: 'notifications',
+                  element: <ResourceNotifications resourceType="quay_image_build_templates" />,
+                },
+                {
+                  id: AwxRoute.QuayImageBuildTemplateTags,
+                  path: 'tags',
+                  element: <QuayImageBuildTemplateTags />,
+                },
+                {
+                  path: '',
+                  element: <Navigate to="details" replace />,
+                },
+              ],
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplateAddTeams,
+              path: ':id/team-access/add',
+              element: <QuayImageBuildTemplateAddTeams />,
+            },
+            {
+              id: AwxRoute.QuayImageBuildTemplateAddUsers,
+              path: ':id/user-access/add',
+              element: <QuayImageBuildTemplateAddUsers />,
             },
           ],
         },

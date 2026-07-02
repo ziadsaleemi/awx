@@ -403,28 +403,57 @@ def _build_image_from_template(template):
     return f'{template.repository_path}:{template.tag}'
 
 
-def _serialize_quay_image_build_template(template):
+def _serialize_quay_image_build_template(template, user=None):
     latest_build = getattr(template, 'latest_build', None)
+    user_capabilities = {
+        'edit': False,
+        'delete': False,
+        'start': False,
+        'schedule': False,
+        'copy': False,
+    }
+    if user is not None:
+        user_capabilities.update(
+            {
+                'edit': user.can_access(QuayImageBuildTemplate, 'change', template, None),
+                'delete': user.can_access(QuayImageBuildTemplate, 'delete', template),
+                'start': user.can_access(QuayImageBuildTemplate, 'start', template),
+                'schedule': user.can_access(QuayImageBuildTemplate, 'start', template),
+            }
+        )
+    project_summary = {
+        'id': template.project_id,
+        'name': template.project.name if template.project_id and template.project else '',
+        'organization': {
+            'id': template.project.organization_id,
+            'name': template.project.organization.name,
+        }
+        if template.project_id and template.project and template.project.organization_id
+        else None,
+    }
+    related = {
+        'launch': reverse('api:quay_image_build_template_launch', kwargs={'pk': template.pk}),
+        'jobs': reverse('api:quay_image_build_template_jobs_list', kwargs={'pk': template.pk}),
+        'schedules': reverse('api:quay_image_build_template_schedules_list', kwargs={'pk': template.pk}),
+        'notification_templates_started': reverse('api:quay_image_build_template_notification_templates_started', kwargs={'pk': template.pk}),
+        'notification_templates_error': reverse('api:quay_image_build_template_notification_templates_error', kwargs={'pk': template.pk}),
+        'notification_templates_success': reverse('api:quay_image_build_template_notification_templates_success', kwargs={'pk': template.pk}),
+        'object_roles': reverse('api:quay_image_build_template_object_roles', kwargs={'pk': template.pk}),
+    }
+    if template.project_id:
+        related['project'] = reverse('api:project_detail', kwargs={'pk': template.project_id})
     return {
         'id': template.id,
         'type': 'quay_image_build_template',
         'url': template.get_absolute_url(),
-        'launch_url': reverse('api:quay_image_build_template_launch', kwargs={'pk': template.pk}),
+        'related': related,
+        'launch_url': related['launch'],
         'created': template.created,
         'modified': template.modified,
         'created_by': template.created_by.username if template.created_by_id else '',
         'name': template.name,
         'description': template.description,
-        'project': {
-            'id': template.project_id,
-            'name': template.project.name if template.project_id and template.project else '',
-            'organization': {
-                'id': template.project.organization_id,
-                'name': template.project.organization.name,
-            }
-            if template.project_id and template.project and template.project.organization_id
-            else None,
-        },
+        'project': project_summary,
         'namespace': template.namespace,
         'repository': template.repository,
         'repository_path': template.repository_path,
@@ -434,6 +463,34 @@ def _serialize_quay_image_build_template(template):
         'definition_file': template.definition_file,
         'context': template.context_path,
         'latest_build': _serialize_quay_image_build(latest_build, include_log=False) if latest_build else None,
+        'summary_fields': {
+            'organization': project_summary['organization'],
+            'project': {
+                'id': project_summary['id'],
+                'name': project_summary['name'],
+            }
+            if project_summary['id']
+            else None,
+            'repository': {
+                'namespace': template.namespace,
+                'repository': template.repository,
+                'repository_path': template.repository_path,
+                'tag': template.tag,
+            },
+            'user_capabilities': user_capabilities,
+            'created_by': {
+                'id': template.created_by_id,
+                'username': template.created_by.username,
+            }
+            if template.created_by_id
+            else None,
+            'modified_by': {
+                'id': template.modified_by_id,
+                'username': template.modified_by.username,
+            }
+            if template.modified_by_id
+            else None,
+        },
     }
 
 
@@ -1110,7 +1167,7 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
     def get(self, request, format=None):
         page = _parse_positive_int(request.query_params.get('page'), 1)
         page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
-        queryset = request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by').all()
+        queryset = request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by', 'modified_by').all()
         namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
         repository = str(request.query_params.get('repository') or '').strip().strip('/')
         search = str(request.query_params.get('search') or '').strip()
@@ -1159,7 +1216,7 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
                 'previous': None,
                 'source': 'quay',
                 'resource': 'image_build_templates',
-                'results': [_serialize_quay_image_build_template(template) for template in items],
+                'results': [_serialize_quay_image_build_template(template, user=request.user) for template in items],
             }
         )
 
@@ -1192,7 +1249,7 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
                 {'detail': _('A Project Quay image build template with this name already exists.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
-        return Response(_serialize_quay_image_build_template(template), status=http_status.HTTP_201_CREATED)
+        return Response(_serialize_quay_image_build_template(template, user=request.user), status=http_status.HTTP_201_CREATED)
 
 
 class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
@@ -1201,7 +1258,7 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get_object(self, request, pk):
-        return request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by').filter(pk=pk).first()
+        return request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by', 'modified_by').filter(pk=pk).first()
 
     def get(self, request, pk, format=None):
         template = self.get_object(request, pk)
@@ -1210,7 +1267,7 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
         template.latest_build = (
             QuayImageBuild.objects.select_related('template', 'project', 'created_by').filter(template=template).order_by('-created', '-id').first()
         )
-        return Response(_serialize_quay_image_build_template(template))
+        return Response(_serialize_quay_image_build_template(template, user=request.user))
 
     def patch(self, request, pk, format=None):
         template = self.get_object(request, pk)
@@ -1245,7 +1302,7 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
                 {'detail': _('A Project Quay image build template with this name already exists.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
-        return Response(_serialize_quay_image_build_template(template))
+        return Response(_serialize_quay_image_build_template(template, user=request.user))
 
     def delete(self, request, pk, format=None):
         template = self.get_object(request, pk)
