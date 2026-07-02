@@ -28,6 +28,7 @@ export function useManagedAwxDashboard() {
       { id: 'control_hub', name: t('AWX Control Hub') },
       { id: 'counts', name: t('Resource counts') },
       { id: 'recent_job_activity', name: t('Recent job activity') },
+      { id: 'control_hub_signals', name: t('Control hub signals') },
       { id: 'recent_jobs', name: t('Recent jobs') },
       { id: 'recent_projects', name: t('Recent projects') },
       { id: 'recent_inventories', name: t('Recent inventories') },

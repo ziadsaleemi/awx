@@ -3,6 +3,7 @@ import { CardBody } from '@patternfly/react-core';
 import { PageDashboard } from '../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../framework/PageDashboard/PageDashboardCard';
 import { AwxControlHubCard } from './cards/AwxControlHubCard';
+import { AwxControlHubSignalsCard } from './cards/AwxControlHubSignalsCard';
 import { AwxInsightsCard } from './cards/AwxInsightsCard';
 import { AwxROICard } from './cards/AwxROICard';
 
@@ -201,6 +202,26 @@ describe('AwxOverview layout', () => {
         expect(moduleRect.right).to.be.lessThan(cardRect.right + 1);
       });
     });
+  });
+
+  it('shows integrated systems in a graph and compact table', () => {
+    cy.viewport(1366, 900);
+    cy.mount(
+      <PageDashboard>
+        <AwxControlHubSignalsCard data={dashboardData} />
+      </PageDashboard>
+    );
+
+    cy.contains('Control hub signals').should('be.visible');
+    cy.getByDataCy('control-hub-signals-chart').should('be.visible');
+    cy.getByDataCy('control-hub-signals-table').should('be.visible');
+    cy.getByDataCy('control-hub-signals-row').should('have.length', 6);
+    cy.contains('Automation execution').should('be.visible');
+    cy.contains('Self-service catalog').should('be.visible');
+    cy.contains('Content supply chain').should('be.visible');
+    cy.contains('Policy as Code').should('be.visible');
+    cy.contains('Event-driven decisions').should('be.visible');
+    cy.contains('Cloud and AI fabric').should('be.visible');
   });
 
   it('keeps variable-height overview cards aligned and contained', () => {

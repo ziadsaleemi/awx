@@ -38,6 +38,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 4 | **Job Activity card drill-down** — clicking a date point navigates to the jobs list filtered to that day | Medium | ✅ |
 | 5 | **Global search (Cmd+K)** — command palette to search jobs, templates, inventories by name | High | ✅ |
 | 6 | **Central hub overview** — `/overview` now opens with an AWX Control Hub card that summarizes automation execution, self-service catalog, cloud connections, OPA/Gatekeeper policy posture, EDA activations, Galaxy NG content, Project Quay image repositories, AI readiness, and platform services using existing AWX read APIs and responsive PatternFly dashboard tiles | High | ✅ |
+| 7 | **Integrated hub graph/table** — add a Control Hub Signals dashboard card with a chart and compact systems table so `/overview` shows operational graph/table context for automation, catalog, content registries, policy, EDA, cloud, and AI integrations | High | ✅ |
 
 ### System Usage Bar (navbar)
 
