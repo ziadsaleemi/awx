@@ -37,6 +37,7 @@ Legend: ⬜ Not started · 🔄 In progress · ✅ Done
 | 3 | **Dark/light mode persistence** — store theme and user UI preferences in the AWX user profile (`/api/v2/me/`) with localStorage fallback for anonymous/offline states, so preference changes survive browser changes | Medium | ✅ |
 | 4 | **Job Activity card drill-down** — clicking a date point navigates to the jobs list filtered to that day | Medium | ✅ |
 | 5 | **Global search (Cmd+K)** — command palette to search jobs, templates, inventories by name | High | ✅ |
+| 6 | **Central hub overview** — `/overview` now opens with an AWX Control Hub card that summarizes automation execution, self-service catalog, cloud connections, OPA/Gatekeeper policy posture, EDA activations, Galaxy NG content, Project Quay image repositories, AI readiness, and platform services using existing AWX read APIs and responsive PatternFly dashboard tiles | High | ✅ |
 
 ### System Usage Bar (navbar)
 

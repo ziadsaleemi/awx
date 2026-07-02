@@ -2,6 +2,7 @@
 import { CardBody } from '@patternfly/react-core';
 import { PageDashboard } from '../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../framework/PageDashboard/PageDashboardCard';
+import { AwxControlHubCard } from './cards/AwxControlHubCard';
 import { AwxInsightsCard } from './cards/AwxInsightsCard';
 import { AwxROICard } from './cards/AwxROICard';
 
@@ -14,6 +15,194 @@ function cardRect(dataCy: string) {
 }
 
 describe('AwxOverview layout', () => {
+  const dashboardData = {
+    inventories: {
+      url: '/api/v2/inventories/',
+      total: 8,
+      total_with_inventory_source: 4,
+      job_failed: 0,
+      inventory_failed: 1,
+    },
+    inventory_sources: {
+      ec2: {
+        url: '/api/v2/inventory_sources/',
+        failures_url: '/api/v2/inventory_sources/?failed=true',
+        label: 'Cloud',
+        total: 4,
+        failed: 1,
+      },
+    },
+    groups: {
+      url: '/api/v2/groups/',
+      total: 3,
+      inventory_failed: 0,
+    },
+    hosts: {
+      url: '/api/v2/hosts/',
+      failures_url: '/api/v2/hosts/?failed=true',
+      total: 11,
+      failed: 3,
+    },
+    projects: {
+      url: '/api/v2/projects/',
+      failures_url: '/api/v2/projects/?failed=true',
+      total: 7,
+      failed: 0,
+    },
+    scm_types: {
+      git: {
+        url: '/api/v2/projects/?scm_type=git',
+        label: 'Git',
+        failures_url: '/api/v2/projects/?scm_type=git&failed=true',
+        total: 7,
+        failed: 0,
+      },
+      svn: {
+        url: '/api/v2/projects/?scm_type=svn',
+        label: 'SVN',
+        failures_url: '/api/v2/projects/?scm_type=svn&failed=true',
+        total: 0,
+        failed: 0,
+      },
+      archive: {
+        url: '/api/v2/projects/?scm_type=archive',
+        label: 'Archive',
+        failures_url: '/api/v2/projects/?scm_type=archive&failed=true',
+        total: 0,
+        failed: 0,
+      },
+    },
+    users: {
+      url: '/api/v2/users/',
+      total: 5,
+    },
+    organizations: {
+      url: '/api/v2/organizations/',
+      total: 2,
+    },
+    teams: {
+      url: '/api/v2/teams/',
+      total: 4,
+    },
+    credentials: {
+      url: '/api/v2/credentials/',
+      total: 12,
+    },
+    job_templates: {
+      url: '/api/v2/job_templates/',
+      total: 9,
+    },
+  };
+
+  beforeEach(() => {
+    cy.intercept('GET', '/api/v2/eda/status/', {
+      configured: true,
+      status: 'configured',
+      controller_url: 'https://eda-controller.example.test',
+    });
+    cy.intercept('GET', '/api/v2/eda/activations/?page_size=1', listResponse([{ id: 1 }]));
+    cy.intercept('GET', '/api/v2/ai/settings/', {
+      enabled: true,
+      configured: true,
+      provider: 'openai_codex',
+      model: 'gpt-5-enterprise-long-context',
+      openai_codex_connected: true,
+    });
+    cy.intercept('GET', '/api/v2/opa/policies/', {
+      enabled: true,
+      server_url: 'http://opa.example.test:8181',
+      policies: [
+        { id: 'job_launch', path: 'awx/job_launch/allow' },
+        { id: 'inventory_access', path: 'awx/inventory_access/allow' },
+        { id: 'credential_use', path: 'awx/credential_use/allow' },
+      ],
+      policy_bundle: { configured: true, size: 128, line_count: 12 },
+    });
+    cy.intercept('GET', '/api/v2/opa/gatekeeper/', {
+      configured: true,
+      cluster: { server_url: 'https://host.docker.internal:6443', context: 'docker-desktop' },
+      counts: {
+        constraint_templates: 1,
+        constraints: 2,
+        violations: 4,
+        filtered_violations: 4,
+        configs: 1,
+      },
+      errors: [],
+    });
+    cy.intercept('GET', '/api/v2/galaxy_ng/status/', {
+      enabled: true,
+      configured: true,
+      status: 'configured',
+      server_url: 'http://galaxy-ng.example.test',
+      controller_error: '',
+      counts: {
+        namespaces: 3,
+        collections: 14,
+        repositories: 4,
+        remotes: 2,
+        remote_registries: 1,
+        signature_keys: 1,
+        collection_approvals: 2,
+        tasks: 6,
+      },
+    });
+    cy.intercept('GET', '/api/v2/quay/status/', {
+      enabled: true,
+      configured: true,
+      status: 'configured',
+      server_url: 'http://quay.example.test',
+      namespace: 'admin',
+      controller_error: '',
+      auth_configured: true,
+      push_configured: true,
+      counts: { repositories: 5, tags: 22 },
+    });
+    cy.intercept(
+      'GET',
+      '/api/v2/catalog_cloud/connections/?page_size=1',
+      listResponse([{ id: 1 }])
+    );
+    cy.intercept('GET', '/api/v2/catalog_items/?page_size=1', listResponse([{ id: 1 }, { id: 2 }]));
+    cy.intercept(
+      'GET',
+      '/api/v2/catalog_deployments/?page_size=1',
+      listResponse([{ id: 1 }, { id: 2 }, { id: 3 }])
+    );
+  });
+
+  it('shows AWX as a central control hub for integrated modules', () => {
+    cy.viewport(1366, 900);
+    cy.mount(
+      <PageDashboard>
+        <AwxControlHubCard data={dashboardData} />
+      </PageDashboard>
+    );
+
+    cy.contains('AWX Control Hub').should('be.visible');
+    cy.contains('Automation execution').should('be.visible');
+    cy.contains('Content and registries').should('be.visible');
+    cy.contains('Policy as Code').should('be.visible');
+    cy.contains('Event-driven automation').should('be.visible');
+    cy.contains('Cloud and catalog').should('be.visible');
+    cy.contains('Platform services').should('be.visible');
+    cy.contains('AI ready').should('be.visible');
+    cy.contains('EDA connected').should('be.visible');
+    cy.contains('OPA enabled').should('be.visible');
+    cy.contains('Gatekeeper connected').should('be.visible');
+    cy.getByDataCy('control-hub-metric').should('have.length', 6);
+    cy.getByDataCy('control-hub-module').should('have.length', 6);
+
+    cy.getByDataCy('awx-control-hub').then(($card) => {
+      const cardRect = $card[0].getBoundingClientRect();
+      cy.getByDataCy('control-hub-module').each(($module) => {
+        const moduleRect = $module[0].getBoundingClientRect();
+        expect(moduleRect.left).to.be.greaterThan(cardRect.left - 1);
+        expect(moduleRect.right).to.be.lessThan(cardRect.right + 1);
+      });
+    });
+  });
+
   it('keeps variable-height overview cards aligned and contained', () => {
     const now = new Date().toISOString();
     const longName =
