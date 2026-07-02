@@ -12,7 +12,9 @@ def create_missing_implicit_roles(apps, *model_names):
         content_type_id = ContentType.objects.get_for_model(model).id
         role_field_names = {field.name for field in implicit_role_fields}
 
-        for obj in model.objects.iterator():
+        # Historical migration models may retain default ordering from a
+        # later state where an ordering field has already been removed.
+        for obj in model.objects.all().order_by().iterator():
             existing_roles = {
                 role.role_field: role.id
                 for role in Role.objects.filter(
