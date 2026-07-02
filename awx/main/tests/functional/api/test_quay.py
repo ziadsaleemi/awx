@@ -664,7 +664,7 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
             user=admin_user,
             expect=200,
         )
-        native_job = QuayImageBuildJob.objects.get(pk=launch_response.data['unified_job']['id'])
+        native_job = QuayImageBuildJob.objects.get(pk=launch_response.data['id'])
         delete_response = delete(create_response.data['url'], user=admin_user, expect=204)
 
     assert create_response.data['name'] == 'Platform EE'
@@ -678,9 +678,10 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     assert filtered_response.data['results'][0]['name'] == 'Platform EE'
     assert ordered_response.data['results'][0]['name'] == 'Utility EE'
     assert update_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
-    assert launch_response.data['template']['id'] == create_response.data['id']
+    assert launch_response.data['type'] == 'quay_image_build_job'
+    assert launch_response.data['quay_image_build_template'] == create_response.data['id']
     assert launch_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
-    assert launch_response.data['unified_job']['id'] == native_job.pk
+    assert launch_response.data['id'] == native_job.pk
     assert native_job.quay_image_build_template_id == create_response.data['id']
     assert signal_start.call_args.args[0] == native_job
     assert build_list_response.data['count'] == 1

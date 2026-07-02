@@ -7,6 +7,7 @@ from awx.main.scheduler import TaskManager, DependencyManager, WorkflowManager
 from awx.main.utils import encrypt_field
 from awx.main.models import WorkflowJobTemplate, JobTemplate, Job, Project, InventorySource, Inventory
 from awx.main.models.ha import Instance
+from awx.main.models.quay import QuayImageBuildTemplate
 from . import create_job
 from django.conf import settings
 
@@ -100,8 +101,15 @@ class TestJobLifeCycle:
         sj = system_job_template.create_unified_job()
         job = job_template.create_unified_job()
         inv_update = inventory_source.create_unified_job()
+        quay_template = QuayImageBuildTemplate.objects.create(
+            name='quay-ee',
+            project=project,
+            namespace='admin',
+            repository='ee-smoke',
+        )
+        quay_job = quay_template.create_unified_job()
 
-        all_ujs = (pu, sj, job, inv_update)
+        all_ujs = (pu, sj, job, inv_update, quay_job)
         for uj in all_ujs:
             uj.signal_start()
 
@@ -116,7 +124,7 @@ class TestJobLifeCycle:
         for uj in (pu, sj):  # control plane jobs
             assert uj.capacity_type == 'control'
             assert [uj.execution_node, uj.controller_node] == [control_instance.hostname, control_instance.hostname], uj
-        for uj in (job, inv_update):  # user-space jobs
+        for uj in (job, inv_update, quay_job):  # user-space jobs
             assert uj.capacity_type == 'execution'
             assert [uj.execution_node, uj.controller_node] == [execution_instance.hostname, control_instance.hostname], uj
 

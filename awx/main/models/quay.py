@@ -289,6 +289,17 @@ class QuayImageBuildJob(UnifiedJob, JobNotificationMixin, TaskManagerUnifiedJobM
     def _get_task_impact(self):
         return 1
 
+    @property
+    def preferred_instance_groups(self):
+        selected_groups = []
+        if self.quay_image_build_template_id:
+            selected_groups.extend(self.quay_image_build_template.instance_groups.all())
+        if self.organization_id:
+            selected_groups.extend(self.organization.instance_groups.all())
+        if not selected_groups:
+            return self.global_instance_groups
+        return selected_groups
+
     def result_stdout_raw_handle(self, enforce_max_bytes=False):
         try:
             legacy_build = self.quay_image_build

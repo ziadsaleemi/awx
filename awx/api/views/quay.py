@@ -424,12 +424,14 @@ def _serialize_quay_image_build_template(template, user=None):
     project_summary = {
         'id': template.project_id,
         'name': template.project.name if template.project_id and template.project else '',
-        'organization': {
-            'id': template.project.organization_id,
-            'name': template.project.organization.name,
-        }
-        if template.project_id and template.project and template.project.organization_id
-        else None,
+        'organization': (
+            {
+                'id': template.project.organization_id,
+                'name': template.project.organization.name,
+            }
+            if template.project_id and template.project and template.project.organization_id
+            else None
+        ),
     }
     related = {
         'launch': reverse('api:quay_image_build_template_launch', kwargs={'pk': template.pk}),
@@ -465,12 +467,14 @@ def _serialize_quay_image_build_template(template, user=None):
         'latest_build': _serialize_quay_image_build(latest_build, include_log=False) if latest_build else None,
         'summary_fields': {
             'organization': project_summary['organization'],
-            'project': {
-                'id': project_summary['id'],
-                'name': project_summary['name'],
-            }
-            if project_summary['id']
-            else None,
+            'project': (
+                {
+                    'id': project_summary['id'],
+                    'name': project_summary['name'],
+                }
+                if project_summary['id']
+                else None
+            ),
             'repository': {
                 'namespace': template.namespace,
                 'repository': template.repository,
@@ -478,18 +482,22 @@ def _serialize_quay_image_build_template(template, user=None):
                 'tag': template.tag,
             },
             'user_capabilities': user_capabilities,
-            'created_by': {
-                'id': template.created_by_id,
-                'username': template.created_by.username,
-            }
-            if template.created_by_id
-            else None,
-            'modified_by': {
-                'id': template.modified_by_id,
-                'username': template.modified_by.username,
-            }
-            if template.modified_by_id
-            else None,
+            'created_by': (
+                {
+                    'id': template.created_by_id,
+                    'username': template.created_by.username,
+                }
+                if template.created_by_id
+                else None
+            ),
+            'modified_by': (
+                {
+                    'id': template.modified_by_id,
+                    'username': template.modified_by.username,
+                }
+                if template.modified_by_id
+                else None
+            ),
         },
     }
 
@@ -1343,7 +1351,8 @@ class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
         build = _create_quay_image_build_from_plan(plan, template.runtime, template=template, unified_job=job)
         job.signal_start()
         headers = {'Location': job.get_absolute_url(request)}
-        return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED, headers=headers)
+        serializer = serializers.QuayImageBuildJobSerializer(job, context={'request': request})
+        return Response(serializer.data, status=http_status.HTTP_202_ACCEPTED, headers=headers)
 
 
 class QuayImageBuildTemplateJobsList(SubListAPIView):

@@ -18,6 +18,7 @@ from awx.main.utils import common
 from awx.api.validators import HostnameRegexValidator
 
 from awx.main.models import Job, AdHocCommand, InventoryUpdate, ProjectUpdate, SystemJob, WorkflowJob, Inventory, JobTemplate, UnifiedJobTemplate, UnifiedJob
+from awx.main.models.quay import QuayImageBuildJob, QuayImageBuildTemplate
 
 from django.core.exceptions import ValidationError
 from django.utils.regex_helper import _lazy_re_compile
@@ -101,6 +102,8 @@ TEST_MODELS = [
     (UnifiedJob, 'unified_job'),
     (Inventory, 'inventory'),
     (JobTemplate, 'job_template'),
+    (QuayImageBuildJob, 'quay_image_build_job'),
+    (QuayImageBuildTemplate, 'quay_image_build_template'),
     (UnifiedJobTemplate, 'unified_job_template'),
 ]
 
@@ -127,7 +130,7 @@ def test_is_testing():
 
 @pytest.mark.parametrize("model_type,model_class", [(name, cls) for cls, name in TEST_MODELS])
 def test_get_capacity_type(model_type, model_class):
-    if model_type in ('job', 'ad_hoc_command', 'inventory_update', 'job_template'):
+    if model_type in ('job', 'ad_hoc_command', 'inventory_update', 'job_template', 'quay_image_build_job', 'quay_image_build_template'):
         expectation = 'execution'
     elif model_type in ('project_update', 'system_job'):
         expectation = 'control'

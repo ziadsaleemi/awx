@@ -580,7 +580,17 @@ def get_model_for_type(type_name):
 def get_capacity_type(uj):
     '''Used for UnifiedJob.capacity_type property, static method will work for partial objects'''
     model_name = uj._meta.concrete_model._meta.model_name
-    if model_name in ('job', 'inventoryupdate', 'adhoccommand', 'jobtemplate', 'inventorysource', 'terraformjob', 'terraformjobtemplate'):
+    if model_name in (
+        'job',
+        'inventoryupdate',
+        'adhoccommand',
+        'jobtemplate',
+        'inventorysource',
+        'terraformjob',
+        'terraformjobtemplate',
+        'quayimagebuildjob',
+        'quayimagebuildtemplate',
+    ):
         return 'execution'
     elif model_name == 'workflowjob':
         return None
