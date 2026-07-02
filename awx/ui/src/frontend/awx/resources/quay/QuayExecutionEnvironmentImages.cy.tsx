@@ -129,11 +129,60 @@ const tags = {
   ],
 };
 
+const namespaces = {
+  count: 1,
+  next: null,
+  previous: null,
+  source: 'quay',
+  resource: 'namespaces',
+  controller_error: '',
+  results: [{ id: 'awx', name: 'awx', namespace: 'awx', namespace_kind: 'organization' }],
+};
+
+const repositories = {
+  count: 2,
+  next: null,
+  previous: null,
+  source: 'quay',
+  resource: 'repositories',
+  namespace: 'awx',
+  controller_error: '',
+  results: [
+    { id: 1, name: 'platform-ee', namespace: 'awx' },
+    { id: 2, name: 'custom-ee', namespace: 'awx' },
+  ],
+};
+
+const definitionFiles = {
+  count: 2,
+  next: null,
+  previous: null,
+  source: 'awx_project',
+  resource: 'execution_environment_definition_files',
+  project: {
+    id: 7,
+    name: 'Execution Environment Project',
+    scm_type: 'git',
+    scm_revision: 'abc123',
+  },
+  results: [
+    { id: 1, name: 'ee/execution-environment.yml', path: 'ee/execution-environment.yml' },
+    { id: 2, name: 'execution-environment.yml', path: 'execution-environment.yml' },
+  ],
+};
+
 describe('QuayExecutionEnvironmentImages', () => {
   it('saves and launches reusable EE build templates', () => {
     cy.viewport(1280, 800);
     cy.intercept('GET', awxAPI`/quay/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/projects/`}*`, projects).as('projects');
+    cy.intercept('GET', awxAPI`/quay/namespaces/`, namespaces).as('namespaces');
+    cy.intercept('GET', `${awxAPI`/quay/repositories/`}*`, repositories).as('repositories');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/quay/execution-environment-images/definition-files/`}*`,
+      definitionFiles
+    ).as('definitionFiles');
     cy.intercept('GET', `${awxAPI`/quay/execution-environment-images/templates/`}*`, {
       count: 1,
       next: null,
@@ -322,7 +371,11 @@ describe('QuayExecutionEnvironmentImages', () => {
     cy.contains('Jobs').click();
 
     cy.contains('Edit template').click();
-    cy.get('#quay-ee-image-tag').clear().type('v2');
+    cy.wait(['@namespaces', '@repositories', '@definitionFiles']);
+    cy.get('#namespace').should('have.value', 'awx');
+    cy.get('#repository').should('have.value', 'platform-ee');
+    cy.get('#definition_file').should('have.value', 'ee/execution-environment.yml');
+    cy.get('#tag').clear().type('v2');
     cy.contains('button', 'Save template').click();
     cy.wait('@updateTemplate').its('request.body').should('include', {
       name: 'Platform EE',
@@ -349,12 +402,13 @@ describe('QuayExecutionEnvironmentImages', () => {
     cy.contains('Back to Templates').click();
     cy.contains('[data-cy="page-title"]', 'EE Build Templates').should('be.visible');
     cy.contains('button', 'Create template').click();
-    cy.contains('[data-cy="page-title"]', 'Create EE build template').should('be.visible');
-    cy.get('#quay-ee-template-name').type('Custom EE');
-    cy.get('#quay-ee-repository').clear().type('custom-ee');
-    cy.get('#quay-ee-image-tag').clear().type('v1');
-    cy.get('#quay-ee-definition-file').clear().type('ee/execution-environment.yml');
-    cy.get('#quay-ee-context').clear().type('ee');
+    cy.contains('[data-cy="page-title"]', 'Create EE Build Template').should('be.visible');
+    cy.wait(['@namespaces', '@repositories', '@definitionFiles']);
+    cy.get('#name').type('Custom EE');
+    cy.get('#repository').select('custom-ee');
+    cy.get('#tag').clear().type('v1');
+    cy.get('#definition_file').select('ee/execution-environment.yml');
+    cy.get('#context').clear().type('ee');
     cy.contains('button', 'Create template').click();
     cy.wait('@saveTemplate').its('request.body').should('deep.equal', {
       name: 'Custom EE',

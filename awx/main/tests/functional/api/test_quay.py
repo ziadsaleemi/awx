@@ -130,6 +130,49 @@ def test_quay_api_token_plan_requires_quay_management_permission(get, rando):
     QUAY_NAMESPACE='awx',
     QUAY_API_TOKEN='quay-token',
 )
+def test_quay_namespaces_list_reads_user_and_organizations(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.quay.requests.get',
+        return_value=quay_response(
+            mocker,
+            {
+                'username': 'admin',
+                'organizations': [
+                    {'name': 'platform'},
+                    {'namespace': 'automation'},
+                ],
+            },
+        ),
+    )
+
+    response = get(reverse('api:quay_namespaces_list'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'quay'
+    assert response.data['resource'] == 'namespaces'
+    assert response.data['controller_error'] == ''
+    assert [namespace['name'] for namespace in response.data['results']] == ['awx', 'admin', 'platform', 'automation']
+    assert [namespace['namespace_kind'] for namespace in response.data['results']] == ['namespace', 'user', 'organization', 'organization']
+    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/user/'
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer quay-token'
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_QUAY_ENABLED=False, QUAY_REGISTRY_URL='https://quay.example.test')
+def test_quay_namespaces_list_reports_module_disabled(get, admin_user):
+    response = get(reverse('api:quay_namespaces_list'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'module_disabled'
+    assert response.data['resource'] == 'namespaces'
+    assert response.data['count'] == 0
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
 def test_quay_repositories_list_normalizes_repository_payload(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.quay.requests.get',
@@ -488,6 +531,37 @@ def test_quay_robot_create_delete_and_regenerate_call_quay_api(post, admin_user,
 
     assert response.data['action'] == 'regenerate_robot_token'
     assert post_mock.call_args.args[0] == 'https://quay.example.test/api/v1/organization/awx/robots/builder/regenerate'
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_definition_files_list_reads_project_checkout(get, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'ee-project'
+    nested_dir = project_root / 'nested'
+    hidden_dir = project_root / '.hidden'
+    nested_dir.mkdir(parents=True)
+    hidden_dir.mkdir()
+    (project_root / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    (nested_dir / 'custom-ee.yaml').write_text('version: 3\ndependencies:\n  python: requirements.txt\n', encoding='utf-8')
+    (project_root / 'playbook.yml').write_text('- hosts: all\n', encoding='utf-8')
+    (hidden_dir / 'ignored.yml').write_text('version: 3\n', encoding='utf-8')
+    (project_root / 'README.md').write_text('# ignored\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project', scm_revision='abc123')
+
+    with override_settings(PROJECTS_ROOT=str(tmp_path)):
+        response = get(
+            reverse('api:quay_execution_environment_definition_files') + f'?project_id={project.pk}',
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['source'] == 'awx_project'
+    assert response.data['resource'] == 'execution_environment_definition_files'
+    assert response.data['project']['id'] == project.pk
+    assert response.data['project']['scm_revision'] == 'abc123'
+    assert [definition_file['path'] for definition_file in response.data['results']] == [
+        'execution-environment.yml',
+        'nested/custom-ee.yaml',
+    ]
 
 
 @pytest.mark.django_db

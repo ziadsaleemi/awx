@@ -3,8 +3,10 @@
 
 import hashlib
 import shlex
+from pathlib import Path
 from urllib.parse import urlparse
 
+import yaml
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
@@ -55,6 +57,17 @@ QUAY_REPOSITORY_VISIBILITIES = ('public', 'private')
 QUAY_REPOSITORY_ROLES = ('read', 'write', 'admin')
 QUAY_ROBOT_NAMESPACE_KINDS = ('user', 'organization')
 QUAY_STATUS_CACHE_TIMEOUT = 15
+QUAY_DEFINITION_FILE_SUFFIXES = ('.yml', '.yaml')
+QUAY_DEFINITION_FILE_NAMES = ('execution-environment.yml', 'execution-environment.yaml')
+QUAY_DEFINITION_FILE_KEYS = {
+    'additional_build_files',
+    'additional_build_steps',
+    'build_arg_defaults',
+    'dependencies',
+    'images',
+    'options',
+}
+QUAY_DEFINITION_FILE_MAX_RESULTS = 200
 
 
 def _quay_status_cache_key(client, server_url, namespace):
@@ -99,6 +112,41 @@ def _quay_error_response(exc):
         http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_502_BAD_GATEWAY
     )
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
+
+
+def _namespace_result(name, namespace_kind='namespace', source='quay'):
+    name = str(name or '').strip().strip('/')
+    if not name:
+        return None
+    return {
+        'id': name,
+        '_awx_key': name,
+        'name': name,
+        'namespace': name,
+        'namespace_kind': namespace_kind,
+        'source': source,
+    }
+
+
+def _definition_file_result(relative_path, index):
+    return {
+        'id': index,
+        '_awx_key': relative_path,
+        'name': relative_path,
+        'path': relative_path,
+    }
+
+
+def _looks_like_execution_environment_definition(path):
+    if path.name.lower() in QUAY_DEFINITION_FILE_NAMES:
+        return True
+    try:
+        document = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return False
+    if not isinstance(document, dict) or 'version' not in document:
+        return False
+    return bool(QUAY_DEFINITION_FILE_KEYS.intersection(document.keys()))
 
 
 def _validate_repository_name(value):
@@ -810,6 +858,68 @@ class QuayRepositoryDeleteView(APIView):
         return Response(_repository_action_response('delete', namespace, repository, result))
 
 
+class QuayNamespacesListView(APIView):
+    name = _('Project Quay Namespaces')
+    resource_purpose = 'project quay user and organization namespaces'
+    permission_classes = (IsAuthenticated, QuayViewPermission)
+
+    def get(self, request, format=None):
+        if not module_enabled():
+            return Response(_empty_resource_response('namespaces', 'module_disabled', _('Project Quay module is disabled.')))
+        if connection_status() != 'configured':
+            return Response(_empty_resource_response('namespaces', 'not_configured', _('Project Quay registry URL is not configured.')))
+
+        client = QuayClient()
+        results = []
+        seen = set()
+
+        def add_namespace(name, namespace_kind='namespace', source='quay'):
+            result = _namespace_result(name, namespace_kind=namespace_kind, source=source)
+            if result and result['name'] not in seen:
+                seen.add(result['name'])
+                results.append(result)
+
+        add_namespace(configured_namespace(), source='settings')
+
+        if client.auth_configured:
+            try:
+                user_payload = client.user()
+            except QuayControllerError as exc:
+                response = normalize_quay_list(results, ['results'])
+                response.update(
+                    {
+                        'source': 'quay',
+                        'resource': 'namespaces',
+                        'controller_error': str(exc),
+                    }
+                )
+                return Response(response)
+
+            add_namespace(user_payload.get('username'), namespace_kind='user')
+            organizations = user_payload.get('organizations') if isinstance(user_payload, dict) else []
+            if isinstance(organizations, dict):
+                organizations = list(organizations.values())
+            if isinstance(organizations, list):
+                for organization in organizations:
+                    if isinstance(organization, dict):
+                        add_namespace(
+                            organization.get('name') or organization.get('namespace') or organization.get('orgname'),
+                            namespace_kind='organization',
+                        )
+                    else:
+                        add_namespace(organization, namespace_kind='organization')
+
+        response = normalize_quay_list(results, ['results'])
+        response.update(
+            {
+                'source': 'quay',
+                'resource': 'namespaces',
+                'controller_error': '',
+            }
+        )
+        return Response(response)
+
+
 class QuayRepositoriesListView(APIView):
     name = _('Project Quay Repositories')
     resource_purpose = 'project quay repositories'
@@ -840,6 +950,60 @@ class QuayRepositoriesListView(APIView):
         response['namespace'] = namespace
         response['controller_error'] = ''
         return Response(response)
+
+
+class QuayExecutionEnvironmentDefinitionFilesView(APIView):
+    name = _('Project Quay Execution Environment Definition Files')
+    resource_purpose = 'execution environment definition files in an AWX Project checkout'
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, format=None):
+        project, error = _project_for_build_plan(request.user, request.query_params.get('project_id') or request.query_params.get('project'))
+        if error:
+            return Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        try:
+            root = Path(project.get_project_path()).resolve(strict=True)
+        except OSError as exc:
+            return Response(
+                {'detail': _('Could not read AWX Project checkout: %(error)s') % {'error': exc}, 'status': 'bad_request'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        files = []
+        for candidate in sorted(root.rglob('*')):
+            if len(files) >= QUAY_DEFINITION_FILE_MAX_RESULTS:
+                break
+            try:
+                resolved = candidate.resolve(strict=True)
+                relative = resolved.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if not resolved.is_file() or resolved.suffix.lower() not in QUAY_DEFINITION_FILE_SUFFIXES:
+                continue
+            if any(part.startswith('.') for part in relative.parts):
+                continue
+            if not _looks_like_execution_environment_definition(resolved):
+                continue
+            files.append(str(relative).replace('\\', '/'))
+
+        files = sorted(files, key=lambda path: (path not in QUAY_DEFINITION_FILE_NAMES, path.lower()))
+        return Response(
+            {
+                'count': len(files),
+                'next': None,
+                'previous': None,
+                'source': 'awx_project',
+                'resource': 'execution_environment_definition_files',
+                'project': {
+                    'id': project.pk,
+                    'name': project.name,
+                    'scm_type': project.scm_type or '',
+                    'scm_revision': project.scm_revision or '',
+                },
+                'results': [_definition_file_result(path, index + 1) for index, path in enumerate(files)],
+            }
+        )
 
 
 class QuayTagsListView(APIView):

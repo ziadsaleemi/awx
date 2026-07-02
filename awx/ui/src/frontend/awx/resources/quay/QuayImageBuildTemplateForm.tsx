@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useRef } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import {
@@ -12,6 +14,7 @@ import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFor
 import { requestPatch, postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxPageForm } from '../../common/AwxPageForm';
+import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { Project } from '../../interfaces/Project';
@@ -34,6 +37,22 @@ interface QuayImageBuildTemplateFormValues {
   context: string;
 }
 
+interface QuayNamespaceOption {
+  name: string;
+  namespace: string;
+  namespace_kind?: string;
+}
+
+interface QuayRepositoryOption {
+  name: string;
+  namespace?: string;
+}
+
+interface QuayDefinitionFileOption {
+  name: string;
+  path: string;
+}
+
 function getTemplateProject(template?: QuayImageBuildTemplate) {
   if (!template) return null;
   if (template.summary_fields?.project) return template.summary_fields.project as Project;
@@ -50,7 +69,7 @@ function defaultValues(template?: QuayImageBuildTemplate): QuayImageBuildTemplat
     repository: template?.repository ?? '',
     tag: template?.tag ?? 'latest',
     runtime: template?.runtime ?? 'podman',
-    definition_file: template?.definition_file ?? 'execution-environment.yml',
+    definition_file: template?.definition_file ?? '',
     context: template?.context ?? template?.context_path ?? '.',
   };
 }
@@ -144,10 +163,90 @@ export function EditQuayImageBuildTemplate() {
 
 function QuayImageBuildTemplateFormInputs() {
   const { t } = useTranslation();
+  const { resetField, setValue } = useFormContext<QuayImageBuildTemplateFormValues>();
+  const namespace = useWatch<QuayImageBuildTemplateFormValues, 'namespace'>({ name: 'namespace' });
+  const repository = useWatch<QuayImageBuildTemplateFormValues, 'repository'>({
+    name: 'repository',
+  });
+  const definitionFile = useWatch<QuayImageBuildTemplateFormValues, 'definition_file'>({
+    name: 'definition_file',
+  });
+  const project = useWatch<QuayImageBuildTemplateFormValues, 'project'>({ name: 'project' });
+  const projectId = project?.id;
+  const previousNamespace = useRef(namespace);
+  const previousProjectId = useRef(projectId);
+  const { data: namespaces, isLoading: isLoadingNamespaces } = useGet<
+    AwxItemsResponse<QuayNamespaceOption>
+  >(awxAPI`/quay/namespaces/`);
+  const { data: repositories, isLoading: isLoadingRepositories } = useGet<
+    AwxItemsResponse<QuayRepositoryOption>
+  >(namespace ? awxAPI`/quay/repositories/` : undefined, { namespace, page_size: 100 });
+  const { data: definitionFiles, isLoading: isLoadingDefinitionFiles } = useGet<
+    AwxItemsResponse<QuayDefinitionFileOption>
+  >(projectId ? awxAPI`/quay/execution-environment-images/definition-files/` : undefined, {
+    project_id: projectId ?? '',
+  });
+
+  const namespaceOptions = useMemo(
+    () =>
+      namespaces?.results.map((namespace) => ({
+        value: namespace.name || namespace.namespace,
+        label: namespace.name || namespace.namespace,
+      })) ?? [],
+    [namespaces?.results]
+  );
+  const repositoryOptions = useMemo(
+    () =>
+      repositories?.results.map((repository) => ({
+        value: repository.name,
+        label: repository.name,
+      })) ?? [],
+    [repositories?.results]
+  );
+  const definitionFileOptions = useMemo(
+    () =>
+      definitionFiles?.results.map((file) => ({
+        value: file.path || file.name,
+        label: file.path || file.name,
+      })) ?? [],
+    [definitionFiles?.results]
+  );
   const runtimeOptions = [
     { value: 'podman', label: t('Podman') },
     { value: 'docker', label: t('Docker') },
   ];
+
+  useEffect(() => {
+    if (previousNamespace.current !== namespace) {
+      resetField('repository', { defaultValue: '' });
+      previousNamespace.current = namespace;
+    }
+  }, [namespace, resetField]);
+
+  useEffect(() => {
+    if (previousProjectId.current !== projectId) {
+      resetField('definition_file', { defaultValue: '' });
+      previousProjectId.current = projectId;
+    }
+  }, [projectId, resetField]);
+
+  useEffect(() => {
+    if (!namespace && namespaceOptions.length === 1) {
+      setValue('namespace', namespaceOptions[0].value);
+    }
+  }, [namespace, namespaceOptions, setValue]);
+
+  useEffect(() => {
+    if (!repository && repositoryOptions.length === 1) {
+      setValue('repository', repositoryOptions[0].value);
+    }
+  }, [repository, repositoryOptions, setValue]);
+
+  useEffect(() => {
+    if (!definitionFile && definitionFileOptions.length === 1) {
+      setValue('definition_file', definitionFileOptions[0].value);
+    }
+  }, [definitionFile, definitionFileOptions, setValue]);
 
   return (
     <>
@@ -164,17 +263,32 @@ function QuayImageBuildTemplateFormInputs() {
         placeholder={t('Add a description for this template')}
       />
       <PageFormProjectSelect<QuayImageBuildTemplateFormValues> name="project" isRequired />
-      <PageFormTextInput<QuayImageBuildTemplateFormValues>
+      <PageFormSelect<QuayImageBuildTemplateFormValues>
         name="namespace"
         label={t('Quay namespace')}
-        isRequired
-        placeholder={t('Quay organization or user')}
+        isRequired={Boolean(namespace) || namespaceOptions.length !== 1}
+        options={namespaceOptions}
+        placeholderText={
+          isLoadingNamespaces ? t('Loading Quay namespaces...') : t('Select namespace')
+        }
+        helperText={t(
+          'Namespaces are loaded from the configured Project Quay user and organizations.'
+        )}
       />
-      <PageFormTextInput<QuayImageBuildTemplateFormValues>
+      <PageFormSelect<QuayImageBuildTemplateFormValues>
         name="repository"
         label={t('Repository')}
-        isRequired
-        placeholder={t('Repository name')}
+        isRequired={Boolean(repository) || repositoryOptions.length !== 1}
+        options={repositoryOptions}
+        placeholderText={
+          !namespace
+            ? t('Select a namespace first')
+            : isLoadingRepositories
+              ? t('Loading repositories...')
+              : t('Select repository')
+        }
+        helperText={t('Repositories are loaded from the selected Project Quay namespace.')}
+        isDisabled={!namespace}
       />
       <PageFormTextInput<QuayImageBuildTemplateFormValues>
         name="tag"
@@ -188,15 +302,24 @@ function QuayImageBuildTemplateFormInputs() {
         options={runtimeOptions}
         isRequired
       />
-      <PageFormTextInput<QuayImageBuildTemplateFormValues>
+      <PageFormSelect<QuayImageBuildTemplateFormValues>
         name="definition_file"
         label={t('Definition file')}
         labelHelpTitle={t('Definition file')}
         labelHelp={t(
           'Path inside the AWX Project checkout to the execution environment definition file.'
         )}
-        isRequired
-        placeholder={t('execution-environment.yml')}
+        isRequired={Boolean(definitionFile) || definitionFileOptions.length !== 1}
+        options={definitionFileOptions}
+        placeholderText={
+          !projectId
+            ? t('Select a project first')
+            : isLoadingDefinitionFiles
+              ? t('Loading definition files...')
+              : t('Select definition file')
+        }
+        helperText={t('Definition files are discovered from YAML files in the selected Project.')}
+        isDisabled={!projectId}
       />
       <PageFormTextInput<QuayImageBuildTemplateFormValues>
         name="context"

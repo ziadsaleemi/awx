@@ -159,6 +159,22 @@ interface QuayImageTag {
   end_ts?: number;
 }
 
+interface QuayNamespaceOption {
+  name: string;
+  namespace: string;
+  namespace_kind?: string;
+}
+
+interface QuayRepositoryOption {
+  name: string;
+  namespace?: string;
+}
+
+interface QuayDefinitionFileOption {
+  name: string;
+  path: string;
+}
+
 interface AwxProject {
   id: number;
   name: string;
@@ -285,6 +301,28 @@ export function QuayExecutionEnvironmentImages() {
     [editingTemplateId, selectedTemplateSnapshot, templateItems]
   );
   const effectiveNamespace = namespace.trim() || status.data?.namespace || '';
+  const shouldLoadFormChoices = mode === 'form';
+  const namespaces = useGet<AwxItemsResponse<QuayNamespaceOption>>(
+    configured && shouldLoadFormChoices ? awxAPI`/quay/namespaces/` : undefined,
+    undefined,
+    { revalidateOnFocus: false }
+  );
+  const repositories = useGet<AwxItemsResponse<QuayRepositoryOption>>(
+    configured && shouldLoadFormChoices && effectiveNamespace
+      ? awxAPI`/quay/repositories/`
+      : undefined,
+    configured && shouldLoadFormChoices && effectiveNamespace
+      ? { namespace: effectiveNamespace, page_size: 100, order_by: 'name' }
+      : undefined,
+    { revalidateOnFocus: false }
+  );
+  const definitionFiles = useGet<AwxItemsResponse<QuayDefinitionFileOption>>(
+    shouldLoadFormChoices && selectedProjectId
+      ? awxAPI`/quay/execution-environment-images/definition-files/`
+      : undefined,
+    shouldLoadFormChoices && selectedProjectId ? { project_id: selectedProjectId } : undefined,
+    { revalidateOnFocus: false }
+  );
   const tagNamespace = selectedTemplate?.namespace || effectiveNamespace;
   const tagRepository = selectedTemplate?.repository || repository.trim();
   const canLoadTags = Boolean(status.data?.auth_configured);
@@ -321,10 +359,10 @@ export function QuayExecutionEnvironmentImages() {
     setDescription('');
     setSelectedProjectId(projectOptions.length ? String(projectOptions[0].id) : '');
     setNamespace(status.data?.namespace || '');
-    setRepository('custom-ee');
+    setRepository('');
     setTag('latest');
     setRuntime('podman');
-    setDefinitionFile('execution-environment.yml');
+    setDefinitionFile('');
     setContextPath('.');
   };
 
@@ -384,15 +422,21 @@ export function QuayExecutionEnvironmentImages() {
     repository: repository.trim(),
     tag: tag.trim() || 'latest',
     runtime,
-    definition_file: definitionFile.trim() || 'execution-environment.yml',
+    definition_file: definitionFile.trim(),
     context: contextPath.trim() || '.',
   });
 
   const saveTemplate = async () => {
-    if (!name.trim() || !selectedProjectId || !effectiveNamespace || !repository.trim()) {
+    if (
+      !name.trim() ||
+      !selectedProjectId ||
+      !effectiveNamespace ||
+      !repository.trim() ||
+      !definitionFile.trim()
+    ) {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Name, project, namespace, and repository are required.'),
+        title: t('Name, project, namespace, repository, and definition file are required.'),
       });
       return;
     }
@@ -532,7 +576,7 @@ export function QuayExecutionEnvironmentImages() {
     mode === 'form'
       ? editingTemplate
         ? t('Edit {{name}}', { name: editingTemplate.name })
-        : t('Create EE build template')
+        : t('Create EE Build Template')
       : mode === 'details' && selectedTemplate
         ? selectedTemplate.name
         : t('EE Build Templates');
@@ -609,6 +653,9 @@ export function QuayExecutionEnvironmentImages() {
           configured={configured}
           projects={projects}
           projectOptions={projectOptions}
+          namespaces={namespaces}
+          repositories={repositories}
+          definitionFiles={definitionFiles}
           status={status}
           name={name}
           setName={setName}
@@ -863,6 +910,9 @@ function FormView(props: {
   configured: boolean;
   projects: ReturnType<typeof useGet<AwxItemsResponse<AwxProject>>>;
   projectOptions: AwxProject[];
+  namespaces: ReturnType<typeof useGet<AwxItemsResponse<QuayNamespaceOption>>>;
+  repositories: ReturnType<typeof useGet<AwxItemsResponse<QuayRepositoryOption>>>;
+  definitionFiles: ReturnType<typeof useGet<AwxItemsResponse<QuayDefinitionFileOption>>>;
   status: ReturnType<typeof useGet<QuayStatus>>;
   name: string;
   setName: (value: string) => void;
@@ -888,30 +938,52 @@ function FormView(props: {
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const namespaceOptions = useMemo(() => {
+    const items = props.namespaces.data?.results ?? [];
+    const options = items.map((item) => item.name || item.namespace).filter(Boolean);
+    if (props.namespace && !options.includes(props.namespace)) options.unshift(props.namespace);
+    return options;
+  }, [props.namespace, props.namespaces.data?.results]);
+  const repositoryOptions = useMemo(() => {
+    const options = (props.repositories.data?.results ?? [])
+      .map((item) => item.name)
+      .filter(Boolean);
+    if (props.repository && !options.includes(props.repository)) options.unshift(props.repository);
+    return options;
+  }, [props.repositories.data?.results, props.repository]);
+  const definitionFileOptions = useMemo(() => {
+    const options = (props.definitionFiles.data?.results ?? [])
+      .map((item) => item.path || item.name)
+      .filter(Boolean);
+    if (props.definitionFile && !options.includes(props.definitionFile)) {
+      options.unshift(props.definitionFile);
+    }
+    return options;
+  }, [props.definitionFile, props.definitionFiles.data?.results]);
+
   return (
     <PageSection>
       <StackAlert status={props.status} />
       <div style={{ maxWidth: 960 }}>
         <Form>
-          <FormGroup label={t('Name')} fieldId="quay-ee-template-name" isRequired>
-            <TextInput
-              id="quay-ee-template-name"
-              value={props.name}
-              onChange={(_, value) => props.setName(value)}
-            />
+          <FormGroup label={t('Name')} fieldId="name" isRequired>
+            <TextInput id="name" value={props.name} onChange={(_, value) => props.setName(value)} />
           </FormGroup>
-          <FormGroup label={t('Description')} fieldId="quay-ee-template-description">
+          <FormGroup label={t('Description')} fieldId="description">
             <TextInput
-              id="quay-ee-template-description"
+              id="description"
               value={props.description}
               onChange={(_, value) => props.setDescription(value)}
             />
           </FormGroup>
-          <FormGroup label={t('AWX Project')} fieldId="quay-ee-project" isRequired>
+          <FormGroup label={t('AWX Project')} fieldId="project" isRequired>
             <FormSelect
-              id="quay-ee-project"
+              id="project"
               value={props.selectedProjectId}
-              onChange={(_, value) => props.setSelectedProjectId(value)}
+              onChange={(_, value) => {
+                props.setSelectedProjectId(value);
+                props.setDefinitionFile('');
+              }}
             >
               <FormSelectOption
                 value=""
@@ -932,30 +1004,60 @@ function FormView(props: {
               ))}
             </FormSelect>
           </FormGroup>
-          <FormGroup label={t('Quay namespace')} fieldId="quay-ee-namespace" isRequired>
-            <TextInput
-              id="quay-ee-namespace"
+          <FormGroup label={t('Quay namespace')} fieldId="namespace" isRequired>
+            <FormSelect
+              id="namespace"
               value={props.namespace}
-              onChange={(_, value) => props.setNamespace(value)}
-            />
+              onChange={(_, value) => {
+                props.setNamespace(value);
+                props.setRepository('');
+              }}
+            >
+              <FormSelectOption
+                value=""
+                label={
+                  props.namespaces.isLoading
+                    ? t('Loading Quay namespaces...')
+                    : namespaceOptions.length
+                      ? t('Select namespace')
+                      : t('No Quay namespaces found')
+                }
+              />
+              {namespaceOptions.map((namespace) => (
+                <FormSelectOption key={namespace} value={namespace} label={namespace} />
+              ))}
+            </FormSelect>
           </FormGroup>
-          <FormGroup label={t('Repository')} fieldId="quay-ee-repository" isRequired>
-            <TextInput
-              id="quay-ee-repository"
+          <FormGroup label={t('Repository')} fieldId="repository" isRequired>
+            <FormSelect
+              id="repository"
               value={props.repository}
               onChange={(_, value) => props.setRepository(value)}
-            />
+              isDisabled={!props.namespace}
+            >
+              <FormSelectOption
+                value=""
+                label={
+                  !props.namespace
+                    ? t('Select a namespace first')
+                    : props.repositories.isLoading
+                      ? t('Loading repositories...')
+                      : repositoryOptions.length
+                        ? t('Select repository')
+                        : t('No repositories found')
+                }
+              />
+              {repositoryOptions.map((repository) => (
+                <FormSelectOption key={repository} value={repository} label={repository} />
+              ))}
+            </FormSelect>
           </FormGroup>
-          <FormGroup label={t('Tag')} fieldId="quay-ee-image-tag" isRequired>
-            <TextInput
-              id="quay-ee-image-tag"
-              value={props.tag}
-              onChange={(_, value) => props.setTag(value)}
-            />
+          <FormGroup label={t('Tag')} fieldId="tag" isRequired>
+            <TextInput id="tag" value={props.tag} onChange={(_, value) => props.setTag(value)} />
           </FormGroup>
-          <FormGroup label={t('Container runtime')} fieldId="quay-ee-runtime">
+          <FormGroup label={t('Container runtime')} fieldId="runtime">
             <FormSelect
-              id="quay-ee-runtime"
+              id="runtime"
               value={props.runtime}
               onChange={(_, value) => props.setRuntime(value as ContainerRuntime)}
             >
@@ -963,16 +1065,37 @@ function FormView(props: {
               <FormSelectOption value="docker" label={t('Docker')} />
             </FormSelect>
           </FormGroup>
-          <FormGroup label={t('Definition file')} fieldId="quay-ee-definition-file" isRequired>
-            <TextInput
-              id="quay-ee-definition-file"
+          <FormGroup label={t('Definition file')} fieldId="definition_file" isRequired>
+            <FormSelect
+              id="definition_file"
               value={props.definitionFile}
               onChange={(_, value) => props.setDefinitionFile(value)}
-            />
+              isDisabled={!props.selectedProjectId}
+            >
+              <FormSelectOption
+                value=""
+                label={
+                  !props.selectedProjectId
+                    ? t('Select a project first')
+                    : props.definitionFiles.isLoading
+                      ? t('Loading definition files...')
+                      : definitionFileOptions.length
+                        ? t('Select definition file')
+                        : t('No execution environment definition files found')
+                }
+              />
+              {definitionFileOptions.map((definitionFile) => (
+                <FormSelectOption
+                  key={definitionFile}
+                  value={definitionFile}
+                  label={definitionFile}
+                />
+              ))}
+            </FormSelect>
           </FormGroup>
-          <FormGroup label={t('Build context')} fieldId="quay-ee-context" isRequired>
+          <FormGroup label={t('Build context')} fieldId="context" isRequired>
             <TextInput
-              id="quay-ee-context"
+              id="context"
               value={props.contextPath}
               onChange={(_, value) => props.setContextPath(value)}
             />
@@ -987,7 +1110,8 @@ function FormView(props: {
                 !props.name.trim() ||
                 !props.selectedProjectId ||
                 !props.namespace ||
-                !props.repository.trim()
+                !props.repository.trim() ||
+                !props.definitionFile.trim()
               }
               onClick={props.onSubmit}
             >

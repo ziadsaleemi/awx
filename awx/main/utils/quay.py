@@ -114,6 +114,9 @@ class QuayClient:
     def get(self, path, params=None):
         return self.request('GET', path, params=params)
 
+    def user(self):
+        return self.get('/api/v1/user/')
+
     def post(self, path, json=None):
         return self.request('POST', path, json=json or {})
 

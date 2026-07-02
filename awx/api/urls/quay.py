@@ -8,6 +8,7 @@ from awx.api.views.quay import (
     QuayExecutionEnvironmentImageBuildTemplateDetailView,
     QuayExecutionEnvironmentImageBuildTemplateLaunchView,
     QuayExecutionEnvironmentImageBuildTemplatesView,
+    QuayExecutionEnvironmentDefinitionFilesView,
     QuayExecutionEnvironmentImageBuildDetailView,
     QuayExecutionEnvironmentImageBuildsView,
     QuayExecutionEnvironmentImageBuildPlanView,
@@ -20,6 +21,7 @@ from awx.api.views.quay import (
     QuayImageBuildTemplateNotificationTemplatesSuccessList,
     QuayImageBuildTemplateObjectRolesList,
     QuayImageBuildTemplateSchedulesList,
+    QuayNamespacesListView,
     QuayRepositoryPermissionsView,
     QuayRepositoryChangeVisibilityView,
     QuayRepositoryCreateView,
@@ -42,6 +44,7 @@ from awx.api.views.quay import (
 quay_urls = [
     re_path(r'^status/$', QuayStatusView.as_view(), name='quay_status'),
     re_path(r'^api-token-plan/$', QuayApiTokenPlanView.as_view(), name='quay_api_token_plan'),
+    re_path(r'^namespaces/$', QuayNamespacesListView.as_view(), name='quay_namespaces_list'),
     re_path(r'^repositories/$', QuayRepositoriesListView.as_view(), name='quay_repositories_list'),
     re_path(r'^repositories/create/$', QuayRepositoryCreateView.as_view(), name='quay_repository_create'),
     re_path(r'^repositories/update/$', QuayRepositoryUpdateView.as_view(), name='quay_repository_update'),
@@ -62,6 +65,11 @@ quay_urls = [
         r'^execution-environment-images/build-plan/$',
         QuayExecutionEnvironmentImageBuildPlanView.as_view(),
         name='quay_execution_environment_image_build_plan',
+    ),
+    re_path(
+        r'^execution-environment-images/definition-files/$',
+        QuayExecutionEnvironmentDefinitionFilesView.as_view(),
+        name='quay_execution_environment_definition_files',
     ),
     re_path(
         r'^execution-environment-images/templates/$',
