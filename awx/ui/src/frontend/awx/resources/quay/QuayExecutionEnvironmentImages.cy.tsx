@@ -59,7 +59,11 @@ const template = {
   modified: '2026-07-01T10:00:00Z',
   name: 'Platform EE',
   description: 'Base execution environment for platform jobs.',
-  project: { id: 7, name: 'Execution Environment Project' },
+  project: {
+    id: 7,
+    name: 'Execution Environment Project',
+    organization: { id: 1, name: 'Default' },
+  },
   namespace: 'awx',
   repository: 'platform-ee',
   repository_path: 'awx/platform-ee',
@@ -209,12 +213,21 @@ describe('QuayExecutionEnvironmentImages', () => {
     cy.wait('@tags');
 
     cy.contains('[data-cy="page-title"]', 'Platform EE').should('be.visible');
-    cy.contains('Back to EE Build Templates').should('be.visible');
+    cy.contains('Back to Templates').should('be.visible');
     cy.contains('Details').should('be.visible');
-    cy.contains('Builds').should('be.visible');
+    cy.contains('Team Access').should('be.visible');
+    cy.contains('User Access').should('be.visible');
+    cy.contains('Schedules').should('be.visible');
+    cy.contains('Jobs').should('be.visible');
+    cy.contains('Notifications').should('be.visible');
     cy.contains('Tags').should('be.visible');
+    cy.contains('Default').should('be.visible');
     cy.contains('Execution Environment Project').should('be.visible');
     cy.get('input[value="quay.example.test/awx/platform-ee:latest"]').should('exist');
+
+    cy.contains('Team Access').click();
+    cy.contains('Team Access requires native AWX template integration.').should('be.visible');
+    cy.contains('Jobs').click();
 
     cy.contains('Edit template').click();
     cy.get('#quay-ee-image-tag').clear().type('v2');
@@ -241,7 +254,7 @@ describe('QuayExecutionEnvironmentImages', () => {
       tag: 'latest',
     });
 
-    cy.contains('Back to EE Build Templates').click();
+    cy.contains('Back to Templates').click();
     cy.contains('[data-cy="page-title"]', 'EE Build Templates').should('be.visible');
     cy.contains('button', 'Create template').click();
     cy.contains('[data-cy="page-title"]', 'Create EE build template').should('be.visible');

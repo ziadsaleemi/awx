@@ -4,6 +4,7 @@ import {
   ActionGroup,
   Alert,
   Button,
+  ButtonVariant,
   ClipboardCopy,
   Form,
   FormGroup,
@@ -24,11 +25,12 @@ import {
 import {
   CaretLeftIcon,
   PencilAltIcon,
-  PlayIcon,
   PlusCircleIcon,
+  RocketIcon,
   SyncAltIcon,
   TrashIcon,
 } from '@patternfly/react-icons';
+import { DropdownPosition } from '@patternfly/react-core/deprecated';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
   DateTimeCell,
@@ -37,6 +39,7 @@ import {
   IToolbarFilter,
   PageActionSelection,
   PageActionType,
+  PageActions,
   PageDetail,
   PageDetails,
   PageHeader,
@@ -56,7 +59,14 @@ import { QuayStatus } from './QuayOverview';
 
 type ContainerRuntime = 'podman' | 'docker';
 type PageMode = 'list' | 'form' | 'details';
-type DetailsTabKey = 'details' | 'builds' | 'tags';
+type DetailsTabKey =
+  | 'details'
+  | 'team-access'
+  | 'user-access'
+  | 'schedules'
+  | 'jobs'
+  | 'notifications'
+  | 'tags';
 
 interface QuayBuildTemplatePayload {
   name: string;
@@ -117,6 +127,10 @@ interface QuayBuildTemplate {
   project: {
     id: number;
     name: string;
+    organization?: {
+      id: number;
+      name: string;
+    } | null;
   };
   namespace: string;
   repository: string;
@@ -312,7 +326,7 @@ export function QuayExecutionEnvironmentImages() {
     setSelectedTemplateId(template.id);
     setSelectedTemplateSnapshot(template);
     setActiveTab(tab);
-    if (tab === 'builds' && template.latest_build?.id) {
+    if (tab === 'jobs' && template.latest_build?.id) {
       setSelectedBuildId(template.latest_build.id);
       setSelectedBuildSnapshot(template.latest_build);
     }
@@ -393,7 +407,7 @@ export function QuayExecutionEnvironmentImages() {
       setSelectedBuildId(build.id);
       setSelectedBuildSnapshot(build);
       await Promise.all([view.refresh(), builds.refresh()]);
-      showDetails({ ...template, latest_build: build }, 'builds');
+      showDetails({ ...template, latest_build: build }, 'jobs');
       alertToaster.addAlert({
         variant: 'success',
         title: t('EE image build queued.'),
@@ -483,6 +497,7 @@ export function QuayExecutionEnvironmentImages() {
     onEdit: showEdit,
     onDelete: (template) => void deleteTemplate(template),
   });
+  const detailsActions = rowActions;
 
   const pageTitle =
     mode === 'form'
@@ -497,35 +512,32 @@ export function QuayExecutionEnvironmentImages() {
     <PageLayout>
       <PageHeader
         title={pageTitle}
+        titleHelpTitle={mode === 'list' ? t('EE Build Templates') : undefined}
+        titleHelp={
+          mode === 'list'
+            ? t(
+                'An EE build template is a reusable AWX Project-backed definition for building and pushing an execution environment image to Project Quay.'
+              )
+            : undefined
+        }
         description={
           mode === 'list'
-            ? t('Reusable AWX Project-backed execution environment image builds for Project Quay.')
+            ? t(
+                'An EE build template is a definition and set of parameters for building an AWX execution environment image.'
+              )
             : undefined
         }
         breadcrumbs={
-          mode === 'list' ? undefined : [{ label: t('EE Build Templates') }, { label: pageTitle }]
+          mode === 'list' ? undefined : [{ label: t('Templates') }, { label: pageTitle }]
         }
         headerActions={
           mode === 'details' && selectedTemplate ? (
             <>
-              <Button
-                variant="primary"
-                icon={<PlayIcon />}
-                isLoading={launchingTemplateId === selectedTemplate.id}
-                isDisabled={
-                  launchingTemplateId === selectedTemplate.id || !status.data?.push_configured
-                }
-                onClick={() => void launchTemplate(selectedTemplate)}
-              >
-                {t('Launch template')}
-              </Button>
-              <Button
-                variant="secondary"
-                icon={<PencilAltIcon />}
-                onClick={() => showEdit(selectedTemplate)}
-              >
-                {t('Edit template')}
-              </Button>
+              <PageActions<QuayBuildTemplate>
+                actions={detailsActions}
+                selectedItem={selectedTemplate}
+                position={DropdownPosition.right}
+              />
               <ModuleAIAssistantAction
                 module="quay"
                 page={t('Project Quay EE Build Template')}
@@ -646,25 +658,43 @@ function useQuayBuildTemplateColumns(
       {
         header: t('Name'),
         cell: (template) => (
-          <Button variant="link" isInline onClick={() => onDetails(template)}>
-            {template.name}
-          </Button>
+          <div>
+            <Button variant="link" isInline onClick={() => onDetails(template)}>
+              {template.name}
+            </Button>
+            {template.description ? (
+              <div style={{ color: 'var(--pf-v5-global--Color--200)', marginTop: 8 }}>
+                {template.description}
+              </div>
+            ) : null}
+          </div>
         ),
         card: 'name',
         list: 'name',
       },
       {
-        header: t('Source project'),
-        cell: (template) => <TextCell text={template.project.name || '-'} />,
+        header: t('Type'),
+        cell: () => <TextCell text={t('EE build template')} />,
       },
       {
-        header: t('Image'),
-        cell: (template) => <TextCell text={template.image || '-'} />,
-        list: 'description',
+        header: t('Organization'),
+        cell: (template) => <TextCell text={template.project.organization?.name || '-'} />,
       },
       {
         header: t('Last run'),
-        cell: (template) => <TextCell text={statusText(template.latest_build?.status)} />,
+        cell: (template) => (
+          <TextCell
+            text={
+              template.latest_build
+                ? `${statusText(template.latest_build.status)}${
+                    template.latest_build.finished
+                      ? ` - ${formatDate(template.latest_build.finished)}`
+                      : ''
+                  }`
+                : statusText()
+            }
+          />
+        ),
       },
       {
         header: t('Last modified'),
@@ -687,6 +717,7 @@ function useQuayBuildTemplateToolbarActions(props: {
         type: PageActionType.Button,
         selection: PageActionSelection.None,
         icon: PlusCircleIcon,
+        variant: ButtonVariant.primary,
         label: t('Create template'),
         isPinned: true,
         onClick: props.onCreate,
@@ -720,8 +751,10 @@ function useQuayBuildTemplateRowActions(props: {
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        icon: PlayIcon,
+        icon: RocketIcon,
         label: t('Launch template'),
+        variant: ButtonVariant.primary,
+        isPinned: true,
         onClick: props.onLaunch,
         isDisabled: (template) => {
           if (props.launchingTemplateId === template.id)
@@ -736,6 +769,7 @@ function useQuayBuildTemplateRowActions(props: {
         selection: PageActionSelection.Single,
         icon: PencilAltIcon,
         label: t('Edit template'),
+        isPinned: true,
         onClick: props.onEdit,
       },
       {
@@ -982,12 +1016,16 @@ function DetailsView(props: {
           title={
             <TabTitleText>
               <CaretLeftIcon />
-              <span style={{ marginLeft: 6 }}>{t('Back to EE Build Templates')}</span>
+              <span style={{ marginLeft: 6 }}>{t('Back to Templates')}</span>
             </TabTitleText>
           }
         />
         <Tab eventKey="details" title={<TabTitleText>{t('Details')}</TabTitleText>} />
-        <Tab eventKey="builds" title={<TabTitleText>{t('Builds')}</TabTitleText>} />
+        <Tab eventKey="team-access" title={<TabTitleText>{t('Team Access')}</TabTitleText>} />
+        <Tab eventKey="user-access" title={<TabTitleText>{t('User Access')}</TabTitleText>} />
+        <Tab eventKey="schedules" title={<TabTitleText>{t('Schedules')}</TabTitleText>} />
+        <Tab eventKey="jobs" title={<TabTitleText>{t('Jobs')}</TabTitleText>} />
+        <Tab eventKey="notifications" title={<TabTitleText>{t('Notifications')}</TabTitleText>} />
         <Tab eventKey="tags" title={<TabTitleText>{t('Tags')}</TabTitleText>} />
       </Tabs>
       <PageSection>
@@ -995,6 +1033,9 @@ function DetailsView(props: {
           <PageDetails>
             <PageDetail label={t('Name')}>{props.template.name}</PageDetail>
             <PageDetail label={t('Description')}>{props.template.description}</PageDetail>
+            <PageDetail label={t('Organization')}>
+              {props.template.project.organization?.name || '-'}
+            </PageDetail>
             <PageDetail label={t('AWX Project')}>{props.template.project.name || '-'}</PageDetail>
             <PageDetail label={t('Image')}>
               <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
@@ -1012,7 +1053,7 @@ function DetailsView(props: {
               {formatDate(props.template.modified)}
             </PageDetail>
           </PageDetails>
-        ) : props.activeTab === 'builds' ? (
+        ) : props.activeTab === 'jobs' ? (
           <BuildsOutput
             builds={props.builds}
             selectedBuildId={props.selectedBuildId}
@@ -1021,16 +1062,41 @@ function DetailsView(props: {
             setSelectedBuildSnapshot={props.setSelectedBuildSnapshot}
             onRefreshBuilds={props.onRefreshBuilds}
           />
-        ) : (
+        ) : props.activeTab === 'tags' ? (
           <TagsTable
             tags={props.tags}
             canLoadTags={props.canLoadTags}
             canManageTags={props.canManageTags}
             onDeleteTag={props.onDeleteTag}
           />
+        ) : (
+          <TemplateIntegrationPending tab={props.activeTab} />
         )}
       </PageSection>
     </>
+  );
+}
+
+function TemplateIntegrationPending(props: { tab: DetailsTabKey }) {
+  const { t } = useTranslation();
+  const tabName =
+    props.tab === 'team-access'
+      ? t('Team Access')
+      : props.tab === 'user-access'
+        ? t('User Access')
+        : props.tab === 'schedules'
+          ? t('Schedules')
+          : t('Notifications');
+  return (
+    <Alert
+      isInline
+      variant="info"
+      title={t('{{tabName}} requires native AWX template integration.', { tabName })}
+    >
+      {t(
+        'Project Quay EE build templates currently run through the Quay API facade. To make this tab fully functional, QuayImageBuildTemplate must expose AWX object roles and launch scheduling/notification relationships the same way Job Templates and Terraform Templates do. This gap is tracked in ENHANCEMENTS.md.'
+      )}
+    </Alert>
   );
 }
 

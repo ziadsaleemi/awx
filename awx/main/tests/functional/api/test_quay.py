@@ -650,6 +650,7 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
 
     assert create_response.data['name'] == 'Platform EE'
     assert create_response.data['project']['id'] == project.pk
+    assert create_response.data['project']['organization']['name'] == organization.name
     assert create_response.data['image'] == 'quay.example.test/awx/platform-ee:v1'
     assert create_response.data['launch_url'].endswith(f'/api/v2/quay/execution-environment-images/templates/{create_response.data["id"]}/launch/')
     assert list_response.data['count'] == 1

@@ -402,6 +402,12 @@ def _serialize_quay_image_build_template(template):
         'project': {
             'id': template.project_id,
             'name': template.project.name if template.project_id and template.project else '',
+            'organization': {
+                'id': template.project.organization_id,
+                'name': template.project.organization.name,
+            }
+            if template.project_id and template.project and template.project.organization_id
+            else None,
         },
         'namespace': template.namespace,
         'repository': template.repository,
@@ -1054,7 +1060,7 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
     def get(self, request, format=None):
         page = _parse_positive_int(request.query_params.get('page'), 1)
         page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
-        queryset = QuayImageBuildTemplate.objects.select_related('project', 'created_by').all()
+        queryset = QuayImageBuildTemplate.objects.select_related('project__organization', 'created_by').all()
         namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
         repository = str(request.query_params.get('repository') or '').strip().strip('/')
         search = str(request.query_params.get('search') or '').strip()
@@ -1142,7 +1148,7 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
     permission_classes = (IsAuthenticated, QuayManagePermission)
 
     def get_object(self, pk):
-        return QuayImageBuildTemplate.objects.select_related('project', 'created_by').filter(pk=pk).first()
+        return QuayImageBuildTemplate.objects.select_related('project__organization', 'created_by').filter(pk=pk).first()
 
     def get(self, request, pk, format=None):
         template = self.get_object(pk)
