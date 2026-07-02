@@ -2,7 +2,7 @@ import pytest
 from django.test import override_settings
 
 from awx.api.versioning import reverse
-from awx.main.models import Project
+from awx.main.models import Project, QuayImageBuildTemplate
 
 
 def quay_response(mocker, payload):
@@ -582,6 +582,128 @@ def test_quay_execution_environment_image_build_create_queues_dispatcher_task(po
     assert list_response.data['count'] == 1
     assert list_response.data['results'][0]['log'] == ''
     assert list_response.data['results'][0]['repository_path'] == 'awx/custom-ee'
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_image_build_template_crud_and_launch(post, get, patch, delete, admin_user, organization, tmp_path, mocker):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project', scm_revision='abc123')
+    task_delay = mocker.patch('awx.api.views.quay.run_quay_image_build.delay')
+    mocker.patch('awx.api.views.quay.transaction.on_commit', side_effect=lambda callback, *args, **kwargs: callback())
+
+    with override_settings(
+        MODULE_QUAY_ENABLED=True,
+        QUAY_REGISTRY_URL='https://quay.example.test',
+        QUAY_NAMESPACE='awx',
+        QUAY_PUSH_USERNAME='awx+robot',
+        QUAY_PUSH_TOKEN='push-token',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        create_response = post(
+            reverse('api:quay_image_build_templates'),
+            data={
+                'name': 'Platform EE',
+                'description': 'Reusable platform execution environment.',
+                'project_id': project.pk,
+                'repository': 'platform-ee',
+                'tag': 'v1',
+                'runtime': 'podman',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=admin_user,
+            expect=201,
+        )
+        list_response = get(reverse('api:quay_image_build_templates'), user=admin_user, expect=200)
+        QuayImageBuildTemplate.objects.create(
+            name='Utility EE',
+            project=project,
+            namespace='awx',
+            repository='utility-ee',
+            tag='latest',
+            runtime='podman',
+            definition_file='ee/execution-environment.yml',
+            context_path='ee',
+        )
+        filtered_response = get(reverse('api:quay_image_build_templates') + '?search=platform&order_by=-name', user=admin_user, expect=200)
+        ordered_response = get(reverse('api:quay_image_build_templates') + '?order_by=-name', user=admin_user, expect=200)
+        update_response = patch(
+            create_response.data['url'],
+            data={
+                'name': 'Platform EE',
+                'project_id': project.pk,
+                'repository': 'platform-ee',
+                'tag': 'v2',
+                'runtime': 'podman',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=admin_user,
+            expect=200,
+        )
+        launch_response = post(create_response.data['launch_url'], data={}, user=admin_user, expect=202)
+        build_list_response = get(reverse('api:quay_image_builds') + f'?template={create_response.data["id"]}', user=admin_user, expect=200)
+        delete_response = delete(create_response.data['url'], user=admin_user, expect=204)
+
+    assert create_response.data['name'] == 'Platform EE'
+    assert create_response.data['project']['id'] == project.pk
+    assert create_response.data['image'] == 'quay.example.test/awx/platform-ee:v1'
+    assert create_response.data['launch_url'].endswith(f'/api/v2/quay/execution-environment-images/templates/{create_response.data["id"]}/launch/')
+    assert list_response.data['count'] == 1
+    assert list_response.data['results'][0]['name'] == 'Platform EE'
+    assert filtered_response.data['count'] == 1
+    assert filtered_response.data['results'][0]['name'] == 'Platform EE'
+    assert ordered_response.data['results'][0]['name'] == 'Utility EE'
+    assert update_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
+    assert launch_response.data['template']['id'] == create_response.data['id']
+    assert launch_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
+    assert build_list_response.data['count'] == 1
+    assert task_delay.call_args.args == (launch_response.data['id'],)
+    assert delete_response.status_code == 204
+
+
+@pytest.mark.django_db
+def test_quay_execution_environment_image_build_template_requires_unique_name(post, admin_user, organization, tmp_path):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
+    QuayImageBuildTemplate.objects.create(
+        name='Platform EE',
+        project=project,
+        namespace='awx',
+        repository='platform-ee',
+        tag='v1',
+        runtime='podman',
+        definition_file='ee/execution-environment.yml',
+        context_path='ee',
+    )
+
+    with override_settings(
+        MODULE_QUAY_ENABLED=True,
+        QUAY_REGISTRY_URL='https://quay.example.test',
+        QUAY_NAMESPACE='awx',
+        PROJECTS_ROOT=str(tmp_path),
+    ):
+        response = post(
+            reverse('api:quay_image_build_templates'),
+            data={
+                'name': 'Platform EE',
+                'project_id': project.pk,
+                'repository': 'platform-ee',
+                'definition_file': 'ee/execution-environment.yml',
+                'context': 'ee',
+            },
+            user=admin_user,
+            expect=400,
+        )
+
+    assert response.data['status'] == 'bad_request'
+    assert response.data['detail'] == 'A Project Quay image build template with this name already exists.'
 
 
 @pytest.mark.django_db

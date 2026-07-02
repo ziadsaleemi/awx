@@ -5,6 +5,9 @@ from django.urls import re_path
 
 from awx.api.views.quay import (
     QuayApiTokenPlanView,
+    QuayExecutionEnvironmentImageBuildTemplateDetailView,
+    QuayExecutionEnvironmentImageBuildTemplateLaunchView,
+    QuayExecutionEnvironmentImageBuildTemplatesView,
     QuayExecutionEnvironmentImageBuildDetailView,
     QuayExecutionEnvironmentImageBuildsView,
     QuayExecutionEnvironmentImageBuildPlanView,
@@ -50,6 +53,21 @@ quay_urls = [
         r'^execution-environment-images/build-plan/$',
         QuayExecutionEnvironmentImageBuildPlanView.as_view(),
         name='quay_execution_environment_image_build_plan',
+    ),
+    re_path(
+        r'^execution-environment-images/templates/$',
+        QuayExecutionEnvironmentImageBuildTemplatesView.as_view(),
+        name='quay_image_build_templates',
+    ),
+    re_path(
+        r'^execution-environment-images/templates/(?P<pk>[0-9]+)/$',
+        QuayExecutionEnvironmentImageBuildTemplateDetailView.as_view(),
+        name='quay_image_build_template_detail',
+    ),
+    re_path(
+        r'^execution-environment-images/templates/(?P<pk>[0-9]+)/launch/$',
+        QuayExecutionEnvironmentImageBuildTemplateLaunchView.as_view(),
+        name='quay_image_build_template_launch',
     ),
     re_path(
         r'^execution-environment-images/builds/$',

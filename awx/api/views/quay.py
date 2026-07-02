@@ -6,7 +6,8 @@ import shlex
 from urllib.parse import urlparse
 
 from django.core.cache import cache
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
@@ -23,7 +24,7 @@ from awx.api.views.galaxy_ng import (
     _validate_image_tag,
     _validate_relative_cli_path,
 )
-from awx.main.models import QuayImageBuild
+from awx.main.models import QuayImageBuild, QuayImageBuildTemplate
 from awx.main.tasks.quay import run_quay_image_build
 from awx.main.utils.quay import (
     QuayClient,
@@ -206,6 +207,11 @@ def _normalize_permissions(payload, principal_key):
 
 
 def _quay_image_build_plan_for_request(request):
+    data = request.data if isinstance(request.data, dict) else {}
+    return _quay_image_build_plan_from_data(request, data)
+
+
+def _quay_image_build_plan_from_data(request, data):
     if not module_enabled():
         return None, Response(
             {'detail': _('Project Quay module is disabled.'), 'status': 'disabled'},
@@ -217,7 +223,6 @@ def _quay_image_build_plan_for_request(request):
             status=http_status.HTTP_400_BAD_REQUEST,
         )
 
-    data = request.data if isinstance(request.data, dict) else {}
     project, error = _project_for_build_plan(request.user, data.get('project_id') or data.get('project'))
     if error:
         return None, Response({'detail': error, 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
@@ -367,6 +372,94 @@ def _serialize_quay_image_build(build, include_log=True):
         'error': build.error,
         'log': build.log if include_log else '',
         'command_summary': build.command_summary or [],
+        'template': {
+            'id': build.template_id,
+            'name': build.template.name if build.template_id and build.template else '',
+        },
+    }
+
+
+def _build_image_from_template(template):
+    registry = QuayClient().registry
+    if registry:
+        return f'{registry}/{template.repository_path}:{template.tag}'
+    return f'{template.repository_path}:{template.tag}'
+
+
+def _serialize_quay_image_build_template(template):
+    latest_build = getattr(template, 'latest_build', None)
+    return {
+        'id': template.id,
+        'type': 'quay_image_build_template',
+        'url': template.get_absolute_url(),
+        'launch_url': reverse('api:quay_image_build_template_launch', kwargs={'pk': template.pk}),
+        'created': template.created,
+        'modified': template.modified,
+        'created_by': template.created_by.username if template.created_by_id else '',
+        'name': template.name,
+        'description': template.description,
+        'project': {
+            'id': template.project_id,
+            'name': template.project.name if template.project_id and template.project else '',
+        },
+        'namespace': template.namespace,
+        'repository': template.repository,
+        'repository_path': template.repository_path,
+        'tag': template.tag,
+        'image': _build_image_from_template(template),
+        'runtime': template.runtime,
+        'definition_file': template.definition_file,
+        'context': template.context_path,
+        'latest_build': _serialize_quay_image_build(latest_build, include_log=False) if latest_build else None,
+    }
+
+
+def _create_quay_image_build_from_plan(plan, runtime, template=None):
+    project_data = plan['project']
+    image_data = plan['image']
+    registry_data = plan['registry']
+    return QuayImageBuild.objects.create(
+        template=template,
+        project_id=project_data['project_id'],
+        project_name=project_data['project_name'],
+        project_path=project_data['project_path'],
+        scm_revision=project_data['scm_revision'],
+        namespace=registry_data['namespace'],
+        repository=image_data['repository'],
+        tag=image_data['tag'],
+        image=image_data['awx'],
+        registry=registry_data['registry'],
+        runtime=runtime,
+        definition_file=project_data['definition_file'],
+        context_path=project_data['context'],
+        command_summary=[{**command, 'label': str(command.get('label') or '')} for command in plan['commands']],
+    )
+
+
+def _template_payload_from_plan(data, plan):
+    project_data = plan['project']
+    image_data = plan['image']
+    registry_data = plan['registry']
+    return {
+        'project_id': project_data['project_id'],
+        'namespace': registry_data['namespace'],
+        'repository': image_data['repository'],
+        'tag': image_data['tag'],
+        'runtime': str(data.get('runtime') or 'podman').strip().lower(),
+        'definition_file': project_data['definition_file'],
+        'context_path': project_data['context'],
+    }
+
+
+def _data_from_template(template):
+    return {
+        'project_id': template.project_id,
+        'namespace': template.namespace,
+        'repository': template.repository,
+        'tag': template.tag,
+        'runtime': template.runtime,
+        'definition_file': template.definition_file,
+        'context': template.context_path,
     }
 
 
@@ -952,6 +1045,181 @@ class QuayExecutionEnvironmentImageBuildPlanView(APIView):
         return Response(plan)
 
 
+class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
+    name = _('Project Quay Execution Environment Image Build Templates')
+    resource_purpose = 'saved project quay execution environment image build templates'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get(self, request, format=None):
+        page = _parse_positive_int(request.query_params.get('page'), 1)
+        page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
+        queryset = QuayImageBuildTemplate.objects.select_related('project', 'created_by').all()
+        namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
+        repository = str(request.query_params.get('repository') or '').strip().strip('/')
+        search = str(request.query_params.get('search') or '').strip()
+        if namespace:
+            queryset = queryset.filter(namespace=namespace)
+        if repository:
+            queryset = queryset.filter(repository=repository)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(description__icontains=search)
+                | Q(namespace__icontains=search)
+                | Q(repository__icontains=search)
+                | Q(project__name__icontains=search)
+            )
+        order_by = str(request.query_params.get('order_by') or 'name').strip()
+        descending = order_by.startswith('-')
+        order_key = order_by[1:] if descending else order_by
+        allowed_order_fields = {
+            'name': 'name',
+            'namespace': 'namespace',
+            'repository': 'repository',
+            'modified': 'modified',
+            'created': 'created',
+            'project': 'project__name',
+            'project__name': 'project__name',
+        }
+        order_field = allowed_order_fields.get(order_key, 'name')
+        queryset = queryset.order_by(f'-{order_field}' if descending else order_field, 'id')
+        count = queryset.count()
+        offset = (page - 1) * page_size
+        items = list(queryset[offset : offset + page_size])
+        latest_builds = {}
+        for build in (
+            QuayImageBuild.objects.select_related('template', 'project', 'created_by')
+            .filter(template_id__in=[template.id for template in items])
+            .order_by('template_id', '-created', '-id')
+        ):
+            latest_builds.setdefault(build.template_id, build)
+        for template in items:
+            template.latest_build = latest_builds.get(template.id)
+        return Response(
+            {
+                'count': count,
+                'next': None,
+                'previous': None,
+                'source': 'quay',
+                'resource': 'image_build_templates',
+                'results': [_serialize_quay_image_build_template(template) for template in items],
+            }
+        )
+
+    def post(self, request, format=None):
+        data = request.data if isinstance(request.data, dict) else {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return Response({'detail': _('Name is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        plan, error_response = _quay_image_build_plan_from_data(request, data)
+        if error_response:
+            return error_response
+        template_data = _template_payload_from_plan(data, plan)
+        try:
+            template = QuayImageBuildTemplate.objects.create(
+                name=name,
+                description=str(data.get('description') or ''),
+                project_id=template_data['project_id'],
+                namespace=template_data['namespace'],
+                repository=template_data['repository'],
+                tag=template_data['tag'],
+                runtime=template_data['runtime'],
+                definition_file=template_data['definition_file'],
+                context_path=template_data['context_path'],
+            )
+        except IntegrityError:
+            return Response(
+                {'detail': _('A Project Quay image build template with this name already exists.'), 'status': 'bad_request'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(_serialize_quay_image_build_template(template), status=http_status.HTTP_201_CREATED)
+
+
+class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
+    name = _('Project Quay Execution Environment Image Build Template Detail')
+    resource_purpose = 'saved project quay execution environment image build template detail'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def get_object(self, pk):
+        return QuayImageBuildTemplate.objects.select_related('project', 'created_by').filter(pk=pk).first()
+
+    def get(self, request, pk, format=None):
+        template = self.get_object(pk)
+        if template is None:
+            return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        template.latest_build = (
+            QuayImageBuild.objects.select_related('template', 'project', 'created_by').filter(template=template).order_by('-created', '-id').first()
+        )
+        return Response(_serialize_quay_image_build_template(template))
+
+    def patch(self, request, pk, format=None):
+        template = self.get_object(pk)
+        if template is None:
+            return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        data = request.data if isinstance(request.data, dict) else {}
+        merged = _data_from_template(template)
+        merged.update(data)
+        plan, error_response = _quay_image_build_plan_from_data(request, merged)
+        if error_response:
+            return error_response
+        name = str(data.get('name') if 'name' in data else template.name).strip()
+        if not name:
+            return Response({'detail': _('Name is required.'), 'status': 'bad_request'}, status=http_status.HTTP_400_BAD_REQUEST)
+        template_data = _template_payload_from_plan(merged, plan)
+        template.name = name
+        if 'description' in data:
+            template.description = str(data.get('description') or '')
+        template.project_id = template_data['project_id']
+        template.namespace = template_data['namespace']
+        template.repository = template_data['repository']
+        template.tag = template_data['tag']
+        template.runtime = template_data['runtime']
+        template.definition_file = template_data['definition_file']
+        template.context_path = template_data['context_path']
+        try:
+            template.save()
+        except IntegrityError:
+            return Response(
+                {'detail': _('A Project Quay image build template with this name already exists.'), 'status': 'bad_request'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(_serialize_quay_image_build_template(template))
+
+    def delete(self, request, pk, format=None):
+        template = self.get_object(pk)
+        if template is None:
+            return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        template.delete()
+        return Response(status=http_status.HTTP_204_NO_CONTENT)
+
+
+class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
+    name = _('Project Quay Execution Environment Image Build Template Launch')
+    resource_purpose = 'launch saved project quay execution environment image build template'
+    permission_classes = (IsAuthenticated, QuayManagePermission)
+
+    def post(self, request, pk, format=None):
+        template = QuayImageBuildTemplate.objects.select_related('project').filter(pk=pk).first()
+        if template is None:
+            return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        if template.project_id is None:
+            return Response(
+                {'detail': _('Project Quay image build template no longer has an AWX Project.'), 'status': 'bad_request'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        plan, error_response = _quay_image_build_plan_from_data(request, _data_from_template(template))
+        if error_response:
+            return error_response
+        if not plan['registry']['push_username_configured'] or not plan['registry']['push_token_configured']:
+            return Response(
+                {'detail': _('Project Quay push credentials are required before AWX can launch an image build.'), 'status': 'bad_request'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        build = _create_quay_image_build_from_plan(plan, template.runtime, template=template)
+        transaction.on_commit(lambda: run_quay_image_build.delay(build.id))
+        return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED)
+
+
 class QuayExecutionEnvironmentImageBuildsView(APIView):
     name = _('Project Quay Execution Environment Image Builds')
     resource_purpose = 'project quay execution environment image build runs'
@@ -960,13 +1228,16 @@ class QuayExecutionEnvironmentImageBuildsView(APIView):
     def get(self, request, format=None):
         page = _parse_positive_int(request.query_params.get('page'), 1)
         page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
-        queryset = QuayImageBuild.objects.select_related('project', 'created_by').all()
+        queryset = QuayImageBuild.objects.select_related('project', 'created_by', 'template').all()
         namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
         repository = str(request.query_params.get('repository') or '').strip().strip('/')
+        template_id = str(request.query_params.get('template') or '').strip()
         if namespace:
             queryset = queryset.filter(namespace=namespace)
         if repository:
             queryset = queryset.filter(repository=repository)
+        if template_id:
+            queryset = queryset.filter(template_id=template_id)
         count = queryset.count()
         offset = (page - 1) * page_size
         items = queryset[offset : offset + page_size]
@@ -991,24 +1262,7 @@ class QuayExecutionEnvironmentImageBuildsView(APIView):
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
-        project_data = plan['project']
-        image_data = plan['image']
-        registry_data = plan['registry']
-        build = QuayImageBuild.objects.create(
-            project_id=project_data['project_id'],
-            project_name=project_data['project_name'],
-            project_path=project_data['project_path'],
-            scm_revision=project_data['scm_revision'],
-            namespace=registry_data['namespace'],
-            repository=image_data['repository'],
-            tag=image_data['tag'],
-            image=image_data['awx'],
-            registry=registry_data['registry'],
-            runtime=str((request.data or {}).get('runtime') or 'podman').strip().lower(),
-            definition_file=project_data['definition_file'],
-            context_path=project_data['context'],
-            command_summary=[{**command, 'label': str(command.get('label') or '')} for command in plan['commands']],
-        )
+        build = _create_quay_image_build_from_plan(plan, str((request.data or {}).get('runtime') or 'podman').strip().lower())
         transaction.on_commit(lambda: run_quay_image_build.delay(build.id))
         return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED)
 
@@ -1019,7 +1273,7 @@ class QuayExecutionEnvironmentImageBuildDetailView(APIView):
     permission_classes = (IsAuthenticated, QuayManagePermission)
 
     def get(self, request, pk, format=None):
-        build = QuayImageBuild.objects.select_related('project', 'created_by').filter(pk=pk).first()
+        build = QuayImageBuild.objects.select_related('project', 'created_by', 'template').filter(pk=pk).first()
         if build is None:
             return Response({'detail': _('Project Quay image build was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
         return Response(_serialize_quay_image_build(build))

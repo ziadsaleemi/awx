@@ -5,9 +5,9 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from awx.api.versioning import reverse
-from awx.main.models.base import PrimordialModel
+from awx.main.models.base import CommonModel, PrimordialModel
 
-__all__ = ['QuayImageBuild']
+__all__ = ['QuayImageBuild', 'QuayImageBuildTemplate']
 
 
 QUAY_IMAGE_BUILD_STATUS_CHOICES = [
@@ -36,6 +36,15 @@ class QuayImageBuild(PrimordialModel):
         default=None,
         on_delete=models.SET_NULL,
         help_text=_('AWX Project used as the execution environment build source.'),
+    )
+    template = models.ForeignKey(
+        'QuayImageBuildTemplate',
+        related_name='builds',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Saved execution environment build template used to launch this run.'),
     )
     project_name = models.CharField(max_length=512, blank=True, default='')
     project_path = models.CharField(max_length=4096, blank=True, default='')
@@ -66,3 +75,36 @@ class QuayImageBuild(PrimordialModel):
 
     def get_absolute_url(self, request=None):
         return reverse('api:quay_image_build_detail', kwargs={'pk': self.pk}, request=request)
+
+
+class QuayImageBuildTemplate(CommonModel):
+    """
+    Saved Project Quay execution-environment image build definition.
+    """
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('name', 'id')
+
+    project = models.ForeignKey(
+        'Project',
+        related_name='quay_image_build_templates',
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('AWX Project used as the execution environment build source.'),
+    )
+    namespace = models.CharField(max_length=255)
+    repository = models.CharField(max_length=255)
+    tag = models.CharField(max_length=128, default='latest')
+    runtime = models.CharField(max_length=16, default='podman')
+    definition_file = models.CharField(max_length=1024, default='execution-environment.yml')
+    context_path = models.CharField(max_length=1024, default='.')
+
+    @property
+    def repository_path(self):
+        return f'{self.namespace}/{self.repository}'
+
+    def get_absolute_url(self, request=None):
+        return reverse('api:quay_image_build_template_detail', kwargs={'pk': self.pk}, request=request)

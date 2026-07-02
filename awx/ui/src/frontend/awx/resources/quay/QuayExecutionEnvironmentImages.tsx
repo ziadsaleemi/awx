@@ -1,94 +1,120 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ActionGroup,
   Alert,
   Button,
-  Card,
-  CardBody,
-  CardTitle,
   ClipboardCopy,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
   Form,
   FormGroup,
   FormSelect,
   FormSelectOption,
-  Gallery,
-  GalleryItem,
   PageSection,
   Spinner,
-  Stack,
-  StackItem,
-  Text,
-  TextContent,
+  Tab,
+  Tabs,
+  TabTitleText,
   TextInput,
-  TextVariants,
-  Title,
 } from '@patternfly/react-core';
-import { TrashIcon } from '@patternfly/react-icons';
+import {
+  CaretLeftIcon,
+  PencilAltIcon,
+  PlayIcon,
+  PlusCircleIcon,
+  SyncAltIcon,
+  TrashIcon,
+} from '@patternfly/react-icons';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
-import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
-import { postRequest } from '../../../common/crud/Data';
+import {
+  DateTimeCell,
+  IPageAction,
+  ITableColumn,
+  IToolbarFilter,
+  PageActionSelection,
+  PageActionType,
+  PageDetail,
+  PageDetails,
+  PageHeader,
+  PageLayout,
+  PageTable,
+  TextCell,
+  ToolbarFilterType,
+  usePageAlertToaster,
+} from '../../../../framework';
+import { postRequest, requestDelete, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
+import { useAwxView } from '../../common/useAwxView';
 import { QuayStatus } from './QuayOverview';
 
 type ContainerRuntime = 'podman' | 'docker';
+type PageMode = 'list' | 'form' | 'details';
+type DetailsTabKey = 'details' | 'builds' | 'tags';
 
-interface QuayBuildPlanPayload {
+interface QuayBuildTemplatePayload {
+  name: string;
+  description: string;
   project_id: number;
   namespace: string;
-  image_name: string;
+  repository: string;
   tag: string;
   runtime: ContainerRuntime;
   definition_file: string;
   context: string;
 }
 
-interface QuayBuildPlan {
+interface QuayImageBuild {
+  id: number;
+  url: string;
+  created: string;
   project: {
-    project_id: number;
-    project_name: string;
-    scm_type: string;
-    scm_url: string;
-    scm_branch: string;
+    id: number;
+    name: string;
+    path: string;
     scm_revision: string;
-    local_path: string;
-    project_path: string;
-    definition_file: string;
-    context: string;
   };
-  registry: {
-    server_url: string;
-    registry: string;
-    namespace: string;
-    insecure: boolean;
-    api_token_configured: boolean;
-    push_username_configured: boolean;
-    push_token_configured: boolean;
+  template?: {
+    id: number;
+    name: string;
   };
-  image: {
-    repository: string;
-    tag: string;
-    repository_path: string;
-    awx: string;
-    push: string;
+  namespace: string;
+  repository: string;
+  repository_path: string;
+  tag: string;
+  image: string;
+  runtime: ContainerRuntime;
+  definition_file: string;
+  context: string;
+  status: string;
+  progress: number;
+  started?: string;
+  finished?: string;
+  error?: string;
+}
+
+interface QuayBuildTemplate {
+  id: number;
+  url: string;
+  launch_url: string;
+  created: string;
+  modified: string;
+  name: string;
+  description: string;
+  project: {
+    id: number;
+    name: string;
   };
-  commands: Array<{
-    label: string;
-    command: string;
-    working_directory?: string;
-  }>;
-  awx_execution_environment: {
-    image: string;
-    pull: string;
-  };
-  notes: string[];
+  namespace: string;
+  repository: string;
+  repository_path: string;
+  tag: string;
+  image: string;
+  runtime: ContainerRuntime;
+  definition_file: string;
+  context: string;
+  latest_build?: QuayImageBuild | null;
 }
 
 interface QuayImageTag {
@@ -125,6 +151,17 @@ function timestampFromTag(tag: QuayImageTag) {
   return timestamp ? new Date(timestamp * 1000).toISOString() : '-';
 }
 
+function formatDate(value?: string) {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function statusText(status?: string) {
+  if (!status) return 'Never run';
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 export function QuayExecutionEnvironmentImages() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
@@ -134,79 +171,228 @@ export function QuayExecutionEnvironmentImages() {
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
+  const builds = useGet<AwxItemsResponse<QuayImageBuild>>(
+    awxAPI`/quay/execution-environment-images/builds/`,
+    { page_size: 10 },
+    { revalidateOnFocus: false, refreshInterval: 5000 }
+  );
+
+  const [mode, setMode] = useState<PageMode>('list');
+  const [activeTab, setActiveTab] = useState<DetailsTabKey>('details');
+  const [editingTemplateId, setEditingTemplateId] = useState<number>();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number>();
+  const [selectedTemplateSnapshot, setSelectedTemplateSnapshot] = useState<QuayBuildTemplate>();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [namespace, setNamespace] = useState('');
-  const [imageName, setImageName] = useState('custom-ee');
+  const [repository, setRepository] = useState('custom-ee');
   const [tag, setTag] = useState('latest');
   const [runtime, setRuntime] = useState<ContainerRuntime>('podman');
   const [definitionFile, setDefinitionFile] = useState('execution-environment.yml');
   const [contextPath, setContextPath] = useState('.');
-  const [plan, setPlan] = useState<QuayBuildPlan>();
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [launchingTemplateId, setLaunchingTemplateId] = useState<number>();
+  const [deletingTemplateId, setDeletingTemplateId] = useState<number>();
 
   const configured = Boolean(status.data?.configured && status.data.registry);
-  const effectiveNamespace = namespace.trim() || status.data?.namespace || '';
   const projectOptions = projects.data?.results ?? [];
+  const buildItems = builds.data?.results ?? [];
+  const toolbarFilters = useQuayBuildTemplateFilters();
+  const view = useAwxView<QuayBuildTemplate>({
+    url: awxAPI`/quay/execution-environment-images/templates/`,
+    toolbarFilters,
+    defaultSort: 'name',
+    disableQueryString: true,
+  });
+  const templateItems = view.pageItems ?? [];
+  const selectedTemplate = useMemo(
+    () =>
+      templateItems.find((template) => template.id === selectedTemplateId) ??
+      selectedTemplateSnapshot,
+    [selectedTemplateId, selectedTemplateSnapshot, templateItems]
+  );
+  const editingTemplate = useMemo(
+    () =>
+      templateItems.find((template) => template.id === editingTemplateId) ??
+      (selectedTemplateSnapshot?.id === editingTemplateId ? selectedTemplateSnapshot : undefined),
+    [editingTemplateId, selectedTemplateSnapshot, templateItems]
+  );
+  const effectiveNamespace = namespace.trim() || status.data?.namespace || '';
+  const tagNamespace = selectedTemplate?.namespace || effectiveNamespace;
+  const tagRepository = selectedTemplate?.repository || repository.trim();
   const canLoadTags = Boolean(status.data?.auth_configured);
   const canManageTags = Boolean(status.data?.can_manage && status.data?.management_configured);
   const shouldLoadTags =
-    configured && canLoadTags && Boolean(effectiveNamespace) && Boolean(imageName.trim());
+    configured &&
+    canLoadTags &&
+    mode === 'details' &&
+    Boolean(tagNamespace) &&
+    Boolean(tagRepository);
   const tags = useGet<AwxItemsResponse<QuayImageTag>>(
     shouldLoadTags ? awxAPI`/quay/tags/` : undefined,
     shouldLoadTags
-      ? { namespace: effectiveNamespace, repository: imageName.trim(), page_size: 20 }
+      ? { namespace: tagNamespace, repository: tagRepository, page_size: 20 }
       : undefined,
     { revalidateOnFocus: false }
   );
 
-  const generatePlan = async () => {
-    if (!selectedProjectId) {
+  useEffect(() => {
+    if (!selectedProjectId && projectOptions.length) {
+      setSelectedProjectId(String(projectOptions[0].id));
+    }
+  }, [projectOptions, selectedProjectId]);
+
+  useEffect(() => {
+    if (!namespace && status.data?.namespace) {
+      setNamespace(status.data.namespace);
+    }
+  }, [namespace, status.data?.namespace]);
+
+  const resetForm = () => {
+    setEditingTemplateId(undefined);
+    setName('');
+    setDescription('');
+    setSelectedProjectId(projectOptions.length ? String(projectOptions[0].id) : '');
+    setNamespace(status.data?.namespace || '');
+    setRepository('custom-ee');
+    setTag('latest');
+    setRuntime('podman');
+    setDefinitionFile('execution-environment.yml');
+    setContextPath('.');
+  };
+
+  const showList = () => {
+    setMode('list');
+    setActiveTab('details');
+    setSelectedTemplateId(undefined);
+    setSelectedTemplateSnapshot(undefined);
+    resetForm();
+  };
+
+  const showCreate = () => {
+    resetForm();
+    setMode('form');
+  };
+
+  const showDetails = (template: QuayBuildTemplate, tab: DetailsTabKey = 'details') => {
+    setSelectedTemplateId(template.id);
+    setSelectedTemplateSnapshot(template);
+    setActiveTab(tab);
+    setMode('details');
+  };
+
+  const showEdit = (template: QuayBuildTemplate) => {
+    setEditingTemplateId(template.id);
+    setName(template.name);
+    setDescription(template.description || '');
+    setSelectedProjectId(template.project.id ? String(template.project.id) : '');
+    setNamespace(template.namespace);
+    setRepository(template.repository);
+    setTag(template.tag);
+    setRuntime(template.runtime);
+    setDefinitionFile(template.definition_file);
+    setContextPath(template.context);
+    setMode('form');
+  };
+
+  const buildPayload = (): QuayBuildTemplatePayload => ({
+    name: name.trim(),
+    description: description.trim(),
+    project_id: Number(selectedProjectId),
+    namespace: effectiveNamespace,
+    repository: repository.trim(),
+    tag: tag.trim() || 'latest',
+    runtime,
+    definition_file: definitionFile.trim() || 'execution-environment.yml',
+    context: contextPath.trim() || '.',
+  });
+
+  const saveTemplate = async () => {
+    if (!name.trim() || !selectedProjectId || !effectiveNamespace || !repository.trim()) {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Select an AWX Project before generating commands.'),
+        title: t('Name, project, namespace, and repository are required.'),
       });
       return;
     }
-    if (!effectiveNamespace) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Set a Project Quay namespace before generating commands.'),
-      });
-      return;
-    }
-    setIsGenerating(true);
+    setIsSaving(true);
     try {
-      const result = await postRequest<QuayBuildPlan, QuayBuildPlanPayload>(
-        awxAPI`/quay/execution-environment-images/build-plan/`,
-        {
-          project_id: Number(selectedProjectId),
-          namespace: effectiveNamespace,
-          image_name: imageName.trim(),
-          tag: tag.trim(),
-          runtime,
-          definition_file: definitionFile.trim(),
-          context: contextPath.trim(),
-        }
-      );
-      setPlan(result);
+      const payload = buildPayload();
+      const saved = editingTemplateId
+        ? await requestPatch<QuayBuildTemplate, QuayBuildTemplatePayload>(
+            `${awxAPI`/quay/execution-environment-images/templates/`}${editingTemplateId}/`,
+            payload
+          )
+        : await postRequest<QuayBuildTemplate, QuayBuildTemplatePayload>(
+            awxAPI`/quay/execution-environment-images/templates/`,
+            payload
+          );
+      await view.refresh();
+      showDetails(saved);
       alertToaster.addAlert({
         variant: 'success',
-        title: t('Project Quay image commands generated.'),
+        title: editingTemplateId ? t('EE build template updated.') : t('EE build template saved.'),
         timeout: 3000,
       });
     } catch (err) {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Unable to generate Project Quay image commands'),
+        title: t('Unable to save EE build template'),
         children: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setIsGenerating(false);
+      setIsSaving(false);
+    }
+  };
+
+  const launchTemplate = async (template: QuayBuildTemplate) => {
+    setLaunchingTemplateId(template.id);
+    try {
+      await postRequest<QuayImageBuild, Record<string, never>>(template.launch_url, {});
+      await Promise.all([view.refresh(), builds.refresh()]);
+      showDetails(template, 'builds');
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('EE image build queued.'),
+        timeout: 3000,
+      });
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Unable to launch EE build template'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setLaunchingTemplateId(undefined);
+    }
+  };
+
+  const deleteTemplate = async (template: QuayBuildTemplate) => {
+    setDeletingTemplateId(template.id);
+    try {
+      const controller = new AbortController();
+      await requestDelete<null>(template.url, controller.signal);
+      await view.refresh();
+      if (selectedTemplateId === template.id) showList();
+      alertToaster.addAlert({
+        variant: 'success',
+        title: t('EE build template deleted.'),
+        timeout: 3000,
+      });
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Unable to delete EE build template'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setDeletingTemplateId(undefined);
     }
   };
 
   const deleteTag = async (imageTag: QuayImageTag) => {
-    if (!imageTag.name) return;
+    if (!imageTag.name || !selectedTemplate) return;
     try {
       await postRequest<
         {
@@ -218,8 +404,8 @@ export function QuayExecutionEnvironmentImages() {
         },
         { namespace: string; repository: string; tag: string }
       >(awxAPI`/quay/tags/delete/`, {
-        namespace: effectiveNamespace,
-        repository: imageName.trim(),
+        namespace: selectedTemplate.namespace,
+        repository: selectedTemplate.repository,
         tag: imageTag.name,
       });
       alertToaster.addAlert({
@@ -237,365 +423,676 @@ export function QuayExecutionEnvironmentImages() {
     }
   };
 
+  const tableColumns = useQuayBuildTemplateColumns(showDetails);
+  const toolbarActions = useQuayBuildTemplateToolbarActions({
+    configured,
+    onCreate: showCreate,
+    onRefresh: () => {
+      void view.refresh();
+      builds.refresh();
+      status.refresh();
+    },
+  });
+  const rowActions = useQuayBuildTemplateRowActions({
+    pushConfigured: Boolean(status.data?.push_configured),
+    launchingTemplateId,
+    deletingTemplateId,
+    onLaunch: (template) => void launchTemplate(template),
+    onEdit: showEdit,
+    onDelete: (template) => void deleteTemplate(template),
+  });
+
+  const pageTitle =
+    mode === 'form'
+      ? editingTemplate
+        ? t('Edit {{name}}', { name: editingTemplate.name })
+        : t('Create EE build template')
+      : mode === 'details' && selectedTemplate
+        ? selectedTemplate.name
+        : t('EE Build Templates');
+
   return (
     <PageLayout>
       <PageHeader
-        title={t('Execution Environments')}
-        description={t(
-          'Build AWX execution environment images from AWX Projects and host them in Project Quay.'
-        )}
+        title={pageTitle}
+        description={
+          mode === 'list'
+            ? t('Reusable AWX Project-backed execution environment image builds for Project Quay.')
+            : undefined
+        }
+        breadcrumbs={
+          mode === 'list' ? undefined : [{ label: t('EE Build Templates') }, { label: pageTitle }]
+        }
         headerActions={
-          <ModuleAIAssistantAction
-            module="quay"
-            page={t('Project Quay Execution Environments')}
-            prompt={t(
-              'Help with Project Quay execution environment images in AWX. Use the selected project, namespace, repository, generated commands, and my AWX permissions. Explain how to build, push, tag, and use the image as an AWX execution environment.'
-            )}
-            context={{
-              registry: status.data?.registry,
-              namespace: effectiveNamespace,
-              repository: imageName,
-              project_id: selectedProjectId,
-            }}
-          />
+          mode === 'details' && selectedTemplate ? (
+            <>
+              <Button
+                variant="primary"
+                icon={<PlayIcon />}
+                isLoading={launchingTemplateId === selectedTemplate.id}
+                isDisabled={
+                  launchingTemplateId === selectedTemplate.id || !status.data?.push_configured
+                }
+                onClick={() => void launchTemplate(selectedTemplate)}
+              >
+                {t('Launch template')}
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<PencilAltIcon />}
+                onClick={() => showEdit(selectedTemplate)}
+              >
+                {t('Edit template')}
+              </Button>
+              <ModuleAIAssistantAction
+                module="quay"
+                page={t('Project Quay EE Build Template')}
+                prompt={t(
+                  'Help with this Project Quay execution environment build template. Use the selected project, namespace, repository, build runs, tags, and my AWX permissions. Explain how to launch, troubleshoot, and use the resulting image in AWX job templates.'
+                )}
+                context={{
+                  registry: status.data?.registry,
+                  namespace: selectedTemplate.namespace,
+                  repository: selectedTemplate.repository,
+                  template_id: selectedTemplate.id,
+                }}
+              />
+            </>
+          ) : (
+            <ModuleAIAssistantAction
+              module="quay"
+              page={t('Project Quay EE Build Templates')}
+              prompt={t(
+                'Help with Project Quay execution environment build templates in AWX. Explain how to save reusable builds, launch them, troubleshoot failures, and use resulting images in job templates.'
+              )}
+              context={{ registry: status.data?.registry, namespace: status.data?.namespace }}
+            />
+          )
         }
       />
-      <PageSection>
-        <Stack hasGutter>
-          {status.isLoading ? (
-            <div style={{ minHeight: 160, display: 'grid', placeItems: 'center' }}>
-              <Spinner size="lg" />
-            </div>
-          ) : status.data && (!status.data.configured || status.data.controller_error) ? (
-            <Alert isInline variant="warning" title={t('Project Quay is not ready')}>
-              {status.data.controller_error || status.data.message}
-            </Alert>
-          ) : null}
-
-          <StackItem>
-            <Gallery hasGutter minWidths={{ default: 'min(420px, 100%)' }}>
-              <GalleryItem>
-                <Card>
-                  <CardTitle>{t('Build and push workflow')}</CardTitle>
-                  <CardBody>
-                    <Stack hasGutter>
-                      <StackItem>
-                        <Alert isInline variant="info" title={t('Project Quay hosts EE images.')}>
-                          {t(
-                            'Generate commands that run from an AWX Project checkout, build an execution environment image, push it to Project Quay, and use the resulting image in AWX execution environments.'
-                          )}
-                        </Alert>
-                      </StackItem>
-                      {projects.error ? (
-                        <StackItem>
-                          <Alert
-                            isInline
-                            variant="warning"
-                            title={t('Could not load AWX Projects.')}
-                          />
-                        </StackItem>
-                      ) : null}
-                      <StackItem>
-                        <Form>
-                          <div
-                            style={{
-                              display: 'grid',
-                              gap: 16,
-                              gridTemplateColumns:
-                                'repeat(auto-fit, minmax(min(260px, 100%), 1fr))',
-                            }}
-                          >
-                            <FormGroup
-                              label={t('AWX Project')}
-                              fieldId="quay-ee-project"
-                              isRequired
-                            >
-                              <FormSelect
-                                id="quay-ee-project"
-                                value={selectedProjectId}
-                                onChange={(_, value) => setSelectedProjectId(value)}
-                              >
-                                <FormSelectOption
-                                  value=""
-                                  label={
-                                    projects.isLoading
-                                      ? t('Loading projects...')
-                                      : projectOptions.length
-                                        ? t('Select a project')
-                                        : t('No readable projects found')
-                                  }
-                                />
-                                {projectOptions.map((project) => (
-                                  <FormSelectOption
-                                    key={project.id}
-                                    value={String(project.id)}
-                                    label={project.name}
-                                  />
-                                ))}
-                              </FormSelect>
-                            </FormGroup>
-                            <FormGroup
-                              label={t('Quay namespace')}
-                              fieldId="quay-ee-namespace"
-                              isRequired
-                            >
-                              <TextInput
-                                id="quay-ee-namespace"
-                                value={namespace || status.data?.namespace || ''}
-                                placeholder={t('Quay organization or user')}
-                                onChange={(_, value) => setNamespace(value)}
-                              />
-                            </FormGroup>
-                            <FormGroup
-                              label={t('Repository')}
-                              fieldId="quay-ee-image-name"
-                              isRequired
-                            >
-                              <TextInput
-                                id="quay-ee-image-name"
-                                value={imageName}
-                                onChange={(_, value) => setImageName(value)}
-                              />
-                            </FormGroup>
-                            <FormGroup label={t('Tag')} fieldId="quay-ee-image-tag" isRequired>
-                              <TextInput
-                                id="quay-ee-image-tag"
-                                value={tag}
-                                onChange={(_, value) => setTag(value)}
-                              />
-                            </FormGroup>
-                            <FormGroup label={t('Runtime')} fieldId="quay-ee-runtime">
-                              <FormSelect
-                                id="quay-ee-runtime"
-                                value={runtime}
-                                onChange={(_, value) => setRuntime(value as ContainerRuntime)}
-                              >
-                                <FormSelectOption value="podman" label={t('Podman')} />
-                                <FormSelectOption value="docker" label={t('Docker')} />
-                              </FormSelect>
-                            </FormGroup>
-                            <FormGroup
-                              label={t('Definition file')}
-                              fieldId="quay-ee-definition-file"
-                              isRequired
-                            >
-                              <TextInput
-                                id="quay-ee-definition-file"
-                                value={definitionFile}
-                                onChange={(_, value) => setDefinitionFile(value)}
-                              />
-                            </FormGroup>
-                            <FormGroup
-                              label={t('Build context')}
-                              fieldId="quay-ee-context"
-                              isRequired
-                            >
-                              <TextInput
-                                id="quay-ee-context"
-                                value={contextPath}
-                                onChange={(_, value) => setContextPath(value)}
-                              />
-                            </FormGroup>
-                          </div>
-                          <ActionGroup>
-                            <Button
-                              variant="primary"
-                              isLoading={isGenerating}
-                              isDisabled={
-                                !configured ||
-                                isGenerating ||
-                                !selectedProjectId ||
-                                !effectiveNamespace
-                              }
-                              onClick={() => void generatePlan()}
-                            >
-                              {t('Generate commands')}
-                            </Button>
-                          </ActionGroup>
-                        </Form>
-                      </StackItem>
-                    </Stack>
-                  </CardBody>
-                </Card>
-              </GalleryItem>
-              <GalleryItem>
-                <Card>
-                  <CardTitle>{t('AWX execution environment value')}</CardTitle>
-                  <CardBody>
-                    {plan ? (
-                      <Stack hasGutter>
-                        <StackItem>
-                          <DescriptionList isHorizontal isCompact>
-                            <DescriptionListGroup>
-                              <DescriptionListTerm>{t('Source project')}</DescriptionListTerm>
-                              <DescriptionListDescription>
-                                {plan.project.project_name}
-                              </DescriptionListDescription>
-                            </DescriptionListGroup>
-                            <DescriptionListGroup>
-                              <DescriptionListTerm>{t('Project checkout')}</DescriptionListTerm>
-                              <DescriptionListDescription>
-                                {plan.project.project_path}
-                              </DescriptionListDescription>
-                            </DescriptionListGroup>
-                            <DescriptionListGroup>
-                              <DescriptionListTerm>{t('Quay registry')}</DescriptionListTerm>
-                              <DescriptionListDescription>
-                                {plan.registry.registry}
-                              </DescriptionListDescription>
-                            </DescriptionListGroup>
-                            <DescriptionListGroup>
-                              <DescriptionListTerm>{t('Repository path')}</DescriptionListTerm>
-                              <DescriptionListDescription>
-                                {plan.image.repository_path}
-                              </DescriptionListDescription>
-                            </DescriptionListGroup>
-                            <DescriptionListGroup>
-                              <DescriptionListTerm>{t('Pull policy')}</DescriptionListTerm>
-                              <DescriptionListDescription>
-                                {plan.awx_execution_environment.pull}
-                              </DescriptionListDescription>
-                            </DescriptionListGroup>
-                          </DescriptionList>
-                        </StackItem>
-                        <StackItem>
-                          <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                            {plan.awx_execution_environment.image}
-                          </ClipboardCopy>
-                        </StackItem>
-                      </Stack>
-                    ) : (
-                      <TextContent>
-                        <Text component={TextVariants.p}>
-                          {t(
-                            'Select an AWX Project and Quay namespace to generate the exact image reference AWX should pull.'
-                          )}
-                        </Text>
-                      </TextContent>
-                    )}
-                  </CardBody>
-                </Card>
-              </GalleryItem>
-            </Gallery>
-          </StackItem>
-
-          {plan ? (
-            <StackItem>
-              <Card>
-                <CardTitle>{t('Generated commands')}</CardTitle>
-                <CardBody>
-                  <Stack hasGutter>
-                    {plan.commands.map((command) => (
-                      <StackItem key={command.label}>
-                        <Title headingLevel="h3" size="md">
-                          {command.label}
-                        </Title>
-                        {command.working_directory ? (
-                          <TextContent>
-                            <Text component={TextVariants.small}>
-                              {t('Working directory: {{path}}', {
-                                path: command.working_directory,
-                              })}
-                            </Text>
-                          </TextContent>
-                        ) : null}
-                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                          {command.command}
-                        </ClipboardCopy>
-                      </StackItem>
-                    ))}
-                    {plan.notes.length ? (
-                      <StackItem>
-                        <Alert isInline variant="info" title={t('Notes')}>
-                          <TextContent>
-                            {plan.notes.map((note) => (
-                              <Text key={note} component={TextVariants.small}>
-                                {note}
-                              </Text>
-                            ))}
-                          </TextContent>
-                        </Alert>
-                      </StackItem>
-                    ) : null}
-                  </Stack>
-                </CardBody>
-              </Card>
-            </StackItem>
-          ) : null}
-
-          <StackItem>
-            <Card>
-              <CardTitle>{t('Hosted image tags')}</CardTitle>
-              <CardBody>
-                {tags.isLoading ? (
-                  <div style={{ minHeight: 120, display: 'grid', placeItems: 'center' }}>
-                    <Spinner size="md" />
-                  </div>
-                ) : configured && !canLoadTags ? (
-                  <Alert isInline variant="info" title={t('Project Quay API token is not set.')}>
-                    {t(
-                      'AWX can generate build and push commands with push credentials, but it needs a Project Quay API token before it can list hosted image tags.'
-                    )}
-                  </Alert>
-                ) : tags.error ? (
-                  <Alert
-                    isInline
-                    variant="warning"
-                    title={t('Could not load Project Quay image tags.')}
-                  />
-                ) : tags.data?.results?.length ? (
-                  <Table
-                    aria-label={t('Project Quay hosted Execution Environments')}
-                    variant="compact"
-                  >
-                    <Thead>
-                      <Tr>
-                        <Th>{t('Tag')}</Th>
-                        <Th>{t('Digest')}</Th>
-                        <Th>{t('Size')}</Th>
-                        <Th>{t('Updated')}</Th>
-                        <Th>{t('Actions')}</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {tags.data.results.map((imageTag) => (
-                        <Tr key={imageTag.id}>
-                          <Td>{imageTag.name || '-'}</Td>
-                          <Td>{imageTag.manifest_digest || '-'}</Td>
-                          <Td>{formatBytes(imageTag.size)}</Td>
-                          <Td>{timestampFromTag(imageTag)}</Td>
-                          <Td>
-                            <Button
-                              variant="link"
-                              icon={<TrashIcon />}
-                              isDanger
-                              isDisabled={!canManageTags}
-                              onClick={() => void deleteTag(imageTag)}
-                            >
-                              {t('Delete tag')}
-                            </Button>
-                          </Td>
-                        </Tr>
-                      ))}
-                    </Tbody>
-                  </Table>
-                ) : (
-                  <TextContent>
-                    <Text component={TextVariants.p}>
-                      {t('No execution environment image tags found.')}
-                    </Text>
-                    <Text component={TextVariants.small}>
-                      {t(
-                        'Push an image to Project Quay and refresh this page to verify AWX can see it.'
-                      )}
-                    </Text>
-                  </TextContent>
-                )}
-              </CardBody>
-            </Card>
-          </StackItem>
-        </Stack>
-      </PageSection>
+      {mode === 'list' ? (
+        <ListView
+          configured={configured}
+          status={status}
+          view={view}
+          toolbarFilters={toolbarFilters}
+          tableColumns={tableColumns}
+          toolbarActions={toolbarActions}
+          rowActions={rowActions}
+          onCreate={showCreate}
+        />
+      ) : mode === 'form' ? (
+        <FormView
+          configured={configured}
+          projects={projects}
+          projectOptions={projectOptions}
+          status={status}
+          name={name}
+          setName={setName}
+          description={description}
+          setDescription={setDescription}
+          selectedProjectId={selectedProjectId}
+          setSelectedProjectId={setSelectedProjectId}
+          namespace={effectiveNamespace}
+          setNamespace={setNamespace}
+          repository={repository}
+          setRepository={setRepository}
+          tag={tag}
+          setTag={setTag}
+          runtime={runtime}
+          setRuntime={setRuntime}
+          definitionFile={definitionFile}
+          setDefinitionFile={setDefinitionFile}
+          contextPath={contextPath}
+          setContextPath={setContextPath}
+          isSaving={isSaving}
+          editing={Boolean(editingTemplateId)}
+          onSubmit={() => void saveTemplate()}
+          onCancel={() => {
+            if (editingTemplate) showDetails(editingTemplate);
+            else showList();
+          }}
+        />
+      ) : selectedTemplate ? (
+        <DetailsView
+          template={selectedTemplate}
+          builds={buildItems.filter((build) => build.template?.id === selectedTemplate.id)}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tags={tags}
+          canLoadTags={canLoadTags}
+          canManageTags={canManageTags}
+          onBack={showList}
+          onDeleteTag={(imageTag) => void deleteTag(imageTag)}
+        />
+      ) : (
+        <PageSection>
+          <Alert isInline variant="warning" title={t('EE build template was not found.')} />
+        </PageSection>
+      )}
     </PageLayout>
   );
+}
+
+function useQuayBuildTemplateFilters(): IToolbarFilter[] {
+  const { t } = useTranslation();
+  return useMemo(
+    () => [
+      {
+        key: 'search',
+        label: t('Search'),
+        type: ToolbarFilterType.MultiText,
+        query: 'search',
+        comparison: 'contains',
+      },
+    ],
+    [t]
+  );
+}
+
+function useQuayBuildTemplateColumns(
+  onDetails: (template: QuayBuildTemplate, tab?: DetailsTabKey) => void
+): ITableColumn<QuayBuildTemplate>[] {
+  const { t } = useTranslation();
+  return useMemo(
+    () => [
+      {
+        header: t('Name'),
+        cell: (template) => (
+          <Button variant="link" isInline onClick={() => onDetails(template)}>
+            {template.name}
+          </Button>
+        ),
+        card: 'name',
+        list: 'name',
+      },
+      {
+        header: t('Source project'),
+        cell: (template) => <TextCell text={template.project.name || '-'} />,
+      },
+      {
+        header: t('Image'),
+        cell: (template) => <TextCell text={template.image || '-'} />,
+        list: 'description',
+      },
+      {
+        header: t('Last run'),
+        cell: (template) => <TextCell text={statusText(template.latest_build?.status)} />,
+      },
+      {
+        header: t('Last modified'),
+        cell: (template) => <DateTimeCell value={template.modified} />,
+      },
+    ],
+    [onDetails, t]
+  );
+}
+
+function useQuayBuildTemplateToolbarActions(props: {
+  configured: boolean;
+  onCreate: () => void;
+  onRefresh: () => void;
+}): IPageAction<QuayBuildTemplate>[] {
+  const { t } = useTranslation();
+  return useMemo(
+    () => [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.None,
+        icon: PlusCircleIcon,
+        label: t('Create template'),
+        isPinned: true,
+        onClick: props.onCreate,
+        isDisabled: props.configured
+          ? undefined
+          : t('Configure Project Quay before creating EE build templates.'),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.None,
+        icon: SyncAltIcon,
+        label: t('Refresh'),
+        onClick: props.onRefresh,
+      },
+    ],
+    [props.configured, props.onCreate, props.onRefresh, t]
+  );
+}
+
+function useQuayBuildTemplateRowActions(props: {
+  pushConfigured: boolean;
+  launchingTemplateId?: number;
+  deletingTemplateId?: number;
+  onLaunch: (template: QuayBuildTemplate) => void;
+  onEdit: (template: QuayBuildTemplate) => void;
+  onDelete: (template: QuayBuildTemplate) => void;
+}): IPageAction<QuayBuildTemplate>[] {
+  const { t } = useTranslation();
+  return useMemo(
+    () => [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        icon: PlayIcon,
+        label: t('Launch template'),
+        onClick: props.onLaunch,
+        isDisabled: (template) => {
+          if (props.launchingTemplateId === template.id)
+            return t('Template launch is already queued.');
+          return props.pushConfigured
+            ? undefined
+            : t('Configure Project Quay push credentials before launching this template.');
+        },
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        icon: PencilAltIcon,
+        label: t('Edit template'),
+        onClick: props.onEdit,
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        icon: TrashIcon,
+        label: t('Delete template'),
+        isDanger: true,
+        onClick: props.onDelete,
+        isDisabled: (template) =>
+          props.deletingTemplateId === template.id ? t('Template is being deleted.') : undefined,
+      },
+    ],
+    [
+      props.deletingTemplateId,
+      props.launchingTemplateId,
+      props.onDelete,
+      props.onEdit,
+      props.onLaunch,
+      props.pushConfigured,
+      t,
+    ]
+  );
+}
+
+function ListView(props: {
+  configured: boolean;
+  status: ReturnType<typeof useGet<QuayStatus>>;
+  view: ReturnType<typeof useAwxView<QuayBuildTemplate>>;
+  toolbarFilters: IToolbarFilter[];
+  tableColumns: ITableColumn<QuayBuildTemplate>[];
+  toolbarActions: IPageAction<QuayBuildTemplate>[];
+  rowActions: IPageAction<QuayBuildTemplate>[];
+  onCreate: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <StackAlert status={props.status} />
+      <PageTable<QuayBuildTemplate>
+        id="quay-ee-build-templates-table"
+        keyFn={(template) => template.id}
+        toolbarFilters={props.toolbarFilters}
+        toolbarActions={props.toolbarActions}
+        tableColumns={props.tableColumns}
+        rowActions={props.rowActions}
+        emptyStateActions={props.configured ? props.toolbarActions.slice(0, 1) : undefined}
+        errorStateTitle={t('Error loading EE build templates')}
+        emptyStateTitle={t('No EE build templates found')}
+        emptyStateDescription={t(
+          'Create a template to save the AWX Project, Quay image, tag, and build paths.'
+        )}
+        emptyStateButtonIcon={<PlusCircleIcon />}
+        emptyStateButtonText={props.configured ? t('Create template') : undefined}
+        emptyStateButtonClick={props.configured ? props.onCreate : undefined}
+        {...props.view}
+      />
+    </>
+  );
+}
+
+function FormView(props: {
+  configured: boolean;
+  projects: ReturnType<typeof useGet<AwxItemsResponse<AwxProject>>>;
+  projectOptions: AwxProject[];
+  status: ReturnType<typeof useGet<QuayStatus>>;
+  name: string;
+  setName: (value: string) => void;
+  description: string;
+  setDescription: (value: string) => void;
+  selectedProjectId: string;
+  setSelectedProjectId: (value: string) => void;
+  namespace: string;
+  setNamespace: (value: string) => void;
+  repository: string;
+  setRepository: (value: string) => void;
+  tag: string;
+  setTag: (value: string) => void;
+  runtime: ContainerRuntime;
+  setRuntime: (value: ContainerRuntime) => void;
+  definitionFile: string;
+  setDefinitionFile: (value: string) => void;
+  contextPath: string;
+  setContextPath: (value: string) => void;
+  isSaving: boolean;
+  editing: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <PageSection>
+      <StackAlert status={props.status} />
+      <div style={{ maxWidth: 960 }}>
+        <Form>
+          <FormGroup label={t('Name')} fieldId="quay-ee-template-name" isRequired>
+            <TextInput
+              id="quay-ee-template-name"
+              value={props.name}
+              onChange={(_, value) => props.setName(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('Description')} fieldId="quay-ee-template-description">
+            <TextInput
+              id="quay-ee-template-description"
+              value={props.description}
+              onChange={(_, value) => props.setDescription(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('AWX Project')} fieldId="quay-ee-project" isRequired>
+            <FormSelect
+              id="quay-ee-project"
+              value={props.selectedProjectId}
+              onChange={(_, value) => props.setSelectedProjectId(value)}
+            >
+              <FormSelectOption
+                value=""
+                label={
+                  props.projects.isLoading
+                    ? t('Loading projects...')
+                    : props.projectOptions.length
+                      ? t('Select a project')
+                      : t('No readable projects found')
+                }
+              />
+              {props.projectOptions.map((project) => (
+                <FormSelectOption
+                  key={project.id}
+                  value={String(project.id)}
+                  label={project.name}
+                />
+              ))}
+            </FormSelect>
+          </FormGroup>
+          <FormGroup label={t('Quay namespace')} fieldId="quay-ee-namespace" isRequired>
+            <TextInput
+              id="quay-ee-namespace"
+              value={props.namespace}
+              onChange={(_, value) => props.setNamespace(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('Repository')} fieldId="quay-ee-repository" isRequired>
+            <TextInput
+              id="quay-ee-repository"
+              value={props.repository}
+              onChange={(_, value) => props.setRepository(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('Tag')} fieldId="quay-ee-image-tag" isRequired>
+            <TextInput
+              id="quay-ee-image-tag"
+              value={props.tag}
+              onChange={(_, value) => props.setTag(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('Container runtime')} fieldId="quay-ee-runtime">
+            <FormSelect
+              id="quay-ee-runtime"
+              value={props.runtime}
+              onChange={(_, value) => props.setRuntime(value as ContainerRuntime)}
+            >
+              <FormSelectOption value="podman" label={t('Podman')} />
+              <FormSelectOption value="docker" label={t('Docker')} />
+            </FormSelect>
+          </FormGroup>
+          <FormGroup label={t('Definition file')} fieldId="quay-ee-definition-file" isRequired>
+            <TextInput
+              id="quay-ee-definition-file"
+              value={props.definitionFile}
+              onChange={(_, value) => props.setDefinitionFile(value)}
+            />
+          </FormGroup>
+          <FormGroup label={t('Build context')} fieldId="quay-ee-context" isRequired>
+            <TextInput
+              id="quay-ee-context"
+              value={props.contextPath}
+              onChange={(_, value) => props.setContextPath(value)}
+            />
+          </FormGroup>
+          <ActionGroup>
+            <Button
+              variant="primary"
+              isLoading={props.isSaving}
+              isDisabled={
+                !props.configured ||
+                props.isSaving ||
+                !props.name.trim() ||
+                !props.selectedProjectId ||
+                !props.namespace ||
+                !props.repository.trim()
+              }
+              onClick={props.onSubmit}
+            >
+              {props.editing ? t('Save template') : t('Create template')}
+            </Button>
+            <Button variant="link" onClick={props.onCancel}>
+              {t('Cancel')}
+            </Button>
+          </ActionGroup>
+        </Form>
+      </div>
+    </PageSection>
+  );
+}
+
+function DetailsView(props: {
+  template: QuayBuildTemplate;
+  builds: QuayImageBuild[];
+  activeTab: DetailsTabKey;
+  setActiveTab: (tab: DetailsTabKey) => void;
+  tags: ReturnType<typeof useGet<AwxItemsResponse<QuayImageTag>>>;
+  canLoadTags: boolean;
+  canManageTags: boolean;
+  onBack: () => void;
+  onDeleteTag: (imageTag: QuayImageTag) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Tabs
+        activeKey={props.activeTab}
+        onSelect={(event, key) => {
+          event.preventDefault();
+          if (key === 'back') {
+            props.onBack();
+            return;
+          }
+          props.setActiveTab(key as DetailsTabKey);
+        }}
+        inset={{ default: 'insetNone' }}
+        isBox
+        style={{
+          backgroundColor: 'var(--pf-v5-c-tabs__link--BackgroundColor)',
+          flexShrink: 0,
+        }}
+      >
+        <Tab
+          eventKey="back"
+          title={
+            <TabTitleText>
+              <CaretLeftIcon />
+              <span style={{ marginLeft: 6 }}>{t('Back to EE Build Templates')}</span>
+            </TabTitleText>
+          }
+        />
+        <Tab eventKey="details" title={<TabTitleText>{t('Details')}</TabTitleText>} />
+        <Tab eventKey="builds" title={<TabTitleText>{t('Builds')}</TabTitleText>} />
+        <Tab eventKey="tags" title={<TabTitleText>{t('Tags')}</TabTitleText>} />
+      </Tabs>
+      <PageSection>
+        {props.activeTab === 'details' ? (
+          <PageDetails>
+            <PageDetail label={t('Name')}>{props.template.name}</PageDetail>
+            <PageDetail label={t('Description')}>{props.template.description}</PageDetail>
+            <PageDetail label={t('AWX Project')}>{props.template.project.name || '-'}</PageDetail>
+            <PageDetail label={t('Image')}>
+              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                {props.template.image}
+              </ClipboardCopy>
+            </PageDetail>
+            <PageDetail label={t('Namespace')}>{props.template.namespace}</PageDetail>
+            <PageDetail label={t('Repository')}>{props.template.repository}</PageDetail>
+            <PageDetail label={t('Tag')}>{props.template.tag}</PageDetail>
+            <PageDetail label={t('Runtime')}>{props.template.runtime}</PageDetail>
+            <PageDetail label={t('Definition file')}>{props.template.definition_file}</PageDetail>
+            <PageDetail label={t('Build context')}>{props.template.context}</PageDetail>
+            <PageDetail label={t('Created')}>{formatDate(props.template.created)}</PageDetail>
+            <PageDetail label={t('Last modified')}>
+              {formatDate(props.template.modified)}
+            </PageDetail>
+          </PageDetails>
+        ) : props.activeTab === 'builds' ? (
+          <BuildsTable builds={props.builds} />
+        ) : (
+          <TagsTable
+            tags={props.tags}
+            canLoadTags={props.canLoadTags}
+            canManageTags={props.canManageTags}
+            onDeleteTag={props.onDeleteTag}
+          />
+        )}
+      </PageSection>
+    </>
+  );
+}
+
+function BuildsTable(props: { builds: QuayImageBuild[] }) {
+  const { t } = useTranslation();
+  if (!props.builds.length) {
+    return <Alert isInline variant="info" title={t('No builds have run for this template.')} />;
+  }
+  return (
+    <Table aria-label={t('EE image build runs')} variant="compact">
+      <Thead>
+        <Tr>
+          <Th>{t('Run')}</Th>
+          <Th>{t('Image')}</Th>
+          <Th>{t('Status')}</Th>
+          <Th>{t('Started')}</Th>
+          <Th>{t('Finished')}</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {props.builds.map((build) => (
+          <Tr key={build.id}>
+            <Td>#{build.id}</Td>
+            <Td>
+              <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                {build.image}
+              </ClipboardCopy>
+            </Td>
+            <Td>{`${statusText(build.status)} (${build.progress}%)`}</Td>
+            <Td>{formatDate(build.started || build.created)}</Td>
+            <Td>{formatDate(build.finished)}</Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
+  );
+}
+
+function TagsTable(props: {
+  tags: ReturnType<typeof useGet<AwxItemsResponse<QuayImageTag>>>;
+  canLoadTags: boolean;
+  canManageTags: boolean;
+  onDeleteTag: (imageTag: QuayImageTag) => void;
+}) {
+  const { t } = useTranslation();
+  if (!props.canLoadTags) {
+    return (
+      <Alert isInline variant="info" title={t('Project Quay API token is not set.')}>
+        {t('AWX needs a Project Quay API token before it can list hosted image tags.')}
+      </Alert>
+    );
+  }
+  if (props.tags.isLoading) {
+    return (
+      <div style={{ minHeight: 140, display: 'grid', placeItems: 'center' }}>
+        <Spinner size="md" />
+      </div>
+    );
+  }
+  if (props.tags.error) {
+    return (
+      <Alert isInline variant="warning" title={t('Could not load images from Project Quay.')}>
+        {t('Check the Project Quay API token and repository permissions.')}
+      </Alert>
+    );
+  }
+  if (!props.tags.data?.results?.length) {
+    return <Alert isInline variant="info" title={t('No hosted image tags found.')} />;
+  }
+  return (
+    <Table aria-label={t('Project Quay hosted Execution Environments')} variant="compact">
+      <Thead>
+        <Tr>
+          <Th>{t('Tag')}</Th>
+          <Th>{t('Digest')}</Th>
+          <Th>{t('Size')}</Th>
+          <Th>{t('Updated')}</Th>
+          <Th>{t('Actions')}</Th>
+        </Tr>
+      </Thead>
+      <Tbody>
+        {props.tags.data.results.map((imageTag) => (
+          <Tr key={imageTag.id}>
+            <Td>{imageTag.name || '-'}</Td>
+            <Td>{imageTag.manifest_digest || '-'}</Td>
+            <Td>{formatBytes(imageTag.size)}</Td>
+            <Td>{timestampFromTag(imageTag)}</Td>
+            <Td>
+              <Button
+                variant="link"
+                icon={<TrashIcon />}
+                isDanger
+                isDisabled={!props.canManageTags}
+                onClick={() => props.onDeleteTag(imageTag)}
+              >
+                {t('Delete tag')}
+              </Button>
+            </Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
+  );
+}
+
+function StackAlert(props: { status: ReturnType<typeof useGet<QuayStatus>> }) {
+  const { t } = useTranslation();
+  if (props.status.isLoading) return null;
+  if (props.status.data && (!props.status.data.configured || props.status.data.controller_error)) {
+    return (
+      <Alert isInline variant="warning" title={t('Project Quay is not ready')}>
+        {props.status.data.controller_error || props.status.data.message}
+      </Alert>
+    );
+  }
+  if (!props.status.data?.push_configured) {
+    return (
+      <Alert isInline variant="warning" title={t('Project Quay push credentials are not set')}>
+        {t('Templates can be saved, but launching a build requires Quay push credentials.')}
+      </Alert>
+    );
+  }
+  return null;
 }
