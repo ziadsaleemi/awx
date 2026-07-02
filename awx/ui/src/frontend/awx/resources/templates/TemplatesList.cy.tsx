@@ -106,6 +106,7 @@ describe('TemplatesList', () => {
         cy.contains(/^Description$/).should('be.visible');
         cy.contains(/^Created by$/).should('be.visible');
         cy.contains(/^Modified by$/).should('be.visible');
+        cy.contains(/^Type$/).should('be.visible');
       });
     });
 
@@ -146,6 +147,18 @@ describe('TemplatesList', () => {
       );
       cy.filterTableByTextFilter('modified-by', 'qux');
       cy.wait('@modifiedByFilterRequest');
+      cy.clearAllFilters();
+    });
+
+    it('Filter templates by EE build template type', () => {
+      cy.mount(<TemplatesList />);
+      cy.intercept('api/v2/unified_job_templates/*type=quay_image_build_template*').as(
+        'eeBuildTemplateTypeFilterRequest'
+      );
+      cy.selectToolbarFilterByLabel(/^Type$/);
+      cy.multiSelectByDataCy('filter-input', ['EE build template']);
+      cy.wait('@eeBuildTemplateTypeFilterRequest');
+      cy.contains('.pf-v5-c-chip__text', 'EE build template').should('be.visible');
       cy.clearAllFilters();
     });
 

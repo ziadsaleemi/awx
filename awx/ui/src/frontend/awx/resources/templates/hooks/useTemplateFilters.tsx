@@ -30,7 +30,7 @@ export function useTemplateFilters({
     executionEnvironmentId?: string
   ) => {
     const templateQueryParams: { [key: string]: string } = {
-      type: 'job_template,workflow_job_template,terraform_job_template',
+      type: 'job_template,workflow_job_template,terraform_job_template,quay_image_build_template',
     };
     if (projectId) {
       templateQueryParams.project__id = projectId;

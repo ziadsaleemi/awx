@@ -245,6 +245,7 @@ export function useTemplateTypeToolbarFilter() {
         { label: t('Job template'), value: 'job_template' },
         { label: t('Workflow job template'), value: 'workflow_job_template' },
         { label: t('Terraform template'), value: 'terraform_job_template' },
+        { label: t('EE build template'), value: 'quay_image_build_template' },
       ],
       placeholder: t('Select types'),
     }),

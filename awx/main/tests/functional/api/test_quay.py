@@ -665,6 +665,11 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
             expect=200,
         )
         native_job = QuayImageBuildJob.objects.get(pk=launch_response.data['id'])
+        unified_templates_response = get(
+            reverse('api:unified_job_template_list') + '?type=quay_image_build_template&page_size=20',
+            user=admin_user,
+            expect=200,
+        )
         delete_response = delete(create_response.data['url'], user=admin_user, expect=204)
 
     assert create_response.data['name'] == 'Platform EE'
@@ -684,6 +689,10 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     assert launch_response.data['id'] == native_job.pk
     assert native_job.quay_image_build_template_id == create_response.data['id']
     assert signal_start.call_args.args[0] == native_job
+    unified_template_ids = {template['id'] for template in unified_templates_response.data['results']}
+    unified_template_types = {template['type'] for template in unified_templates_response.data['results']}
+    assert create_response.data['id'] in unified_template_ids
+    assert unified_template_types == {'quay_image_build_template'}
     assert build_list_response.data['count'] == 1
     assert build_list_response.data['results'][0]['unified_job']['id'] == native_job.pk
     assert jobs_response.data['count'] == 1
