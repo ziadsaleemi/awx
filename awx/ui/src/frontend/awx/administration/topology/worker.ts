@@ -17,12 +17,12 @@ self.onmessage = function calculateLayout({
   const simulation = d3
     .forceSimulation(nodes)
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('charge', d3.forceManyBody().strength(-50))
+    .force('charge', d3.forceManyBody().strength(-150))
     .force(
       'link',
       d3.forceLink<MeshNode, MeshLink>(links).id((d) => d.hostname)
     )
-    .force('collide', d3.forceCollide(62))
+    .force('collide', d3.forceCollide(90))
     .force('forceX', d3.forceX(0))
     .force('forceY', d3.forceY(0))
     .stop();

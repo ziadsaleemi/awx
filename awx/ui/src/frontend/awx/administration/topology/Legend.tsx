@@ -38,6 +38,11 @@ export const Legend = () => {
   const ExecutionNodeIcon = getNodeIcon('execution');
   const HybridNodeIcon = getNodeIcon('hybrid');
   const HopNodeIcon = getNodeIcon('hop');
+  const EdaIcon = getNodeIcon('service-eda');
+  const PolicyIcon = getNodeIcon('service-gatekeeper');
+  const RegistryIcon = getNodeIcon('service-quay');
+  const CloudIcon = getNodeIcon('service-cloud');
+  const AiIcon = getNodeIcon('service-ai');
 
   const LegendDescription = (props: { label: string; icon: ReactElement }) => {
     const { label, icon } = props;
@@ -67,6 +72,24 @@ export const Legend = () => {
               </DescriptionListDescription>
               <DescriptionListDescription>
                 <LegendDescription label={t('Hop')} icon={<HopNodeIcon />} />
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            <DescriptionListGroup>
+              <DescriptionListTerm>{t('Integrated services')}</DescriptionListTerm>
+              <DescriptionListDescription>
+                <LegendDescription label={t('EDA')} icon={<EdaIcon />} />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription label={t('Policy')} icon={<PolicyIcon />} />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription label={t('Registry and hub')} icon={<RegistryIcon />} />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription label={t('Cloud provider')} icon={<CloudIcon />} />
+              </DescriptionListDescription>
+              <DescriptionListDescription>
+                <LegendDescription label={t('AI assistant')} icon={<AiIcon />} />
               </DescriptionListDescription>
             </DescriptionListGroup>
             <DescriptionListGroup>

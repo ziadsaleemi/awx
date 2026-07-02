@@ -1,14 +1,22 @@
 import {
   BuilderImageIcon,
+  BrainIcon,
   CheckCircleIcon,
+  CloudServerIcon,
   ClockIcon,
+  CodeBranchIcon,
   CubeIcon,
   DataProcessorIcon,
   DatabaseIcon,
   ExclamationCircleIcon,
+  NetworkIcon,
   MinusCircleIcon,
   PlusCircleIcon,
   QuestionCircleIcon,
+  RegistryIcon,
+  RobotIcon,
+  ServiceCatalogIcon,
+  ShieldAltIcon,
 } from '@patternfly/react-icons';
 import {
   DEFAULT_DECORATOR_RADIUS,
@@ -25,12 +33,15 @@ import { CustomNodeProps } from '../types';
 function getStatusIcon(nodeType: string) {
   switch (nodeType) {
     case 'ready':
+    case 'connected':
       return <CheckCircleIcon style={{ fill: pfSuccess }} />;
     case 'installed':
+    case 'not_configured':
       return <ClockIcon style={{ fill: pfInfo }} />;
     case 'provisioning':
       return <PlusCircleIcon style={{ fill: pfDisabled }} />;
     case 'deprovisioning':
+    case 'disabled':
       return <MinusCircleIcon style={{ fill: pfDisabled }} />;
     case 'unavailable':
     case 'deprovision-fail':
@@ -51,6 +62,22 @@ export function getNodeIcon(nodeType: string) {
       return DatabaseIcon;
     case 'hop':
       return DataProcessorIcon;
+    case 'service-ai':
+      return BrainIcon;
+    case 'service-cloud':
+      return CloudServerIcon;
+    case 'service-eda':
+      return RobotIcon;
+    case 'service-galaxy':
+      return ServiceCatalogIcon;
+    case 'service-gatekeeper':
+      return ShieldAltIcon;
+    case 'service-opa':
+      return CodeBranchIcon;
+    case 'service-quay':
+      return RegistryIcon;
+    case 'service-network':
+      return NetworkIcon;
     default:
       return DatabaseIcon;
   }
@@ -63,6 +90,7 @@ export const MeshNode: React.FC<CustomNodeProps & WithSelectionProps> = ({
 }: CustomNodeProps) => {
   const data = element.getData();
   const Icon = data && getNodeIcon(data.nodeType);
+  const isServiceNode = data?.nodeType?.startsWith('service-');
 
   const statusDecorator = useMemo(() => {
     const icon = data && getStatusIcon(data.nodeStatus);
@@ -94,8 +122,15 @@ export const MeshNode: React.FC<CustomNodeProps & WithSelectionProps> = ({
       onStatusDecoratorClick={onSelect}
       truncateLength={20}
     >
-      <g transform={`translate(13, 13)`}>
-        {Icon && <Icon style={{ color: '#393F44' }} width={25} height={25} />}
+      <g
+        data-cy={`mesh-node-icon-${element.getId()}`}
+        onClick={onSelect}
+        style={{ cursor: 'pointer', pointerEvents: 'all' }}
+        transform={`translate(13, 13)`}
+      >
+        {Icon && (
+          <Icon style={{ color: isServiceNode ? '#0066cc' : '#393F44' }} width={25} height={25} />
+        )}
       </g>
       {statusDecorator}
     </DefaultNode>

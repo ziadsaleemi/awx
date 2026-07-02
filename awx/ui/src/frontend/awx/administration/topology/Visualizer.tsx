@@ -28,10 +28,10 @@ import styled from 'styled-components';
 import { MeshVisualizer } from '../../interfaces/MeshVisualizer';
 import { Legend } from './Legend';
 import { Loader } from './Loader';
-import { InstanceDetailSidebar } from './Sidebar';
+import { InstanceDetailSidebar, ServiceDetailSidebar } from './Sidebar';
 import { MeshEdge } from './components/MeshEdge';
 import { MeshNode } from './components/MeshNode';
-import { WebWorkerResponse } from './types';
+import { MeshLink, WebWorkerResponse } from './types';
 import { useTranslation } from 'react-i18next';
 
 const ContentLoading = styled(Loader)`
@@ -65,6 +65,11 @@ const baselineComponentFactory: ComponentFactory = (kind: ModelKind, type: strin
 };
 
 const NODE_DIAMETER = 50;
+const SERVICE_NODE_DIAMETER = 58;
+
+function getEndpointName(endpoint: MeshLink['source'] | MeshLink['target']) {
+  return typeof endpoint === 'string' ? endpoint : endpoint.hostname;
+}
 
 function getEdgeStyle(edge: string) {
   switch (edge) {
@@ -104,6 +109,19 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
   const [showLegend, setShowLegend] = useState<boolean>(false);
   const controllerRef = useRef<Visualization>();
   const controller = controllerRef.current;
+  const topologyNodes = useMemo(
+    () => [...mesh.nodes, ...(mesh.services ?? [])],
+    [mesh.nodes, mesh.services]
+  );
+  const topologyLinks = useMemo(
+    () => [...mesh.links, ...(mesh.service_links ?? [])],
+    [mesh.links, mesh.service_links]
+  );
+  const serviceById = useMemo(() => {
+    return new Map((mesh.services ?? []).map((service) => [String(service.id), service]));
+  }, [mesh.services]);
+  const selectedService =
+    selectedIds.length > 0 ? serviceById.get(String(selectedIds[0])) : undefined;
 
   function toggleLegend() {
     setShowLegend(!showLegend);
@@ -133,8 +151,8 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
     const height = getHeight('#mesh-topology');
     if (window.Worker) {
       getData.postMessage({
-        nodes: mesh.nodes,
-        links: mesh.links,
+        nodes: topologyNodes,
+        links: topologyLinks,
         width: width,
         height: height,
       });
@@ -183,27 +201,40 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
 
   useEffect(() => {
     const nodes: NodeModel[] = meshLayout.nodes.map((n) => {
+      const isServiceNode = n.node_type.startsWith('service-');
       return {
         id: n.id,
         x: n.x,
         y: n.y,
         type: n.node_type,
         label: n.hostname,
-        width: NODE_DIAMETER,
-        height: NODE_DIAMETER,
+        width: isServiceNode ? SERVICE_NODE_DIAMETER : NODE_DIAMETER,
+        height: isServiceNode ? SERVICE_NODE_DIAMETER : NODE_DIAMETER,
         shape: NodeShape.rect,
         data: {
           nodeType: n.node_type,
           nodeStatus: n.node_state,
+          serviceType: n.service_type,
+          statusLabel: n.status_label,
+          description: n.description,
+          endpoint: n.endpoint,
+          metadata: n.metadata,
         },
       };
     });
+    const nodeIdByHostname = new Map(meshLayout.nodes.map((node) => [node.hostname, node.id]));
     const links: EdgeModel[] = meshLayout.links.map((l) => {
+      const sourceName = getEndpointName(l.source);
+      const targetName = getEndpointName(l.target);
+      const sourceId =
+        typeof l.source === 'string' ? nodeIdByHostname.get(l.source) ?? l.source : l.source.id;
+      const targetId =
+        typeof l.target === 'string' ? nodeIdByHostname.get(l.target) ?? l.target : l.target.id;
       return {
-        id: `edge-${l.source.hostname}-${l.target.hostname}`,
+        id: `edge-${sourceName}-${targetName}`,
         type: 'edge',
-        source: l.source.id,
-        target: l.target.id,
+        source: sourceId,
+        target: targetId,
         edgeStyle: getEdgeStyle(l.link_state),
         data: {
           endTerminalStatus: getEdgeStatus(l.link_state),
@@ -241,10 +272,17 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
               show
               resizable
             >
-              <InstanceDetailSidebar
-                onClose={() => setSelectedIds([])}
-                selectedId={selectedIds[0]}
-              />
+              {selectedService ? (
+                <ServiceDetailSidebar
+                  service={selectedService}
+                  onClose={() => setSelectedIds([])}
+                />
+              ) : (
+                <InstanceDetailSidebar
+                  onClose={() => setSelectedIds([])}
+                  selectedId={selectedIds[0]}
+                />
+              )}
             </TopologySideBar>
           )
         }

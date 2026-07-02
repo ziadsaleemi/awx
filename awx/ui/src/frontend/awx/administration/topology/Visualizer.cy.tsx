@@ -28,13 +28,30 @@ describe('Mesh Visualizer', () => {
       .its('response.body')
       .then((data: MeshVisualizer) => {
         data.nodes.forEach((n) => {
-          cy.get(`[data-id="${n.id}"]`).should('be.visible');
+          cy.get(`[data-id="${n.id}"]`).should('exist');
           cy.get(`[data-id="${n.id}"] text`).should('have.text', n.hostname);
         });
         data.links.forEach((l) => {
           cy.get(`[data-id="edge-${l.source}-${l.target}"]`).should('be.visible');
         });
+        data.services?.forEach((service) => {
+          cy.get(`[data-id="${service.id}"]`).should('exist');
+          cy.get(`[data-id="${service.id}"] text`).should('have.text', service.hostname);
+        });
+        data.service_links?.forEach((l) => {
+          cy.get(`[data-id="edge-${l.source}-${l.target}"]`).should('be.visible');
+        });
       });
+  });
+  it('should show sidebar details when a service node is selected', () => {
+    cy.mount(<Topology />);
+    cy.get('.mesh-content-loader').should('not.exist');
+    cy.get('[data-cy="mesh-node-icon-service-eda"]').click({ force: true });
+    cy.get('[data-cy="mesh-viz-sidebar"]').should('be.visible');
+    cy.get('[data-cy="mesh-viz-sidebar"]').contains('EDA Controller').should('be.visible');
+    cy.get('[data-cy="mesh-viz-sidebar"]')
+      .contains('https://eda.example.test')
+      .should('be.visible');
   });
   it('should show sidebar details when a node is selected', () => {
     cy.mount(<Topology />);

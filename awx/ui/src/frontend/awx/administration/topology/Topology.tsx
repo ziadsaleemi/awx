@@ -24,11 +24,11 @@ export function Topology() {
       <PageHeader
         title={t('Topology View')}
         description={t(
-          'View node type, node health, and specific details about each node in your mesh topology.'
+          'View AWX mesh nodes, integrated services, and the connections between them.'
         )}
         titleHelpTitle={t('Topology View')}
         titleHelp={t(
-          'View node type, node health, and specific details about each node in your mesh topology.'
+          'View AWX mesh nodes, service health, and specific details about each node or connected service.'
         )}
         titleDocLink={useGetDocsUrl(config, 'topology')}
       />

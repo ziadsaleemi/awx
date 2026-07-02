@@ -81,5 +81,69 @@
       "target": "receptor-hop",
       "link_state": "established"
     }
+  ],
+  "services": [
+    {
+      "id": "service-eda",
+      "hostname": "EDA Controller",
+      "node_type": "service-eda",
+      "node_state": "ready",
+      "enabled": true,
+      "service_type": "eda",
+      "status_label": "Connected",
+      "description": "Event-Driven Ansible controller used for rulebooks, activations, and access sync.",
+      "endpoint": "https://eda.example.test",
+      "metadata": {
+        "Module": "Enabled",
+        "Auth": "Configured"
+      }
+    },
+    {
+      "id": "service-opa",
+      "hostname": "OPA",
+      "node_type": "service-opa",
+      "node_state": "ready",
+      "enabled": true,
+      "service_type": "opa",
+      "status_label": "Connected",
+      "description": "Open Policy Agent guardrails used before launches, AI actions, and policy sync.",
+      "endpoint": "http://opa.example.test:8181",
+      "metadata": {
+        "Module": "Enabled",
+        "Auth type": "None"
+      }
+    },
+    {
+      "id": "service-quay",
+      "hostname": "Project Quay",
+      "node_type": "service-quay",
+      "node_state": "ready",
+      "enabled": true,
+      "service_type": "quay",
+      "status_label": "Connected",
+      "description": "Execution environment image registry used by EE build templates.",
+      "endpoint": "https://quay.example.test",
+      "metadata": {
+        "Module": "Enabled",
+        "Namespace": "awx"
+      }
+    }
+  ],
+  "service_links": [
+    {
+      "source": "awx_1",
+      "target": "EDA Controller",
+      "link_state": "established"
+    },
+    {
+      "source": "awx_1",
+      "target": "OPA",
+      "link_state": "established"
+    },
+    {
+      "source": "awx_1",
+      "target": "Project Quay",
+      "link_state": "established"
+    }
   ]
 }
