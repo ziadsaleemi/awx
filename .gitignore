@@ -117,6 +117,8 @@ tools/awx-deploy/ansible/vars/*.yml
 env/*
 nohup.out
 reports
+!awx/ui/src/frontend/awx/analytics/Reports/
+!awx/ui/src/frontend/awx/analytics/Reports/**
 *.bak
 *.bak[0-9]
 *.dot
