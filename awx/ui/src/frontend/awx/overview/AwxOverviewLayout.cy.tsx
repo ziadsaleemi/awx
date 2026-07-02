@@ -2,7 +2,6 @@
 import { CardBody } from '@patternfly/react-core';
 import { PageDashboard } from '../../../framework/PageDashboard/PageDashboard';
 import { PageDashboardCard } from '../../../framework/PageDashboard/PageDashboardCard';
-import { AwxControlHubCard } from './cards/AwxControlHubCard';
 import { AwxControlHubSignalsCard } from './cards/AwxControlHubSignalsCard';
 import { AwxInsightsCard } from './cards/AwxInsightsCard';
 import { AwxROICard } from './cards/AwxROICard';
@@ -170,38 +169,6 @@ describe('AwxOverview layout', () => {
       '/api/v2/catalog_deployments/?page_size=1',
       listResponse([{ id: 1 }, { id: 2 }, { id: 3 }])
     );
-  });
-
-  it('shows AWX as a central control hub for integrated modules', () => {
-    cy.viewport(1366, 900);
-    cy.mount(
-      <PageDashboard>
-        <AwxControlHubCard data={dashboardData} />
-      </PageDashboard>
-    );
-
-    cy.contains('AWX Control Hub').should('be.visible');
-    cy.contains('Automation execution').should('be.visible');
-    cy.contains('Content and registries').should('be.visible');
-    cy.contains('Policy as Code').should('be.visible');
-    cy.contains('Event-driven automation').should('be.visible');
-    cy.contains('Cloud and catalog').should('be.visible');
-    cy.contains('Platform services').should('be.visible');
-    cy.contains('AI ready').should('be.visible');
-    cy.contains('EDA connected').should('be.visible');
-    cy.contains('OPA enabled').should('be.visible');
-    cy.contains('Gatekeeper connected').should('be.visible');
-    cy.getByDataCy('control-hub-metric').should('have.length', 6);
-    cy.getByDataCy('control-hub-module').should('have.length', 6);
-
-    cy.getByDataCy('awx-control-hub').then(($card) => {
-      const cardRect = $card[0].getBoundingClientRect();
-      cy.getByDataCy('control-hub-module').each(($module) => {
-        const moduleRect = $module[0].getBoundingClientRect();
-        expect(moduleRect.left).to.be.greaterThan(cardRect.left - 1);
-        expect(moduleRect.right).to.be.lessThan(cardRect.right + 1);
-      });
-    });
   });
 
   it('shows integrated systems in a graph and compact table', () => {

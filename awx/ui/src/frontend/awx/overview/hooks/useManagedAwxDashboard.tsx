@@ -11,8 +11,8 @@ export function useManagedAwxDashboard() {
 
   // Use a user-specific key so each user's dashboard card order is stored separately.
   const storageId = activeAwxUser
-    ? `awx-dashboard-hub-v2-${activeAwxUser.id}`
-    : 'awx-dashboard-hub-v2';
+    ? `awx-dashboard-hub-v3-${activeAwxUser.id}`
+    : 'awx-dashboard-hub-v3';
 
   const columns = useMemo(
     () => [
@@ -25,7 +25,6 @@ export function useManagedAwxDashboard() {
   );
   const resources: Resource[] = useMemo(
     () => [
-      { id: 'control_hub', name: t('AWX Control Hub') },
       { id: 'counts', name: t('Resource counts') },
       { id: 'recent_job_activity', name: t('Recent job activity') },
       { id: 'control_hub_signals', name: t('Control hub signals') },

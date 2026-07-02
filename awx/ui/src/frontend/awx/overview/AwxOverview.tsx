@@ -9,7 +9,6 @@ import { PageDashboard } from '../../../framework/PageDashboard/PageDashboard';
 import { awxAPI } from '../common/api/awx-utils';
 import { useAwxWebSocketSubscription } from '../common/useAwxWebSocket';
 import { AwxCountsCard } from './cards/AwxCountsCard';
-import { AwxControlHubCard } from './cards/AwxControlHubCard';
 import { AwxControlHubSignalsCard } from './cards/AwxControlHubSignalsCard';
 import { AwxJobActivityCard } from './cards/AwxJobActivityCard';
 import { AwxRecentInventoriesCard } from './cards/AwxRecentInventoriesCard';
@@ -76,8 +75,6 @@ function AwxOverviewInternal(props: { managedResources: Resource[] }) {
     <PageDashboard sectionStyle={{ padding: '16px' }}>
       {managedResources.map((resource: Resource) => {
         switch (resource.id) {
-          case 'control_hub':
-            return <AwxControlHubCard key={resource.id} data={data} />;
           case 'control_hub_signals':
             return <AwxControlHubSignalsCard key={resource.id} data={data} />;
           case 'counts':
