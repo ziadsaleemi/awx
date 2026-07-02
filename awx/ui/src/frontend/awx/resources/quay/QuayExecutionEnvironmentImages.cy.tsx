@@ -166,6 +166,80 @@ describe('QuayExecutionEnvironmentImages', () => {
       },
     }).as('build42');
     cy.intercept('GET', `${awxAPI`/quay/tags/`}*`, tags).as('tags');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/role_team_assignments/`}?object_id=11&content_type__model=quayimagebuildtemplate*`,
+      {
+        count: 0,
+        next: null,
+        previous: null,
+        results: [],
+      }
+    ).as('teamAccess');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/role_user_assignments/`}?object_id=11&content_type__model=quayimagebuildtemplate*`,
+      {
+        count: 0,
+        next: null,
+        previous: null,
+        results: [],
+      }
+    ).as('userAccess');
+    cy.intercept(
+      'OPTIONS',
+      `${awxAPI`/quay/execution-environment-images/templates/`}11/schedules/`,
+      {
+        actions: {
+          POST: {
+            name: { type: 'string', required: true },
+            rrule: { type: 'string', required: true },
+          },
+        },
+      }
+    ).as('scheduleOptions');
+    cy.intercept('GET', `${awxAPI`/quay/execution-environment-images/templates/`}11/schedules/*`, {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('schedules');
+    cy.intercept('GET', `${awxAPI`/notification_templates/`}*`, {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }).as('notificationTemplates');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/quay/execution-environment-images/templates/`}11/notification_templates_started/`,
+      {
+        count: 0,
+        next: null,
+        previous: null,
+        results: [],
+      }
+    ).as('notificationsStarted');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/quay/execution-environment-images/templates/`}11/notification_templates_success/`,
+      {
+        count: 0,
+        next: null,
+        previous: null,
+        results: [],
+      }
+    ).as('notificationsSuccess');
+    cy.intercept(
+      'GET',
+      `${awxAPI`/quay/execution-environment-images/templates/`}11/notification_templates_error/`,
+      {
+        count: 0,
+        next: null,
+        previous: null,
+        results: [],
+      }
+    ).as('notificationsError');
     cy.intercept('POST', awxAPI`/quay/execution-environment-images/templates/`, {
       statusCode: 201,
       body: {
@@ -226,7 +300,25 @@ describe('QuayExecutionEnvironmentImages', () => {
     cy.get('input[value="quay.example.test/awx/platform-ee:latest"]').should('exist');
 
     cy.contains('Team Access').click();
-    cy.contains('Team Access requires native AWX template integration.').should('be.visible');
+    cy.wait('@teamAccess');
+    cy.contains('Add roles').should('be.visible');
+    cy.contains('There are currently no teams assigned').should('be.visible');
+    cy.contains('User Access').click();
+    cy.wait('@userAccess');
+    cy.contains('There are currently no users assigned').should('be.visible');
+    cy.contains('Schedules').click();
+    cy.wait(['@scheduleOptions', '@schedules']);
+    cy.contains('No schedules yet').should('be.visible');
+    cy.contains('Notifications').click();
+    cy.wait([
+      '@notificationTemplates',
+      '@notificationsStarted',
+      '@notificationsSuccess',
+      '@notificationsError',
+    ]);
+    cy.contains(
+      'There are currently no notifications added to this Project Quay EE build template.'
+    ).should('be.visible');
     cy.contains('Jobs').click();
 
     cy.contains('Edit template').click();

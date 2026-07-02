@@ -82,6 +82,16 @@ export function useGetScheduleUrl() {
           scheduleList: { pageId: AwxRoute.WorkflowJobTemplateSchedules, params },
         }[route] as string | schedulePageUrl;
       }
+      if (unified_job_type === 'quay_image_build_job') {
+        return {
+          name: t('Project Quay image build'),
+          details: { pageId: AwxRoute.QuayImageBuildTemplateScheduleDetails, params },
+          create: { pageId: AwxRoute.QuayImageBuildTemplateScheduleCreate, params },
+          edit: { pageId: AwxRoute.QuayImageBuildTemplateScheduleEdit, params },
+          resource: { pageId: AwxRoute.QuayExecutionEnvironmentImages, params },
+          scheduleList: { pageId: AwxRoute.QuayExecutionEnvironmentImages, params },
+        }[route] as string | schedulePageUrl;
+      }
       return '';
     },
     [t]

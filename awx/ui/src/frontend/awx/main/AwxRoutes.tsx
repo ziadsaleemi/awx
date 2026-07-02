@@ -215,6 +215,12 @@ export enum AwxRoute {
   QuayRepositoryPermissions = 'awx-quay-repository-permissions',
   QuayRobots = 'awx-quay-robots',
   QuayExecutionEnvironmentImages = 'awx-quay-execution-environment-images',
+  QuayImageBuildTemplateAddTeams = 'awx-quay-image-build-template-add-teams',
+  QuayImageBuildTemplateAddUsers = 'awx-quay-image-build-template-add-users',
+  QuayImageBuildTemplateScheduleCreate = 'awx-quay-image-build-template-schedule-create',
+  QuayImageBuildTemplateScheduleEdit = 'awx-quay-image-build-template-schedule-edit',
+  QuayImageBuildTemplateSchedulePage = 'awx-quay-image-build-template-schedule-page',
+  QuayImageBuildTemplateScheduleDetails = 'awx-quay-image-build-template-schedule-details',
   QuayApiToken = 'awx-quay-api-token',
 
   // Cloud

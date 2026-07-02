@@ -97,7 +97,7 @@ from awx.main.models.workflow import (  # noqa
 from awx.main.models.terraform import TerraformJobTemplate, TerraformJob  # noqa
 from awx.main.models.events import TerraformJobEvent  # noqa
 from awx.main.models.catalog import CatalogItem, CatalogDeployment, CloudProviderConnection, CloudProviderState  # noqa
-from awx.main.models.quay import QuayImageBuild, QuayImageBuildTemplate  # noqa
+from awx.main.models.quay import QuayImageBuild, QuayImageBuildJob, QuayImageBuildTemplate  # noqa
 
 # Add custom methods to User model for permissions checks.
 from django.contrib.auth.models import User  # noqa
@@ -268,6 +268,7 @@ permission_registry.register(
     WorkflowJobTemplate,
     JobTemplate,
     TerraformJobTemplate,
+    QuayImageBuildTemplate,
     CatalogItem,
     CloudProviderConnection,
     CloudProviderState,

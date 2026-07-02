@@ -32,6 +32,7 @@ import {
 } from '@patternfly/react-icons';
 import { DropdownPosition } from '@patternfly/react-core/deprecated';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import { useSearchParams } from 'react-router-dom';
 import {
   DateTimeCell,
   IPageAction,
@@ -49,12 +50,17 @@ import {
   ToolbarFilterType,
   usePageAlertToaster,
 } from '../../../../framework';
+import { TeamAccess } from '../../../common/access/components/TeamAccess';
+import { UserAccess } from '../../../common/access/components/UserAccess';
 import { postRequest, requestDelete, requestGet, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxView } from '../../common/useAwxView';
+import { AwxRoute } from '../../main/AwxRoutes';
+import { ResourceNotifications } from '../notifications/ResourceNotifications';
+import { SchedulesList } from '../../views/schedules/SchedulesList';
 import { QuayStatus } from './QuayOverview';
 
 type ContainerRuntime = 'podman' | 'docker';
@@ -196,9 +202,22 @@ function buildStatusColor(status?: string): 'blue' | 'green' | 'orange' | 'red' 
   return 'blue';
 }
 
+function isDetailsTabKey(value: string | null): value is DetailsTabKey {
+  return (
+    value === 'details' ||
+    value === 'team-access' ||
+    value === 'user-access' ||
+    value === 'schedules' ||
+    value === 'jobs' ||
+    value === 'notifications' ||
+    value === 'tags'
+  );
+}
+
 export function QuayExecutionEnvironmentImages() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
+  const [searchParams, setSearchParams] = useSearchParams();
   const status = useGet<QuayStatus>(awxAPI`/quay/status/`);
   const projects = useGet<AwxItemsResponse<AwxProject>>(
     awxAPI`/projects/`,
@@ -232,8 +251,8 @@ export function QuayExecutionEnvironmentImages() {
   const [selectedBuildSnapshot, setSelectedBuildSnapshot] = useState<QuayImageBuild>();
 
   const configured = Boolean(status.data?.configured && status.data.registry);
-  const projectOptions = projects.data?.results ?? [];
-  const buildItems = builds.data?.results ?? [];
+  const projectOptions = useMemo(() => projects.data?.results ?? [], [projects.data?.results]);
+  const buildItems = useMemo(() => builds.data?.results ?? [], [builds.data?.results]);
   const toolbarFilters = useQuayBuildTemplateFilters();
   const view = useAwxView<QuayBuildTemplate>({
     url: awxAPI`/quay/execution-environment-images/templates/`,
@@ -241,7 +260,7 @@ export function QuayExecutionEnvironmentImages() {
     defaultSort: 'name',
     disableQueryString: true,
   });
-  const templateItems = view.pageItems ?? [];
+  const templateItems = useMemo(() => view.pageItems ?? [], [view.pageItems]);
   const selectedTemplate = useMemo(
     () =>
       templateItems.find((template) => template.id === selectedTemplateId) ??
@@ -322,7 +341,7 @@ export function QuayExecutionEnvironmentImages() {
     setMode('form');
   };
 
-  const showDetails = (template: QuayBuildTemplate, tab: DetailsTabKey = 'details') => {
+  const showDetails = useCallback((template: QuayBuildTemplate, tab: DetailsTabKey = 'details') => {
     setSelectedTemplateId(template.id);
     setSelectedTemplateSnapshot(template);
     setActiveTab(tab);
@@ -331,7 +350,7 @@ export function QuayExecutionEnvironmentImages() {
       setSelectedBuildSnapshot(template.latest_build);
     }
     setMode('details');
-  };
+  }, []);
 
   const showEdit = (template: QuayBuildTemplate) => {
     setEditingTemplateId(template.id);
@@ -346,6 +365,16 @@ export function QuayExecutionEnvironmentImages() {
     setContextPath(template.context);
     setMode('form');
   };
+
+  useEffect(() => {
+    const templateId = Number(searchParams.get('template'));
+    if (!templateId || Number.isNaN(templateId) || !templateItems.length) return;
+    const template = templateItems.find((item) => item.id === templateId);
+    if (!template) return;
+    const requestedTab = searchParams.get('tab');
+    showDetails(template, isDetailsTabKey(requestedTab) ? requestedTab : 'details');
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, showDetails, templateItems]);
 
   const buildPayload = (): QuayBuildTemplatePayload => ({
     name: name.trim(),
@@ -811,7 +840,6 @@ function ListView(props: {
       <StackAlert status={props.status} />
       <PageTable<QuayBuildTemplate>
         id="quay-ee-build-templates-table"
-        keyFn={(template) => template.id}
         toolbarFilters={props.toolbarFilters}
         toolbarActions={props.toolbarActions}
         tableColumns={props.tableColumns}
@@ -1069,34 +1097,37 @@ function DetailsView(props: {
             canManageTags={props.canManageTags}
             onDeleteTag={props.onDeleteTag}
           />
+        ) : props.activeTab === 'team-access' ? (
+          <TeamAccess
+            service="awx"
+            id={props.template.id.toString()}
+            type="quayimagebuildtemplate"
+            addRolesRoute={AwxRoute.QuayImageBuildTemplateAddTeams}
+          />
+        ) : props.activeTab === 'user-access' ? (
+          <UserAccess
+            service="awx"
+            id={props.template.id.toString()}
+            type="quayimagebuildtemplate"
+            addRolesRoute={AwxRoute.QuayImageBuildTemplateAddUsers}
+          />
+        ) : props.activeTab === 'schedules' ? (
+          <SchedulesList
+            createSchedulePageId={AwxRoute.QuayImageBuildTemplateScheduleCreate}
+            resourceId={props.template.id.toString()}
+            resourceType="quay-image-build-template"
+            sublistEndpoint={awxAPI`/quay/execution-environment-images/templates`}
+          />
+        ) : props.activeTab === 'notifications' ? (
+          <ResourceNotifications
+            resourceType="quay_image_build_templates"
+            id={props.template.id.toString()}
+          />
         ) : (
-          <TemplateIntegrationPending tab={props.activeTab} />
+          <Alert isInline variant="warning" title={t('Unsupported EE build template tab.')} />
         )}
       </PageSection>
     </>
-  );
-}
-
-function TemplateIntegrationPending(props: { tab: DetailsTabKey }) {
-  const { t } = useTranslation();
-  const tabName =
-    props.tab === 'team-access'
-      ? t('Team Access')
-      : props.tab === 'user-access'
-        ? t('User Access')
-        : props.tab === 'schedules'
-          ? t('Schedules')
-          : t('Notifications');
-  return (
-    <Alert
-      isInline
-      variant="info"
-      title={t('{{tabName}} requires native AWX template integration.', { tabName })}
-    >
-      {t(
-        'Project Quay EE build templates currently run through the Quay API facade. To make this tab fully functional, QuayImageBuildTemplate must expose AWX object roles and launch scheduling/notification relationships the same way Job Templates and Terraform Templates do. This gap is tracked in ENHANCEMENTS.md.'
-      )}
-    </Alert>
   );
 }
 

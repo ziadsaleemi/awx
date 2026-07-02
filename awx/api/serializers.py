@@ -81,6 +81,8 @@ from awx.main.models import (
     Project,
     ProjectUpdate,
     ProjectUpdateEvent,
+    QuayImageBuildJob,
+    QuayImageBuildTemplate,
     ReceptorAddress,
     Role,
     Schedule,
@@ -786,7 +788,15 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
 
     def get_types(self):
         if type(self) is UnifiedJobTemplateSerializer:
-            return ['project', 'inventory_source', 'job_template', 'system_job_template', 'workflow_job_template', 'terraform_job_template']
+            return [
+                'project',
+                'inventory_source',
+                'job_template',
+                'system_job_template',
+                'workflow_job_template',
+                'terraform_job_template',
+                'quay_image_build_template',
+            ]
         else:
             return super(UnifiedJobTemplateSerializer, self).get_types()
 
@@ -807,6 +817,8 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
                 serializer_class = WorkflowApprovalTemplateSerializer
             elif isinstance(obj, TerraformJobTemplate):
                 serializer_class = TerraformJobTemplateSerializer
+            elif isinstance(obj, QuayImageBuildTemplate):
+                serializer_class = QuayImageBuildTemplateSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -818,7 +830,7 @@ class UnifiedJobTemplateSerializer(BaseSerializer, OpaQueryPathMixin):
                 serializer.parent = self.parent
                 serializer.polymorphic_base = self
                 # capabilities prefetch is only valid for these models
-                if isinstance(obj, (JobTemplate, WorkflowJobTemplate, TerraformJobTemplate)):
+                if isinstance(obj, (JobTemplate, WorkflowJobTemplate, TerraformJobTemplate, QuayImageBuildTemplate)):
                     serializer.capabilities_prefetch = serializer_class.capabilities_prefetch
                 else:
                     serializer.capabilities_prefetch = None
@@ -881,7 +893,7 @@ class UnifiedJobSerializer(BaseSerializer):
 
     def get_types(self):
         if type(self) is UnifiedJobSerializer:
-            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job']
+            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job', 'quay_image_build_job']
         else:
             return super(UnifiedJobSerializer, self).get_types()
 
@@ -961,6 +973,8 @@ class UnifiedJobSerializer(BaseSerializer):
                 serializer_class = WorkflowApprovalSerializer
             elif isinstance(obj, TerraformJob):
                 serializer_class = TerraformJobSerializer
+            elif isinstance(obj, QuayImageBuildJob):
+                serializer_class = QuayImageBuildJobSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -1003,7 +1017,7 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
 
     def get_types(self):
         if type(self) is UnifiedJobListSerializer:
-            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job']
+            return ['project_update', 'inventory_update', 'job', 'ad_hoc_command', 'system_job', 'workflow_job', 'terraform_job', 'quay_image_build_job']
         else:
             return super(UnifiedJobListSerializer, self).get_types()
 
@@ -1026,6 +1040,8 @@ class UnifiedJobListSerializer(UnifiedJobSerializer):
                 serializer_class = WorkflowApprovalListSerializer
             elif isinstance(obj, TerraformJob):
                 serializer_class = TerraformJobListSerializer
+            elif isinstance(obj, QuayImageBuildJob):
+                serializer_class = QuayImageBuildJobListSerializer
         return serializer_class
 
     def to_representation(self, obj):
@@ -4086,6 +4102,120 @@ class TerraformJobListSerializer(TerraformJobSerializer, UnifiedJobListSerialize
 
 
 class TerraformJobCancelSerializer(TerraformJobSerializer):
+    can_cancel = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        fields = ('can_cancel',)
+
+
+class QuayImageBuildTemplateSerializer(UnifiedJobTemplateSerializer):
+    show_capabilities = ['start', 'schedule', 'edit', 'delete']
+    capabilities_prefetch = ['admin', 'execute']
+
+    class Meta:
+        model = QuayImageBuildTemplate
+        fields = (
+            '*',
+            'project',
+            'namespace',
+            'repository',
+            'tag',
+            'runtime',
+            'definition_file',
+            'context_path',
+            'execution_environment',
+        )
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        res.update(
+            jobs=self.reverse('api:quay_image_build_template_jobs_list', kwargs={'pk': obj.pk}),
+            launch=self.reverse('api:quay_image_build_template_launch', kwargs={'pk': obj.pk}),
+            schedules=self.reverse('api:quay_image_build_template_schedules_list', kwargs={'pk': obj.pk}),
+            notification_templates_started=self.reverse('api:quay_image_build_template_notification_templates_started', kwargs={'pk': obj.pk}),
+            notification_templates_error=self.reverse('api:quay_image_build_template_notification_templates_error', kwargs={'pk': obj.pk}),
+            notification_templates_success=self.reverse('api:quay_image_build_template_notification_templates_success', kwargs={'pk': obj.pk}),
+            object_roles=self.reverse('api:quay_image_build_template_object_roles', kwargs={'pk': obj.pk}),
+        )
+        if obj.project_id:
+            res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        if obj.execution_environment_id:
+            res['execution_environment'] = self.reverse('api:execution_environment_detail', kwargs={'pk': obj.execution_environment_id})
+        return res
+
+    def get_summary_fields(self, obj):
+        summary_fields = super().get_summary_fields(obj)
+        summary_fields['repository'] = {
+            'namespace': obj.namespace,
+            'repository': obj.repository,
+            'repository_path': obj.repository_path,
+            'tag': obj.tag,
+        }
+        return summary_fields
+
+
+class QuayImageBuildJobSerializer(UnifiedJobSerializer):
+    result_stdout = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuayImageBuildJob
+        fields = (
+            '*',
+            'quay_image_build_template',
+            'project',
+            'namespace',
+            'repository',
+            'tag',
+            'image',
+            'registry',
+            'runtime',
+            'definition_file',
+            'context_path',
+            'scm_revision',
+            'progress',
+            'command_summary',
+            'result_stdout',
+        )
+
+    def get_related(self, obj):
+        res = super().get_related(obj)
+        if obj.quay_image_build_template_id:
+            res['quay_image_build_template'] = self.reverse('api:quay_image_build_template_detail', kwargs={'pk': obj.quay_image_build_template_id})
+        if obj.project_id:
+            res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        try:
+            legacy_build = obj.quay_image_build
+        except ObjectDoesNotExist:
+            legacy_build = None
+        if legacy_build:
+            res['quay_image_build'] = self.reverse('api:quay_image_build_detail', kwargs={'pk': legacy_build.pk})
+        res['cancel'] = self.reverse('api:quay_image_build_job_cancel', kwargs={'pk': obj.pk})
+        return res
+
+    def get_summary_fields(self, obj):
+        summary_fields = super().get_summary_fields(obj)
+        summary_fields['repository'] = {
+            'namespace': obj.namespace,
+            'repository': obj.repository,
+            'repository_path': obj.repository_path,
+            'tag': obj.tag,
+        }
+        return summary_fields
+
+    def get_result_stdout(self, obj):
+        try:
+            return obj.result_stdout
+        except StdoutMaxBytesExceeded as e:
+            return _("Standard Output too large to display ({text_size} bytes), only download supported for sizes over {supported_size} bytes.").format(
+                text_size=e.total, supported_size=e.supported
+            )
+
+
+class QuayImageBuildJobListSerializer(QuayImageBuildJobSerializer, UnifiedJobListSerializer):
+    pass
+
+
+class QuayImageBuildJobCancelSerializer(QuayImageBuildJobSerializer):
     can_cancel = serializers.BooleanField(read_only=True)
 
     class Meta:

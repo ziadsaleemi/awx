@@ -74,6 +74,8 @@ from awx.main.models import (
     WorkflowApprovalTemplate,
     TerraformJobTemplate,
     TerraformJob,
+    QuayImageBuildJob,
+    QuayImageBuildTemplate,
     CatalogItem,
     CatalogDeployment,
 )
@@ -1902,6 +1904,91 @@ class TerraformJobAccess(BaseAccess):
 
     def can_start(self, obj, validate_license=True):
         return self.can_add({'terraform_job_template': obj.terraform_job_template_id})
+
+    def can_delete(self, obj):
+        return self.user.is_superuser
+
+
+class QuayImageBuildTemplateAccess(BaseAccess):
+    """
+    I can see Project Quay image build templates when I have read role on the template.
+    """
+
+    model = QuayImageBuildTemplate
+    select_related = (
+        'created_by',
+        'modified_by',
+        'project',
+        'organization',
+    )
+
+    def filtered_queryset(self):
+        if self.user.is_superuser or self.user.is_system_auditor:
+            return QuayImageBuildTemplate.objects.all()
+        return QuayImageBuildTemplate.objects.filter(pk__in=QuayImageBuildTemplate.accessible_pk_qs(self.user, 'read_role'))
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return (
+                Organization.accessible_objects(self.user, 'execution_environment_admin_role').exists()
+                or Organization.accessible_objects(self.user, 'job_template_admin_role').exists()
+            )
+        project = get_object_from_data('project', Project, data) if data and data.get('project') else None
+        organization = project.organization if project and project.organization_id else None
+        if not organization and data and data.get('organization'):
+            organization = get_object_from_data('organization', Organization, data)
+        if not organization:
+            return False
+        has_org_admin = self.user in organization.execution_environment_admin_role or self.user in organization.job_template_admin_role
+        has_project_use = not project or self.user.can_access(Project, 'use', project)
+        return has_org_admin and has_project_use
+
+    def can_start(self, obj, validate_license=True):
+        if validate_license:
+            self.check_license()
+        if self.user.is_superuser:
+            return True
+        return self.user in obj.execute_role
+
+    def can_change(self, obj, data):
+        if self.user not in obj.admin_role and not self.user.is_superuser:
+            return False
+        if data is None:
+            return True
+        return self.check_related('project', Project, data, obj=obj, role_field='use_role', mandatory=False)
+
+    def can_delete(self, obj):
+        return self.user.is_superuser or self.user in obj.admin_role
+
+
+class QuayImageBuildJobAccess(BaseAccess):
+    """
+    I can see a Project Quay image build job when I can see its parent template.
+    """
+
+    model = QuayImageBuildJob
+    select_related = (
+        'created_by',
+        'modified_by',
+        'quay_image_build_template',
+        'project',
+    )
+
+    def filtered_queryset(self):
+        return QuayImageBuildJob.objects.filter(quay_image_build_template__in=QuayImageBuildTemplate.accessible_pk_qs(self.user, 'read_role')).distinct()
+
+    @check_superuser
+    def can_add(self, data):
+        if data is None:
+            return False
+        return self.check_related('quay_image_build_template', QuayImageBuildTemplate, data, role_field='execute_role')
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_start(self, obj, validate_license=True):
+        return self.can_add({'quay_image_build_template': obj.quay_image_build_template_id})
 
     def can_delete(self, obj):
         return self.user.is_superuser

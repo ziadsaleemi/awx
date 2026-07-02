@@ -20,6 +20,7 @@ interface ResourceTypeMapper {
   organizations?: string;
   system_job_templates?: string;
   terraform_job_templates?: string;
+  quay_image_build_templates?: string;
 }
 
 export function ResourceNotifications({ resourceType, id }: { resourceType: string; id?: string }) {
@@ -34,6 +35,7 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
     organizations: 'id',
     system_job_templates: 'id',
     terraform_job_templates: 'id',
+    quay_image_build_templates: 'id',
   };
 
   const resourceToErrorMsg: ResourceTypeMapper = {
@@ -44,32 +46,40 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
     organizations: 'organization',
     system_job_templates: 'system job templates',
     terraform_job_templates: 'terraform job template',
+    quay_image_build_templates: 'Project Quay EE build template',
+  };
+
+  const resourceToPathMap: ResourceTypeMapper = {
+    quay_image_build_templates: 'quay/execution-environment-images/templates',
   };
 
   const params = useParams();
   // The id in the URL may not be the id of the AWX resource so we support explicitly passing the id and then falling back to the URL id
   const resourceId =
     id ?? params[resourceToParamMap[resourceType as keyof ResourceTypeMapper] ?? ''];
+  const resourcePath = resourceToPathMap[resourceType as keyof ResourceTypeMapper] ?? resourceType;
+  const resourceBaseUrl = `${awxAPI`/`}${resourcePath}/${resourceId ?? ''}`;
 
   const { data: notificationStarted, refresh: notificationStartedRefresh } = useGet<
     AwxItemsResponse<NotificationTemplate>
-  >(awxAPI`/${resourceType}/${resourceId ?? ''}/notification_templates_started/`);
+  >(`${resourceBaseUrl}/notification_templates_started/`);
 
   const { data: notificationSuccess, refresh: notificationSuccessRefresh } = useGet<
     AwxItemsResponse<NotificationTemplate>
-  >(awxAPI`/${resourceType}/${resourceId ?? ''}/notification_templates_success/`);
+  >(`${resourceBaseUrl}/notification_templates_success/`);
 
   const { data: notificationError, refresh: notificationErrorRefresh } = useGet<
     AwxItemsResponse<NotificationTemplate>
-  >(awxAPI`/${resourceType}/${resourceId ?? ''}/notification_templates_error/`);
+  >(`${resourceBaseUrl}/notification_templates_error/`);
 
   const approvalUrl =
     resourceType === 'system_job_templates' ||
     resourceType === 'job_templates' ||
     resourceType === 'projects' ||
-    resourceType === 'terraform_job_templates'
+    resourceType === 'terraform_job_templates' ||
+    resourceType === 'quay_image_build_templates'
       ? ''
-      : awxAPI`/${resourceType}/${resourceId ?? ''}/notification_templates_approvals/`;
+      : `${resourceBaseUrl}/notification_templates_approvals/`;
 
   const approval = useGet<AwxItemsResponse<NotificationTemplate>>(approvalUrl);
   const { data: notificationApproval, refresh: notificationApprovalRefresh } =
@@ -88,7 +98,7 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
     notificationSuccessRefresh,
     notificationError: notificationError?.results,
     notificationErrorRefresh,
-    resourceType,
+    resourceType: resourcePath,
     resourceId,
   });
   const view = useAwxView<NotificationTemplate>({

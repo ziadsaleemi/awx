@@ -5,15 +5,26 @@ import hashlib
 import shlex
 from urllib.parse import urlparse
 
+from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status as http_status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from awx.api.generics import APIView
+from awx.api import serializers
+from awx.api.generics import (
+    APIView,
+    GenericCancelView,
+    ListAPIView,
+    RetrieveDestroyAPIView,
+    SubListAPIView,
+    SubListCreateAPIView,
+    SubListCreateAttachDetachAPIView,
+)
 from awx.api.versioning import reverse
 from awx.api.views.content_permissions import QuayManagePermission, QuayViewPermission
 from awx.api.views.content_permissions import user_can_manage_quay
@@ -24,7 +35,8 @@ from awx.api.views.galaxy_ng import (
     _validate_image_tag,
     _validate_relative_cli_path,
 )
-from awx.main.models import QuayImageBuild, QuayImageBuildTemplate
+from awx.main import models
+from awx.main.models import QuayImageBuild, QuayImageBuildJob, QuayImageBuildTemplate
 from awx.main.tasks.quay import run_quay_image_build
 from awx.main.utils.quay import (
     QuayClient,
@@ -377,6 +389,10 @@ def _serialize_quay_image_build(build, include_log=True):
             'id': build.template_id,
             'name': build.template.name if build.template_id and build.template else '',
         },
+        'unified_job': {
+            'id': build.unified_job_id,
+            'url': build.unified_job.get_absolute_url() if build.unified_job_id and build.unified_job else '',
+        },
     }
 
 
@@ -421,12 +437,13 @@ def _serialize_quay_image_build_template(template):
     }
 
 
-def _create_quay_image_build_from_plan(plan, runtime, template=None):
+def _create_quay_image_build_from_plan(plan, runtime, template=None, unified_job=None):
     project_data = plan['project']
     image_data = plan['image']
     registry_data = plan['registry']
     return QuayImageBuild.objects.create(
         template=template,
+        unified_job=unified_job,
         project_id=project_data['project_id'],
         project_name=project_data['project_name'],
         project_path=project_data['project_path'],
@@ -441,6 +458,39 @@ def _create_quay_image_build_from_plan(plan, runtime, template=None):
         context_path=project_data['context'],
         command_summary=[{**command, 'label': str(command.get('label') or '')} for command in plan['commands']],
     )
+
+
+def _apply_quay_image_build_plan_to_job(job, plan, runtime):
+    project_data = plan['project']
+    image_data = plan['image']
+    registry_data = plan['registry']
+    job.project_id = project_data['project_id']
+    job.namespace = registry_data['namespace']
+    job.repository = image_data['repository']
+    job.tag = image_data['tag']
+    job.image = image_data['awx']
+    job.registry = registry_data['registry']
+    job.runtime = runtime
+    job.definition_file = project_data['definition_file']
+    job.context_path = project_data['context']
+    job.scm_revision = project_data['scm_revision']
+    job.command_summary = [{**command, 'label': str(command.get('label') or '')} for command in plan['commands']]
+    job.save(
+        update_fields=[
+            'project',
+            'namespace',
+            'repository',
+            'tag',
+            'image',
+            'registry',
+            'runtime',
+            'definition_file',
+            'context_path',
+            'scm_revision',
+            'command_summary',
+        ]
+    )
+    return job
 
 
 def _template_payload_from_plan(data, plan):
@@ -1055,12 +1105,12 @@ class QuayExecutionEnvironmentImageBuildPlanView(APIView):
 class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
     name = _('Project Quay Execution Environment Image Build Templates')
     resource_purpose = 'saved project quay execution environment image build templates'
-    permission_classes = (IsAuthenticated, QuayManagePermission)
+    permission_classes = (IsAuthenticated,)
 
     def get(self, request, format=None):
         page = _parse_positive_int(request.query_params.get('page'), 1)
         page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=100)
-        queryset = QuayImageBuildTemplate.objects.select_related('project__organization', 'created_by').all()
+        queryset = request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by').all()
         namespace = str(request.query_params.get('namespace') or '').strip().strip('/')
         repository = str(request.query_params.get('repository') or '').strip().strip('/')
         search = str(request.query_params.get('search') or '').strip()
@@ -1122,6 +1172,9 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
         if error_response:
             return error_response
         template_data = _template_payload_from_plan(data, plan)
+        access_data = {'project': template_data['project_id']}
+        if not request.user.can_access(QuayImageBuildTemplate, 'add', access_data):
+            raise PermissionDenied()
         try:
             template = QuayImageBuildTemplate.objects.create(
                 name=name,
@@ -1145,13 +1198,13 @@ class QuayExecutionEnvironmentImageBuildTemplatesView(APIView):
 class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
     name = _('Project Quay Execution Environment Image Build Template Detail')
     resource_purpose = 'saved project quay execution environment image build template detail'
-    permission_classes = (IsAuthenticated, QuayManagePermission)
+    permission_classes = (IsAuthenticated,)
 
-    def get_object(self, pk):
-        return QuayImageBuildTemplate.objects.select_related('project__organization', 'created_by').filter(pk=pk).first()
+    def get_object(self, request, pk):
+        return request.user.get_queryset(QuayImageBuildTemplate).select_related('project__organization', 'created_by').filter(pk=pk).first()
 
     def get(self, request, pk, format=None):
-        template = self.get_object(pk)
+        template = self.get_object(request, pk)
         if template is None:
             return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
         template.latest_build = (
@@ -1160,9 +1213,11 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
         return Response(_serialize_quay_image_build_template(template))
 
     def patch(self, request, pk, format=None):
-        template = self.get_object(pk)
+        template = self.get_object(request, pk)
         if template is None:
             return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        if not request.user.can_access(QuayImageBuildTemplate, 'change', template, request.data):
+            raise PermissionDenied()
         data = request.data if isinstance(request.data, dict) else {}
         merged = _data_from_template(template)
         merged.update(data)
@@ -1193,9 +1248,11 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
         return Response(_serialize_quay_image_build_template(template))
 
     def delete(self, request, pk, format=None):
-        template = self.get_object(pk)
+        template = self.get_object(request, pk)
         if template is None:
             return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        if not request.user.can_access(QuayImageBuildTemplate, 'delete', template):
+            raise PermissionDenied()
         template.delete()
         return Response(status=http_status.HTTP_204_NO_CONTENT)
 
@@ -1203,12 +1260,14 @@ class QuayExecutionEnvironmentImageBuildTemplateDetailView(APIView):
 class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
     name = _('Project Quay Execution Environment Image Build Template Launch')
     resource_purpose = 'launch saved project quay execution environment image build template'
-    permission_classes = (IsAuthenticated, QuayManagePermission)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request, pk, format=None):
-        template = QuayImageBuildTemplate.objects.select_related('project').filter(pk=pk).first()
+        template = request.user.get_queryset(QuayImageBuildTemplate).select_related('project').filter(pk=pk).first()
         if template is None:
             return Response({'detail': _('Project Quay image build template was not found.'), 'status': 'not_found'}, status=http_status.HTTP_404_NOT_FOUND)
+        if not request.user.can_access(QuayImageBuildTemplate, 'start', template):
+            raise PermissionDenied()
         if template.project_id is None:
             return Response(
                 {'detail': _('Project Quay image build template no longer has an AWX Project.'), 'status': 'bad_request'},
@@ -1222,9 +1281,85 @@ class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
                 {'detail': _('Project Quay push credentials are required before AWX can launch an image build.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
-        build = _create_quay_image_build_from_plan(plan, template.runtime, template=template)
-        transaction.on_commit(lambda: run_quay_image_build.delay(build.id))
-        return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED)
+        job = template.create_quay_image_build_job()
+        _apply_quay_image_build_plan_to_job(job, plan, template.runtime)
+        build = _create_quay_image_build_from_plan(plan, template.runtime, template=template, unified_job=job)
+        job.signal_start()
+        headers = {'Location': job.get_absolute_url(request)}
+        return Response(_serialize_quay_image_build(build), status=http_status.HTTP_202_ACCEPTED, headers=headers)
+
+
+class QuayImageBuildTemplateJobsList(SubListAPIView):
+    model = models.QuayImageBuildJob
+    serializer_class = serializers.QuayImageBuildJobListSerializer
+    parent_model = models.QuayImageBuildTemplate
+    relationship = 'jobs'
+    parent_key = 'quay_image_build_template'
+    resource_purpose = 'Project Quay image build jobs of an execution environment build template'
+
+
+class QuayImageBuildTemplateSchedulesList(SubListCreateAPIView):
+    name = _('Project Quay Image Build Template Schedules')
+    model = models.Schedule
+    serializer_class = serializers.ScheduleSerializer
+    parent_model = models.QuayImageBuildTemplate
+    relationship = 'schedules'
+    parent_key = 'unified_job_template'
+    resource_purpose = 'schedules of a Project Quay image build template'
+
+
+class QuayImageBuildTemplateNotificationTemplatesAnyList(SubListCreateAttachDetachAPIView):
+    model = models.NotificationTemplate
+    serializer_class = serializers.NotificationTemplateSerializer
+    parent_model = models.QuayImageBuildTemplate
+    resource_purpose = 'base view for notification templates of a Project Quay image build template'
+
+
+class QuayImageBuildTemplateNotificationTemplatesStartedList(QuayImageBuildTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_started'
+    resource_purpose = 'notification templates triggered on Project Quay image build start'
+
+
+class QuayImageBuildTemplateNotificationTemplatesErrorList(QuayImageBuildTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_error'
+    resource_purpose = 'notification templates triggered on Project Quay image build error'
+
+
+class QuayImageBuildTemplateNotificationTemplatesSuccessList(QuayImageBuildTemplateNotificationTemplatesAnyList):
+    relationship = 'notification_templates_success'
+    resource_purpose = 'notification templates triggered on Project Quay image build success'
+
+
+class QuayImageBuildTemplateObjectRolesList(SubListAPIView):
+    deprecated = True
+    model = models.Role
+    serializer_class = serializers.RoleSerializer
+    parent_model = models.QuayImageBuildTemplate
+    search_fields = ('role_field', 'content_type__model')
+    resource_purpose = 'roles of a Project Quay image build template'
+
+    def get_queryset(self):
+        template = self.get_parent_object()
+        content_type = ContentType.objects.get_for_model(self.parent_model)
+        return models.Role.objects.filter(content_type=content_type, object_id=template.pk)
+
+
+class QuayImageBuildJobList(ListAPIView):
+    model = models.QuayImageBuildJob
+    serializer_class = serializers.QuayImageBuildJobListSerializer
+    resource_purpose = 'Project Quay image build jobs'
+
+
+class QuayImageBuildJobDetail(RetrieveDestroyAPIView):
+    model = models.QuayImageBuildJob
+    serializer_class = serializers.QuayImageBuildJobSerializer
+    resource_purpose = 'Project Quay image build job detail'
+
+
+class QuayImageBuildJobCancel(GenericCancelView):
+    model = models.QuayImageBuildJob
+    serializer_class = serializers.QuayImageBuildJobCancelSerializer
+    resource_purpose = 'cancel a Project Quay image build job'
 
 
 class QuayExecutionEnvironmentImageBuildsView(APIView):

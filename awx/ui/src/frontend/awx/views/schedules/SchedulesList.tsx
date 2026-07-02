@@ -38,12 +38,14 @@ export function SchedulesList(props: {
   sublistEndpoint?: string;
   url?: string;
   resourceType?: string;
+  resourceId?: string;
 }) {
   const { t } = useTranslation();
   const pageNavigate = usePageNavigate();
   const pageUrl = useGetPageUrl();
   const params = useParams<{ inventory_type?: string; id?: string; source_id?: string }>();
-  const resourceId = params.source_id ?? params.id;
+  const resourceId = props.resourceId ?? params.source_id ?? params.id;
+  const routeParams = { ...params, id: resourceId };
 
   const compParams = useOutletContext<{ template: JobTemplate }>();
   const isMissingResource: boolean = compParams?.template
@@ -70,7 +72,7 @@ export function SchedulesList(props: {
 
   const toolbarActions = useScheduleToolbarActions(
     view.unselectItemsAndRefresh,
-    pageUrl(props.createSchedulePageId, { params }),
+    pageUrl(props.createSchedulePageId, { params: routeParams }),
     isMissingResource
   );
   const rowActions = useSchedulesActions({
@@ -111,7 +113,7 @@ export function SchedulesList(props: {
       }
       emptyStateButtonClick={
         canCreateSchedule && !isMissingResource
-          ? () => pageNavigate(props.createSchedulePageId, { params })
+          ? () => pageNavigate(props.createSchedulePageId, { params: routeParams })
           : undefined
       }
       {...view}

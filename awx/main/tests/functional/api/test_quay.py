@@ -2,7 +2,7 @@ import pytest
 from django.test import override_settings
 
 from awx.api.versioning import reverse
-from awx.main.models import Project, QuayImageBuildTemplate
+from awx.main.models import Project, QuayImageBuildJob, QuayImageBuildTemplate, Schedule
 
 
 def quay_response(mocker, payload):
@@ -591,7 +591,7 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     source_dir.mkdir(parents=True)
     (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
     project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project', scm_revision='abc123')
-    task_delay = mocker.patch('awx.api.views.quay.run_quay_image_build.delay')
+    signal_start = mocker.patch.object(QuayImageBuildJob, 'signal_start', autospec=True)
     mocker.patch('awx.api.views.quay.transaction.on_commit', side_effect=lambda callback, *args, **kwargs: callback())
 
     with override_settings(
@@ -646,6 +646,25 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
         )
         launch_response = post(create_response.data['launch_url'], data={}, user=admin_user, expect=202)
         build_list_response = get(reverse('api:quay_image_builds') + f'?template={create_response.data["id"]}', user=admin_user, expect=200)
+        template = QuayImageBuildTemplate.objects.get(pk=create_response.data['id'])
+        Schedule.objects.create(
+            name='Nightly EE build',
+            unified_job_template=template,
+            rrule='DTSTART;TZID=America/New_York:20260702T120000 RRULE:FREQ=DAILY;INTERVAL=1',
+        )
+        jobs_response = get(reverse('api:quay_image_build_template_jobs_list', kwargs={'pk': create_response.data['id']}), user=admin_user, expect=200)
+        schedules_response = get(
+            reverse('api:quay_image_build_template_schedules_list', kwargs={'pk': create_response.data['id']}), user=admin_user, expect=200
+        )
+        object_roles_response = get(
+            reverse('api:quay_image_build_template_object_roles', kwargs={'pk': create_response.data['id']}), user=admin_user, expect=200
+        )
+        notifications_started_response = get(
+            reverse('api:quay_image_build_template_notification_templates_started', kwargs={'pk': create_response.data['id']}),
+            user=admin_user,
+            expect=200,
+        )
+        native_job = QuayImageBuildJob.objects.get(pk=launch_response.data['unified_job']['id'])
         delete_response = delete(create_response.data['url'], user=admin_user, expect=204)
 
     assert create_response.data['name'] == 'Platform EE'
@@ -661,8 +680,17 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     assert update_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
     assert launch_response.data['template']['id'] == create_response.data['id']
     assert launch_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
+    assert launch_response.data['unified_job']['id'] == native_job.pk
+    assert native_job.quay_image_build_template_id == create_response.data['id']
+    assert signal_start.call_args.args[0] == native_job
     assert build_list_response.data['count'] == 1
-    assert task_delay.call_args.args == (launch_response.data['id'],)
+    assert build_list_response.data['results'][0]['unified_job']['id'] == native_job.pk
+    assert jobs_response.data['count'] == 1
+    assert jobs_response.data['results'][0]['id'] == native_job.pk
+    assert schedules_response.data['count'] == 1
+    assert schedules_response.data['results'][0]['name'] == 'Nightly EE build'
+    assert object_roles_response.data['count'] >= 3
+    assert notifications_started_response.data['count'] == 0
     assert delete_response.status_code == 204
 
 

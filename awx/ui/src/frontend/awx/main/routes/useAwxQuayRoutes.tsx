@@ -3,11 +3,21 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
+import { ResourceNotifications } from '../../resources/notifications/ResourceNotifications';
+import {
+  QuayImageBuildTemplateAddTeams,
+  QuayImageBuildTemplateAddUsers,
+} from '../../resources/quay/QuayImageBuildTemplateAddAccess';
 import { QuayApiToken } from '../../resources/quay/QuayApiToken';
 import { QuayExecutionEnvironmentImages } from '../../resources/quay/QuayExecutionEnvironmentImages';
 import { QuayOverview } from '../../resources/quay/QuayOverview';
 import { QuayRepositories, QuayRepositoryDetails } from '../../resources/quay/QuayRepositories';
 import { QuayRobots } from '../../resources/quay/QuayRobots';
+import { awxAPI } from '../../common/api/awx-utils';
+import { ScheduleDetails } from '../../views/schedules/SchedulePage/ScheduleDetails';
+import { SchedulePage } from '../../views/schedules/SchedulePage/SchedulePage';
+import { ScheduleAddWizard } from '../../views/schedules/wizard/ScheduleAddWizard';
+import { ScheduleEditWizard } from '../../views/schedules/wizard/ScheduleEditWizard';
 import { AwxRoute } from '../AwxRoutes';
 
 export function useAwxQuayRoutes() {
@@ -55,6 +65,84 @@ export function useAwxQuayRoutes() {
           label: t('Execution Environments'),
           path: 'execution-environment-images',
           element: <QuayExecutionEnvironmentImages />,
+        },
+        {
+          id: AwxRoute.QuayImageBuildTemplateScheduleCreate,
+          path: 'execution-environment-images/templates/:id/schedules/create',
+          element: (
+            <ScheduleAddWizard
+              resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+            />
+          ),
+          hidden: true,
+        },
+        {
+          id: AwxRoute.QuayImageBuildTemplateScheduleEdit,
+          path: 'execution-environment-images/templates/:id/schedules/:schedule_id/edit',
+          element: (
+            <ScheduleEditWizard
+              resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+            />
+          ),
+          hidden: true,
+        },
+        {
+          id: AwxRoute.QuayImageBuildTemplateSchedulePage,
+          path: 'execution-environment-images/templates/:id/schedules/:schedule_id',
+          element: (
+            <SchedulePage
+              resourceEndPoint={awxAPI`/quay/execution-environment-images/templates/`}
+              initialBreadCrumbs={[
+                { label: t('Project Quay'), to: AwxRoute.QuayOverview },
+                {
+                  label: t('Execution Environments'),
+                  to: AwxRoute.QuayExecutionEnvironmentImages,
+                },
+                { id: 'data', to: AwxRoute.QuayExecutionEnvironmentImages },
+                {
+                  label: t('Schedules'),
+                  id: 'schedules',
+                  to: AwxRoute.QuayExecutionEnvironmentImages,
+                },
+              ]}
+              backTab={{
+                label: t('Back to Schedules'),
+                page: AwxRoute.QuayExecutionEnvironmentImages,
+                persistentFilterKey: 'quay-image-build-template-schedules',
+              }}
+              tabs={[
+                {
+                  label: t('Details'),
+                  page: AwxRoute.QuayImageBuildTemplateScheduleDetails,
+                },
+              ]}
+            />
+          ),
+          hidden: true,
+          children: [
+            {
+              id: AwxRoute.QuayImageBuildTemplateScheduleDetails,
+              path: 'details',
+              element: <ScheduleDetails />,
+            },
+          ],
+        },
+        {
+          id: AwxRoute.QuayImageBuildTemplateAddTeams,
+          path: 'execution-environment-images/templates/:id/team-access/add',
+          element: <QuayImageBuildTemplateAddTeams />,
+          hidden: true,
+        },
+        {
+          id: AwxRoute.QuayImageBuildTemplateAddUsers,
+          path: 'execution-environment-images/templates/:id/user-access/add',
+          element: <QuayImageBuildTemplateAddUsers />,
+          hidden: true,
+        },
+        {
+          path: 'execution-environment-images/templates/:id/notifications',
+          element: <ResourceNotifications resourceType="quay_image_build_templates" />,
+          hidden: true,
         },
         {
           id: AwxRoute.QuayApiToken,
