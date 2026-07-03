@@ -58,6 +58,7 @@ awx_receptor_socket_file: /var/run/awx-receptor/receptor.sock
 awx_receptor_listen_port: 2222
 awx_receptor_log_level: info
 awx_receptor_work_type: local
+awx_receptor_runner_command: /var/lib/awx/venv/awx/bin/ansible-runner
 awx_receptor_enable_tcp_listener: true
 awx_receptor_enable_work_signing: false
 awx_receptor_peer_hosts: "{{ groups.get('awx_receptor', []) | difference([inventory_hostname]) }}"

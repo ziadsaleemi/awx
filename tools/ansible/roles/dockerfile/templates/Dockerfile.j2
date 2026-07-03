@@ -204,7 +204,8 @@ RUN dnf install -y epel-next-release && dnf install -y inotify-tools && dnf remo
 # Copy app from builder
 COPY --from=builder /var/lib/awx /var/lib/awx
 
-RUN ln -s /var/lib/awx/venv/awx/bin/awx-manage /usr/bin/awx-manage
+RUN ln -s /var/lib/awx/venv/awx/bin/awx-manage /usr/bin/awx-manage && \
+    ln -s /var/lib/awx/venv/awx/bin/ansible-runner /usr/bin/ansible-runner
 
 COPY --from={{ receptor_image }} /usr/bin/receptor /usr/bin/receptor
 {% if build_dev|bool %}

@@ -26,7 +26,7 @@
 
 - work-command:
     worktype: {{ awx_receptor_work_type }}
-    command: ansible-runner
+    command: {{ awx_receptor_runner_command }}
     params: worker
     allowruntimeparams: true
     verifysignature: {{ awx_receptor_enable_work_signing | bool | lower }}

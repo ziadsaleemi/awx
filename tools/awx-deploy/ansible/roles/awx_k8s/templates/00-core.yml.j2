@@ -292,7 +292,7 @@ data:
         permissions: "0660"
     - work-command:
         worktype: {{ awx_receptor_work_type }}
-        command: ansible-runner
+        command: {{ awx_receptor_runner_command }}
         params: worker
         allowruntimeparams: true
         verifysignature: false

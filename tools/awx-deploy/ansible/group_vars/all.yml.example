@@ -42,6 +42,7 @@ awx_redis_image: docker.io/library/redis:7.4
 awx_receptor_listen_port: 2222
 awx_receptor_peer_hosts: "{{ groups.get('awx_receptor', []) | difference([inventory_hostname]) }}"
 awx_receptor_container_privileged: true
+awx_receptor_runner_command: /var/lib/awx/venv/awx/bin/ansible-runner
 awx_instance_node_type: hybrid
 
 awx_lb_http_port: 80
