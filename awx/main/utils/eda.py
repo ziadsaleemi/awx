@@ -32,6 +32,15 @@ EDA_RESOURCE_API_PATHS = {
     'user-role-assignments': '/api/eda/v1/role_user_assignments/',
     'team-role-assignments': '/api/eda/v1/role_team_assignments/',
 }
+EDA_RESOURCE_API_PATH_ALIASES = {
+    'role-definitions': ('/api/eda/v1/roles/', '/api/eda/v1/role_definitions/'),
+}
+EDA_OPTIONAL_RESOURCE_API_PATHS = {
+    'organizations',
+    'teams',
+    'user-role-assignments',
+    'team-role-assignments',
+}
 UPSTREAM_ACTIVATION_FIELDS = {
     'name',
     'description',
@@ -73,8 +82,13 @@ def module_enabled():
 
 
 def resource_path(resource):
+    return resource_paths(resource)[0]
+
+
+def resource_paths(resource):
     try:
-        return EDA_RESOURCE_API_PATHS[str(resource or '').strip()]
+        resource = str(resource or '').strip()
+        return list(EDA_RESOURCE_API_PATH_ALIASES.get(resource) or (EDA_RESOURCE_API_PATHS[resource],))
     except KeyError as exc:
         raise EDAControllerError('EDA resource is invalid.', 'invalid') from exc
 
@@ -231,7 +245,8 @@ class EDAControllerClient:
             message = f'EDA Controller request failed: {status_code or exc}'
             if detail:
                 message = f'{message}: {detail}'
-            raise EDAControllerError(message, 'bad_request' if status_code == 400 else 'unreachable') from exc
+            status = 'not_found' if status_code == 404 else 'bad_request' if status_code == 400 else 'unreachable'
+            raise EDAControllerError(message, status) from exc
         except ValueError as exc:
             raise EDAControllerError('EDA Controller returned invalid JSON.', 'invalid_response') from exc
 
@@ -250,14 +265,38 @@ class EDAControllerClient:
     def delete_json(self, path):
         return self._request_json('DELETE', path)
 
-    def _resource_path(self, resource, resource_id=None):
-        base_path = resource_path(resource).rstrip('/')
+    def _resource_path(self, resource, resource_id=None, base_path=None):
+        base_path = (base_path or resource_path(resource)).rstrip('/')
         if resource_id not in (None, ''):
             return f'{base_path}/{resource_id}/'
         return f'{base_path}/'
 
+    def _resource_paths(self, resource, resource_id=None):
+        return [self._resource_path(resource, resource_id, base_path=path) for path in resource_paths(resource)]
+
+    def _unsupported_resource_payload(self, resource, exc=None):
+        detail = str(exc) if exc else f'EDA resource "{resource}" is not supported by this EDA Controller.'
+        return {
+            'count': 0,
+            'next': None,
+            'previous': None,
+            'results': [],
+            'unsupported': True,
+            'controller_error': detail,
+        }
+
     def list_resource(self, resource, params=None):
-        return self.get_json(self._resource_path(resource), params=params)
+        last_error = None
+        for path in self._resource_paths(resource):
+            try:
+                return self.get_json(path, params=params)
+            except EDAControllerError as exc:
+                if exc.status != 'not_found':
+                    raise
+                last_error = exc
+        if resource in EDA_OPTIONAL_RESOURCE_API_PATHS:
+            return self._unsupported_resource_payload(resource, last_error)
+        raise last_error or EDAControllerError('EDA resource was not found.', 'not_found')
 
     def list_resource_all(self, resource, params=None, page_size=200, max_pages=20):
         params = dict(params or {})
@@ -277,10 +316,33 @@ class EDAControllerClient:
     def get_resource(self, resource, resource_id):
         if resource_id in (None, ''):
             raise EDAControllerError('EDA resource id is required.', 'missing')
-        return self.get_json(self._resource_path(resource, resource_id))
+        last_error = None
+        for path in self._resource_paths(resource, resource_id):
+            try:
+                return self.get_json(path)
+            except EDAControllerError as exc:
+                if exc.status != 'not_found':
+                    raise
+                last_error = exc
+        raise last_error or EDAControllerError('EDA resource was not found.', 'not_found')
 
     def default_organization_id(self):
-        return self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH, 'Default') or self.find_controller_item_id(DEFAULT_ORGANIZATIONS_PATH)
+        try:
+            payload = self.list_resource_all('organizations', page_size=200, max_pages=1)
+        except EDAControllerError as exc:
+            if exc.status in ('not_found', 'not_supported'):
+                return None
+            raise
+        items = _coerce_items(payload)
+        for item in items:
+            if isinstance(item, dict) and str(_pick_first(item, ('name', 'username', 'id')) or '').strip() == 'Default':
+                return _pick_first(item, ('id', 'pk', 'uuid'))
+        for item in items:
+            if isinstance(item, dict):
+                item_id = _pick_first(item, ('id', 'pk', 'uuid'))
+                if item_id not in (None, ''):
+                    return item_id
+        return None
 
     def upstream_resource_payload(self, resource, payload=None, add_defaults=False):
         normalized = dict(payload or {})

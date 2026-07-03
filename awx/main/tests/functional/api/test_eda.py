@@ -551,6 +551,7 @@ def test_eda_resource_list_proxies_to_controller(get, admin_user, mocker):
     assert response.data['resource'] == 'projects'
     assert response.data['count'] == 26
     assert response.data['next'].endswith('/api/v2/eda/projects/?order_by=name&page=2&page_size=25')
+    assert response.data['next'].startswith('/api/v2/eda/projects/')
     assert response.data['results'][0]['name'] == 'Ops project'
     assert request_mock.call_args.args[0] == 'GET'
     assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/projects/'
@@ -582,6 +583,8 @@ def test_eda_resource_list_rewrites_relative_controller_pagination_links(get, ad
 
     assert response.data['next'].endswith('/api/v2/eda/credential-types/?page=2&page_size=1&order_by=name')
     assert response.data['previous'].endswith('/api/v2/eda/credential-types/?page=1&page_size=1&order_by=name')
+    assert response.data['next'].startswith('/api/v2/eda/credential-types/')
+    assert response.data['previous'].startswith('/api/v2/eda/credential-types/')
     assert '/api/eda/v1/' not in response.data['next']
     assert '/api/eda/v1/' not in response.data['previous']
 
@@ -594,7 +597,7 @@ def test_eda_resource_list_rewrites_relative_controller_pagination_links(get, ad
         ('organizations', '/api/eda/v1/organizations/'),
         ('teams', '/api/eda/v1/teams/'),
         ('users', '/api/eda/v1/users/'),
-        ('role-definitions', '/api/eda/v1/role_definitions/'),
+        ('role-definitions', '/api/eda/v1/roles/'),
         ('user-role-assignments', '/api/eda/v1/role_user_assignments/'),
         ('team-role-assignments', '/api/eda/v1/role_team_assignments/'),
     ],
@@ -613,6 +616,44 @@ def test_eda_access_resource_list_proxies_to_controller(get, admin_user, mocker,
     assert request_mock.call_args.args[0] == 'GET'
     assert request_mock.call_args.args[1] == f'https://eda.example.test{upstream_path}'
     assert request_mock.call_args.kwargs['params'] == {'page_size': '25'}
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_optional_access_resource_list_returns_empty_when_controller_does_not_support_endpoint(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_error_response(mocker, 404, 'not found'),
+    )
+
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'organizations'}), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'eda_controller'
+    assert response.data['resource'] == 'organizations'
+    assert response.data['count'] == 0
+    assert response.data['results'] == []
+    assert response.data['unsupported'] is True
+    assert 'not found' in response.data['controller_error']
+    assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/organizations/'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_role_definitions_fall_back_to_legacy_endpoint(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        side_effect=[
+            eda_error_response(mocker, 404, 'new roles endpoint missing'),
+            eda_response(mocker, {'count': 1, 'next': None, 'previous': None, 'results': [{'id': 7, 'name': 'Organization Admin'}]}),
+        ],
+    )
+
+    response = get(reverse('api:eda_resource_list', kwargs={'resource': 'role-definitions'}), user=admin_user, expect=200)
+
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['name'] == 'Organization Admin'
+    assert request_mock.call_args_list[0].args[1] == 'https://eda.example.test/api/eda/v1/roles/'
+    assert request_mock.call_args_list[1].args[1] == 'https://eda.example.test/api/eda/v1/role_definitions/'
 
 
 @pytest.mark.django_db

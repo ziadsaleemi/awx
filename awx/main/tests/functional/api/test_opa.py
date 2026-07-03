@@ -531,6 +531,28 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
 
 
 @pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kubernetes.default.svc',
+    GATEKEEPER_K8S_AUTH_TOKEN='stale-token',
+    GATEKEEPER_K8S_VERIFY_SSL=True,
+)
+def test_gatekeeper_policy_manager_uses_in_cluster_serviceaccount_auth_and_ca(get, admin_user, mocker):
+    mocker.patch('awx.api.views.gatekeeper._gatekeeper_file_text', return_value='live-serviceaccount-token')
+    mocker.patch('awx.api.views.gatekeeper._gatekeeper_file_exists', return_value=True)
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=_gatekeeper_policy_manager_responses()) as requests_get:
+        response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
+
+    assert response.data['cluster']['verify_ssl'] is True
+    requests_get.assert_any_call(
+        'https://kubernetes.default.svc/apis/templates.gatekeeper.sh/v1/constrainttemplates',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer live-serviceaccount-token'},
+        verify='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt',
+        timeout=5.0,
+    )
+
+
+@pytest.mark.django_db
 @override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
 def test_gatekeeper_policy_manager_deduplicates_constraints_across_served_versions(get, admin_user):
     constraint = {

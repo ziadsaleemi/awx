@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 import yaml
@@ -46,6 +46,9 @@ GATEKEEPER_PROJECT_SYNC_ALLOWED_SUFFIXES = ('.yml', '.yaml', '.json')
 GATEKEEPER_PROJECT_SYNC_MAX_FILES = 50
 GATEKEEPER_PROJECT_SYNC_MAX_DOCS = 200
 GATEKEEPER_PROJECT_SYNC_MAX_FILE_BYTES = 512 * 1024
+GATEKEEPER_IN_CLUSTER_HOSTS = {'kubernetes.default.svc', 'kubernetes.default.svc.cluster.local'}
+GATEKEEPER_SERVICEACCOUNT_TOKEN_PATH = Path('/var/run/secrets/kubernetes.io/serviceaccount/token')
+GATEKEEPER_SERVICEACCOUNT_CA_PATH = Path('/var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
 
 
 def gatekeeper_module_enabled():
@@ -126,6 +129,22 @@ def _gatekeeper_context_map():
     return contexts
 
 
+def _gatekeeper_file_text(path):
+    try:
+        return Path(path).read_text(encoding='utf-8').strip()
+    except OSError:
+        return ''
+
+
+def _gatekeeper_file_exists(path):
+    return Path(path).exists()
+
+
+def _is_in_cluster_kubernetes_api(server_url):
+    parsed = urlparse(str(server_url or ''))
+    return parsed.scheme == 'https' and parsed.hostname in GATEKEEPER_IN_CLUSTER_HOSTS
+
+
 def _requested_gatekeeper_context(request):
     if request.method == 'GET':
         value = request.query_params.get('context')
@@ -164,7 +183,14 @@ class GatekeeperKubernetesClient:
         self.server_url = config['server_url']
         self.auth_token = config['auth_token']
         self.verify_ssl = bool(config['verify_ssl'])
+        self.requests_verify = self.verify_ssl
         self.timeout = max(float(config['timeout'] or 5), 1)
+        if _is_in_cluster_kubernetes_api(self.server_url):
+            serviceaccount_token = _gatekeeper_file_text(GATEKEEPER_SERVICEACCOUNT_TOKEN_PATH)
+            if serviceaccount_token:
+                self.auth_token = serviceaccount_token
+            if self.verify_ssl and _gatekeeper_file_exists(GATEKEEPER_SERVICEACCOUNT_CA_PATH):
+                self.requests_verify = str(GATEKEEPER_SERVICEACCOUNT_CA_PATH)
 
     def is_configured(self):
         return bool(self.server_url)
@@ -192,7 +218,7 @@ class GatekeeperKubernetesClient:
 
     def get(self, path):
         url = urljoin(f'{self.server_url}/', path.lstrip('/'))
-        response = requests.get(url, headers=self._headers(), verify=self.verify_ssl, timeout=self.timeout)
+        response = requests.get(url, headers=self._headers(), verify=self.requests_verify, timeout=self.timeout)
         response.raise_for_status()
         return response.json()
 
@@ -213,7 +239,7 @@ class GatekeeperKubernetesClient:
             headers=headers,
             json=payload,
             params=params or None,
-            verify=self.verify_ssl,
+            verify=self.requests_verify,
             timeout=self.timeout,
         )
         response.raise_for_status()
@@ -228,7 +254,7 @@ class GatekeeperKubernetesClient:
             url,
             headers=self._headers(),
             params={'dryRun': 'All'} if dry_run else None,
-            verify=self.verify_ssl,
+            verify=self.requests_verify,
             timeout=self.timeout,
         )
         response.raise_for_status()

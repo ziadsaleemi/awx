@@ -65,7 +65,7 @@ def _date_to_iso(value):
 def _page_link(request, page):
     query = request.GET.copy()
     query['page'] = str(page)
-    return request.build_absolute_uri(f'{request.path}?{query.urlencode()}')
+    return f'{request.path}?{query.urlencode()}'
 
 
 def _query_params(request):
@@ -99,7 +99,7 @@ def _rewrite_resource_page_link(request, link):
     query = parsed.query
     if not query and '?' in str(link):
         query = str(link).split('?', 1)[1]
-    return request.build_absolute_uri(f'{request.path}?{urlencode(parse_qsl(query, keep_blank_values=True))}')
+    return f'{request.path}?{urlencode(parse_qsl(query, keep_blank_values=True))}'
 
 
 def _rewrite_resource_page_links(request, data):
@@ -290,7 +290,7 @@ class EDAResourceListView(APIView):
         data = _rewrite_resource_page_links(request, data)
         data['source'] = 'eda_controller'
         data['resource'] = resource
-        data['controller_error'] = ''
+        data['controller_error'] = data.get('controller_error') or ''
         return Response(data)
 
     def post(self, request, resource, format=None):
