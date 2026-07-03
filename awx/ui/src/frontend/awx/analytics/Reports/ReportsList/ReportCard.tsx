@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { PageTable } from '../../../../../framework';
-import { awxAPI } from '../../../../common/api/awx-utils';
-import { ReportsList } from '../../../../interfaces/ReportsList';
+import { awxAPI } from '../../../common/api/awx-utils';
+import { ReportsList } from '../../../interfaces/ReportsList';
 import { useAnalyticsView } from '../../useAnalyticsView';
 import { useReportCardColumns } from './useReportCardColumns';
 import { useReportCardFilters } from './useReportCardFilters';

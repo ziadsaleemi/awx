@@ -9,8 +9,8 @@ import {
 
 export interface MeshNode {
   id: string | number;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
   node_type: string;
   hostname: string;
   node_state: string;

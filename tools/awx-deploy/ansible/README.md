@@ -174,6 +174,10 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
   -e awx_galaxy_ng_configure_awx_settings=true
 ```
 
+Module visibility is controlled from AWX under **Settings → Modules**. Deploy
+roles configure service endpoints and credentials, but they do not lock the
+module enable switches in generated `settings.py`.
+
 ## Quick Start: Galaxy NG on k3s/Kubernetes
 
 ```bash

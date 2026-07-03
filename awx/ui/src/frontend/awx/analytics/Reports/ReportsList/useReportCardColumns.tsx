@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ITableColumn, TextCell } from '../../../../../framework';
-import { ReportsList } from '../../../../interfaces/ReportsList';
+import { ReportsList } from '../../../interfaces/ReportsList';
 
 export function useReportCardColumns() {
   const { t } = useTranslation();

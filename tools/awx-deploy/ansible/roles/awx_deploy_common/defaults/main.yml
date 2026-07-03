@@ -2,7 +2,7 @@
 awx_deploy_method: server
 
 awx_image: docker.io/ziadsaleemi/awx
-awx_image_tag: "25.1.4"
+awx_image_tag: "25.1.5"
 awx_skip_image_pull: false
 awx_ee_image: quay.io/ansible/awx-ee:latest
 
@@ -160,7 +160,6 @@ awx_eda_k8s_wait_for_service: true
 
 awx_galaxy_ng_enabled: false
 awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
-awx_galaxy_ng_module_enabled: "{{ awx_galaxy_ng_enabled or awx_galaxy_ng_configure_awx_settings }}"
 awx_galaxy_ng_server_inventory_host: "{{ groups.get('awx_galaxy_ng', []) | first | default('') }}"
 awx_galaxy_ng_namespace: galaxy-ng
 awx_galaxy_ng_name: awx-galaxy-ng
@@ -185,7 +184,6 @@ awx_galaxy_ng_k8s_url: "http://{{ awx_galaxy_ng_name }}.{{ awx_galaxy_ng_namespa
 
 awx_quay_enabled: false
 awx_quay_configure_awx_settings: "{{ awx_quay_enabled }}"
-awx_quay_module_enabled: "{{ awx_quay_enabled or awx_quay_configure_awx_settings }}"
 awx_quay_server_inventory_host: "{{ groups.get('awx_quay', []) | first | default('') }}"
 awx_quay_k8s_namespace: quay
 awx_quay_name: awx-quay
@@ -209,7 +207,6 @@ awx_quay_registry_storage_size: 50Gi
 
 awx_opa_enabled: false
 awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
-awx_opa_module_enabled: "{{ awx_opa_enabled or awx_opa_configure_awx_settings }}"
 awx_opa_server_inventory_host: "{{ groups.get('awx_opa', []) | first | default('') }}"
 awx_opa_host: ""
 awx_opa_port: 8181
@@ -235,7 +232,6 @@ awx_opa_server_log_level: info
 
 awx_gatekeeper_enabled: false
 awx_gatekeeper_configure_awx_settings: "{{ awx_gatekeeper_enabled }}"
-awx_gatekeeper_module_enabled: "{{ awx_gatekeeper_enabled or awx_gatekeeper_configure_awx_settings }}"
 awx_gatekeeper_namespace: gatekeeper-system
 awx_gatekeeper_version: v3.22.2
 awx_gatekeeper_manifest_url: "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/{{ awx_gatekeeper_version }}/deploy/gatekeeper.yaml"

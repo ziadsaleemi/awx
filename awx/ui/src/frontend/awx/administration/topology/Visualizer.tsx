@@ -203,9 +203,9 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
     const nodes: NodeModel[] = meshLayout.nodes.map((n) => {
       const isServiceNode = n.node_type.startsWith('service-');
       return {
-        id: n.id,
-        x: n.x,
-        y: n.y,
+        id: String(n.id),
+        x: n.x ?? 0,
+        y: n.y ?? 0,
         type: n.node_type,
         label: n.hostname,
         width: isServiceNode ? SERVICE_NODE_DIAMETER : NODE_DIAMETER,
@@ -222,14 +222,20 @@ export const TopologyViewLayer = (props: { mesh: MeshVisualizer }) => {
         },
       };
     });
-    const nodeIdByHostname = new Map(meshLayout.nodes.map((node) => [node.hostname, node.id]));
+    const nodeIdByHostname = new Map(
+      meshLayout.nodes.map((node) => [node.hostname, String(node.id)])
+    );
     const links: EdgeModel[] = meshLayout.links.map((l) => {
       const sourceName = getEndpointName(l.source);
       const targetName = getEndpointName(l.target);
       const sourceId =
-        typeof l.source === 'string' ? nodeIdByHostname.get(l.source) ?? l.source : l.source.id;
+        typeof l.source === 'string'
+          ? nodeIdByHostname.get(l.source) ?? l.source
+          : String(l.source.id);
       const targetId =
-        typeof l.target === 'string' ? nodeIdByHostname.get(l.target) ?? l.target : l.target.id;
+        typeof l.target === 'string'
+          ? nodeIdByHostname.get(l.target) ?? l.target
+          : String(l.target.id);
       return {
         id: `edge-${sourceName}-${targetName}`,
         type: 'edge',

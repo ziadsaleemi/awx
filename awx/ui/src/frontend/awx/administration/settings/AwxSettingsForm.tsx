@@ -14,6 +14,7 @@ import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSe
 import { usePatchRequest } from '../../../common/crud/usePatchRequest';
 import { AwxPageForm } from '../../common/AwxPageForm';
 import { awxAPI } from '../../common/api/awx-utils';
+import { useAwxConfigState } from '../../common/useAwxConfig';
 import { PageFormFileUpload } from '../../../../framework/PageForm/Inputs/PageFormFileUpload';
 import { useRevertAllSettingsModal } from './useRevertAllSettingsModal';
 import { AwxLogoUpload } from './AwxLogoUpload';
@@ -112,20 +113,22 @@ export function AwxSettingsForm(props: {
 }) {
   const navigate = useNavigate();
   const patch = usePatchRequest();
+  const { refreshAwxConfig } = useAwxConfigState();
   const openRevertAllSettingsModal = useRevertAllSettingsModal();
   const onSubmit = useCallback(
     async (data: object) => {
       // Only send the data that is in the options
       const patchData: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(data)) {
-        if (Object.keys(props.options).includes(key)) {
+        if (props.options[key] && !props.options[key].defined_in_file) {
           patchData[key] = value;
         }
       }
       await patch(awxAPI`/settings/all/`, patchData);
+      refreshAwxConfig?.();
       navigate('..');
     },
-    [navigate, patch, props.options]
+    [navigate, patch, props.options, refreshAwxConfig]
   );
 
   // This is used for AWX LDAP settings which need groups
@@ -257,6 +260,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
         labelHelp={option.help_text}
         isRequired={option.required}
         type="password"
+        isReadOnly={isReadOnly}
+        enableUndo={!isReadOnly}
+        enableReset={!isReadOnly}
       />
     );
   }
@@ -275,7 +281,7 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           labelHelp={option.help_text}
           isRequired={option.required}
           allowEditingUploadedText={true}
-          isReadOnly={false}
+          isReadOnly={isReadOnly}
         />
       </PageFormSection>
     );
@@ -310,6 +316,7 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           enableUndo
           enableReset
           disableAutoResize
+          isReadOnly={isReadOnly}
         />
       </PageFormSection>
     );
@@ -326,8 +333,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           labelHelp={option.help_text}
           isRequired={option.required}
           defaultValue={option.default}
-          enableUndo
-          enableReset
+          enableUndo={!isReadOnly}
+          enableReset={!isReadOnly}
+          isReadOnly={isReadOnly}
         />
       );
     case 'integer':
@@ -343,8 +351,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           min={option.min_value}
           max={option.max_value}
           defaultValue={option.default}
-          enableUndo
-          enableReset
+          enableUndo={!isReadOnly}
+          enableReset={!isReadOnly}
+          isReadOnly={isReadOnly}
         />
       );
     case 'boolean':
@@ -356,7 +365,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
             labelHelpTitle={option.label}
             labelHelp={option.help_text}
             defaultValue={option.default}
-            enableReset
+            enableReset={!isReadOnly}
+            isDisabled={isReadOnly}
+            readOnly={isReadOnly}
           />
         </PageFormSection>
       );
@@ -389,8 +400,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
             format="object"
             isRequired={option.required}
             defaultValue={option.default}
-            enableUndo
-            enableReset
+            enableUndo={!isReadOnly}
+            enableReset={!isReadOnly}
+            isReadOnly={isReadOnly}
           />
         </PageFormSection>
       );
@@ -405,8 +417,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
             format="object"
             isRequired={option.required}
             defaultValue={option.default}
-            enableUndo
-            enableReset
+            enableUndo={!isReadOnly}
+            enableReset={!isReadOnly}
+            isReadOnly={isReadOnly}
           />
         </PageFormSection>
       );
@@ -420,8 +433,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           options={option.choices.map((choice) => ({ value: choice[0], label: choice[1] }))}
           isRequired={option.required}
           defaultValue={option.default}
-          enableUndo
-          enableReset
+          enableUndo={!isReadOnly}
+          enableReset={!isReadOnly}
+          isReadOnly={isReadOnly}
         />
       );
     case 'datetime':
@@ -434,8 +448,9 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
           type="datetime-local"
           isRequired={option.required}
           defaultValue={option.default}
-          enableUndo
-          enableReset
+          enableUndo={!isReadOnly}
+          enableReset={!isReadOnly}
+          isReadOnly={isReadOnly}
         />
       );
 

@@ -37,7 +37,7 @@ export function AwxSystemUsageBar() {
 
   const { data } = useGet<AwxItemsResponse<Instance>>(
     awxAPI`/instances/`,
-    { page_size: 50 },
+    { page_size: 200 },
     {
       refreshInterval: 30000,
     }
@@ -49,20 +49,27 @@ export function AwxSystemUsageBar() {
     (i) => i.enabled && i.node_state !== 'deprovisioning'
   );
 
-  const totalCapacity = instances.reduce((sum, i) => sum + i.capacity, 0);
-  const consumedCapacity = instances.reduce((sum, i) => sum + i.consumed_capacity, 0);
+  const capacityNodes = instances.filter((i) => i.capacity > 0);
+  const totalCapacity = capacityNodes.reduce((sum, i) => sum + i.capacity, 0);
+  const consumedCapacity = capacityNodes.reduce((sum, i) => sum + i.consumed_capacity, 0);
   const jobsRunning = instances.reduce((sum, i) => sum + i.jobs_running, 0);
   const usedPct = totalCapacity > 0 ? Math.round((consumedCapacity / totalCapacity) * 100) : 0;
 
   const isCritical = usedPct >= 90;
   const barColor = nodeBarColor(usedPct);
 
-  // Per-node breakdown — only shown when there are multiple execution nodes.
-  const showNodeBreakdown = instances.length > 1;
-  const execNodes = instances.filter(
+  const executionNodes = instances.filter(
     (i) => i.node_type === 'execution' || i.node_type === 'hybrid'
   );
-  const breakdownNodes = execNodes.length > 0 ? execNodes : instances;
+  const readyNodes = instances.filter((i) => ['installed', 'ready'].includes(i.node_state));
+  const unavailableNodes = instances.filter((i) => !['installed', 'ready'].includes(i.node_state));
+  const busiestNodes = [...capacityNodes]
+    .sort((a, b) => {
+      const aPct = a.capacity > 0 ? a.consumed_capacity / a.capacity : 0;
+      const bPct = b.capacity > 0 ? b.consumed_capacity / b.capacity : 0;
+      return b.jobs_running - a.jobs_running || bPct - aPct || a.hostname.localeCompare(b.hostname);
+    })
+    .slice(0, 5);
 
   const tooltipContent = (
     <div style={{ minWidth: 200 }}>
@@ -74,9 +81,17 @@ export function AwxSystemUsageBar() {
         {t('Capacity used')}: <strong>{consumedCapacity}</strong> / {totalCapacity} (
         <strong>{usedPct}%</strong>)
       </div>
-      {showNodeBreakdown && (
+      <div>
+        {t('Nodes')}: <strong>{instances.length}</strong> {t('visible')}, {readyNodes.length}{' '}
+        {t('ready')}, {unavailableNodes.length} {t('unavailable')}
+      </div>
+      <div>
+        {t('Execution capacity nodes')}: <strong>{executionNodes.length}</strong>
+      </div>
+      {busiestNodes.length > 0 ? (
         <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 6 }}>
-          {breakdownNodes.map((inst) => {
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('Busiest nodes')}</div>
+          {busiestNodes.map((inst) => {
             const instPct =
               inst.capacity > 0 ? Math.round((inst.consumed_capacity / inst.capacity) * 100) : 0;
             return (
@@ -97,6 +112,17 @@ export function AwxSystemUsageBar() {
               </div>
             );
           })}
+          {capacityNodes.length > busiestNodes.length && (
+            <div style={{ fontSize: '11px', opacity: 0.8 }}>
+              {t('+{{count}} more capacity node(s)', {
+                count: capacityNodes.length - busiestNodes.length,
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 6 }}>
+          {t('No active execution capacity is reporting load.')}
         </div>
       )}
     </div>
@@ -128,9 +154,7 @@ export function AwxSystemUsageBar() {
           {jobsRunning} {jobsRunning === 1 ? t('job') : t('jobs')}
         </span>
 
-        {/* Main aggregate bar + optional per-node bars */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-          {/* Aggregate bar */}
+        <div style={{ flexShrink: 0 }}>
           <div
             style={{
               width: 72,
@@ -152,37 +176,6 @@ export function AwxSystemUsageBar() {
               }}
             />
           </div>
-
-          {/* #8 — per-node inline bars (only when multiple nodes exist) */}
-          {showNodeBreakdown &&
-            breakdownNodes.map((inst) => {
-              const instPct =
-                inst.capacity > 0 ? Math.round((inst.consumed_capacity / inst.capacity) * 100) : 0;
-              return (
-                <div
-                  key={inst.id}
-                  style={{
-                    width: 72,
-                    height: 3,
-                    borderRadius: 2,
-                    backgroundColor: 'rgba(255,255,255,0.15)',
-                    overflow: 'hidden',
-                  }}
-                  title={`${inst.hostname}: ${instPct}%`}
-                >
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${instPct}%`,
-                      backgroundColor: nodeBarColor(instPct),
-                      borderRadius: 2,
-                      transition: 'width 0.6s ease',
-                      opacity: 0.85,
-                    }}
-                  />
-                </div>
-              );
-            })}
         </div>
 
         <span

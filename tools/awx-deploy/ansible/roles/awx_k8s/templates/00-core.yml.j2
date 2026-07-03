@@ -154,7 +154,6 @@ stringData:
     EDA_VERIFY_SSL = {{ 'True' if awx_eda_verify_ssl | bool else 'False' }}
     EDA_REQUEST_TIMEOUT = {{ awx_eda_request_timeout | int }}
 {% endif %}
-    MODULE_GALAXY_NG_ENABLED = {{ 'True' if awx_galaxy_ng_module_enabled | bool else 'False' }}
 {% if awx_galaxy_ng_configure_awx_settings | bool %}
 {% set effective_galaxy_ng_server_url = awx_galaxy_ng_server_url if awx_galaxy_ng_server_url else awx_galaxy_ng_k8s_url %}
     GALAXY_NG_SERVER_URL = {{ effective_galaxy_ng_server_url | to_json }}
@@ -166,7 +165,6 @@ stringData:
     GALAXY_NG_API_PATH_PREFIX = {{ awx_galaxy_ng_api_path_prefix | to_json }}
     GALAXY_NG_CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }}
 {% endif %}
-    MODULE_QUAY_ENABLED = {{ 'True' if awx_quay_module_enabled | bool else 'False' }}
 {% if awx_quay_configure_awx_settings | bool %}
 {% set effective_quay_registry_url = awx_quay_registry_url if awx_quay_registry_url else awx_quay_k8s_url %}
     QUAY_REGISTRY_URL = {{ effective_quay_registry_url | to_json }}
@@ -177,8 +175,6 @@ stringData:
     QUAY_VERIFY_SSL = {{ 'True' if awx_quay_verify_ssl | bool else 'False' }}
     QUAY_REQUEST_TIMEOUT = {{ awx_quay_request_timeout | int }}
 {% endif %}
-    MODULE_OPA_ENABLED = {{ 'True' if awx_opa_module_enabled | bool else 'False' }}
-    MODULE_GATEKEEPER_ENABLED = {{ 'True' if awx_gatekeeper_module_enabled | bool else 'False' }}
 {% if awx_opa_configure_awx_settings | bool %}
 {% set effective_opa_host = awx_opa_host %}
 {% if not effective_opa_host and awx_opa_server_inventory_host %}
