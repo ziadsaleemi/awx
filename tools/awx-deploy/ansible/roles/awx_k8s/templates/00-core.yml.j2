@@ -141,6 +141,10 @@ stringData:
     SYSTEM_UUID = os.environ.get("AWX_SYSTEM_UUID", "")
     IS_K8S = True
     AWX_AUTO_DEPROVISION_INSTANCES = True
+    AWX_CONTAINER_GROUP_DEFAULT_NAMESPACE = os.environ.get("MY_POD_NAMESPACE", "{{ awx_k8s_namespace }}")
+    BROADCAST_WEBSOCKET_PORT = 80
+    BROADCAST_WEBSOCKET_PROTOCOL = "http"
+    BROADCAST_WEBSOCKET_VERIFY_CERT = False
     STATIC_ROOT = "/var/lib/awx/public/static"
     MEDIA_ROOT = "/var/lib/awx/public/media"
     PROJECTS_ROOT = "/var/lib/awx/projects"
@@ -281,7 +285,7 @@ data:
             toservice: control
     - control-service:
         service: control
-        filename: {{ awx_receptor_socket_file }}
+        filename: /var/run/receptor/receptor.sock
         permissions: "0660"
     - work-command:
         worktype: {{ awx_receptor_work_type }}

@@ -6,6 +6,7 @@ metadata:
   namespace: {{ awx_k8s_namespace }}
 spec:
   replicas: {{ awx_k8s_web_replicas }}
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ awx_k8s_name }}-web
@@ -20,6 +21,24 @@ spec:
         runAsGroup: 0
         fsGroup: 0
       initContainers:
+        - name: init-receptor-config
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - |
+              cp /receptor-template/receptor.conf /etc/receptor/receptor.conf
+              chgrp 0 /etc/receptor /etc/receptor/receptor.conf
+              chmod 0775 /etc/receptor
+              chmod 0664 /etc/receptor/receptor.conf
+          volumeMounts:
+            - name: awx-nginx
+              mountPath: /receptor-template/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
         - name: init-nginx-state
           image: {{ awx_image }}:{{ awx_image_tag }}
           command:
@@ -45,9 +64,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.uid
             - name: MY_POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
+              value: {{ awx_k8s_name }}-web.{{ awx_k8s_namespace }}.svc.cluster.local
           ports:
             - containerPort: 8013
           volumeMounts:
@@ -67,10 +84,8 @@ spec:
               mountPath: /etc/nginx/conf.d/nginx.locations.conf
               subPath: nginx.locations.conf
               readOnly: true
-            - name: awx-nginx
-              mountPath: /etc/receptor/receptor.conf
-              subPath: receptor.conf
-              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
             - name: projects
               mountPath: /var/lib/awx/projects
               subPath: projects
@@ -80,7 +95,7 @@ spec:
             - name: containers
               mountPath: /var/lib/awx/.local/share/containers
             - name: receptor
-              mountPath: /var/run/awx-receptor
+              mountPath: /var/run/receptor
             - name: nginx-state
               mountPath: /var/lib/nginx
         - name: receptor
@@ -91,12 +106,10 @@ spec:
           args:
             - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
           volumeMounts:
-            - name: awx-nginx
-              mountPath: /etc/receptor/receptor.conf
-              subPath: receptor.conf
-              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
             - name: receptor
-              mountPath: /var/run/awx-receptor
+              mountPath: /var/run/receptor
       volumes:
         - name: awx-secret
           secret:
@@ -111,6 +124,8 @@ spec:
           emptyDir: {}
         - name: receptor
           emptyDir: {}
+        - name: receptor-config
+          emptyDir: {}
         - name: nginx-state
           emptyDir: {}
 ---
@@ -121,6 +136,7 @@ metadata:
   namespace: {{ awx_k8s_namespace }}
 spec:
   replicas: {{ awx_k8s_task_replicas }}
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ awx_k8s_name }}-task
@@ -134,6 +150,25 @@ spec:
         runAsUser: 1000
         runAsGroup: 0
         fsGroup: 0
+      initContainers:
+        - name: init-receptor-config
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - |
+              cp /receptor-template/receptor.conf /etc/receptor/receptor.conf
+              chgrp 0 /etc/receptor /etc/receptor/receptor.conf
+              chmod 0775 /etc/receptor
+              chmod 0664 /etc/receptor/receptor.conf
+          volumeMounts:
+            - name: awx-nginx
+              mountPath: /receptor-template/receptor.conf
+              subPath: receptor.conf
+              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
       containers:
         - name: awx-task
           image: {{ awx_image }}:{{ awx_image_tag }}
@@ -161,10 +196,8 @@ spec:
               mountPath: /etc/tower/SECRET_KEY
               subPath: SECRET_KEY
               readOnly: true
-            - name: awx-nginx
-              mountPath: /etc/receptor/receptor.conf
-              subPath: receptor.conf
-              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
             - name: projects
               mountPath: /var/lib/awx/projects
               subPath: projects
@@ -174,7 +207,7 @@ spec:
             - name: containers
               mountPath: /var/lib/awx/.local/share/containers
             - name: receptor
-              mountPath: /var/run/awx-receptor
+              mountPath: /var/run/receptor
         - name: receptor
           image: {{ awx_image }}:{{ awx_image_tag }}
           command:
@@ -183,12 +216,10 @@ spec:
           args:
             - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
           volumeMounts:
-            - name: awx-nginx
-              mountPath: /etc/receptor/receptor.conf
-              subPath: receptor.conf
-              readOnly: true
+            - name: receptor-config
+              mountPath: /etc/receptor
             - name: receptor
-              mountPath: /var/run/awx-receptor
+              mountPath: /var/run/receptor
       volumes:
         - name: awx-secret
           secret:
@@ -202,6 +233,8 @@ spec:
         - name: containers
           emptyDir: {}
         - name: receptor
+          emptyDir: {}
+        - name: receptor-config
           emptyDir: {}
 ---
 apiVersion: v1

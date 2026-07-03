@@ -24,6 +24,7 @@ spec:
             - |
               awx-manage migrate --noinput
               awx-manage shell -c "import os; from django.contrib.auth import get_user_model; User=get_user_model(); user,_=User.objects.get_or_create(username='{{ awx_admin_user }}', defaults={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}); desired={'email':'admin@localhost','is_superuser':True,'is_staff':True,'is_active':True}; [setattr(user,k,v) for k,v in desired.items() if getattr(user,k)!=v]; password=os.environ.get('DJANGO_SUPERUSER_PASSWORD'); password and user.set_password(password); user.save(); print('Admin synchronized')"
+              awx-manage register_default_execution_environments
           env:
             - name: DJANGO_SUPERUSER_PASSWORD
               valueFrom:
