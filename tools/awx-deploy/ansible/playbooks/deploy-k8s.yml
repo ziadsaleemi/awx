@@ -6,6 +6,8 @@
     awx_deploy_method: k8s
   roles:
     - awx_k8s
+    - role: awx_opa_k8s
+      when: awx_opa_enabled | default(false) | bool
     - role: awx_gatekeeper_k8s
       when: awx_gatekeeper_enabled | default(false) | bool
     - role: awx_eda_k8s

@@ -39,6 +39,9 @@ stringData:
   PULP_TOKEN_AUTH_DISABLED: "false"
   PULP_TOKEN_SERVER: "{{ awx_galaxy_ng_effective_public_url }}/token/"
   PULP_TOKEN_SIGNATURE_ALGORITHM: ES256
+  PULP_DB_ENCRYPTION_KEY: /etc/pulp/certs/database_fields.symmetric.key
+  PULP_DATABASE_FIELDS_SYMMETRIC_KEY: {{ awx_galaxy_ng_effective_database_fields_symmetric_key | quote }}
+  database_fields.symmetric.key: {{ awx_galaxy_ng_effective_database_fields_symmetric_key | quote }}
   PULP_PUBLIC_KEY_PATH: /app/dev/common/container_auth_public_key.pem
   PULP_PRIVATE_KEY_PATH: /app/dev/common/container_auth_private_key.pem
   PULP_ALLOWED_EXPORT_PATHS: /app/tmp
@@ -190,6 +193,50 @@ data:
     }
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ awx_galaxy_ng_name }}-settings
+  namespace: {{ awx_galaxy_ng_namespace }}
+data:
+  settings.py: |
+    SECRET_KEY = {{ awx_galaxy_ng_effective_secret_key | to_json }}
+    DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": {{ awx_galaxy_ng_postgres_database | to_json }},
+            "USER": {{ awx_galaxy_ng_postgres_user | to_json }},
+            "PASSWORD": {{ awx_galaxy_ng_effective_postgres_password | to_json }},
+            "HOST": "{{ awx_galaxy_ng_name }}-postgres",
+            "PORT": "5432",
+            "CONN_MAX_AGE": 0,
+        }
+    }
+    REDIS_HOST = "{{ awx_galaxy_ng_name }}-redis"
+    REDIS_PORT = 6379
+    REDIS_PASSWORD = None
+    REDIS_SSL = False
+    ANALYTICS = False
+    REDIRECT_TO_OBJECT_STORAGE = False
+    GALAXY_DEPLOYMENT_MODE = "standalone"
+    DEFAULT_FILE_STORAGE = "pulpcore.app.models.storage.FileSystem"
+    FILE_UPLOAD_TEMP_DIR = "/var/lib/pulp/tmp"
+    CONTENT_ORIGIN = {{ awx_galaxy_ng_effective_public_url | to_json }}
+    ANSIBLE_API_HOSTNAME = {{ awx_galaxy_ng_effective_public_url | to_json }}
+    ANSIBLE_CONTENT_HOSTNAME = {{ awx_galaxy_ng_effective_public_url | to_json }}
+    GALAXY_API_PATH_PREFIX = {{ awx_galaxy_ng_api_path_prefix | to_json }}
+    CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }}
+    TOKEN_AUTH_DISABLED = False
+    TOKEN_SERVER = {{ (awx_galaxy_ng_effective_public_url ~ "/token/") | to_json }}
+    TOKEN_SIGNATURE_ALGORITHM = "ES256"
+    PUBLIC_KEY_PATH = "/app/dev/common/container_auth_public_key.pem"
+    PRIVATE_KEY_PATH = "/app/dev/common/container_auth_private_key.pem"
+    ALLOWED_EXPORT_PATHS = ["/app/tmp"]
+    ALLOWED_IMPORT_PATHS = ["/app/tmp"]
+    RESOURCE_SERVER_SYNC_ENABLED = False
+    ANSIBLE_BASE_ROLES_REQUIRE_VIEW = False
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ awx_galaxy_ng_name }}-postgres
@@ -306,6 +353,33 @@ spec:
     spec:
       restartPolicy: Never
       initContainers:
+        - name: prepare-storage
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /var/lib/pulp/tmp /var/lib/pulp/media /var/lib/pulp/artifact /var/lib/pulp/content /tmp/ansible
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+        - name: write-db-encryption-key
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /etc/pulp/certs && printf '%s' "$PULP_DATABASE_FIELDS_SYMMETRIC_KEY" > /etc/pulp/certs/database_fields.symmetric.key && chmod 0600 /etc/pulp/certs/database_fields.symmetric.key
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
         - name: wait-postgres
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
           command: ["wait-for-tcp", "{{ awx_galaxy_ng_name }}-postgres", "5432"]
@@ -322,7 +396,10 @@ spec:
             - bash
             - -lc
           args:
-            - django-admin fix-squashed-migrations && django-admin migrate && django-admin createsuperuser --noinput || true
+            - |
+              django-admin fix-squashed-migrations
+              django-admin migrate
+              django-admin shell -c 'import os; from django.contrib.auth import get_user_model; User = get_user_model(); username = os.environ["DJANGO_SUPERUSER_USERNAME"]; User.objects.filter(username=username).exists() or User.objects.create_superuser(username, os.environ.get("DJANGO_SUPERUSER_EMAIL", ""), os.environ["DJANGO_SUPERUSER_PASSWORD"])'
           volumeMounts:
             - name: pulp
               mountPath: /var/lib/pulp
@@ -330,12 +407,19 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
             - name: tmp-ansible
               mountPath: /tmp/ansible
       volumes:
         - name: pulp
           persistentVolumeClaim:
             claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: settings
+          configMap:
+            name: {{ awx_galaxy_ng_name }}-settings
         - name: tmp-ansible
           emptyDir: {}
 ---
@@ -355,6 +439,33 @@ spec:
         app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
     spec:
       initContainers:
+        - name: prepare-storage
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /var/lib/pulp/tmp /var/lib/pulp/media /var/lib/pulp/artifact /var/lib/pulp/content /tmp/ansible
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+        - name: write-db-encryption-key
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /etc/pulp/certs && printf '%s' "$PULP_DATABASE_FIELDS_SYMMETRIC_KEY" > /etc/pulp/certs/database_fields.symmetric.key && chmod 0600 /etc/pulp/certs/database_fields.symmetric.key
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
         - name: wait-migrations
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
           envFrom:
@@ -365,6 +476,10 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
       containers:
         - name: api
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
@@ -374,7 +489,7 @@ spec:
                 name: {{ awx_galaxy_ng_name }}-secret
           env:
             - name: GUNICORN_PORT
-              value: {{ awx_galaxy_ng_api_port | quote }}
+              value: "{{ awx_galaxy_ng_api_port }}"
           ports:
             - containerPort: {{ awx_galaxy_ng_api_port }}
           volumeMounts:
@@ -384,12 +499,19 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
             - name: tmp-ansible
               mountPath: /tmp/ansible
       volumes:
         - name: pulp
           persistentVolumeClaim:
             claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: settings
+          configMap:
+            name: {{ awx_galaxy_ng_name }}-settings
         - name: tmp-ansible
           emptyDir: {}
 ---
@@ -401,6 +523,18 @@ metadata:
 spec:
   ports:
     - port: {{ awx_galaxy_ng_api_port }}
+      targetPort: {{ awx_galaxy_ng_api_port }}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulp-api
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: 80
       targetPort: {{ awx_galaxy_ng_api_port }}
   selector:
     app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-api
@@ -421,6 +555,33 @@ spec:
         app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
     spec:
       initContainers:
+        - name: prepare-storage
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /var/lib/pulp/tmp /var/lib/pulp/media /var/lib/pulp/artifact /var/lib/pulp/content /tmp/ansible
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+        - name: write-db-encryption-key
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /etc/pulp/certs && printf '%s' "$PULP_DATABASE_FIELDS_SYMMETRIC_KEY" > /etc/pulp/certs/database_fields.symmetric.key && chmod 0600 /etc/pulp/certs/database_fields.symmetric.key
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
         - name: wait-migrations
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
           envFrom:
@@ -431,6 +592,10 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
       containers:
         - name: content
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
@@ -440,7 +605,7 @@ spec:
                 name: {{ awx_galaxy_ng_name }}-secret
           env:
             - name: GUNICORN_PORT
-              value: {{ awx_galaxy_ng_content_port | quote }}
+              value: "{{ awx_galaxy_ng_content_port }}"
           ports:
             - containerPort: {{ awx_galaxy_ng_content_port }}
           volumeMounts:
@@ -450,12 +615,19 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
             - name: tmp-ansible
               mountPath: /tmp/ansible
       volumes:
         - name: pulp
           persistentVolumeClaim:
             claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: settings
+          configMap:
+            name: {{ awx_galaxy_ng_name }}-settings
         - name: tmp-ansible
           emptyDir: {}
 ---
@@ -467,6 +639,18 @@ metadata:
 spec:
   ports:
     - port: {{ awx_galaxy_ng_content_port }}
+      targetPort: {{ awx_galaxy_ng_content_port }}
+  selector:
+    app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulp-content
+  namespace: {{ awx_galaxy_ng_namespace }}
+spec:
+  ports:
+    - port: 80
       targetPort: {{ awx_galaxy_ng_content_port }}
   selector:
     app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-content
@@ -535,6 +719,33 @@ spec:
         app.kubernetes.io/name: {{ awx_galaxy_ng_name }}-worker
     spec:
       initContainers:
+        - name: prepare-storage
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /var/lib/pulp/tmp /var/lib/pulp/media /var/lib/pulp/artifact /var/lib/pulp/content /tmp/ansible
+          volumeMounts:
+            - name: pulp
+              mountPath: /var/lib/pulp
+              subPath: pulp
+            - name: tmp-ansible
+              mountPath: /tmp/ansible
+        - name: write-db-encryption-key
+          image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
+          envFrom:
+            - secretRef:
+                name: {{ awx_galaxy_ng_name }}-secret
+          command:
+            - bash
+            - -lc
+          args:
+            - mkdir -p /etc/pulp/certs && printf '%s' "$PULP_DATABASE_FIELDS_SYMMETRIC_KEY" > /etc/pulp/certs/database_fields.symmetric.key && chmod 0600 /etc/pulp/certs/database_fields.symmetric.key
+          volumeMounts:
+            - name: pulp
+              mountPath: /etc/pulp
+              subPath: etc-pulp
         - name: wait-migrations
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
           envFrom:
@@ -545,6 +756,10 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
       containers:
         - name: worker
           image: {{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}
@@ -559,12 +774,19 @@ spec:
             - name: pulp
               mountPath: /etc/pulp
               subPath: etc-pulp
+            - name: settings
+              mountPath: /etc/pulp/settings.py
+              subPath: settings.py
+              readOnly: true
             - name: tmp-ansible
               mountPath: /tmp/ansible
       volumes:
         - name: pulp
           persistentVolumeClaim:
             claimName: {{ awx_galaxy_ng_name }}-pulp
+        - name: settings
+          configMap:
+            name: {{ awx_galaxy_ng_name }}-settings
         - name: tmp-ansible
           emptyDir: {}
 ---

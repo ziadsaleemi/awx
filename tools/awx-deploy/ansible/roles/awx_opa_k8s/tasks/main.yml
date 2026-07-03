@@ -1,0 +1,90 @@
+---
+- name: Validate OPA deployment target
+  ansible.builtin.assert:
+    that:
+      - awx_deploy_method in ['k3s', 'k8s']
+    fail_msg: "OPA Kubernetes deployment requires awx_deploy_method=k3s or awx_deploy_method=k8s."
+
+- name: Resolve kubectl command for OPA
+  ansible.builtin.set_fact:
+    awx_opa_kubectl: >-
+      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+
+- name: Wait for Kubernetes API readiness for OPA
+  ansible.builtin.command:
+    cmd: "{{ awx_opa_kubectl }} get --raw=/readyz"
+  register: awx_opa_k8s_readyz
+  retries: 60
+  delay: 5
+  until: awx_opa_k8s_readyz.rc == 0
+  changed_when: false
+
+- name: Create OPA namespace
+  ansible.builtin.command:
+    cmd: "{{ awx_opa_kubectl }} create namespace {{ awx_opa_k8s_namespace }}"
+  register: awx_opa_k8s_namespace_create
+  changed_when: awx_opa_k8s_namespace_create.rc == 0
+  failed_when:
+    - awx_opa_k8s_namespace_create.rc != 0
+    - "'AlreadyExists' not in awx_opa_k8s_namespace_create.stderr"
+
+- name: Create OPA Kubernetes manifest workspace
+  ansible.builtin.file:
+    path: "{{ awx_opa_k8s_work_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Render OPA Kubernetes manifest
+  ansible.builtin.template:
+    src: opa.yml.j2
+    dest: "{{ awx_opa_k8s_work_dir }}/opa.yml"
+    mode: "0600"
+
+- name: Apply OPA Kubernetes resources
+  ansible.builtin.command:
+    cmd: "{{ awx_opa_kubectl }} apply -f {{ awx_opa_k8s_work_dir }}/opa.yml"
+  register: awx_opa_k8s_apply
+  changed_when: "'created' in awx_opa_k8s_apply.stdout or 'configured' in awx_opa_k8s_apply.stdout"
+
+- name: Wait for OPA deployment
+  ansible.builtin.command:
+    cmd: "{{ awx_opa_kubectl }} -n {{ awx_opa_k8s_namespace }} rollout status deployment/{{ awx_opa_name }} --timeout=300s"
+  changed_when: false
+  when: awx_opa_k8s_wait_for_service | bool
+
+- name: Check firewalld state for OPA NodePort
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_opa_k8s_firewalld_state
+  changed_when: false
+  failed_when: false
+  when: awx_opa_k8s_service_type == "NodePort"
+
+- name: Check OPA NodePort firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --query-port={{ awx_opa_k8s_node_port }}/tcp"
+  register: awx_opa_k8s_firewalld_port
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_opa_k8s_service_type == "NodePort"
+    - awx_opa_k8s_firewalld_state.stdout == "active"
+
+- name: Open OPA NodePort in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_opa_k8s_node_port }}/tcp"
+  register: awx_opa_k8s_firewalld_open
+  changed_when: true
+  when:
+    - awx_opa_k8s_service_type == "NodePort"
+    - awx_opa_k8s_firewalld_state.stdout == "active"
+    - awx_opa_k8s_firewalld_port.rc != 0
+
+- name: Reload firewalld for OPA NodePort
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_opa_k8s_service_type == "NodePort"
+    - awx_opa_k8s_firewalld_state.stdout == "active"
+    - awx_opa_k8s_firewalld_open is changed

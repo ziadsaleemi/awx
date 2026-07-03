@@ -13,6 +13,65 @@
   until: awx_k8s_readyz.rc == 0
   changed_when: false
 
+- name: Check firewalld state for Kubernetes pod networking
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: awx_k8s_firewalld_pod_state
+  changed_when: false
+  failed_when: false
+  when: awx_k8s_manage_firewalld | bool
+
+- name: Check Kubernetes pod interfaces in trusted firewalld zone
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --zone=trusted --query-interface={{ item }}"
+  loop: "{{ awx_k8s_firewalld_trusted_interfaces }}"
+  register: awx_k8s_firewalld_trusted_interface
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_k8s_manage_firewalld | bool
+    - awx_k8s_firewalld_pod_state.stdout == "active"
+
+- name: Trust Kubernetes pod interfaces in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --zone=trusted --add-interface={{ item.item }}"
+  loop: "{{ awx_k8s_firewalld_trusted_interface.results | selectattr('rc', 'ne', 0) | list }}"
+  register: awx_k8s_firewalld_trusted_add
+  changed_when: true
+  when:
+    - awx_k8s_manage_firewalld | bool
+    - awx_k8s_firewalld_pod_state.stdout == "active"
+    - awx_k8s_firewalld_trusted_interface is defined
+
+- name: Check kubelet metrics firewalld port
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --query-port={{ awx_k8s_firewalld_kubelet_metrics_port }}/tcp"
+  register: awx_k8s_firewalld_kubelet_port
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_k8s_manage_firewalld | bool
+    - awx_k8s_firewalld_pod_state.stdout == "active"
+
+- name: Open kubelet metrics port in firewalld
+  ansible.builtin.command:
+    cmd: "firewall-cmd --permanent --add-port={{ awx_k8s_firewalld_kubelet_metrics_port }}/tcp"
+  register: awx_k8s_firewalld_kubelet_open
+  changed_when: true
+  when:
+    - awx_k8s_manage_firewalld | bool
+    - awx_k8s_firewalld_pod_state.stdout == "active"
+    - awx_k8s_firewalld_kubelet_port.rc != 0
+
+- name: Reload firewalld for Kubernetes pod networking
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload
+  changed_when: true
+  when:
+    - awx_k8s_manage_firewalld | bool
+    - awx_k8s_firewalld_pod_state.stdout == "active"
+    - (awx_k8s_firewalld_trusted_add is defined and awx_k8s_firewalld_trusted_add is changed) or (awx_k8s_firewalld_kubelet_open is defined and awx_k8s_firewalld_kubelet_open is changed)
+
 - name: Read existing Kubernetes secret key when not provided
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} get secret {{ awx_k8s_name }}-secret -o jsonpath='{.data.SECRET_KEY}'"

@@ -13,6 +13,12 @@
   until: awx_eda_k8s_readyz.rc == 0
   changed_when: false
 
+- name: Install EDA Kubernetes manifest dependencies
+  ansible.builtin.package:
+    name: "{{ awx_eda_k8s_packages }}"
+    state: present
+  when: awx_eda_k8s_install_packages | bool
+
 - name: Create EDA Kubernetes manifest workspace
   ansible.builtin.file:
     path: "{{ awx_eda_k8s_work_dir }}"
@@ -44,6 +50,15 @@
   register: awx_eda_k8s_apply_operator
   changed_when: "'created' in awx_eda_k8s_apply_operator.stdout or 'configured' in awx_eda_k8s_apply_operator.stdout"
 
+- name: Pin reachable EDA operator kube-rbac-proxy image
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_eda_namespace }} set image deployment/{{ awx_eda_k8s_operator_deployment }} kube-rbac-proxy={{ awx_eda_k8s_kube_rbac_proxy_image }}:{{ awx_eda_k8s_kube_rbac_proxy_image_tag }}"
+  register: awx_eda_k8s_proxy_image
+  changed_when: "'image updated' in awx_eda_k8s_proxy_image.stdout"
+  when:
+    - awx_eda_k8s_kube_rbac_proxy_image | length > 0
+    - awx_eda_k8s_kube_rbac_proxy_image_tag | length > 0
+
 - name: Wait for EDA custom resource definition
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} wait --for=condition=Established crd/edas.eda.ansible.com --timeout=180s"
@@ -64,7 +79,7 @@
 
 - name: Wait for EDA service
   ansible.builtin.command:
-    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_eda_namespace }} get service {{ awx_eda_name }}-service"
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_eda_namespace }} get service {{ awx_eda_k8s_api_service_name }}"
   register: awx_eda_k8s_service
   retries: 60
   delay: 10

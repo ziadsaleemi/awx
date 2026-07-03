@@ -62,7 +62,10 @@
 
 - name: Resolve existing Project Quay Kubernetes secret data
   ansible.builtin.set_fact:
-    awx_quay_existing_secret_data: "{{ (awx_quay_existing_secret.stdout | default('{}', true) | from_json).data | default({}) }}"
+    awx_quay_existing_secret_data: >-
+      {{ ((awx_quay_existing_secret.stdout | from_json).data | default({}))
+        if awx_quay_existing_secret.rc == 0
+        else {} }}
   no_log: true
 
 - name: Resolve Project Quay Kubernetes secrets

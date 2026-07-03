@@ -62,7 +62,21 @@
 
 - name: Resolve existing Galaxy NG Kubernetes secret data
   ansible.builtin.set_fact:
-    awx_galaxy_ng_existing_secret_data: "{{ (awx_galaxy_ng_existing_secret.stdout | default('{}') | from_json).data | default({}) }}"
+    awx_galaxy_ng_existing_secret_data: >-
+      {{ ((awx_galaxy_ng_existing_secret.stdout | from_json).data | default({}))
+        if awx_galaxy_ng_existing_secret.rc == 0
+        else {} }}
+  no_log: true
+
+- name: Generate Galaxy NG database encryption key when missing
+  ansible.builtin.command:
+    cmd: python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+  register: awx_galaxy_ng_generated_database_fields_symmetric_key
+  changed_when: false
+  when:
+    - awx_galaxy_ng_database_fields_symmetric_key | length == 0
+    - awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | length == 0
+    - awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | length == 0
   no_log: true
 
 - name: Resolve Galaxy NG Kubernetes secrets
@@ -85,6 +99,14 @@
         else (awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | b64decode
           if awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | length > 0
           else awx_galaxy_ng_generated_secret_key.stdout) }}
+    awx_galaxy_ng_effective_database_fields_symmetric_key: >-
+      {{ awx_galaxy_ng_database_fields_symmetric_key
+        if awx_galaxy_ng_database_fields_symmetric_key | length > 0
+        else (awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | b64decode
+          if awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | length > 0
+          else (awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | b64decode
+            if awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | length > 0
+            else awx_galaxy_ng_generated_database_fields_symmetric_key.stdout)) }}
   no_log: true
 
 - name: Resolve Galaxy NG public URL for Kubernetes
@@ -107,6 +129,12 @@
     mode: "0600"
   no_log: true
 
+- name: Remove previous Galaxy NG migration job before applying resources
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} delete job {{ awx_galaxy_ng_name }}-migrate --ignore-not-found=true"
+  register: awx_galaxy_ng_delete_migrate
+  changed_when: "'deleted' in awx_galaxy_ng_delete_migrate.stdout"
+
 - name: Apply Galaxy NG Kubernetes resources
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_galaxy_ng_work_dir }}/galaxy-ng.yml"
@@ -123,18 +151,6 @@
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-redis --timeout=180s"
   changed_when: false
 
-- name: Recreate Galaxy NG migration job
-  ansible.builtin.command:
-    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} delete job {{ awx_galaxy_ng_name }}-migrate --ignore-not-found=true"
-  register: awx_galaxy_ng_delete_migrate
-  changed_when: "'deleted' in awx_galaxy_ng_delete_migrate.stdout"
-
-- name: Apply Galaxy NG migration job
-  ansible.builtin.command:
-    cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_galaxy_ng_work_dir }}/galaxy-ng.yml"
-  register: awx_galaxy_ng_migrate_apply
-  changed_when: "'created' in awx_galaxy_ng_migrate_apply.stdout or 'configured' in awx_galaxy_ng_migrate_apply.stdout"
-
 - name: Wait for Galaxy NG migration job
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} wait --for=condition=complete job/{{ awx_galaxy_ng_name }}-migrate --timeout=900s"
@@ -149,6 +165,14 @@
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-content --timeout=300s"
   changed_when: false
+
+- name: Restart Galaxy NG UI after manifest changes
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout restart deployment/{{ awx_galaxy_ng_name }}-ui"
+  changed_when: true
+  when:
+    - awx_galaxy_ng_ui_enabled | bool
+    - awx_galaxy_ng_k8s_apply is changed
 
 - name: Wait for Galaxy NG UI deployment
   ansible.builtin.command:

@@ -2,7 +2,7 @@
 awx_galaxy_ng_enabled: false
 awx_galaxy_ng_namespace: galaxy-ng
 awx_galaxy_ng_name: awx-galaxy-ng
-awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image: quay.io/ansible/galaxy-ng
 awx_galaxy_ng_image_tag: latest
 awx_galaxy_ng_nginx_image: docker.io/library/nginx:1.27
 awx_galaxy_ng_ui_enabled: true
@@ -19,6 +19,7 @@ awx_galaxy_ng_postgres_database: galaxy_ng
 awx_galaxy_ng_postgres_user: galaxy_ng
 awx_galaxy_ng_postgres_password: "{{ lookup('env', 'GALAXY_NG_POSTGRES_PASSWORD') }}"
 awx_galaxy_ng_secret_key: "{{ lookup('env', 'GALAXY_NG_SECRET_KEY') }}"
+awx_galaxy_ng_database_fields_symmetric_key: "{{ lookup('env', 'GALAXY_NG_DATABASE_FIELDS_SYMMETRIC_KEY') }}"
 awx_galaxy_ng_api_port: 8000
 awx_galaxy_ng_content_port: 24816
 awx_galaxy_ng_public_port: 5001

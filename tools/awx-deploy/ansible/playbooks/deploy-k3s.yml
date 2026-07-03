@@ -29,6 +29,17 @@
     - role: awx_gatekeeper_k8s
       when: awx_gatekeeper_enabled | default(false) | bool
 
+- name: Deploy OPA to k3s
+  hosts: awx_k3s_servers[0]
+  gather_facts: true
+  become: true
+  vars:
+    awx_deploy_method: k3s
+    awx_k8s_kubectl_binary: /usr/local/bin/kubectl
+  roles:
+    - role: awx_opa_k8s
+      when: awx_opa_enabled | default(false) | bool
+
 - name: Deploy EDA to k3s
   hosts: awx_k3s_servers[0]
   gather_facts: true

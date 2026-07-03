@@ -62,6 +62,11 @@ awx_k8s_ingress_enabled: false
 awx_k8s_ingress_host: ""
 awx_k8s_kubectl_binary: kubectl
 awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_manage_firewalld: true
+awx_k8s_firewalld_trusted_interfaces:
+  - cni0
+  - flannel.1
+awx_k8s_firewalld_kubelet_metrics_port: 10250
 
 awx_k3s_install_url: https://get.k3s.io
 awx_k3s_channel: stable
@@ -99,9 +104,15 @@ awx_eda_server_api_port: 8000
 awx_eda_server_ui_port: 8443
 
 # k3s/k8s EDA path.
-awx_eda_k8s_operator_ref: main
+awx_eda_k8s_operator_ref: "1.0.2"
+awx_eda_k8s_operator_image_tag: "1.0.2"
+awx_eda_k8s_kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
+awx_eda_k8s_kube_rbac_proxy_image_tag: v0.15.0
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
+awx_eda_k8s_api_service_name: "{{ awx_eda_name }}-api"
+awx_eda_k8s_api_service_port: 8000
+awx_eda_k8s_api_url: "http://{{ awx_eda_k8s_api_service_name }}.{{ awx_eda_namespace }}.svc.cluster.local:{{ awx_eda_k8s_api_service_port }}"
 
 # Galaxy NG / private automation hub deployment integration.
 # For k3s/k8s, enabling this deploys Galaxy NG beside AWX and configures AWX to
@@ -109,7 +120,7 @@ awx_eda_k8s_node_port: 30855
 # on hosts in [awx_galaxy_ng], then set awx_galaxy_ng_configure_awx_settings=true.
 awx_galaxy_ng_enabled: false
 awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
-awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image: quay.io/ansible/galaxy-ng
 awx_galaxy_ng_image_tag: latest
 awx_galaxy_ng_ui_enabled: true
 awx_galaxy_ng_ui_image: quay.io/pulp/galaxy-web
@@ -187,9 +198,9 @@ awx_quay_upgrade_skip_backup: false
 awx_quay_upgrade_skip_pull: false
 
 # Policy as Code integration.
-# OPA is standalone and can run on a dedicated VM/container host or any external
-# OPA URL. Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or
-# when a server AWX deployment is managing a remote Kubernetes API.
+# OPA can run beside AWX in k3s/k8s or on a dedicated VM/container host.
+# Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or when a
+# server AWX deployment is managing a remote Kubernetes API.
 awx_opa_enabled: false
 awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
 awx_opa_host: ""
@@ -203,6 +214,12 @@ awx_opa_request_retries: 2
 awx_opa_container_image: docker.io/openpolicyagent/opa:latest
 awx_opa_server_http_port: 8181
 awx_opa_server_policy: ""
+
+# k3s/k8s OPA path.
+awx_opa_k8s_namespace: opa
+awx_opa_name: awx-opa
+awx_opa_k8s_service_type: ClusterIP
+awx_opa_k8s_node_port: 30818
 
 # Kubernetes Gatekeeper path.
 awx_gatekeeper_enabled: false

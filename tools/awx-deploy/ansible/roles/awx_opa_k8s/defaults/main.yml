@@ -1,0 +1,19 @@
+---
+awx_deploy_method: k8s
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_work_dir: /tmp/awx-k8s
+
+awx_opa_enabled: false
+awx_opa_container_image: docker.io/openpolicyagent/opa:latest
+awx_opa_name: awx-opa
+awx_opa_k8s_namespace: opa
+awx_opa_k8s_service_type: ClusterIP
+awx_opa_k8s_node_port: 30818
+awx_opa_k8s_replicas: 1
+awx_opa_k8s_work_dir: "{{ awx_k8s_work_dir }}/opa"
+awx_opa_k8s_wait_for_service: true
+awx_opa_port: 8181
+awx_opa_server_log_level: info
+awx_opa_server_policy: ""
+awx_opa_policy_bundle: ""

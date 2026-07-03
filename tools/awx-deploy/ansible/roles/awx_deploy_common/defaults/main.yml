@@ -92,6 +92,11 @@ awx_k8s_ingress_host: ""
 awx_k8s_kubectl_binary: kubectl
 awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
 awx_k8s_work_dir: /tmp/awx-k8s
+awx_k8s_manage_firewalld: true
+awx_k8s_firewalld_trusted_interfaces:
+  - cni0
+  - flannel.1
+awx_k8s_firewalld_kubelet_metrics_port: 10250
 
 awx_k3s_install_url: https://get.k3s.io
 awx_k3s_channel: stable
@@ -147,14 +152,18 @@ awx_eda_server_wait_for_health: true
 awx_eda_server_image_url: ""
 awx_eda_server_ui_image: ""
 
-awx_eda_k8s_operator_ref: main
+awx_eda_k8s_operator_ref: "1.0.2"
 awx_eda_k8s_operator_kustomize_url: "github.com/ansible/eda-server-operator/config/default?ref={{ awx_eda_k8s_operator_ref }}"
 awx_eda_k8s_operator_image: quay.io/ansible/eda-server-operator
-awx_eda_k8s_operator_image_tag: ""
+awx_eda_k8s_operator_image_tag: "1.0.2"
+awx_eda_k8s_kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
+awx_eda_k8s_kube_rbac_proxy_image_tag: v0.15.0
 awx_eda_k8s_operator_deployment: eda-server-operator-controller-manager
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
-awx_eda_k8s_api_url: "http://{{ awx_eda_name }}-service.{{ awx_eda_namespace }}.svc.cluster.local"
+awx_eda_k8s_api_service_name: "{{ awx_eda_name }}-api"
+awx_eda_k8s_api_service_port: 8000
+awx_eda_k8s_api_url: "http://{{ awx_eda_k8s_api_service_name }}.{{ awx_eda_namespace }}.svc.cluster.local:{{ awx_eda_k8s_api_service_port }}"
 awx_eda_k8s_work_dir: "{{ awx_k8s_work_dir }}/eda"
 awx_eda_k8s_wait_for_service: true
 
@@ -163,7 +172,7 @@ awx_galaxy_ng_configure_awx_settings: "{{ awx_galaxy_ng_enabled }}"
 awx_galaxy_ng_server_inventory_host: "{{ groups.get('awx_galaxy_ng', []) | first | default('') }}"
 awx_galaxy_ng_namespace: galaxy-ng
 awx_galaxy_ng_name: awx-galaxy-ng
-awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image: quay.io/ansible/galaxy-ng
 awx_galaxy_ng_image_tag: latest
 awx_galaxy_ng_admin_user: admin
 awx_galaxy_ng_admin_password: "{{ lookup('env', 'GALAXY_NG_ADMIN_PASSWORD') | default(awx_admin_password, true) }}"
@@ -229,6 +238,14 @@ awx_opa_server_policy: ""
 awx_opa_server_http_port: "{{ awx_opa_port }}"
 awx_opa_server_addr: "0.0.0.0:{{ awx_opa_server_http_port }}"
 awx_opa_server_log_level: info
+awx_opa_k8s_namespace: opa
+awx_opa_name: awx-opa
+awx_opa_k8s_host: "{{ awx_opa_name }}.{{ awx_opa_k8s_namespace }}.svc.cluster.local"
+awx_opa_k8s_service_type: ClusterIP
+awx_opa_k8s_node_port: 30818
+awx_opa_k8s_replicas: 1
+awx_opa_k8s_work_dir: "{{ awx_k8s_work_dir }}/opa"
+awx_opa_k8s_wait_for_service: true
 
 awx_gatekeeper_enabled: false
 awx_gatekeeper_configure_awx_settings: "{{ awx_gatekeeper_enabled }}"

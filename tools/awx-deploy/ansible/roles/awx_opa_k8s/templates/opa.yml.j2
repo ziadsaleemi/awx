@@ -1,0 +1,84 @@
+{% set effective_opa_policy = awx_opa_server_policy if awx_opa_server_policy | length > 0 else awx_opa_policy_bundle %}
+{% set has_opa_policy = effective_opa_policy | length > 0 %}
+{% if has_opa_policy %}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ awx_opa_name }}-policies
+  namespace: {{ awx_opa_k8s_namespace }}
+data:
+  awx.rego: |
+{{ effective_opa_policy | indent(4, true) }}
+{% endif %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_opa_name }}
+  namespace: {{ awx_opa_k8s_namespace }}
+spec:
+  replicas: {{ awx_opa_k8s_replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ awx_opa_name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ awx_opa_name }}
+    spec:
+      containers:
+        - name: opa
+          image: {{ awx_opa_container_image }}
+          args:
+            - run
+            - --server
+            - --addr
+            - 0.0.0.0:{{ awx_opa_port }}
+            - --log-level
+            - {{ awx_opa_server_log_level | quote }}
+{% if has_opa_policy %}
+            - /policies
+{% endif %}
+          ports:
+            - name: http
+              containerPort: {{ awx_opa_port }}
+          readinessProbe:
+            httpGet:
+              path: /health?plugins
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+{% if has_opa_policy %}
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+      volumes:
+        - name: policies
+          configMap:
+            name: {{ awx_opa_name }}-policies
+{% endif %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ awx_opa_name }}
+  namespace: {{ awx_opa_k8s_namespace }}
+spec:
+  type: {{ awx_opa_k8s_service_type }}
+  ports:
+    - name: http
+      port: {{ awx_opa_port }}
+      targetPort: http
+{% if awx_opa_k8s_service_type == 'NodePort' and (awx_opa_k8s_node_port | int) > 0 %}
+      nodePort: {{ awx_opa_k8s_node_port | int }}
+{% endif %}
+  selector:
+    app.kubernetes.io/name: {{ awx_opa_name }}

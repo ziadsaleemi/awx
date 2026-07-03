@@ -123,6 +123,9 @@ QUAY_REQUEST_TIMEOUT = {{ awx_quay_request_timeout | int }}
 
 {% if awx_opa_configure_awx_settings | bool %}
 {% set effective_opa_host = awx_opa_host %}
+{% if not effective_opa_host and awx_deploy_method in ['k8s', 'k3s'] %}
+{% set effective_opa_host = awx_opa_k8s_host %}
+{% endif %}
 {% if not effective_opa_host and awx_opa_server_inventory_host %}
 {% set opa_host = hostvars.get(awx_opa_server_inventory_host, {}).get('ansible_host', awx_opa_server_inventory_host) %}
 {% set effective_opa_host = opa_host %}

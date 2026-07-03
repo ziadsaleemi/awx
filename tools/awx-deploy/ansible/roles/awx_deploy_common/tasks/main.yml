@@ -14,10 +14,10 @@
 - name: Validate OPA settings
   ansible.builtin.assert:
     that:
-      - not (awx_opa_configure_awx_settings | bool) or ((awx_opa_host | length > 0) or (awx_opa_server_inventory_host | length > 0))
+      - not (awx_opa_configure_awx_settings | bool) or (awx_deploy_method in ['k3s', 'k8s']) or ((awx_opa_host | length > 0) or (awx_opa_server_inventory_host | length > 0))
       - awx_opa_auth_type in ['None', 'Token', 'Certificate']
       - awx_opa_port | int > 0
-    fail_msg: "When awx_opa_configure_awx_settings=true, set awx_opa_host or define an [awx_opa] inventory host. awx_opa_auth_type must be None, Token, or Certificate."
+    fail_msg: "When awx_opa_configure_awx_settings=true for server deployments, set awx_opa_host or define an [awx_opa] inventory host. awx_opa_auth_type must be None, Token, or Certificate."
 
 - name: Validate Gatekeeper settings
   ansible.builtin.assert:
