@@ -74,6 +74,9 @@ awx_k3s_write_kubeconfig_mode: "0644"
 awx_k3s_disable:
   - traefik
   - network-policy
+awx_k3s_integrated_capacity_check_enabled: true
+awx_k3s_min_memory_mb_for_integrated_services: 16384
+awx_k3s_min_vcpus_for_integrated_services: 4
 
 awx_backup_name: "awx-{{ ansible_date_time.iso8601_basic_short }}"
 awx_restore_confirm: false

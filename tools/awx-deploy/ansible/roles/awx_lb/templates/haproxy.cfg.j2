@@ -17,7 +17,7 @@ defaults
 
 frontend awx_http
     bind {{ awx_lb_bind_address }}:{{ awx_lb_http_port }}
-{% for port in awx_lb_extra_http_ports | default([]) %}
+{% for port in awx_lb_extra_http_ports_effective | default([]) %}
     bind {{ awx_lb_bind_address }}:{{ port }}
 {% endfor %}
     default_backend awx_web

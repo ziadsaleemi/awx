@@ -2,7 +2,7 @@
 - name: Resolve kubectl command for Galaxy NG
   ansible.builtin.set_fact:
     awx_k8s_kubectl: >-
-      {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
+      {{ awx_k8s_kubectl_binary | default('kubectl') }}{% if (awx_k8s_kubeconfig | default('')) | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
 
 - name: Wait for Kubernetes API readiness for Galaxy NG
   ansible.builtin.command:

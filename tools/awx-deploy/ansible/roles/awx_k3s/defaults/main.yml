@@ -1,0 +1,7 @@
+---
+awx_k3s_install_url: https://get.k3s.io
+awx_k3s_channel: stable
+awx_k3s_write_kubeconfig_mode: "0644"
+awx_k3s_disable:
+  - traefik
+  - network-policy

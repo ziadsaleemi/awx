@@ -38,5 +38,8 @@ awx_galaxy_ng_pulp_storage_size: 50Gi
 awx_galaxy_ng_api_replicas: 1
 awx_galaxy_ng_content_replicas: 1
 awx_galaxy_ng_worker_replicas: 1
+awx_k8s_kubectl_binary: kubectl
+awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+awx_k8s_work_dir: /tmp/awx-k8s
 awx_galaxy_ng_work_dir: "{{ awx_k8s_work_dir }}/galaxy-ng"
 awx_galaxy_ng_wait_for_service: true

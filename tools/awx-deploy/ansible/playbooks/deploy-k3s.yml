@@ -18,6 +18,35 @@
   roles:
     - awx_k8s
 
+- name: Validate k3s capacity for integrated services
+  hosts: awx_k3s_servers[0]
+  gather_facts: true
+  become: true
+  vars:
+    awx_k3s_heavy_integrated_services_enabled: >-
+      {{ (awx_eda_enabled | default(false) | bool)
+         or (awx_galaxy_ng_enabled | default(false) | bool)
+         or (awx_quay_enabled | default(false) | bool) }}
+    awx_k3s_effective_vcpus: "{{ ansible_processor_vcpus | default(ansible_processor_count) | default(1) | int }}"
+    awx_k3s_effective_min_memory_mb: "{{ awx_k3s_min_memory_mb_for_integrated_services | default(16384) | int }}"
+    awx_k3s_effective_min_vcpus: "{{ awx_k3s_min_vcpus_for_integrated_services | default(4) | int }}"
+  tasks:
+    - name: Fail early when k3s VM is too small for EDA, Galaxy NG, or Quay
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb | int >= awx_k3s_effective_min_memory_mb | int
+          - awx_k3s_effective_vcpus | int >= awx_k3s_effective_min_vcpus | int
+        fail_msg: >-
+          k3s integrated service deployment is enabled, but this node has
+          {{ ansible_memtotal_mb }} MB RAM and {{ awx_k3s_effective_vcpus }} vCPU.
+          AWX plus EDA Controller, Galaxy NG, or Project Quay requires at least
+          {{ awx_k3s_effective_min_memory_mb }} MB RAM and {{ awx_k3s_effective_min_vcpus }} vCPU.
+          Resize the k3s VM, disable the heavy integrated services for this run,
+          or set awx_k3s_integrated_capacity_check_enabled=false only for an explicit constrained lab run.
+      when:
+        - awx_k3s_integrated_capacity_check_enabled | default(true) | bool
+        - awx_k3s_heavy_integrated_services_enabled | bool
+
 - name: Deploy Gatekeeper to k3s
   hosts: awx_k3s_servers[0]
   gather_facts: true

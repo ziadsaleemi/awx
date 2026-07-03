@@ -121,6 +121,13 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-k3s.yml \
   -e awx_eda_configure_awx_settings=true
 ```
 
+When EDA, Galaxy NG, or Project Quay is enabled on k3s, the playbook checks
+node capacity before deploying those heavier services. The default minimum is
+16 GB RAM and 4 vCPU. Override `awx_k3s_min_memory_mb_for_integrated_services`
+or `awx_k3s_min_vcpus_for_integrated_services` for larger/smaller lab profiles;
+set `awx_k3s_integrated_capacity_check_enabled=false` only when you explicitly
+want to test a constrained node.
+
 ## Quick Start: EDA on Server VM
 
 For direct server AWX deployments, put EDA on a dedicated VM in the `awx_eda`
