@@ -204,8 +204,25 @@ RUN dnf install -y epel-next-release && dnf install -y inotify-tools && dnf remo
 # Copy app from builder
 COPY --from=builder /var/lib/awx /var/lib/awx
 
-RUN ln -s /var/lib/awx/venv/awx/bin/awx-manage /usr/bin/awx-manage && \
-    ln -s /var/lib/awx/venv/awx/bin/ansible-runner /usr/bin/ansible-runner
+RUN /var/lib/awx/venv/awx/bin/pip install 'ansible-core>=2.16,<2.18' && \
+    for exe in \
+        awx-manage \
+        ansible \
+        ansible-config \
+        ansible-console \
+        ansible-doc \
+        ansible-galaxy \
+        ansible-inventory \
+        ansible-playbook \
+        ansible-pull \
+        ansible-test \
+        ansible-vault \
+        ansible-runner; \
+    do \
+        if [ -x "/var/lib/awx/venv/awx/bin/${exe}" ]; then \
+            ln -sf "/var/lib/awx/venv/awx/bin/${exe}" "/usr/bin/${exe}"; \
+        fi; \
+    done
 
 COPY --from={{ receptor_image }} /usr/bin/receptor /usr/bin/receptor
 {% if build_dev|bool %}
