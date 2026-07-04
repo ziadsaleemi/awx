@@ -573,6 +573,26 @@ class TestGenericRun:
         assert env['ANSIBLE_SSH_CONTROL_PATH_DIR'] == os.path.join(private_data_dir, 'cp')
 
     @pytest.mark.django_db
+    def test_build_env_dependency_paths_fall_back_when_runner_unavailable(self, patch_Job, private_data_dir, execution_environment, mock_me):
+        job = Job(project=Project(), inventory=Inventory())
+        job.execution_environment = execution_environment
+
+        task = jobs.RunJob()
+        task.instance = job
+
+        real_isdir = os.path.isdir
+        with mock.patch.object(task, 'build_credentials_list', return_value=[], autospec=True):
+            with mock.patch('awx.main.tasks.jobs.os.path.isdir', side_effect=lambda p: False if p == '/runner' else real_isdir(p)):
+                env = task.build_env(job, private_data_dir)
+
+        assert os.path.join(private_data_dir, 'requirements_roles') in env['ANSIBLE_ROLES_PATH'].split(os.pathsep)
+        assert os.path.join(private_data_dir, 'requirements_collections') in env['ANSIBLE_COLLECTIONS_PATH'].split(os.pathsep)
+        assert os.path.join(private_data_dir, 'plugins_path') in env['ANSIBLE_CALLBACK_PLUGINS'].split(os.pathsep)
+        assert '/runner/requirements_roles' not in env['ANSIBLE_ROLES_PATH'].split(os.pathsep)
+        assert '/runner/requirements_collections' not in env['ANSIBLE_COLLECTIONS_PATH'].split(os.pathsep)
+        assert '/runner/plugins_path' not in env['ANSIBLE_CALLBACK_PLUGINS'].split(os.pathsep)
+
+    @pytest.mark.django_db
     def test_build_env_control_path_uses_runner_when_available(self, patch_Job, private_data_dir, execution_environment, mock_me):
         job = Job(project=Project(), inventory=Inventory())
         job.execution_environment = execution_environment

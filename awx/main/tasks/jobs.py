@@ -1181,6 +1181,7 @@ class RunJob(SourceControlMixin, BaseTask):
         path_vars.append(
             ('ANSIBLE_CALLBACK_PLUGINS', 'callback_plugins', 'plugins_path', '~/.ansible/plugins:/plugins/callback:/usr/share/ansible/plugins/callback'),
         )
+        runner_root = CONTAINER_ROOT if os.path.isdir(CONTAINER_ROOT) else private_data_dir
 
         config_values = read_ansible_config(
             os.path.join(private_data_dir, 'project'), list(map(lambda x: x[1], path_vars)) + ['callbacks_enabled', 'remote_tmp']
@@ -1198,7 +1199,7 @@ class RunJob(SourceControlMixin, BaseTask):
                 for path in config_values[config_setting].split(':'):
                     if path not in paths:
                         paths = [config_values[config_setting]] + paths
-            paths = [os.path.join(CONTAINER_ROOT, folder)] + paths
+            paths = [os.path.join(runner_root, folder)] + paths
             env[env_key] = os.pathsep.join(paths)
 
         env['ANSIBLE_CALLBACKS_ENABLED'] = 'indirect_instance_count'
@@ -1208,7 +1209,7 @@ class RunJob(SourceControlMixin, BaseTask):
         if flag_enabled("FEATURE_INDIRECT_NODE_COUNTING_ENABLED"):
             env['AWX_COLLECT_HOST_QUERIES'] = '1'
             # Add vendor collections path for external query file discovery
-            vendor_collections_path = os.path.join(CONTAINER_ROOT, 'vendor_collections')
+            vendor_collections_path = os.path.join(runner_root, 'vendor_collections')
             env['ANSIBLE_COLLECTIONS_PATH'] = f"{vendor_collections_path}:{env['ANSIBLE_COLLECTIONS_PATH']}"
             logger.debug(f"ANSIBLE_COLLECTIONS_PATH updated for vendor collections: {env['ANSIBLE_COLLECTIONS_PATH']}")
 

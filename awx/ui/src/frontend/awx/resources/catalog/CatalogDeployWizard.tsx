@@ -873,6 +873,18 @@ export function CatalogDeployContent({
                         }
                       }
 
+                      if (selectedProvider === 'vmware' && key === 'template_name') {
+                        const selectedTemplate =
+                          formValues[key] === undefined || formValues[key] === null
+                            ? ''
+                            : String(formValues[key]);
+                        if (selectedTemplate && !dynamicOptions.includes(selectedTemplate)) {
+                          // vCenter REST does not expose classic VM templates through /vcenter/vm.
+                          // Keep the catalog's configured default selectable for Terraform clones.
+                          dynamicOptions = [selectedTemplate, ...dynamicOptions];
+                        }
+                      }
+
                       if (dynamicOptions.length > 0) {
                         return (
                           <FormGroup
