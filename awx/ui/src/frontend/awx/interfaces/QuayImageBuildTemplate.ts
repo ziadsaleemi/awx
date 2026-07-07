@@ -87,6 +87,7 @@ export interface QuayImageBuildTemplate {
     notification_templates_error?: string;
     notification_templates_success?: string;
     object_roles?: string;
+    instance_groups?: string;
     project?: string;
     execution_environment?: string;
   };

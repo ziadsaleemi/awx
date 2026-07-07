@@ -1,0 +1,23 @@
+services:
+  galaxy_web_assets:
+    image: ${AWX_GALAXY_NG_UI_IMAGE:-quay.io/pulp/galaxy-web:4.9.2}
+    platform: ${AWX_GALAXY_NG_UI_PLATFORM:-linux/amd64}
+    user: root
+    entrypoint: ["/bin/sh"]
+    command:
+      - "-lc"
+      - "rm -rf /galaxy-web/* && cp -R /opt/app-root/src/css /opt/app-root/src/js /opt/app-root/src/fonts /opt/app-root/src/sourcemaps /opt/app-root/src/index.html /opt/app-root/src/favicon.ico /opt/app-root/src/editor.worker.js /galaxy-web/"
+    volumes:
+      - galaxy_web_static:/galaxy-web
+
+  nginx:
+    depends_on:
+      galaxy_web_assets:
+        condition: service_completed_successfully
+    volumes:
+      - ${AWX_GALAXY_UI_NGINX_CONF:?Set AWX_GALAXY_UI_NGINX_CONF to tools/awx-deploy/support/galaxy-ng-ui/galaxy-ng-nginx-with-ui.conf}:/etc/nginx/nginx.conf:ro
+      - galaxy_web_static:/opt/galaxy-web:ro
+
+volumes:
+  galaxy_web_static:
+    name: galaxy_web_static

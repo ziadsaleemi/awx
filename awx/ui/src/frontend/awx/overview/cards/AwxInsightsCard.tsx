@@ -8,21 +8,7 @@
  *  - deterministic recommendations, with optional manual AI summary
  */
 
-import {
-  Alert,
-  Button,
-  CardBody,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
-  Spinner,
-  Stack,
-  StackItem,
-  Text,
-  TextContent,
-  TextVariants,
-} from '@patternfly/react-core';
+import { Alert, Button, CardBody, Spinner } from '@patternfly/react-core';
 import { SyncAltIcon } from '@patternfly/react-icons';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -31,6 +17,15 @@ import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashb
 import { postRequest } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAIAssistantEnabled } from '../../common/AIAssistant';
+import {
+  OverviewCenteredSpinner,
+  OverviewMetricGrid,
+  OverviewMetricTile,
+  OverviewRow,
+  OverviewRows,
+  OverviewSection,
+  overviewCardBodyStyle,
+} from './OverviewCardStyles';
 
 interface JobStats {
   total: number;
@@ -483,6 +478,12 @@ function useInsightsData(): {
   return { stats, isLoading, hasError };
 }
 
+function getSignalAccent(severity: InsightSignal['severity']) {
+  if (severity === 'danger') return 'var(--pf-v5-global--danger-color--100)';
+  if (severity === 'warning') return 'var(--pf-v5-global--warning-color--100)';
+  return 'var(--pf-v5-global--info-color--100)';
+}
+
 export function AwxInsightsCard() {
   const { t } = useTranslation();
   const { stats, isLoading, hasError } = useInsightsData();
@@ -564,14 +565,12 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
     >
       <CardBody
         style={{
-          minWidth: 0,
-          overflowX: 'hidden',
-          overflowWrap: 'anywhere',
-          wordBreak: 'break-word',
+          ...overviewCardBodyStyle,
+          overflow: 'visible',
         }}
       >
         {isLoading ? (
-          <Spinner size="lg" />
+          <OverviewCenteredSpinner />
         ) : hasError ? (
           <Alert
             variant="warning"
@@ -580,109 +579,81 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
             title={t('Automation insights data is temporarily unavailable')}
           />
         ) : (
-          <Stack hasGutter>
-            {stats?.signals.length ? (
-              <StackItem>
-                {stats.signals.slice(0, 4).map((signal) => (
-                  <Alert
-                    key={signal.title}
-                    variant={signal.severity}
-                    isInline
-                    isPlain
-                    title={signal.title}
-                    style={{ marginBottom: 6, overflowWrap: 'anywhere' }}
-                  />
-                ))}
-              </StackItem>
-            ) : (
-              <StackItem>
-                <Alert
-                  variant="success"
-                  isInline
-                  isPlain
-                  title={t('No active reliability anomalies detected')}
-                />
-              </StackItem>
-            )}
+          <>
+            <OverviewMetricGrid minWidth={130}>
+              <OverviewMetricTile
+                value={stats?.jobs.total ?? 0}
+                label={t('Recent jobs')}
+                detail={t('Last 200 jobs')}
+              />
+              <OverviewMetricTile
+                value={`${(stats?.failureRate ?? 0).toFixed(1)}%`}
+                label={t('Failure rate')}
+                detail={t('{{count}} failed', { count: stats?.jobs.failed ?? 0 })}
+                tone={(stats?.failureRate ?? 0) > 20 ? 'danger' : 'success'}
+              />
+              <OverviewMetricTile
+                value={stats?.runtimeAnomalies.length ?? 0}
+                label={t('Runtime anomalies')}
+                detail={t('Slow outliers')}
+                tone={(stats?.runtimeAnomalies.length ?? 0) > 0 ? 'warning' : 'success'}
+              />
+              <OverviewMetricTile
+                value={stats?.inventoryDrift.length ?? 0}
+                label={t('Inventory drift')}
+                detail={t('Inventory signals')}
+                tone={(stats?.inventoryDrift.length ?? 0) > 0 ? 'warning' : 'success'}
+              />
+            </OverviewMetricGrid>
 
-            <StackItem>
-              <DescriptionList isCompact isHorizontal>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Recent jobs (200)')}</DescriptionListTerm>
-                  <DescriptionListDescription>{stats?.jobs.total ?? 0}</DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Failure rate')}</DescriptionListTerm>
-                  <DescriptionListDescription
-                    style={{
-                      color:
-                        (stats?.failureRate ?? 0) > 20
-                          ? 'var(--pf-v5-global--danger-color--100)'
-                          : 'var(--pf-v5-global--success-color--100)',
-                      fontWeight: 600,
-                    }}
-                  >
-                    {(stats?.failureRate ?? 0).toFixed(1)}%
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Runtime anomalies')}</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {stats?.runtimeAnomalies.length ?? 0}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Inventory drift')}</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {stats?.inventoryDrift.length ?? 0}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-              </DescriptionList>
-            </StackItem>
+            <OverviewSection title={t('Reliability signals')}>
+              <OverviewRows>
+                {stats?.signals.length ? (
+                  stats.signals.slice(0, 4).map((signal) => (
+                    <OverviewRow key={signal.title} accentColor={getSignalAccent(signal.severity)}>
+                      {signal.title}
+                    </OverviewRow>
+                  ))
+                ) : (
+                  <OverviewRow accentColor="var(--pf-v5-global--success-color--100)">
+                    {t('No active reliability anomalies detected')}
+                  </OverviewRow>
+                )}
+              </OverviewRows>
+            </OverviewSection>
 
             {!!stats?.recommendations.length && (
-              <StackItem>
-                <TextContent>
-                  <Text component={TextVariants.h4} style={{ margin: 0, fontSize: 13 }}>
-                    {t('Recommended actions')}
-                  </Text>
-                </TextContent>
-                <ul
-                  style={{ marginTop: 6, paddingLeft: 18, fontSize: 13, overflowWrap: 'anywhere' }}
-                >
+              <OverviewSection title={t('Recommended actions')}>
+                <OverviewRows>
                   {stats.recommendations.map((recommendation) => (
-                    <li key={recommendation}>{recommendation}</li>
+                    <OverviewRow
+                      key={recommendation}
+                      accentColor="var(--pf-v5-global--primary-color--100)"
+                    >
+                      {recommendation}
+                    </OverviewRow>
                   ))}
-                </ul>
-              </StackItem>
+                </OverviewRows>
+              </OverviewSection>
             )}
 
             {aiEnabled && aiConfigured && (
-              <StackItem>
+              <OverviewSection title={aiSummary || aiLoading || aiError ? t('AI summary') : null}>
                 {aiLoading ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                     <Spinner size="sm" />
-                    <span style={{ fontSize: 13 }}>{t('Generating AI insights...')}</span>
+                    <span>{t('Generating AI insights...')}</span>
                   </div>
                 ) : aiSummary ? (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      whiteSpace: 'pre-wrap',
-                      overflowWrap: 'anywhere',
-                      borderLeft: '3px solid var(--pf-v5-global--primary-color--100)',
-                      paddingLeft: 10,
-                      marginTop: 4,
-                    }}
-                  >
-                    {aiSummary}
-                  </div>
+                  <OverviewRow accentColor="var(--pf-v5-global--primary-color--100)">
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{aiSummary}</div>
+                  </OverviewRow>
                 ) : aiError ? (
                   <Alert variant="info" isInline isPlain title={aiError} />
                 ) : null}
-              </StackItem>
+              </OverviewSection>
             )}
-          </Stack>
+          </>
         )}
       </CardBody>
     </PageDashboardCard>

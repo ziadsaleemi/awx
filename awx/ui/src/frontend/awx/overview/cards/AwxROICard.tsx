@@ -8,19 +8,22 @@
  * Configurable via localStorage (no backend setting needed for MVP).
  */
 
-import {
-  CardBody,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
-  Spinner,
-} from '@patternfly/react-core';
+import { CardBody } from '@patternfly/react-core';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
 import { awxAPI } from '../../common/api/awx-utils';
+import {
+  OverviewCenteredSpinner,
+  OverviewMetricGrid,
+  OverviewMetricTile,
+  OverviewRow,
+  OverviewRows,
+  OverviewSection,
+  overviewCardBodyStyle,
+  overviewMutedTextStyle,
+} from './OverviewCardStyles';
 
 const ROI_HOURLY_RATE_KEY = 'awx-roi-hourly-rate';
 const ROI_MANUAL_MULTIPLIER_KEY = 'awx-roi-manual-multiplier';
@@ -69,44 +72,70 @@ export function AwxROICard() {
     return { hoursAutomated, hoursSaved, costAvoidance, jobCount: data.results.length };
   }, [data, hourlyRate, manualMultiplier]);
 
+  const formattedCost = `$${costAvoidance.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
   return (
     <PageDashboardCard title={t('Automation ROI')} width="half" height="lg" style={{ minWidth: 0 }}>
-      <CardBody style={{ minWidth: 0 }}>
+      <CardBody style={overviewCardBodyStyle}>
         {isLoading ? (
-          <Spinner size="lg" />
+          <OverviewCenteredSpinner />
         ) : (
-          <DescriptionList isCompact isHorizontal>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Successful jobs analysed')}</DescriptionListTerm>
-              <DescriptionListDescription>{jobCount.toLocaleString()}</DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Hours automated')}</DescriptionListTerm>
-              <DescriptionListDescription>
-                {hoursAutomated.toFixed(1)} {t('h')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Estimated hours saved')}</DescriptionListTerm>
-              <DescriptionListDescription
-                style={{ fontWeight: 600, color: 'var(--pf-v5-global--success-color--100)' }}
-              >
-                {hoursSaved.toFixed(1)} {t('h')}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-            <DescriptionListGroup>
-              <DescriptionListTerm>{t('Estimated cost avoidance')}</DescriptionListTerm>
-              <DescriptionListDescription
+          <>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...overviewMutedTextStyle, fontSize: 13, fontWeight: 600 }}>
+                {t('Estimated cost avoidance')}
+              </div>
+              <div
                 style={{
-                  fontWeight: 700,
-                  fontSize: 18,
                   color: 'var(--pf-v5-global--success-color--100)',
+                  fontSize: 34,
+                  lineHeight: 1.1,
+                  fontWeight: 700,
+                  marginTop: 8,
+                  overflowWrap: 'anywhere',
                 }}
               >
-                ${costAvoidance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          </DescriptionList>
+                {formattedCost}
+              </div>
+              <div style={{ ...overviewMutedTextStyle, marginTop: 8, fontSize: 13 }}>
+                {t('Based on the last {{jobCount}} successful jobs.', {
+                  jobCount: jobCount.toLocaleString(),
+                })}
+              </div>
+            </div>
+
+            <OverviewMetricGrid minWidth={130}>
+              <OverviewMetricTile
+                value={jobCount.toLocaleString()}
+                label={t('Successful jobs')}
+                detail={t('Analyzed')}
+              />
+              <OverviewMetricTile
+                value={`${hoursAutomated.toFixed(1)} ${t('h')}`}
+                label={t('Runtime automated')}
+                detail={t('Actual execution time')}
+              />
+              <OverviewMetricTile
+                value={`${hoursSaved.toFixed(1)} ${t('h')}`}
+                label={t('Time returned')}
+                detail={t('{{multiplier}}x manual effort estimate', {
+                  multiplier: manualMultiplier.toLocaleString(),
+                })}
+                tone="success"
+              />
+            </OverviewMetricGrid>
+
+            <OverviewSection title={t('ROI assumptions')}>
+              <OverviewRows>
+                <OverviewRow right={`$${hourlyRate.toLocaleString()}/${t('h')}`}>
+                  {t('Labor rate')}
+                </OverviewRow>
+                <OverviewRow right={`${manualMultiplier.toLocaleString()}x`}>
+                  {t('Manual effort multiplier')}
+                </OverviewRow>
+              </OverviewRows>
+            </OverviewSection>
+          </>
         )}
       </CardBody>
     </PageDashboardCard>

@@ -15,6 +15,7 @@ from awx.api.views.quay import (
     QuayImageBuildJobCancel,
     QuayImageBuildJobDetail,
     QuayImageBuildJobList,
+    QuayImageBuildTemplateInstanceGroupsList,
     QuayImageBuildTemplateJobsList,
     QuayImageBuildTemplateNotificationTemplatesErrorList,
     QuayImageBuildTemplateNotificationTemplatesStartedList,
@@ -95,6 +96,11 @@ quay_urls = [
         r'^execution-environment-images/templates/(?P<pk>[0-9]+)/schedules/$',
         QuayImageBuildTemplateSchedulesList.as_view(),
         name='quay_image_build_template_schedules_list',
+    ),
+    re_path(
+        r'^execution-environment-images/templates/(?P<pk>[0-9]+)/instance_groups/$',
+        QuayImageBuildTemplateInstanceGroupsList.as_view(),
+        name='quay_image_build_template_instance_groups_list',
     ),
     re_path(
         r'^execution-environment-images/templates/(?P<pk>[0-9]+)/notification_templates_started/$',

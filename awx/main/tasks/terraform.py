@@ -95,6 +95,23 @@ def _container_runtime() -> str:
     return 'docker'
 
 
+def _image_uses_terraform_entrypoint(image: str) -> bool:
+    """
+    Return True for official or mirrored hashicorp/terraform images.
+
+    Those images ship with ``ENTRYPOINT ["terraform"]``.  AWX passes the full
+    Terraform command itself (``terraform init`` / ``terraform plan`` / ...),
+    so the container entrypoint must be cleared or Docker executes
+    ``terraform terraform init``.
+    """
+    repository = (image or '').split('@', 1)[0]
+    tag_separator = repository.rfind(':')
+    last_separator = repository.rfind('/')
+    if tag_separator > last_separator:
+        repository = repository[:tag_separator]
+    return repository == 'hashicorp/terraform' or repository.endswith('/hashicorp/terraform')
+
+
 @task(queue=get_task_queuename)
 class RunTerraformJob(SourceControlMixin):
     """
@@ -418,21 +435,30 @@ class RunTerraformJob(SourceControlMixin):
         self._write_envvars_file(env, private_data_dir)
         pull = getattr(ee, 'pull', 'missing')
         runtime = _container_runtime()
+        entrypoint_args = []
+        if _image_uses_terraform_entrypoint(getattr(ee, 'image', '')):
+            entrypoint_args = ['--entrypoint', '']
 
-        container_cmd = [
-            runtime,
-            'run',
-            '--rm',
-            '--volume',
-            f'{private_data_dir}:/runner:Z',
-            '--workdir',
-            container_cwd,
-            '--pull',
-            pull,
-            '--env-file',
-            os.path.join(private_data_dir, 'env', 'envvars'),
-            ee.image,
-        ] + list(args)
+        container_cmd = (
+            [
+                runtime,
+                'run',
+                '--rm',
+                '--volume',
+                f'{private_data_dir}:/runner:Z',
+                '--workdir',
+                container_cwd,
+                '--pull',
+                pull,
+                '--env-file',
+                os.path.join(private_data_dir, 'env', 'envvars'),
+            ]
+            + entrypoint_args
+            + [
+                ee.image,
+            ]
+            + list(args)
+        )
 
         logger.info(
             '%s using execution environment %s (runtime=%s, pull=%s)',
@@ -556,8 +582,9 @@ class RunTerraformJob(SourceControlMixin):
         # container.  Because private_data_dir is mounted at /runner, we store
         # the plan file there so both the host path and container path exist.
         if ee and private_data_dir:
-            plan_tmpdir_for_cmd = os.path.join(private_data_dir, 'tfplan')
-            os.makedirs(plan_tmpdir_for_cmd, exist_ok=True)
+            plan_tmpdir_on_host = os.path.join(private_data_dir, 'tfplan')
+            os.makedirs(plan_tmpdir_on_host, exist_ok=True)
+            plan_tmpdir_for_cmd = '/runner/tfplan'
         else:
             plan_tmpdir_for_cmd = plan_tmpdir
 

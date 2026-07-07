@@ -8,7 +8,7 @@ export interface AnsibleAboutModalProps {
   onClose?: () => void;
 }
 
-export const ABOUT_MODAL_VERSION = '25.1.6';
+export const ABOUT_MODAL_VERSION = '25.1.7';
 
 function AnsibleAboutModal(props: AnsibleAboutModalProps) {
   const [_dialog, setDialog] = usePageDialog();

@@ -5252,6 +5252,28 @@ class TerraformJobTemplateLaunch(GenericAPIView):
         }
         return Response(data)
 
+    def _template_launch_validation_vars(self, obj):
+        validation_vars = obj.extra_vars_dict.copy()
+        if obj.survey_enabled and obj.survey_spec:
+            for survey_element in obj.survey_spec.get('spec', []):
+                variable = survey_element.get('variable')
+                if not variable or variable in validation_vars:
+                    continue
+                default = survey_element.get('default')
+                if default in (None, '') and not survey_element.get('required'):
+                    continue
+                if default is not None:
+                    default_value = default
+                    try:
+                        if survey_element.get('type') == 'integer' and default != '':
+                            default_value = int(default)
+                        elif survey_element.get('type') == 'float' and default != '':
+                            default_value = float(default)
+                    except (TypeError, ValueError):
+                        default_value = default
+                    validation_vars[variable] = default_value
+        return validation_vars
+
     def post(self, request, *args, **kwargs):
         obj = self.get_object()
         launch_kwargs = {}
@@ -5277,7 +5299,7 @@ class TerraformJobTemplateLaunch(GenericAPIView):
         elif obj.survey_enabled:
             # No launch-time vars provided; still validate that required survey
             # fields have defaults or were already set on the template.
-            survey_errors = obj.survey_variable_validation({})
+            survey_errors = obj.survey_variable_validation(self._template_launch_validation_vars(obj))
             if survey_errors:
                 return Response(
                     {'variables_needed_to_start': survey_errors},

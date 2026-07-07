@@ -73,4 +73,44 @@ describe('JobOutput.cy.tsx', () => {
       expect(event.detail.prompt).to.contain('Use this job output');
     });
   });
+
+  it('renders Quay image build output with line numbers', () => {
+    const quayJob = {
+      id: 308,
+      type: 'quay_image_build_job',
+      name: 'AWX EE Demo',
+      status: 'failed',
+      failed: true,
+      started: '2026-07-07T03:55:47.688453Z',
+      finished: '2026-07-07T04:17:12.970855Z',
+      elapsed: 1285.282,
+      command_summary: [
+        {
+          label: 'Build execution environment',
+          command: 'ansible-builder build --container-runtime podman',
+        },
+      ],
+      result_stdout:
+        'Starting Project Quay image build host.docker.internal:30881/admin/awx-ee-demo:latest\n' +
+        'Project: AWX EE Demo\n' +
+        'Running command:\n' +
+        '  podman build -f ee/Containerfile -t host.docker.internal:30881/admin/awx-ee-demo:latest ee\n',
+    };
+
+    cy.mount(<JobOutput job={quayJob as unknown as Job} reloadJob={() => null} />);
+    cy.contains('h1', 'AWX EE Demo');
+    cy.get('[aria-label="Build output"]').within(() => {
+      cy.getByDataCy('quay-output-line-number').then((lines) => {
+        expect([...lines].map((line) => line.textContent?.trim())).to.deep.equal([
+          '1',
+          '2',
+          '3',
+          '4',
+        ]);
+      });
+      cy.contains('Starting Project Quay image build');
+      cy.contains('Project: AWX EE Demo');
+      cy.contains('podman build -f ee/Containerfile');
+    });
+  });
 });

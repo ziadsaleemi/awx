@@ -2,7 +2,7 @@ import pytest
 from django.test import override_settings
 
 from awx.api.versioning import reverse
-from awx.main.models import Project, QuayImageBuildJob, QuayImageBuildTemplate, Schedule
+from awx.main.models import InstanceGroup, Project, QuayImageBuildJob, QuayImageBuildTemplate, Schedule
 
 
 def quay_response(mocker, payload):
@@ -718,6 +718,10 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
             user=admin_user,
             expect=200,
         )
+        instance_group = InstanceGroup.objects.create(name='ee-builders')
+        instance_groups_url = reverse('api:quay_image_build_template_instance_groups_list', kwargs={'pk': create_response.data['id']})
+        attach_instance_group_response = post(instance_groups_url, data={'id': instance_group.pk}, user=admin_user, expect=204)
+        instance_groups_response = get(instance_groups_url, user=admin_user, expect=200)
         launch_response = post(create_response.data['launch_url'], data={}, user=admin_user, expect=202)
         build_list_response = get(reverse('api:quay_image_builds') + f'?template={create_response.data["id"]}', user=admin_user, expect=200)
         template = QuayImageBuildTemplate.objects.get(pk=create_response.data['id'])
@@ -739,6 +743,7 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
             expect=200,
         )
         native_job = QuayImageBuildJob.objects.get(pk=launch_response.data['id'])
+        preferred_instance_groups = list(native_job.preferred_instance_groups)
         unified_templates_response = get(
             reverse('api:unified_job_template_list') + '?type=quay_image_build_template&page_size=20',
             user=admin_user,
@@ -751,17 +756,24 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     assert create_response.data['project']['organization']['name'] == organization.name
     assert create_response.data['image'] == 'quay.example.test/awx/platform-ee:v1'
     assert create_response.data['launch_url'].endswith(f'/api/v2/quay/execution-environment-images/templates/{create_response.data["id"]}/launch/')
+    assert create_response.data['related']['instance_groups'].endswith(
+        f'/api/v2/quay/execution-environment-images/templates/{create_response.data["id"]}/instance_groups/'
+    )
     assert list_response.data['count'] == 1
     assert list_response.data['results'][0]['name'] == 'Platform EE'
     assert filtered_response.data['count'] == 1
     assert filtered_response.data['results'][0]['name'] == 'Platform EE'
     assert ordered_response.data['results'][0]['name'] == 'Utility EE'
     assert update_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
+    assert attach_instance_group_response.status_code == 204
+    assert instance_groups_response.data['count'] == 1
+    assert instance_groups_response.data['results'][0]['name'] == 'ee-builders'
     assert launch_response.data['type'] == 'quay_image_build_job'
     assert launch_response.data['quay_image_build_template'] == create_response.data['id']
     assert launch_response.data['image'] == 'quay.example.test/awx/platform-ee:v2'
     assert launch_response.data['id'] == native_job.pk
     assert native_job.quay_image_build_template_id == create_response.data['id']
+    assert preferred_instance_groups == [instance_group]
     assert signal_start.call_args.args[0] == native_job
     unified_template_ids = {template['id'] for template in unified_templates_response.data['results']}
     unified_template_types = {template['type'] for template in unified_templates_response.data['results']}

@@ -48,7 +48,7 @@ export function TerraformTemplateLaunch() {
   const onSubmit: PageFormSubmitHandler<TerraformLaunchFormValues> = async (values) => {
     const payload: Partial<TerraformLaunchFormValues> = {};
 
-    if (template.ask_variables_on_launch && values.extra_vars !== template.extra_vars) {
+    if (template.ask_variables_on_launch) {
       payload.extra_vars = values.extra_vars;
     }
     if (template.ask_terraform_operation_on_launch) {

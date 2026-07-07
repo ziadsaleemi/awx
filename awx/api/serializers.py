@@ -184,6 +184,8 @@ SUMMARIZABLE_FK_FIELDS = {
     'job_template': DEFAULT_SUMMARY_FIELDS,
     'workflow_job_template': DEFAULT_SUMMARY_FIELDS,
     'workflow_job': DEFAULT_SUMMARY_FIELDS,
+    'quay_image_build_template': DEFAULT_SUMMARY_FIELDS + ('namespace', 'repository', 'tag'),
+    'quay_image_build_job': DEFAULT_SUMMARY_FIELDS + ('status', 'failed', 'elapsed', 'image'),
     'workflow_approval_template': DEFAULT_SUMMARY_FIELDS + ('timeout',),
     'workflow_approval': DEFAULT_SUMMARY_FIELDS + ('timeout',),
     'schedule': DEFAULT_SUMMARY_FIELDS + ('next_run',),
@@ -4136,6 +4138,7 @@ class QuayImageBuildTemplateSerializer(UnifiedJobTemplateSerializer):
             notification_templates_error=self.reverse('api:quay_image_build_template_notification_templates_error', kwargs={'pk': obj.pk}),
             notification_templates_success=self.reverse('api:quay_image_build_template_notification_templates_success', kwargs={'pk': obj.pk}),
             object_roles=self.reverse('api:quay_image_build_template_object_roles', kwargs={'pk': obj.pk}),
+            instance_groups=self.reverse('api:quay_image_build_template_instance_groups_list', kwargs={'pk': obj.pk}),
         )
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})

@@ -11,9 +11,13 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  Flex,
+  FlexItem,
   FormGroup,
   FormSelect,
   FormSelectOption,
+  Gallery,
+  GalleryItem,
   Grid,
   GridItem,
   Label,
@@ -21,11 +25,17 @@ import {
   Spinner,
   Stack,
   StackItem,
+  Text,
+  TextContent,
+  TextVariants,
   TextInput,
+  Title,
 } from '@patternfly/react-core';
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
+  OutlinedClockIcon,
+  SecurityIcon,
   SyncAltIcon,
   TimesCircleIcon,
 } from '@patternfly/react-icons';
@@ -33,6 +43,8 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useGetPageUrl } from '../../../../framework';
+import { PageDashboard } from '../../../../framework/PageDashboard/PageDashboard';
+import { PageDashboardCard } from '../../../../framework/PageDashboard/PageDashboardCard';
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { OPAPolicyManagementPanel } from '../../administration/settings/OPAPolicyManagementPanel';
@@ -169,158 +181,418 @@ function ActivityStreamLink(props: { id?: number | null; label?: string }) {
   );
 }
 
-function StatusCard(props: {
-  title: string;
-  value: string | number;
-  description: string;
-  variant?: 'success' | 'warning' | 'danger' | 'default';
-}) {
-  const icon =
-    props.variant === 'success' ? (
-      <CheckCircleIcon />
-    ) : props.variant === 'danger' || props.variant === 'warning' ? (
-      <ExclamationTriangleIcon />
-    ) : undefined;
-  const color =
-    props.variant === 'success'
-      ? 'green'
-      : props.variant === 'danger'
-        ? 'red'
-        : props.variant === 'warning'
-          ? 'orange'
-          : 'grey';
+function formatBytes(bytes?: number) {
+  if (!bytes) return '0 bytes';
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} bytes`;
+}
+
+function formatTimestamp(value?: string) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
+function OPAStatusLabel(props: { enabled: boolean; enabledText: string; disabledText: string }) {
+  if (props.enabled) {
+    return (
+      <Label color="green" icon={<SecurityIcon />}>
+        {props.enabledText}
+      </Label>
+    );
+  }
   return (
-    <Card isFlat>
-      <CardBody>
-        <Stack>
-          <StackItem>
-            <Label color={color} icon={icon}>
-              {props.title}
-            </Label>
-          </StackItem>
-          <StackItem>
-            <span style={{ display: 'block', fontSize: 28, fontWeight: 700, marginTop: 8 }}>
-              {props.value}
-            </span>
-          </StackItem>
-          <StackItem>
-            <span>{props.description}</span>
-          </StackItem>
-        </Stack>
-      </CardBody>
-    </Card>
+    <Label color="grey" icon={<TimesCircleIcon />}>
+      {props.disabledText}
+    </Label>
+  );
+}
+
+function OPAMetricTile(props: { label: string; value: string | number; detail?: string }) {
+  return (
+    <div
+      data-cy="opa-metric-tile"
+      style={{
+        border: '1px solid var(--pf-v5-global--BorderColor--100)',
+        minHeight: 120,
+        minWidth: 0,
+        padding: 16,
+        width: '100%',
+      }}
+    >
+      <Stack hasGutter>
+        <StackItem>
+          <Title
+            headingLevel="h3"
+            size="2xl"
+            style={{ lineHeight: 1.15, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+          >
+            {props.value}
+          </Title>
+        </StackItem>
+        <StackItem>
+          <TextContent>
+            <Text component={TextVariants.small}>{props.label}</Text>
+            {props.detail ? (
+              <Text
+                component={TextVariants.small}
+                style={{ opacity: 0.75, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+              >
+                {props.detail}
+              </Text>
+            ) : null}
+          </TextContent>
+        </StackItem>
+      </Stack>
+    </div>
+  );
+}
+
+function OPAQuickLink(props: { to: string; label: string; description: string }) {
+  return (
+    <GalleryItem>
+      <Stack hasGutter>
+        <StackItem>
+          <Link to={props.to}>{props.label}</Link>
+        </StackItem>
+        <StackItem>
+          <TextContent>
+            <Text component={TextVariants.small}>{props.description}</Text>
+          </TextContent>
+        </StackItem>
+      </Stack>
+    </GalleryItem>
+  );
+}
+
+function OPAActivityEvidence(props: {
+  entries: OPAActivityEntry[];
+  isLoading: boolean;
+  error: boolean;
+  emptyText: string;
+}) {
+  const { t } = useTranslation();
+  if (props.isLoading) return <Spinner size="md" />;
+  if (props.error) {
+    return <Alert variant="warning" isInline title={t('Could not load OPA activity.')} />;
+  }
+  if (props.entries.length === 0) {
+    return (
+      <TextContent>
+        <Text component={TextVariants.p}>{props.emptyText}</Text>
+      </TextContent>
+    );
+  }
+  return (
+    <Gallery hasGutter minWidths={{ default: '260px' }}>
+      {props.entries.slice(0, 6).map((entry) => (
+        <GalleryItem key={entry.activity_stream_id}>
+          <Flex
+            spaceItems={{ default: 'spaceItemsSm' }}
+            alignItems={{ default: 'alignItemsFlexStart' }}
+            flexWrap={{ default: 'nowrap' }}
+          >
+            <FlexItem>
+              {entry.is_denial ? (
+                <ExclamationTriangleIcon color="var(--pf-v5-global--danger-color--100)" />
+              ) : (
+                <SecurityIcon color="var(--pf-v5-global--success-color--100)" />
+              )}
+            </FlexItem>
+            <FlexItem grow={{ default: 'grow' }}>
+              <Stack>
+                <StackItem>
+                  <Link to={`/activity-stream?id=${entry.activity_stream_id}`}>
+                    {entry.policy_id || entry.object2 || t('OPA decision')}
+                  </Link>
+                </StackItem>
+                <StackItem>
+                  <TextContent>
+                    <Text
+                      component={TextVariants.small}
+                      style={{ opacity: 0.75, overflowWrap: 'anywhere' }}
+                    >
+                      {entry.is_denial ? t('Denied') : t('Allowed')} -{' '}
+                      {entry.source || entry.object1 || t('Policy check')}
+                    </Text>
+                    <Text component={TextVariants.small} style={{ opacity: 0.75 }}>
+                      <OutlinedClockIcon /> {formatTimestamp(entry.timestamp)}
+                    </Text>
+                  </TextContent>
+                </StackItem>
+              </Stack>
+            </FlexItem>
+          </Flex>
+        </GalleryItem>
+      ))}
+    </Gallery>
   );
 }
 
 function OPAOverview() {
   const { t } = useTranslation();
+  const getPageUrl = useGetPageUrl();
   const status = useGet<OPAStatusResponse>(awxAPI`/opa/policies/`);
   const modules = useGet<OPAPolicyModulesResponse>(awxAPI`/opa/policy-modules/`);
   const activity = useGet<OPAActivityResponse>(awxAPI`/opa/activity/?limit=25`);
   const decisionPaths = status.data?.policies?.length ?? 0;
   const liveModules = modules.data?.count ?? 0;
   const denials = activity.data?.denial_count ?? 0;
+  const decisions = activity.data?.decisions?.length ?? 0;
+  const bundleConfigured = Boolean(status.data?.policy_bundle?.configured);
+  const opaEnabled = Boolean(status.data?.enabled);
+  const pageUrl = (route: AwxRoute, fallback: string) => getPageUrl(route) || fallback;
 
   return (
-    <PageSection data-cy="opa-overview">
-      <Stack hasGutter>
-        <StackItem>
-          <Grid hasGutter>
-            <GridItem sm={12} lg={3}>
-              <StatusCard
-                title={t('OPA server')}
-                value={status.data?.enabled ? t('Enabled') : t('Disabled')}
-                description={status.data?.server_url || t('No OPA endpoint configured')}
-                variant={status.data?.enabled ? 'success' : 'warning'}
+    <PageDashboard sectionStyle={{ padding: 16 }}>
+      <PageDashboardCard
+        id="opa-control-plane"
+        title={t('OPA control plane')}
+        subtitle={t('Standalone guardrails for AWX launches, AI actions, and Rego modules')}
+        width="full"
+        height="sm"
+        headerControls={
+          <Flex
+            spaceItems={{ default: 'spaceItemsSm' }}
+            alignItems={{ default: 'alignItemsCenter' }}
+          >
+            <FlexItem>
+              <OPAStatusLabel
+                enabled={opaEnabled}
+                enabledText={t('OPA enabled')}
+                disabledText={t('OPA not configured')}
               />
-            </GridItem>
-            <GridItem sm={12} lg={3}>
-              <StatusCard
-                title={t('Live modules')}
-                value={liveModules}
-                description={t('Rego modules currently available through OPA')}
-                variant={liveModules ? 'success' : 'default'}
+            </FlexItem>
+            <FlexItem>
+              <OPAStatusLabel
+                enabled={bundleConfigured}
+                enabledText={t('Bundle managed')}
+                disabledText={t('Bundle not set')}
               />
-            </GridItem>
-            <GridItem sm={12} lg={3}>
-              <StatusCard
-                title={t('Decision paths')}
-                value={decisionPaths}
-                description={t('AWX guardrail checks registered for OPA')}
-                variant={decisionPaths ? 'success' : 'default'}
-              />
-            </GridItem>
-            <GridItem sm={12} lg={3}>
-              <StatusCard
-                title={t('Recent denials')}
-                value={denials}
-                description={t('Denied OPA decisions found in recent Activity Stream')}
-                variant={denials ? 'danger' : 'success'}
-              />
-            </GridItem>
-          </Grid>
-        </StackItem>
-        <StackItem>
-          <Card isFlat>
-            <CardHeader>
-              <CardTitle>{t('OPA status')}</CardTitle>
-            </CardHeader>
-            <CardBody>
-              {status.isLoading ? (
-                <Spinner size="md" />
-              ) : status.error ? (
-                <Alert variant="danger" isInline title={t('Could not load OPA status.')} />
-              ) : (
-                <DescriptionList isHorizontal isCompact>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Server URL')}</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {status.data?.server_url ? (
-                        <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
-                          {status.data.server_url}
-                        </ClipboardCopy>
-                      ) : (
-                        t('Not configured')
-                      )}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Managed bundle')}</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {status.data?.policy_bundle?.configured
-                        ? t('{{bytes}} bytes / {{lines}} lines', {
-                            bytes: status.data.policy_bundle.size,
-                            lines: status.data.policy_bundle.line_count ?? 0,
-                          })
-                        : t('No managed bundle configured')}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Live policy API')}</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {modules.error
-                        ? t('Unable to read live modules')
-                        : modules.data?.enabled
-                          ? t('{{count}} module(s)', { count: modules.data.count })
-                          : t('Not configured')}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                </DescriptionList>
-              )}
-            </CardBody>
-          </Card>
-        </StackItem>
-        <StackItem>
-          <OPAActivityList
-            title={t('Recent OPA decisions')}
+            </FlexItem>
+          </Flex>
+        }
+      >
+        <CardBody data-cy="opa-overview">
+          <div
+            style={{
+              display: 'grid',
+              gap: 16,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+              maxWidth: '100%',
+            }}
+          >
+            <OPAMetricTile
+              label={t('Decision paths')}
+              value={decisionPaths}
+              detail={
+                status.isLoading
+                  ? t('Loading')
+                  : status.error
+                    ? t('Unavailable')
+                    : status.data?.server_url || t('No server')
+              }
+            />
+            <OPAMetricTile
+              label={t('Live modules')}
+              value={liveModules}
+              detail={
+                modules.error
+                  ? t('Policy API unavailable')
+                  : t('{{count}} readable through OPA', { count: liveModules })
+              }
+            />
+            <OPAMetricTile
+              label={t('Managed bundle')}
+              value={
+                bundleConfigured ? formatBytes(status.data?.policy_bundle?.size) : t('Not set')
+              }
+              detail={t('{{lines}} lines managed', {
+                lines: status.data?.policy_bundle?.line_count ?? 0,
+              })}
+            />
+            <OPAMetricTile
+              label={t('Recent decisions')}
+              value={decisions}
+              detail={t('{{count}} denials in recent audit evidence', { count: denials })}
+            />
+          </div>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard
+        id="opa-status"
+        title={t('OPA status')}
+        subtitle={t('Live policy API and AWX-managed bundle state')}
+        width="half"
+        height="sm"
+        linkText={t('Open OPA settings')}
+        to={pageUrl(AwxRoute.SettingsOpa, '/settings/opa')}
+      >
+        <CardBody>
+          {status.isLoading ? (
+            <Spinner size="md" />
+          ) : status.error ? (
+            <Alert variant="warning" isInline title={t('Could not load OPA status.')} />
+          ) : (
+            <DescriptionList isHorizontal isCompact>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Server URL')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {status.data?.server_url ? (
+                    <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+                      {status.data.server_url}
+                    </ClipboardCopy>
+                  ) : (
+                    t('Not configured')
+                  )}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Enforcement')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <OPAStatusLabel
+                    enabled={opaEnabled}
+                    enabledText={t('Enabled')}
+                    disabledText={t('Disabled')}
+                  />
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Bundle checksum')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  <span style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                    {status.data?.policy_bundle?.sha256 || t('No managed bundle configured')}
+                  </span>
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+              <DescriptionListGroup>
+                <DescriptionListTerm>{t('Live policy API')}</DescriptionListTerm>
+                <DescriptionListDescription>
+                  {modules.error
+                    ? t('Unable to read live modules')
+                    : modules.data?.enabled
+                      ? t('{{count}} module(s)', { count: modules.data.count })
+                      : t('Not configured')}
+                </DescriptionListDescription>
+              </DescriptionListGroup>
+            </DescriptionList>
+          )}
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard
+        id="opa-decision-coverage"
+        title={t('Decision coverage')}
+        subtitle={t('AWX guardrail paths currently routed through OPA')}
+        width="half"
+        height="sm"
+        linkText={t('Test policies')}
+        to={pageUrl(AwxRoute.PolicyAsCodeOpaTester, '/policy-as-code/opa/tester')}
+      >
+        <CardBody>
+          {status.isLoading ? (
+            <Spinner size="md" />
+          ) : status.error ? (
+            <Alert variant="warning" isInline title={t('Could not load OPA decision paths.')} />
+          ) : (
+            <Gallery hasGutter minWidths={{ default: '220px' }}>
+              {(status.data?.policies ?? []).slice(0, 8).map((policy) => (
+                <GalleryItem key={policy.id || policy.path}>
+                  <Stack>
+                    <StackItem>
+                      <Link
+                        to={pageUrl(AwxRoute.PolicyAsCodeOpaTester, '/policy-as-code/opa/tester')}
+                      >
+                        {policy.path}
+                      </Link>
+                    </StackItem>
+                    <StackItem>
+                      <TextContent>
+                        <Text
+                          component={TextVariants.small}
+                          style={{ opacity: 0.75, overflowWrap: 'anywhere' }}
+                        >
+                          {policy.description || policy.id}
+                        </Text>
+                      </TextContent>
+                    </StackItem>
+                  </Stack>
+                </GalleryItem>
+              ))}
+              {decisionPaths === 0 ? (
+                <GalleryItem>
+                  <TextContent>
+                    <Text component={TextVariants.p}>{t('No decision paths registered.')}</Text>
+                  </TextContent>
+                </GalleryItem>
+              ) : null}
+            </Gallery>
+          )}
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard
+        id="opa-workflows"
+        title={t('OPA workflows')}
+        subtitle={t(
+          'Manage modules, sync Rego from AWX Projects, test inputs, and review evidence'
+        )}
+        width="full"
+        height="xs"
+      >
+        <CardBody>
+          <Gallery hasGutter minWidths={{ default: '220px' }}>
+            <OPAQuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaModules, '/policy-as-code/opa/modules')}
+              label={t('Policy Modules')}
+              description={t('Create, validate, update, delete, and roll back live Rego modules.')}
+            />
+            <OPAQuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaProjectSync, '/policy-as-code/opa/project-sync')}
+              label={t('Project Sync')}
+              description={t('Pull bounded .rego files from synced AWX Project checkouts.')}
+            />
+            <OPAQuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaTester, '/policy-as-code/opa/tester')}
+              label={t('Policy Tester')}
+              description={t('Evaluate sample inputs against live OPA decision paths.')}
+            />
+            <OPAQuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaDecisions, '/policy-as-code/opa/decisions')}
+              label={t('Decisions')}
+              description={t('Review recent allow and deny evidence from Activity Stream.')}
+            />
+            <OPAQuickLink
+              to={pageUrl(AwxRoute.PolicyAsCodeOpaViolations, '/policy-as-code/opa/violations')}
+              label={t('Violations')}
+              description={t('Focus on denied OPA decisions that blocked protected actions.')}
+            />
+          </Gallery>
+        </CardBody>
+      </PageDashboardCard>
+
+      <PageDashboardCard
+        id="opa-recent-evidence"
+        title={t('Recent OPA evidence')}
+        subtitle={t('Allow and deny decisions recorded through AWX audit paths')}
+        width="full"
+        height="xs"
+        linkText={t('View decisions')}
+        to={pageUrl(AwxRoute.PolicyAsCodeOpaDecisions, '/policy-as-code/opa/decisions')}
+      >
+        <CardBody>
+          <OPAActivityEvidence
             entries={activity.data?.decisions ?? []}
             isLoading={activity.isLoading}
             error={Boolean(activity.error)}
             emptyText={t('No recent OPA decisions were found.')}
           />
-        </StackItem>
-      </Stack>
-    </PageSection>
+        </CardBody>
+      </PageDashboardCard>
+    </PageDashboard>
   );
 }
 

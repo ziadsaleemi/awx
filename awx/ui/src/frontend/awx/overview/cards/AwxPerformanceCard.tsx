@@ -7,19 +7,7 @@
  *  - Current capacity and execution-load trend over a selected time window
  */
 
-import {
-  CardBody,
-  Flex,
-  FlexItem,
-  Progress,
-  ProgressSize,
-  Spinner,
-  Stack,
-  StackItem,
-  Text,
-  TextContent,
-  TextVariants,
-} from '@patternfly/react-core';
+import { CardBody, Progress, ProgressSize } from '@patternfly/react-core';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
@@ -28,6 +16,17 @@ import { PageSingleSelect } from '../../../../framework/PageInputs/PageSingleSel
 import { useGetPageUrl } from '../../../../framework/PageNavigation/useGetPageUrl';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
+import {
+  OverviewCenteredSpinner,
+  OverviewMetricGrid,
+  OverviewMetricTile,
+  OverviewRow,
+  OverviewRows,
+  OverviewSection,
+  OverviewTwoColumnGrid,
+  overviewCardBodyStyle,
+  overviewMutedTextStyle,
+} from './OverviewCardStyles';
 
 interface Instance {
   hostname: string;
@@ -308,6 +307,14 @@ export function AwxPerformanceCard() {
             change: Math.abs(runtimeTrend.percentChange),
           })
         : t('Flat vs earlier in this window');
+  const capacityTone =
+    capacitySummary.percent > 80 ? 'danger' : capacitySummary.percent > 60 ? 'warning' : 'success';
+  const trendTone =
+    runtimeTrend.direction === 'up'
+      ? 'warning'
+      : runtimeTrend.direction === 'down'
+        ? 'success'
+        : 'default';
 
   return (
     <PageDashboardCard
@@ -330,201 +337,175 @@ export function AwxPerformanceCard() {
         />
       }
     >
-      <CardBody>
+      <CardBody style={overviewCardBodyStyle}>
         {isLoading ? (
-          <Spinner size="lg" />
+          <OverviewCenteredSpinner />
         ) : (
-          <Stack hasGutter>
-            {/* Capacity utilisation */}
-            {executionNodes.length > 0 && (
-              <StackItem>
-                <Flex alignItems={{ default: 'alignItemsCenter' }}>
-                  <FlexItem grow={{ default: 'grow' }}>
-                    <TextContent style={{ marginBottom: 8 }}>
-                      <Text
-                        component={TextVariants.h4}
-                        style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
-                      >
-                        {t('Execution node capacity')}
-                      </Text>
-                    </TextContent>
-                  </FlexItem>
-                  <FlexItem>
-                    <Text component={TextVariants.small}>
-                      {t('{{pct}}% used', { pct: capacitySummary.percent })}
-                    </Text>
-                  </FlexItem>
-                </Flex>
-                <Stack hasGutter>
-                  {executionNodes.slice(0, 4).map((node) => {
-                    const pct =
-                      node.capacity > 0
-                        ? Math.round((node.consumed_capacity / node.capacity) * 100)
-                        : 0;
-                    return (
-                      <StackItem key={node.hostname}>
-                        <div style={{ fontSize: 12, marginBottom: 2 }}>{node.hostname}</div>
-                        <Progress
-                          value={pct}
-                          size={ProgressSize.sm}
-                          title={`${pct}%`}
-                          aria-label={`${node.hostname} capacity`}
-                          style={{
-                            // Red if >80%, yellow if >60%
-                            ['--pf-v5-c-progress__bar--BackgroundColor' as string]:
-                              pct > 80
-                                ? 'var(--pf-v5-global--danger-color--100)'
-                                : pct > 60
-                                  ? 'var(--pf-v5-global--warning-color--100)'
-                                  : undefined,
-                          }}
-                        />
-                      </StackItem>
-                    );
-                  })}
-                </Stack>
-              </StackItem>
-            )}
+          <>
+            <OverviewMetricGrid minWidth={170}>
+              <OverviewMetricTile
+                value={`${capacitySummary.percent}%`}
+                label={t('Capacity used')}
+                detail={t('{{used}} of {{total}} consumed', {
+                  used: capacitySummary.consumed.toLocaleString(),
+                  total: capacitySummary.capacity.toLocaleString(),
+                })}
+                tone={capacityTone}
+              />
+              <OverviewMetricTile
+                value={executionNodes.length.toLocaleString()}
+                label={t('Execution nodes')}
+                detail={t('Enabled execution or hybrid nodes')}
+              />
+              <OverviewMetricTile
+                value={formatDuration(runtimeTrend.totalElapsed)}
+                label={t('Execution load')}
+                detail={trendSummary}
+                tone={trendTone}
+              />
+              <OverviewMetricTile
+                value={failedHosts.length.toLocaleString()}
+                label={t('Failed hosts')}
+                detail={t('Recent host failure signals')}
+                tone={failedHosts.length > 0 ? 'warning' : 'success'}
+              />
+            </OverviewMetricGrid>
 
-            {/* Runtime trend */}
-            {runtimeTrend.totalElapsed > 0 && (
-              <StackItem>
-                <Flex alignItems={{ default: 'alignItemsCenter' }}>
-                  <FlexItem grow={{ default: 'grow' }}>
-                    <TextContent style={{ marginBottom: 8 }}>
-                      <Text
-                        component={TextVariants.h4}
-                        style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
-                      >
-                        {t('Execution load trend')}
-                      </Text>
-                    </TextContent>
-                  </FlexItem>
-                  <FlexItem>
-                    <Text component={TextVariants.small}>{trendSummary}</Text>
-                  </FlexItem>
-                </Flex>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                  <tbody>
-                    {runtimeTrend.buckets.map((bucket) => (
-                      <tr key={bucket.start.toISOString()}>
-                        <td style={{ padding: '3px 8px 3px 0', whiteSpace: 'nowrap' }}>
-                          {formatBucketLabel(bucket.start, activeWindow)}
-                        </td>
-                        <td style={{ padding: '3px 8px 3px 0' }}>
-                          {t('{{count}} jobs', { count: bucket.jobCount })}
-                        </td>
-                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600 }}>
-                          {formatDuration(bucket.totalElapsed)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </StackItem>
-            )}
+            <OverviewTwoColumnGrid>
+              <OverviewSection title={t('Execution node capacity')}>
+                {executionNodes.length > 0 ? (
+                  <OverviewRows>
+                    {executionNodes.slice(0, 5).map((node) => {
+                      const pct =
+                        node.capacity > 0
+                          ? Math.round((node.consumed_capacity / node.capacity) * 100)
+                          : 0;
+                      return (
+                        <OverviewRow key={node.hostname} right={`${pct}%`}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{node.hostname}</div>
+                          <Progress
+                            value={pct}
+                            size={ProgressSize.sm}
+                            title={`${pct}%`}
+                            aria-label={`${node.hostname} capacity`}
+                            style={{
+                              marginTop: 6,
+                              ['--pf-v5-c-progress__bar--BackgroundColor' as string]:
+                                pct > 80
+                                  ? 'var(--pf-v5-global--danger-color--100)'
+                                  : pct > 60
+                                    ? 'var(--pf-v5-global--warning-color--100)'
+                                    : undefined,
+                            }}
+                          />
+                        </OverviewRow>
+                      );
+                    })}
+                  </OverviewRows>
+                ) : (
+                  <div style={{ ...overviewMutedTextStyle, fontSize: 13 }}>
+                    {t('No enabled execution nodes found.')}
+                  </div>
+                )}
+              </OverviewSection>
 
-            {/* Slowest templates */}
-            {slowestTemplates.length > 0 && (
-              <StackItem>
-                <TextContent style={{ marginBottom: 8 }}>
-                  <Text
-                    component={TextVariants.h4}
-                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
+              <OverviewSection title={t('Execution load trend')}>
+                {runtimeTrend.totalElapsed > 0 ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `repeat(${runtimeTrend.buckets.length}, minmax(0, 1fr))`,
+                      gap: 8,
+                      alignItems: 'end',
+                      minHeight: 126,
+                    }}
                   >
-                    {t('Slowest templates (avg)')}
-                  </Text>
-                </TextContent>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                  <tbody>
-                    {slowestTemplates.map((tmpl, i) => (
-                      <tr key={i}>
-                        <td
+                    {runtimeTrend.buckets.map((bucket) => {
+                      const maxElapsed = Math.max(
+                        ...runtimeTrend.buckets.map((trendBucket) => trendBucket.totalElapsed),
+                        1
+                      );
+                      const pct = Math.max(6, Math.round((bucket.totalElapsed / maxElapsed) * 100));
+                      return (
+                        <div
+                          key={bucket.start.toISOString()}
                           style={{
-                            padding: '3px 8px 3px 0',
-                            maxWidth: 220,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={tmpl.name}
-                        >
-                          {tmpl.name}
-                        </td>
-                        <td
-                          style={{
-                            padding: '3px 0',
-                            fontWeight: 600,
-                            color:
-                              tmpl.avgSeconds > 600
-                                ? 'var(--pf-v5-global--warning-color--100)'
-                                : undefined,
-                            textAlign: 'right',
-                            whiteSpace: 'nowrap',
+                            display: 'grid',
+                            gap: 6,
+                            alignItems: 'end',
+                            minWidth: 0,
                           }}
                         >
-                          {formatDuration(tmpl.avgSeconds)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </StackItem>
-            )}
+                          <div
+                            title={`${formatDuration(bucket.totalElapsed)} / ${bucket.jobCount} jobs`}
+                            style={{
+                              height: `${pct}px`,
+                              minHeight: 6,
+                              background: 'var(--pf-v5-global--primary-color--100)',
+                            }}
+                          />
+                          <div
+                            style={{
+                              ...overviewMutedTextStyle,
+                              fontSize: 11,
+                              textAlign: 'center',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {formatBucketLabel(bucket.start, activeWindow)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ ...overviewMutedTextStyle, fontSize: 13 }}>
+                    {t('No execution load in this window.')}
+                  </div>
+                )}
+              </OverviewSection>
+            </OverviewTwoColumnGrid>
 
-            {/* Most failed hosts */}
-            {failedHosts.length > 0 && (
-              <StackItem>
-                <TextContent style={{ marginBottom: 8 }}>
-                  <Text
-                    component={TextVariants.h4}
-                    style={{ margin: 0, fontSize: 13, fontWeight: 600 }}
-                  >
-                    {t('Most failed hosts')}
-                  </Text>
-                </TextContent>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                  <tbody>
+            <OverviewTwoColumnGrid>
+              <OverviewSection title={t('Slowest templates (avg)')}>
+                {slowestTemplates.length > 0 ? (
+                  <OverviewRows>
+                    {slowestTemplates.map((tmpl) => (
+                      <OverviewRow key={tmpl.name} right={formatDuration(tmpl.avgSeconds)}>
+                        {tmpl.name}
+                      </OverviewRow>
+                    ))}
+                  </OverviewRows>
+                ) : (
+                  <div style={{ ...overviewMutedTextStyle, fontSize: 13 }}>
+                    {t('No successful template runtime data in this window.')}
+                  </div>
+                )}
+              </OverviewSection>
+
+              <OverviewSection title={t('Most failed hosts')}>
+                {failedHosts.length > 0 ? (
+                  <OverviewRows>
                     {failedHosts.map((host) => (
-                      <tr key={host.host}>
-                        <td
-                          style={{
-                            padding: '3px 8px 3px 0',
-                            maxWidth: 220,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={host.host}
-                        >
-                          {host.host}
-                        </td>
-                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600 }}>
-                          {t('{{count}} failures', { count: host.failures })}
-                        </td>
-                      </tr>
+                      <OverviewRow
+                        key={host.host}
+                        right={t('{{count}} failures', { count: host.failures })}
+                        accentColor="var(--pf-v5-global--warning-color--100)"
+                      >
+                        {host.host}
+                      </OverviewRow>
                     ))}
-                  </tbody>
-                </table>
-              </StackItem>
-            )}
-
-            {slowestTemplates.length === 0 &&
-              executionNodes.length === 0 &&
-              failedHosts.length === 0 &&
-              runtimeTrend.totalElapsed === 0 && (
-                <StackItem>
-                  <TextContent>
-                    <Text
-                      component={TextVariants.small}
-                      style={{ color: 'var(--pf-v5-global--Color--200)' }}
-                    >
-                      {t('No performance data available yet. Run some jobs to see metrics here.')}
-                    </Text>
-                  </TextContent>
-                </StackItem>
-              )}
-          </Stack>
+                  </OverviewRows>
+                ) : (
+                  <div style={{ ...overviewMutedTextStyle, fontSize: 13 }}>
+                    {t('No host failures in this window.')}
+                  </div>
+                )}
+              </OverviewSection>
+            </OverviewTwoColumnGrid>
+          </>
         )}
       </CardBody>
     </PageDashboardCard>

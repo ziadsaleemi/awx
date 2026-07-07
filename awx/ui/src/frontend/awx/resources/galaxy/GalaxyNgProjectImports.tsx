@@ -32,8 +32,8 @@ import { PageHeader, PageLayout, usePageAlertToaster } from '../../../../framewo
 import { postRequest } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
-import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
+import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
 import { GalaxyNgStatus } from './GalaxyNgOverview';
 
 interface AwxProject {
@@ -163,8 +163,9 @@ export function GalaxyNgProjectImports() {
           'Build collection artifacts from AWX Projects and publish them to Galaxy NG.'
         )}
         headerActions={
-          <ModuleAIAssistantAction
-            module="galaxy_ng"
+          <GalaxyNgHeaderActions
+            status={status.data}
+            uiRoute="collections/"
             page={t('Galaxy NG project imports')}
             prompt={t(
               'Help with Galaxy NG project imports in AWX. Use the selected AWX Project, collection path, generated commands, Galaxy NG settings, and approval workflow. Explain how to build, publish, approve, and install this collection.'

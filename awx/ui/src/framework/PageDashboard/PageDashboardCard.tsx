@@ -10,6 +10,7 @@ import {
 } from '@patternfly/react-core';
 import { AngleRightIcon } from '@patternfly/react-icons';
 import { CSSProperties, ReactNode, useContext, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Help } from '../components/Help';
 import { useID } from '../hooks/useID';
@@ -88,6 +89,7 @@ export function PageDashboardCard(props: {
 
   canCollapse?: boolean;
 }) {
+  const { t } = useTranslation();
   const id = useID(props);
 
   const dashboardContext = useContext(PageDashboardContext);
@@ -206,13 +208,19 @@ export function PageDashboardCard(props: {
             </FlexItem>
             {props.canCollapse && (
               <FlexItem>
-                <AngleRightIcon
-                  style={{
-                    transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                    transition: 'transform',
-                  }}
+                <Button
+                  aria-label={isCollapsed ? t('Expand card') : t('Collapse card')}
+                  variant="plain"
                   onClick={() => setCollapsed(!isCollapsed)}
-                />
+                  style={{ padding: 0 }}
+                >
+                  <AngleRightIcon
+                    style={{
+                      transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                      transition: 'transform 0.2s ease',
+                    }}
+                  />
+                </Button>
               </FlexItem>
             )}
           </Flex>

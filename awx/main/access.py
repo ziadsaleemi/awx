@@ -1961,6 +1961,20 @@ class QuayImageBuildTemplateAccess(BaseAccess):
     def can_delete(self, obj):
         return self.user.is_superuser or self.user in obj.admin_role
 
+    @check_superuser
+    def can_attach(self, obj, sub_obj, relationship, data, skip_sub_obj_read_check=False):
+        if relationship == "instance_groups":
+            if not obj.organization:
+                return False
+            return self.user in sub_obj.use_role and self.user in obj.admin_role
+        return super(QuayImageBuildTemplateAccess, self).can_attach(obj, sub_obj, relationship, data, skip_sub_obj_read_check=skip_sub_obj_read_check)
+
+    @check_superuser
+    def can_unattach(self, obj, sub_obj, relationship, *args, **kwargs):
+        if relationship == "instance_groups":
+            return self.can_attach(obj, sub_obj, relationship, *args, **kwargs)
+        return super(QuayImageBuildTemplateAccess, self).can_unattach(obj, sub_obj, relationship, *args, **kwargs)
+
 
 class QuayImageBuildJobAccess(BaseAccess):
     """

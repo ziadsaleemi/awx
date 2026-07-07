@@ -19,9 +19,9 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { PageHeader, PageLayout, useGetPageUrl } from '../../../../framework';
 import { useGet } from '../../../common/crud/useGet';
-import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
+import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
 import { GalaxyNgStatus } from './GalaxyNgOverview';
 
 export function GalaxyNgApiToken() {
@@ -36,8 +36,9 @@ export function GalaxyNgApiToken() {
         title={t('API Token')}
         description={t('Galaxy NG credentials AWX uses to read Automation Hub content APIs.')}
         headerActions={
-          <ModuleAIAssistantAction
-            module="galaxy_ng"
+          <GalaxyNgHeaderActions
+            status={status.data}
+            uiRoute="token/"
             page={t('Galaxy NG API token')}
             prompt={t(
               'Help me configure Galaxy NG API token access for AWX. Explain what is configured, what is missing, and how this affects namespaces, collections, repositories, remotes, and tasks.'

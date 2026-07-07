@@ -26,6 +26,7 @@ import {
   ContentWorkflowGroups,
 } from '../content/ContentManagementCards';
 import { AwxRoute } from '../../main/AwxRoutes';
+import { getGalaxyApiBrowserUrl, getGalaxyBrowserUrl } from './GalaxyNgHeaderActions';
 
 export interface GalaxyNgStatus {
   enabled: boolean;
@@ -55,32 +56,6 @@ export interface GalaxyNgStatus {
   };
   pulp_status: Record<string, unknown>;
   controller_error: string;
-}
-
-function getBrowserUrl(url?: string) {
-  if (!url) return url;
-  try {
-    const parsed = new URL(url);
-    const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (
-      parsed.hostname === 'host.docker.internal' &&
-      (currentHost === 'localhost' || currentHost === '127.0.0.1')
-    ) {
-      parsed.hostname = currentHost;
-    }
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-function getApiBrowserUrl(apiRootUrl?: string) {
-  if (!apiRootUrl) return undefined;
-  try {
-    return new URL('v3/swagger-ui/', apiRootUrl).toString();
-  } catch {
-    return apiRootUrl;
-  }
 }
 
 export function GalaxyNgOverview() {
@@ -351,13 +326,13 @@ export function GalaxyNgOverview() {
                     description: t('Review AWX authentication for Galaxy NG APIs.'),
                   },
                   {
-                    href: getBrowserUrl(data?.ui_url),
+                    href: getGalaxyBrowserUrl(data?.ui_url),
                     label: t('Open Galaxy NG UI'),
                     description: t('Open the live Automation Hub UI served by the deploy stack.'),
                   },
                   {
-                    href: getBrowserUrl(
-                      data?.api_browser_url || getApiBrowserUrl(data?.api_root_url)
+                    href: getGalaxyBrowserUrl(
+                      data?.api_browser_url || getGalaxyApiBrowserUrl(data?.api_root_url)
                     ),
                     label: t('Open Galaxy NG API'),
                     description: t('Open the live API browser for direct hub operations.'),

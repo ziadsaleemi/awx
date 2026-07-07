@@ -50,6 +50,7 @@ GALAXY_NG_IMAGE_NAME_RE = re.compile(r'^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]
 GALAXY_NG_IMAGE_TAG_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$')
 GALAXY_NG_CONTAINER_RUNTIMES = ('podman', 'docker')
 GALAXY_NG_STATUS_CACHE_TIMEOUT = 15
+GALAXY_NG_COLLECTION_DETAIL_CACHE_TIMEOUT = 60
 
 
 def _galaxy_ng_status_cache_key(client, server_url):
@@ -64,6 +65,19 @@ def _galaxy_ng_status_cache_key(client, server_url):
         ]
     )
     return f'awx:galaxy-ng:status:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
+
+
+def _galaxy_ng_collection_detail_cache_key(client, detail_path):
+    fingerprint = '|'.join(
+        [
+            client.server_url or '',
+            detail_path or '',
+            str(client.verify_ssl),
+            str(client.timeout),
+            str(client.auth_configured),
+        ]
+    )
+    return f'awx:galaxy-ng:collection-detail:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -83,7 +97,7 @@ def _galaxy_list_params(request, page, page_size):
         'offset': (page - 1) * page_size,
     }
     for key, values in request.query_params.lists():
-        if key in ('page', 'page_size'):
+        if key in ('page', 'page_size', 'refresh'):
             continue
         value = values if len(values) > 1 else values[0]
         if key == 'order_by':
@@ -106,6 +120,155 @@ def _empty_resource_response(resource, source, detail=''):
         'detail': detail,
         'results': [],
     }
+
+
+def _collection_namespace(value):
+    if isinstance(value, dict):
+        return value.get('name') or ''
+    return value or ''
+
+
+def _collection_version_object(record):
+    if isinstance(record.get('highest_version'), dict) and record['highest_version'].get('version'):
+        return record['highest_version']
+    if isinstance(record.get('latest_version'), dict) and record['latest_version'].get('version'):
+        return record['latest_version']
+    return {}
+
+
+def _collection_latest_version(record):
+    version_object = _collection_version_object(record)
+    return version_object.get('version') or record.get('version') or ''
+
+
+def _collection_repository_name(record):
+    if isinstance(record.get('repository'), str) and record['repository']:
+        return record['repository']
+    if isinstance(record.get('repository_list'), list) and record['repository_list']:
+        return record['repository_list'][0]
+
+    candidates = [
+        record.get('href'),
+        record.get('versions_url'),
+        _collection_version_object(record).get('href'),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        match = re.search(r'/content/([^/]+)/collections/index/', str(candidate))
+        if match:
+            return match.group(1)
+    return ''
+
+
+def _collection_latest_version_detail_path(client, record, repository):
+    version_object = _collection_version_object(record)
+    if version_object.get('href'):
+        return version_object['href']
+
+    namespace = _collection_namespace(record.get('namespace'))
+    name = record.get('name') or ''
+    version = _collection_latest_version(record)
+    if not (namespace and name and version):
+        return ''
+
+    repository = repository or 'published'
+    return (
+        f'{client.api_path_prefix.rstrip("/")}/v3/plugin/ansible/content/{quote(repository, safe="")}/collections/index/'
+        f'{quote(namespace, safe="")}/{quote(name, safe="")}/versions/{quote(version, safe="")}/'
+    )
+
+
+def _compact_collection_version_detail(detail):
+    if not isinstance(detail, dict):
+        return {}
+    compact_keys = (
+        'version',
+        'href',
+        'created_at',
+        'updated_at',
+        'requires_ansible',
+        'marks',
+        'artifact',
+        'collection',
+        'download_url',
+        'name',
+        'namespace',
+        'signatures',
+        'metadata',
+        'git_url',
+        'git_commit_sha',
+        'manifest',
+    )
+    return {key: detail[key] for key in compact_keys if key in detail}
+
+
+def _enrich_collection_record(client, record):
+    if not isinstance(record, dict):
+        return record
+
+    enriched = dict(record)
+    repository = _collection_repository_name(record)
+    if repository:
+        enriched.setdefault('repository', repository)
+
+    detail_path = _collection_latest_version_detail_path(client, record, repository)
+    if not detail_path:
+        return enriched
+
+    cache_key = _galaxy_ng_collection_detail_cache_key(client, detail_path)
+    detail = cache.get(cache_key)
+    if detail is None:
+        try:
+            detail = client.get(detail_path)
+        except GalaxyNGControllerError as exc:
+            enriched['version_detail_error'] = str(exc)
+            return enriched
+        cache.set(cache_key, detail, GALAXY_NG_COLLECTION_DETAIL_CACHE_TIMEOUT)
+
+    if not isinstance(detail, dict):
+        return enriched
+
+    metadata = detail.get('metadata') if isinstance(detail.get('metadata'), dict) else {}
+    existing_metadata = enriched.get('metadata') if isinstance(enriched.get('metadata'), dict) else {}
+    merged_metadata = {**existing_metadata, **metadata}
+    enriched['metadata'] = merged_metadata
+
+    if isinstance(metadata.get('contents'), list):
+        enriched['contents'] = metadata['contents']
+    if isinstance(metadata.get('dependencies'), dict):
+        enriched['dependencies'] = metadata['dependencies']
+    if metadata.get('description') and not enriched.get('description'):
+        enriched['description'] = metadata['description']
+
+    namespace = _collection_namespace(detail.get('namespace')) or _collection_namespace(enriched.get('namespace'))
+    if namespace:
+        enriched['namespace'] = namespace
+
+    for key in ('version', 'requires_ansible', 'artifact', 'download_url', 'marks', 'git_url', 'git_commit_sha', 'manifest'):
+        if key in detail:
+            enriched[key] = detail[key]
+
+    signatures = detail.get('signatures') if isinstance(detail.get('signatures'), list) else enriched.get('signatures')
+    if isinstance(signatures, list):
+        enriched['signatures'] = signatures
+        enriched['sign_state'] = detail.get('sign_state') or ('signed' if signatures else 'unsigned')
+
+    if detail.get('created_at'):
+        enriched['version_created_at'] = detail['created_at']
+    if detail.get('updated_at'):
+        enriched['version_updated_at'] = detail['updated_at']
+
+    enriched['latest_version_detail'] = _compact_collection_version_detail(detail)
+    return enriched
+
+
+def _enrich_collection_response(client, response):
+    results = response.get('results')
+    if not isinstance(results, list):
+        return response
+    response['results'] = [_enrich_collection_record(client, record) for record in results]
+    return response
 
 
 def _galaxy_ng_error_response(exc):
@@ -450,6 +613,8 @@ class GalaxyNGResourceListView(APIView):
             )
 
         response = normalize_list_response(payload, offset=(page - 1) * page_size)
+        if self.resource == 'collections':
+            response = _enrich_collection_response(client, response)
         response['source'] = 'galaxy_ng'
         response['resource'] = self.resource
         response['controller_error'] = ''

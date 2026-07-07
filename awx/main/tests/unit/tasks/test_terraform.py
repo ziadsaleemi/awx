@@ -11,7 +11,8 @@ from unittest import mock
 
 import pytest
 
-from awx.main.tasks.terraform import RunTerraformJob, _HOST_IP_KEY_RE, _first_string_output
+from awx.main.tasks.terraform import RunTerraformJob, _HOST_IP_KEY_RE, _first_string_output, _image_uses_terraform_entrypoint
+from awx.main.tasks.terraform_credentials import _normalize_vsphere_server
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -223,6 +224,68 @@ class TestLocalStateWarning:
 
 
 # ---------------------------------------------------------------------------
+# Execution environment wrapping
+# ---------------------------------------------------------------------------
+
+
+class TestExecutionEnvironmentWrapping:
+    def test_official_terraform_images_are_detected(self):
+        assert _image_uses_terraform_entrypoint('hashicorp/terraform:latest')
+        assert _image_uses_terraform_entrypoint('docker.io/hashicorp/terraform:1.15')
+        assert _image_uses_terraform_entrypoint('registry.example.com/hashicorp/terraform@sha256:abc')
+        assert not _image_uses_terraform_entrypoint('quay.io/ansible/awx-ee:latest')
+
+    def test_official_terraform_image_entrypoint_is_cleared(self, tmp_path):
+        task = _make_task()
+        task.instance = _make_instance()
+        ee = mock.MagicMock()
+        ee.image = 'docker.io/hashicorp/terraform:1.15'
+        ee.pull = 'missing'
+
+        with mock.patch('awx.main.tasks.terraform._container_runtime', return_value='docker'):
+            cmd = task._wrap_cmd_for_ee(
+                ['terraform', 'init', '-no-color'],
+                str(tmp_path),
+                {'TF_IN_AUTOMATION': '1'},
+                str(tmp_path),
+                ee,
+            )
+
+        entrypoint_index = cmd.index('--entrypoint')
+        image_index = cmd.index(ee.image)
+        assert cmd[entrypoint_index + 1] == ''
+        assert cmd[image_index + 1 :] == ['terraform', 'init', '-no-color']
+
+    def test_generic_execution_environment_entrypoint_is_preserved(self, tmp_path):
+        task = _make_task()
+        task.instance = _make_instance()
+        ee = mock.MagicMock()
+        ee.image = 'quay.io/ansible/awx-ee:latest'
+        ee.pull = 'missing'
+
+        with mock.patch('awx.main.tasks.terraform._container_runtime', return_value='docker'):
+            cmd = task._wrap_cmd_for_ee(
+                ['terraform', 'init', '-no-color'],
+                str(tmp_path),
+                {'TF_IN_AUTOMATION': '1'},
+                str(tmp_path),
+                ee,
+            )
+
+        assert '--entrypoint' not in cmd
+        image_index = cmd.index(ee.image)
+        assert cmd[image_index + 1 :] == ['terraform', 'init', '-no-color']
+
+
+class TestTerraformCredentialHelpers:
+    def test_vsphere_server_normalization(self):
+        assert _normalize_vsphere_server('vcenter.example.com') == 'vcenter.example.com'
+        assert _normalize_vsphere_server('https://vcenter.example.com') == 'vcenter.example.com'
+        assert _normalize_vsphere_server('https://vcenter.example.com/sdk') == 'vcenter.example.com'
+        assert _normalize_vsphere_server('https//vcenter.example.com/sdk') == 'vcenter.example.com'
+
+
+# ---------------------------------------------------------------------------
 # _run_terraform
 # ---------------------------------------------------------------------------
 
@@ -233,7 +296,9 @@ class TestRunTerraform:
     def _make_popen(self, rc, stdout_text):
         proc = mock.MagicMock()
         proc.returncode = rc
-        proc.communicate.return_value = (stdout_text.encode(), b'')
+        lines = [f'{line}\n'.encode() for line in stdout_text.splitlines()] or [b'']
+        proc.stdout.readline.side_effect = lines + [b'']
+        proc.wait.return_value = rc
         return proc
 
     @mock.patch('awx.main.tasks.terraform.subprocess.Popen')
@@ -310,6 +375,33 @@ class TestRunTerraform:
         assert rc == 1
         # Only init ran
         assert mock_popen.call_count == 1
+
+    def test_containerized_apply_uses_runner_plan_path(self, tmp_path):
+        task = _make_task()
+        inst = _make_instance(terraform_operation='apply')
+        ee = mock.MagicMock()
+        ee.image = 'docker.io/hashicorp/terraform:1.15'
+        ee.pull = 'missing'
+        inst.resolve_execution_environment.return_value = ee
+        private_data_dir = str(tmp_path)
+        working_dir = str(tmp_path / 'project')
+        (tmp_path / 'project').mkdir()
+
+        with mock.patch.object(task, 'get_instance_timeout', return_value=0):
+            with mock.patch('awx.main.tasks.terraform.tempfile.mkdtemp', return_value=str(tmp_path / 'host-tfplan')):
+                with mock.patch.object(task, '_run_cmd', return_value=(0, 'ok')) as run_cmd:
+                    rc, _output, _ = task._run_terraform(
+                        inst,
+                        working_dir,
+                        {},
+                        private_data_dir=private_data_dir,
+                    )
+
+        assert rc == 0
+        plan_args = run_cmd.call_args_list[1].args[0]
+        apply_args = run_cmd.call_args_list[2].args[0]
+        assert '-out=/runner/tfplan/tfplan.out' in plan_args
+        assert apply_args[-1] == '/runner/tfplan/tfplan.out'
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +546,7 @@ class TestRunStatusTransitions:
         task._write_tfvars = mock.MagicMock(return_value=None)
         task._build_env = mock.MagicMock(return_value=({}, {}))
         task._run_terraform = mock.MagicMock(return_value=(terraform_rc, 'output text', None))
+        task._capture_artifacts = mock.MagicMock()
         task._populate_inventory = mock.MagicMock()
 
     def test_successful_apply_marks_job_successful(self, tmp_path):

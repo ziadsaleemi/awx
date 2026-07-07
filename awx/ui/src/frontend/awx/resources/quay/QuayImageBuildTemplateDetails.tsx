@@ -1,10 +1,12 @@
-import { ClipboardCopy } from '@patternfly/react-core';
+import { ClipboardCopy, Label, LabelGroup } from '@patternfly/react-core';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { LoadingPage, PageDetail, PageDetails, useGetPageUrl } from '../../../../framework';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxError } from '../../common/AwxError';
+import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { awxAPI } from '../../common/api/awx-utils';
+import { InstanceGroup } from '../../interfaces/InstanceGroup';
 import { QuayImageBuildTemplate } from '../../interfaces/QuayImageBuildTemplate';
 import { AwxRoute } from '../../main/AwxRoutes';
 
@@ -24,6 +26,11 @@ export function QuayImageBuildTemplateDetails() {
     refresh,
   } = useGet<QuayImageBuildTemplate>(
     params.id ? awxAPI`/quay/execution-environment-images/templates/${params.id}/` : ''
+  );
+  const { data: instanceGroups } = useGet<AwxItemsResponse<InstanceGroup>>(
+    params.id
+      ? awxAPI`/quay/execution-environment-images/templates/${params.id}/instance_groups/`
+      : ''
   );
 
   if (error) return <AwxError error={error} handleRefresh={refresh} />;
@@ -58,6 +65,25 @@ export function QuayImageBuildTemplateDetails() {
       <PageDetail label={t('Definition file')}>{template.definition_file}</PageDetail>
       <PageDetail label={t('Build context')}>
         {template.context ?? template.context_path ?? '.'}
+      </PageDetail>
+      <PageDetail
+        label={t('Instance groups')}
+        helpText={t('The instance groups this EE build template will run on.')}
+        isEmpty={!instanceGroups?.results?.length}
+      >
+        <LabelGroup>
+          {instanceGroups?.results?.map((instanceGroup) => (
+            <Label color="blue" key={instanceGroup.id}>
+              <Link
+                to={getPageUrl(AwxRoute.InstanceGroupDetails, {
+                  params: { id: instanceGroup.id },
+                })}
+              >
+                {instanceGroup.name}
+              </Link>
+            </Label>
+          ))}
+        </LabelGroup>
       </PageDetail>
       <PageDetail label={t('Created')}>{formatDate(template.created)}</PageDetail>
       <PageDetail label={t('Last modified')}>{formatDate(template.modified)}</PageDetail>

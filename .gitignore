@@ -77,6 +77,8 @@ scratch
 testem.log
 awx/awx_test.sqlite3-journal
 .pytest_cache/
+.playwright-cli/
+output/
 
 # Mac OS X
 *.DS_Store

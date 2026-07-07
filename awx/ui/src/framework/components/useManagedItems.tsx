@@ -124,9 +124,10 @@ export function useManageItems<ItemT extends object>(options: ManageItemsProps<I
 
   const onApplyChanges = useCallback(
     (orderedItems: ItemT[], selectedItems: ItemT[]) => {
+      const selectedKeys = new Set(selectedItems.map((item) => keyFn(item)));
       const managedItemsState: IManagedItemState[] = orderedItems.map((item) => ({
         key: keyFn(item),
-        enabled: selectedItems.includes(item),
+        enabled: selectedKeys.has(keyFn(item)),
         state: saveFn ? saveFn(item) : undefined,
       }));
       setItemsState(managedItemsState);

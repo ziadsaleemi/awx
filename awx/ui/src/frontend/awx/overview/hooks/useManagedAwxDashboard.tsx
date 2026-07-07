@@ -42,7 +42,7 @@ export function useManagedAwxDashboard() {
       id: storageId,
       title: t('Manage view'),
       description: t(
-        'Hide or show the panels you want to see on the overview page by selecting or unselecting, respectively. The panels are ordered from top to bottom on the list. Use the draggable icon :: to re-order your view.'
+        'Use the row checkboxes to show or hide overview cards, then apply the changes. Drag the handle at the start of a row to reorder cards.'
       ),
       items: resources,
       keyFn: (resources) => resources.id,

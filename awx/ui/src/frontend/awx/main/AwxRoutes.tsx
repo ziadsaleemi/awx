@@ -206,6 +206,7 @@ export enum AwxRoute {
   GalaxyNGCollectionApprovals = 'awx-galaxy-ng-collection-approvals',
   GalaxyNGTasks = 'awx-galaxy-ng-tasks',
   GalaxyNGApiToken = 'awx-galaxy-ng-api-token',
+  GalaxyNGResourceDetails = 'awx-galaxy-ng-resource-details',
 
   // Project Quay
   Quay = 'awx-quay',

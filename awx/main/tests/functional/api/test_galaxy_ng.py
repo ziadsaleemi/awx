@@ -193,7 +193,7 @@ def test_galaxy_ng_resource_list_normalizes_pulp_payload(get, admin_user, mocker
         ),
     )
 
-    response = get(reverse('api:galaxy_ng_tasks_list') + '?page=2&page_size=10&order_by=-name&name__icontains=import', user=admin_user, expect=200)
+    response = get(reverse('api:galaxy_ng_tasks_list') + '?page=2&page_size=10&order_by=-name&name__icontains=import&refresh=1', user=admin_user, expect=200)
 
     assert response.data['count'] == 2
     assert response.data['next'] is None
@@ -553,21 +553,51 @@ def test_galaxy_ng_collection_import_plan_rejects_path_traversal(post, admin_use
 @pytest.mark.django_db
 @override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
 def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, mocker):
-    mocker.patch(
+    request_mock = mocker.patch(
         'awx.main.utils.galaxy_ng.requests.get',
-        return_value=galaxy_response(
-            mocker,
-            {
-                'meta': {'count': 1},
-                'data': [
-                    {
-                        'namespace': 'infra',
-                        'name': 'network',
-                        'latest_version': {'version': '1.2.3'},
-                    }
-                ],
-            },
-        ),
+        side_effect=[
+            galaxy_response(
+                mocker,
+                {
+                    'meta': {'count': 1},
+                    'data': [
+                        {
+                            'namespace': 'infra',
+                            'name': 'network',
+                            'latest_version': {'version': '1.2.3'},
+                        }
+                    ],
+                },
+            ),
+            galaxy_response(
+                mocker,
+                {
+                    'version': '1.2.3',
+                    'created_at': '2026-07-04T20:09:36.612026Z',
+                    'updated_at': '2026-07-04T20:09:36.626656Z',
+                    'requires_ansible': '>=2.15.0',
+                    'artifact': {'filename': 'infra-network-1.2.3.tar.gz', 'sha256': 'abc123', 'size': 5157},
+                    'download_url': 'https://hub.example.test/api/galaxy/v3/artifacts/infra-network-1.2.3.tar.gz',
+                    'namespace': {'name': 'infra'},
+                    'signatures': [],
+                    'metadata': {
+                        'authors': ['Automation Team'],
+                        'contents': [
+                            {'name': 'router', 'content_type': 'module'},
+                            {'name': 'switch', 'content_type': 'role'},
+                            {'name': 'validate.yml', 'content_type': 'playbook'},
+                        ],
+                        'dependencies': {'ansible.netcommon': '>=5.0.0'},
+                        'description': 'Network automation content',
+                        'homepage': 'https://example.test/network',
+                        'issues': 'https://example.test/network/issues',
+                        'license': ['MIT'],
+                        'repository': 'https://example.test/network.git',
+                        'tags': ['network'],
+                    },
+                },
+            ),
+        ],
     )
 
     response = get(reverse('api:galaxy_ng_collections_list'), user=admin_user, expect=200)
@@ -576,6 +606,17 @@ def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, m
     assert response.data['results'][0]['namespace'] == 'infra'
     assert response.data['results'][0]['name'] == 'network'
     assert isinstance(response.data['results'][0]['id'], int)
+    assert response.data['results'][0]['version'] == '1.2.3'
+    assert response.data['results'][0]['requires_ansible'] == '>=2.15.0'
+    assert response.data['results'][0]['metadata']['description'] == 'Network automation content'
+    assert response.data['results'][0]['contents'][2]['content_type'] == 'playbook'
+    assert response.data['results'][0]['dependencies'] == {'ansible.netcommon': '>=5.0.0'}
+    assert response.data['results'][0]['sign_state'] == 'unsigned'
+    assert response.data['results'][0]['artifact']['filename'] == 'infra-network-1.2.3.tar.gz'
+    assert response.data['results'][0]['download_url'].endswith('/infra-network-1.2.3.tar.gz')
+    assert request_mock.call_args_list[1].args[0] == (
+        'https://hub.example.test/api/galaxy/v3/plugin/ansible/content/published/collections/index/infra/network/versions/1.2.3/'
+    )
 
 
 @pytest.mark.django_db

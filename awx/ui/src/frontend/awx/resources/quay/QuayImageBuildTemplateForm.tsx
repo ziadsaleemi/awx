@@ -11,12 +11,15 @@ import {
 } from '../../../../framework';
 import { PageFormSelect } from '../../../../framework/PageForm/Inputs/PageFormSelect';
 import { PageFormTextInput } from '../../../../framework/PageForm/Inputs/PageFormTextInput';
-import { requestPatch, postRequest } from '../../../common/crud/Data';
+import { postRequest, requestGet, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
 import { AwxPageForm } from '../../common/AwxPageForm';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
+import { getAddedAndRemoved } from '../../common/util/getAddedAndRemoved';
+import { PageFormInstanceGroupSelect } from '../../administration/instance-groups/components/PageFormInstanceGroupSelect';
+import { InstanceGroup } from '../../interfaces/InstanceGroup';
 import { Project } from '../../interfaces/Project';
 import {
   QuayImageBuildRuntime,
@@ -35,6 +38,7 @@ interface QuayImageBuildTemplateFormValues {
   runtime: QuayImageBuildRuntime;
   definition_file: string;
   context: string;
+  instance_groups: InstanceGroup[];
 }
 
 interface QuayNamespaceOption {
@@ -60,7 +64,10 @@ function getTemplateProject(template?: QuayImageBuildTemplate) {
   return null;
 }
 
-function defaultValues(template?: QuayImageBuildTemplate): QuayImageBuildTemplateFormValues {
+function defaultValues(
+  template?: QuayImageBuildTemplate,
+  instanceGroups: InstanceGroup[] = []
+): QuayImageBuildTemplateFormValues {
   return {
     name: template?.name ?? '',
     description: template?.description ?? '',
@@ -71,6 +78,7 @@ function defaultValues(template?: QuayImageBuildTemplate): QuayImageBuildTemplat
     runtime: template?.runtime ?? 'podman',
     definition_file: template?.definition_file ?? '',
     context: template?.context ?? template?.context_path ?? '.',
+    instance_groups: instanceGroups,
   };
 }
 
@@ -97,6 +105,7 @@ export function CreateQuayImageBuildTemplate() {
       awxAPI`/quay/execution-environment-images/templates/`,
       toPayload(values)
     );
+    await submitInstanceGroups(created.id, values.instance_groups ?? [], []);
     pageNavigate(AwxRoute.QuayImageBuildTemplatePage, { params: { id: created.id } });
   };
 
@@ -127,18 +136,40 @@ export function EditQuayImageBuildTemplate() {
     data: template,
     error,
     refresh,
+    isLoading: isLoadingTemplate,
   } = useGet<QuayImageBuildTemplate>(
     id ? awxAPI`/quay/execution-environment-images/templates/${id}/` : ''
   );
+  const {
+    data: instanceGroups,
+    error: instanceGroupsError,
+    refresh: refreshInstanceGroups,
+    isLoading: isLoadingInstanceGroups,
+  } = useGet<AwxItemsResponse<InstanceGroup>>(
+    id ? awxAPI`/quay/execution-environment-images/templates/${id}/instance_groups/` : ''
+  );
 
-  if (error) return <AwxError error={error} handleRefresh={refresh} />;
-  if (!template) return <LoadingPage />;
+  const formError = error || instanceGroupsError;
+  if (formError) {
+    return (
+      <AwxError
+        error={formError}
+        handleRefresh={error ? refresh : refreshInstanceGroups}
+      />
+    );
+  }
+  if (isLoadingTemplate || isLoadingInstanceGroups || !template) return <LoadingPage />;
 
   const onSubmit: PageFormSubmitHandler<QuayImageBuildTemplateFormValues> = async (values) => {
     const payload = toPayload(values);
     await requestPatch<typeof payload>(
       awxAPI`/quay/execution-environment-images/templates/${id}/`,
       payload
+    );
+    await submitInstanceGroups(
+      template.id,
+      values.instance_groups ?? [],
+      instanceGroups?.results ?? []
     );
     pageNavigate(AwxRoute.QuayImageBuildTemplatePage, { params: { id } });
   };
@@ -152,7 +183,7 @@ export function EditQuayImageBuildTemplate() {
       <AwxPageForm
         submitText={t('Save EE build template')}
         onSubmit={onSubmit}
-        defaultValue={defaultValues(template)}
+        defaultValue={defaultValues(template, instanceGroups?.results ?? [])}
         onCancel={() => pageNavigate(AwxRoute.QuayImageBuildTemplatePage, { params: { id } })}
       >
         <QuayImageBuildTemplateFormInputs />
@@ -329,6 +360,45 @@ function QuayImageBuildTemplateFormInputs() {
         isRequired
         placeholder="."
       />
+      <PageFormInstanceGroupSelect<QuayImageBuildTemplateFormValues>
+        name="instance_groups"
+        labelHelp={t(
+          'Select the instance groups for this EE build template to run on. Use a dedicated builder group for heavy image builds.'
+        )}
+      />
     </>
   );
+}
+
+async function submitInstanceGroups(
+  templateId: number,
+  currentInstanceGroups: InstanceGroup[],
+  originalInstanceGroups: InstanceGroup[]
+) {
+  const original =
+    originalInstanceGroups.length > 0
+      ? originalInstanceGroups
+      : (
+          await requestGet<AwxItemsResponse<InstanceGroup>>(
+            awxAPI`/quay/execution-environment-images/templates/${templateId.toString()}/instance_groups/`
+          )
+        ).results;
+  const { added, removed } = getAddedAndRemoved(original, currentInstanceGroups);
+  for (const group of removed) {
+    await postRequest(
+      awxAPI`/quay/execution-environment-images/templates/${templateId.toString()}/instance_groups/`,
+      {
+        id: group.id,
+        disassociate: true,
+      }
+    );
+  }
+  for (const group of added) {
+    await postRequest(
+      awxAPI`/quay/execution-environment-images/templates/${templateId.toString()}/instance_groups/`,
+      {
+        id: group.id,
+      }
+    );
+  }
 }

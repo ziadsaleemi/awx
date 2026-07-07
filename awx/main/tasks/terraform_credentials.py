@@ -38,6 +38,7 @@ for each attached credential after the template-based injection pass.
 """
 
 import logging
+from urllib.parse import urlparse
 
 from awx.main.redact import REPLACE_STR  # noqa: F401 – re-exported for injectors
 
@@ -69,15 +70,10 @@ class TerraformProviderInjector:
         """Register a concrete injector class."""
         ns = injector_cls.credential_type_namespace
         if not ns:
-            raise ValueError(
-                f"{injector_cls.__name__} must define credential_type_namespace"
-            )
+            raise ValueError(f"{injector_cls.__name__} must define credential_type_namespace")
         if ns in _REGISTRY:
-            logger.warning(
-                'Overriding existing TerraformProviderInjector for namespace %s', ns
-            )
+            logger.warning('Overriding existing TerraformProviderInjector for namespace %s', ns)
         _REGISTRY[ns] = injector_cls
-        logger.debug('Registered TerraformProviderInjector for namespace %s', ns)
 
     @classmethod
     def apply_all(cls, credential, env: dict, safe_env: dict, private_data_dir: str) -> None:
@@ -93,9 +89,7 @@ class TerraformProviderInjector:
         try:
             injector_cls().inject(credential, env, safe_env, private_data_dir)
         except Exception:
-            logger.exception(
-                'TerraformProviderInjector for namespace %s raised an exception', ns
-            )
+            logger.exception('TerraformProviderInjector for namespace %s raised an exception', ns)
             raise
 
     # ------------------------------------------------------------------
@@ -129,6 +123,56 @@ class TerraformProviderInjector:
             The job's isolated data directory.  Write any temporary files
             here so they are cleaned up after the job finishes.
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement inject()"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must implement inject()")
+
+
+def _normalize_vsphere_server(value):
+    """
+    Return the hostname portion expected by the vSphere Terraform provider.
+
+    The provider constructs its own SDK URL, so passing a full URL can produce
+    malformed requests like ``https://https//vcenter.example/sdk``.
+    """
+    raw = str(value or '').strip().rstrip('/')
+    if not raw:
+        return ''
+
+    # Repair the common "https//host" typo/mangling before parsing.
+    raw = raw.replace('https//', 'https://', 1).replace('http//', 'http://', 1)
+
+    if '://' in raw:
+        parsed = urlparse(raw)
+        raw = parsed.netloc or parsed.path
+
+    if raw.endswith('/sdk'):
+        raw = raw[: -len('/sdk')]
+
+    return raw.strip().strip('/')
+
+
+class VMwareVsphereTerraformInjector(TerraformProviderInjector):
+    credential_type_namespace = 'vmware_vsphere_terraform'
+
+    def inject(self, credential, env, safe_env, private_data_dir):
+        server = _normalize_vsphere_server(credential.get_input('vsphere_server', default=''))
+        user = credential.get_input('vsphere_user', default='') or ''
+        password = credential.get_input('vsphere_password', default='') or ''
+        allow_unverified_ssl = str(credential.get_input('vsphere_allow_unverified_ssl', default=False)).lower()
+
+        values = {
+            'VSPHERE_SERVER': server,
+            'VSPHERE_USER': user,
+            'VSPHERE_PASSWORD': password,
+            'VSPHERE_ALLOW_UNVERIFIED_SSL': allow_unverified_ssl,
+            'TF_VAR_vsphere_server': server,
+            'TF_VAR_vsphere_user': user,
+            'TF_VAR_vsphere_password': password,
+            'TF_VAR_vsphere_allow_unverified_ssl': allow_unverified_ssl,
+        }
+        env.update(values)
+        safe_env.update(values)
+        safe_env['VSPHERE_PASSWORD'] = REPLACE_STR
+        safe_env['TF_VAR_vsphere_password'] = REPLACE_STR
+
+
+TerraformProviderInjector.register(VMwareVsphereTerraformInjector)

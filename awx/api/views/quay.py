@@ -24,6 +24,7 @@ from awx.api.generics import (
     ListAPIView,
     RetrieveDestroyAPIView,
     SubListAPIView,
+    SubListAttachDetachAPIView,
     SubListCreateAPIView,
     SubListCreateAttachDetachAPIView,
 )
@@ -489,6 +490,7 @@ def _serialize_quay_image_build_template(template, user=None):
         'notification_templates_error': reverse('api:quay_image_build_template_notification_templates_error', kwargs={'pk': template.pk}),
         'notification_templates_success': reverse('api:quay_image_build_template_notification_templates_success', kwargs={'pk': template.pk}),
         'object_roles': reverse('api:quay_image_build_template_object_roles', kwargs={'pk': template.pk}),
+        'instance_groups': reverse('api:quay_image_build_template_instance_groups_list', kwargs={'pk': template.pk}),
     }
     if template.project_id:
         related['project'] = reverse('api:project_detail', kwargs={'pk': template.project_id})
@@ -1536,6 +1538,15 @@ class QuayImageBuildTemplateSchedulesList(SubListCreateAPIView):
     relationship = 'schedules'
     parent_key = 'unified_job_template'
     resource_purpose = 'schedules of a Project Quay image build template'
+
+
+class QuayImageBuildTemplateInstanceGroupsList(SubListAttachDetachAPIView):
+    model = models.InstanceGroup
+    serializer_class = serializers.InstanceGroupSerializer
+    parent_model = models.QuayImageBuildTemplate
+    relationship = 'instance_groups'
+    filter_read_permission = False
+    resource_purpose = 'instance groups of a Project Quay image build template'
 
 
 class QuayImageBuildTemplateNotificationTemplatesAnyList(SubListCreateAttachDetachAPIView):

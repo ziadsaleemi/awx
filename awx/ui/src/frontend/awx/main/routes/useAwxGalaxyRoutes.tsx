@@ -6,6 +6,7 @@ import { PageNavigationItem } from '../../../../framework';
 import { GalaxyNgApiToken } from '../../resources/galaxy/GalaxyNgApiToken';
 import { GalaxyNgOverview } from '../../resources/galaxy/GalaxyNgOverview';
 import { GalaxyNgProjectImports } from '../../resources/galaxy/GalaxyNgProjectImports';
+import { GalaxyNgResourceDetails } from '../../resources/galaxy/GalaxyNgResourceDetails';
 import { GalaxyNgResourceList } from '../../resources/galaxy/GalaxyNgResourceList';
 import { AwxRoute } from '../AwxRoutes';
 
@@ -84,6 +85,12 @@ export function useAwxGalaxyRoutes() {
           label: t('API Token'),
           path: 'api-token',
           element: <GalaxyNgApiToken />,
+        },
+        {
+          id: AwxRoute.GalaxyNGResourceDetails,
+          path: ':resource/:resourceKey',
+          element: <GalaxyNgResourceDetails />,
+          hidden: true,
         },
         {
           path: '',

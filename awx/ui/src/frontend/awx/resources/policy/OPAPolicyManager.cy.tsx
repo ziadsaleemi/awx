@@ -138,10 +138,14 @@ describe('OPAPolicyManager', () => {
     mountOPA('overview');
     cy.wait(['@opaStatus', '@opaModules', '@opaActivity']);
 
-    cy.get('[data-cy="opa-overview"]').should('contain', 'OPA server');
+    cy.get('[data-cy="opa-control-plane"]').should('contain', 'OPA control plane');
+    cy.get('[data-cy="opa-overview"]').should('contain', 'Decision paths');
     cy.get('[data-cy="opa-overview"]').should('contain', 'Live modules');
-    cy.get('[data-cy="opa-overview"]').should('contain', 'Recent denials');
-    cy.get('[data-cy="opa-activity-list"]').should('contain', 'Denied by OPA policy guardrail.');
+    cy.get('[data-cy="opa-overview"]').should('contain', 'Managed bundle');
+    cy.get('[data-cy="opa-status"]').should('contain', 'OPA status');
+    cy.get('[data-cy="opa-decision-coverage"]').should('contain', 'Decision coverage');
+    cy.get('[data-cy="opa-workflows"]').should('contain', 'Project Sync');
+    cy.get('[data-cy="opa-recent-evidence"]').should('contain', 'awx/gatekeeper_resource/allow');
   });
 
   it('shows OPA violations from denied decisions', () => {
