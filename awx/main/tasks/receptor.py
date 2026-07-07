@@ -818,9 +818,11 @@ def generate_config_data():
     # returns two values
     #   receptor config - based on current database peers
     #   should_update   - If True, receptor_config differs from the receptor conf file on disk
-    addresses = ReceptorAddress.objects.filter(peers_from_control_nodes=True)
+    addresses = list(ReceptorAddress.objects.filter(peers_from_control_nodes=True))
 
     receptor_config = list(RECEPTOR_CONFIG_STARTER)
+    if addresses:
+        receptor_config = [entry for entry in receptor_config if 'local-only' not in entry]
     for address in addresses:
         if address.get_peer_type():
             peer = {

@@ -101,6 +101,105 @@
           else awx_k8s_generated_secret_key.stdout) }}
   no_log: true
 
+- name: Check existing Kubernetes receptor secret
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} get secret {{ awx_k8s_name }}-receptor"
+  register: awx_k8s_receptor_secret
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create Kubernetes receptor material workspace
+  ansible.builtin.file:
+    path: "{{ awx_k8s_work_dir }}/receptor"
+    state: directory
+    mode: "0700"
+  when: awx_k8s_receptor_secret.rc != 0
+
+- name: Generate Kubernetes receptor mesh CA key
+  ansible.builtin.command:
+    cmd: "openssl genrsa -out {{ awx_k8s_work_dir }}/receptor/mesh-CA.key 4096"
+    creates: "{{ awx_k8s_work_dir }}/receptor/mesh-CA.key"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor mesh CA certificate
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -new -nodes
+      -key {{ awx_k8s_work_dir }}/receptor/mesh-CA.key
+      -sha256 -days 3650
+      -subj /CN={{ awx_k8s_name }}-receptor-mesh-ca
+      -out {{ awx_k8s_work_dir }}/receptor/mesh-CA.crt
+    creates: "{{ awx_k8s_work_dir }}/receptor/mesh-CA.crt"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor node key
+  ansible.builtin.command:
+    cmd: "openssl genrsa -out {{ awx_k8s_work_dir }}/receptor/receptor.key 2048"
+    creates: "{{ awx_k8s_work_dir }}/receptor/receptor.key"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor node certificate request
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -new
+      -key {{ awx_k8s_work_dir }}/receptor/receptor.key
+      -subj /CN={{ awx_k8s_name }}-control-plane
+      -out {{ awx_k8s_work_dir }}/receptor/receptor.csr
+    creates: "{{ awx_k8s_work_dir }}/receptor/receptor.csr"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor node certificate
+  ansible.builtin.command:
+    cmd: >-
+      openssl x509 -req
+      -in {{ awx_k8s_work_dir }}/receptor/receptor.csr
+      -CA {{ awx_k8s_work_dir }}/receptor/mesh-CA.crt
+      -CAkey {{ awx_k8s_work_dir }}/receptor/mesh-CA.key
+      -CAcreateserial
+      -out {{ awx_k8s_work_dir }}/receptor/receptor.crt
+      -days 3650 -sha256
+    creates: "{{ awx_k8s_work_dir }}/receptor/receptor.crt"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor work signing private key
+  ansible.builtin.command:
+    cmd: "openssl genrsa -out {{ awx_k8s_work_dir }}/receptor/work_private_key.pem 2048"
+    creates: "{{ awx_k8s_work_dir }}/receptor/work_private_key.pem"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Generate Kubernetes receptor work signing public key
+  ansible.builtin.command:
+    cmd: >-
+      openssl rsa
+      -in {{ awx_k8s_work_dir }}/receptor/work_private_key.pem
+      -out {{ awx_k8s_work_dir }}/receptor/work_public_key.pem
+      -outform PEM -pubout
+    creates: "{{ awx_k8s_work_dir }}/receptor/work_public_key.pem"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
+- name: Create Kubernetes receptor secret
+  ansible.builtin.command:
+    cmd: >-
+      {{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} create secret generic {{ awx_k8s_name }}-receptor
+      --from-file=mesh-CA.crt={{ awx_k8s_work_dir }}/receptor/mesh-CA.crt
+      --from-file=mesh-CA.key={{ awx_k8s_work_dir }}/receptor/mesh-CA.key
+      --from-file=receptor.crt={{ awx_k8s_work_dir }}/receptor/receptor.crt
+      --from-file=receptor.key={{ awx_k8s_work_dir }}/receptor/receptor.key
+      --from-file=work_private_key.pem={{ awx_k8s_work_dir }}/receptor/work_private_key.pem
+      --from-file=work_public_key.pem={{ awx_k8s_work_dir }}/receptor/work_public_key.pem
+  register: awx_k8s_create_receptor_secret
+  changed_when: "'created' in awx_k8s_create_receptor_secret.stdout"
+  when: awx_k8s_receptor_secret.rc != 0
+  no_log: true
+
 - name: Create Kubernetes manifest workspace
   ansible.builtin.file:
     path: "{{ awx_k8s_work_dir }}"

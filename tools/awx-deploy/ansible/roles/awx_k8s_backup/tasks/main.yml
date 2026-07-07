@@ -49,7 +49,7 @@
     cmd: >-
       set -o pipefail &&
       {{ awx_k8s_backup_kubectl }} -n {{ awx_k8s_namespace }}
-      get secret {{ awx_k8s_name }}-secret {{ awx_k8s_name }}-postgres -o json |
+      get secret {{ awx_k8s_name }}-secret {{ awx_k8s_name }}-postgres {{ awx_k8s_name }}-receptor -o json |
       python3 -c 'import json, sys; data=json.load(sys.stdin); keys=("resourceVersion", "uid", "selfLink", "creationTimestamp", "managedFields"); [data.setdefault("metadata", {}).pop(key, None) for key in keys]; items=data.get("items") if isinstance(data.get("items"), list) else [data]; [item.setdefault("metadata", {}).pop(key, None) for item in items for key in keys]; [item.get("metadata", {}).get("annotations", {}).pop("kubectl.kubernetes.io/last-applied-configuration", None) for item in items]; print(json.dumps(data, indent=2, sort_keys=True))'
       > {{ awx_k8s_backup_path }}/k8s-secrets.yml
     executable: /bin/bash

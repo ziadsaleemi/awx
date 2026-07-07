@@ -598,6 +598,7 @@ class TestPeers:
 
             new_config, should_update = generate_config_data()
             assert should_update
+            assert not any('local-only' in entry for entry in new_config)
 
             peers = []
             for entry in new_config:

@@ -29,13 +29,38 @@ spec:
           args:
             - |
               cp /receptor-template/receptor.conf /etc/receptor/receptor.conf
+              mkdir -p /etc/receptor/tls/ca
+              cp /receptor-secret/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.crt
+              cp /receptor-secret/mesh-CA.key /etc/receptor/tls/ca/mesh-CA.key
+              openssl req -newkey rsa:2048 -nodes \
+                -keyout /etc/receptor/tls/receptor.key \
+                -subj "/CN=${HOSTNAME}" \
+                -addext "subjectAltName=DNS:${HOSTNAME},otherName:1.3.6.1.4.1.2312.19.1;UTF8:${HOSTNAME}" \
+                -out /tmp/receptor.csr
+              openssl x509 -req \
+                -in /tmp/receptor.csr \
+                -CA /etc/receptor/tls/ca/mesh-CA.crt \
+                -CAkey /etc/receptor/tls/ca/mesh-CA.key \
+                -CAcreateserial \
+                -out /etc/receptor/tls/receptor.crt \
+                -days 3650 -sha256 \
+                -copy_extensions copy
+              cp /receptor-secret/work_private_key.pem /etc/receptor/work_private_key.pem
+              cp /receptor-secret/work_public_key.pem /etc/receptor/work_public_key.pem
               chgrp 0 /etc/receptor /etc/receptor/receptor.conf
+              chgrp -R 0 /etc/receptor/tls /etc/receptor/work_private_key.pem /etc/receptor/work_public_key.pem
               chmod 0775 /etc/receptor
               chmod 0664 /etc/receptor/receptor.conf
+              chmod 0755 /etc/receptor/tls /etc/receptor/tls/ca
+              chmod 0640 /etc/receptor/tls/ca/mesh-CA.key /etc/receptor/tls/receptor.key /etc/receptor/work_private_key.pem
+              chmod 0644 /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/receptor.crt /etc/receptor/work_public_key.pem
           volumeMounts:
             - name: awx-nginx
               mountPath: /receptor-template/receptor.conf
               subPath: receptor.conf
+              readOnly: true
+            - name: awx-receptor
+              mountPath: /receptor-secret
               readOnly: true
             - name: receptor-config
               mountPath: /etc/receptor
@@ -104,7 +129,7 @@ spec:
             - /bin/bash
             - -lc
           args:
-            - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
+            - sed -i "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf && exec receptor --config /etc/receptor/receptor.conf
           volumeMounts:
             - name: receptor-config
               mountPath: /etc/receptor
@@ -117,6 +142,9 @@ spec:
         - name: awx-nginx
           configMap:
             name: {{ awx_k8s_name }}-nginx
+        - name: awx-receptor
+          secret:
+            secretName: {{ awx_k8s_name }}-receptor
         - name: projects
           persistentVolumeClaim:
             claimName: {{ awx_k8s_name }}-projects
@@ -159,13 +187,38 @@ spec:
           args:
             - |
               cp /receptor-template/receptor.conf /etc/receptor/receptor.conf
+              mkdir -p /etc/receptor/tls/ca
+              cp /receptor-secret/mesh-CA.crt /etc/receptor/tls/ca/mesh-CA.crt
+              cp /receptor-secret/mesh-CA.key /etc/receptor/tls/ca/mesh-CA.key
+              openssl req -newkey rsa:2048 -nodes \
+                -keyout /etc/receptor/tls/receptor.key \
+                -subj "/CN=${HOSTNAME}" \
+                -addext "subjectAltName=DNS:${HOSTNAME},otherName:1.3.6.1.4.1.2312.19.1;UTF8:${HOSTNAME}" \
+                -out /tmp/receptor.csr
+              openssl x509 -req \
+                -in /tmp/receptor.csr \
+                -CA /etc/receptor/tls/ca/mesh-CA.crt \
+                -CAkey /etc/receptor/tls/ca/mesh-CA.key \
+                -CAcreateserial \
+                -out /etc/receptor/tls/receptor.crt \
+                -days 3650 -sha256 \
+                -copy_extensions copy
+              cp /receptor-secret/work_private_key.pem /etc/receptor/work_private_key.pem
+              cp /receptor-secret/work_public_key.pem /etc/receptor/work_public_key.pem
               chgrp 0 /etc/receptor /etc/receptor/receptor.conf
+              chgrp -R 0 /etc/receptor/tls /etc/receptor/work_private_key.pem /etc/receptor/work_public_key.pem
               chmod 0775 /etc/receptor
               chmod 0664 /etc/receptor/receptor.conf
+              chmod 0755 /etc/receptor/tls /etc/receptor/tls/ca
+              chmod 0640 /etc/receptor/tls/ca/mesh-CA.key /etc/receptor/tls/receptor.key /etc/receptor/work_private_key.pem
+              chmod 0644 /etc/receptor/tls/ca/mesh-CA.crt /etc/receptor/tls/receptor.crt /etc/receptor/work_public_key.pem
           volumeMounts:
             - name: awx-nginx
               mountPath: /receptor-template/receptor.conf
               subPath: receptor.conf
+              readOnly: true
+            - name: awx-receptor
+              mountPath: /receptor-secret
               readOnly: true
             - name: receptor-config
               mountPath: /etc/receptor
@@ -214,7 +267,7 @@ spec:
             - /bin/bash
             - -lc
           args:
-            - sed "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf > /tmp/receptor.conf && exec receptor --config /tmp/receptor.conf
+            - sed -i "s/__HOSTNAME__/${HOSTNAME}/g" /etc/receptor/receptor.conf && exec receptor --config /etc/receptor/receptor.conf
           volumeMounts:
             - name: receptor-config
               mountPath: /etc/receptor
@@ -227,6 +280,9 @@ spec:
         - name: awx-nginx
           configMap:
             name: {{ awx_k8s_name }}-nginx
+        - name: awx-receptor
+          secret:
+            secretName: {{ awx_k8s_name }}-receptor
         - name: projects
           persistentVolumeClaim:
             claimName: {{ awx_k8s_name }}-projects

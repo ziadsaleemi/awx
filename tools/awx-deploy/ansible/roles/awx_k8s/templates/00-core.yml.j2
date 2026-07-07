@@ -296,6 +296,11 @@ data:
         params: worker
         allowruntimeparams: true
         verifysignature: false
+    - work-signing:
+        privatekey: /etc/receptor/work_private_key.pem
+        tokenexpiration: 1m
+    - work-verification:
+        publickey: /etc/receptor/work_public_key.pem
     - work-kubernetes:
         worktype: kubernetes-runtime-auth
         authmethod: runtime
@@ -310,3 +315,9 @@ data:
         allowruntimepod: true
         allowruntimeparams: true
         verifysignature: false
+    - tls-client:
+        name: tlsclient
+        rootcas: /etc/receptor/tls/ca/mesh-CA.crt
+        cert: /etc/receptor/tls/receptor.crt
+        key: /etc/receptor/tls/receptor.key
+        mintls13: false
