@@ -253,6 +253,11 @@ awx_gatekeeper_configure_awx_settings: "{{ awx_gatekeeper_enabled }}"
 awx_gatekeeper_namespace: gatekeeper-system
 awx_gatekeeper_version: v3.22.2
 awx_gatekeeper_manifest_url: "https://raw.githubusercontent.com/open-policy-agent/gatekeeper/{{ awx_gatekeeper_version }}/deploy/gatekeeper.yaml"
+awx_gatekeeper_manifest_cache_dir: /var/cache/awx-deploy/gatekeeper
+awx_gatekeeper_manifest_path: "{{ awx_gatekeeper_manifest_cache_dir }}/gatekeeper-{{ awx_gatekeeper_version }}.yaml"
+awx_gatekeeper_manifest_download_retries: 5
+awx_gatekeeper_manifest_download_delay: 15
+awx_gatekeeper_reapply_existing: false
 awx_gatekeeper_wait_for_rollout: true
 awx_gatekeeper_controller_deployment: gatekeeper-controller-manager
 awx_gatekeeper_audit_deployment: gatekeeper-audit

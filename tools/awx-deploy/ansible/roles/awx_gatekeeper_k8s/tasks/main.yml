@@ -19,11 +19,44 @@
   until: awx_gatekeeper_readyz.rc == 0
   changed_when: false
 
+- name: Check existing Gatekeeper deployments
+  ansible.builtin.command:
+    cmd: "{{ awx_gatekeeper_kubectl }} -n {{ awx_gatekeeper_namespace }} get deployment/{{ awx_gatekeeper_controller_deployment }} deployment/{{ awx_gatekeeper_audit_deployment }}"
+  register: awx_gatekeeper_existing
+  failed_when: false
+  changed_when: false
+
+- name: Resolve Gatekeeper install requirement
+  ansible.builtin.set_fact:
+    awx_gatekeeper_release_present: "{{ awx_gatekeeper_existing.rc == 0 }}"
+    awx_gatekeeper_should_apply: "{{ awx_gatekeeper_existing.rc != 0 or awx_gatekeeper_reapply_existing | bool }}"
+
+- name: Create Gatekeeper manifest cache directory
+  ansible.builtin.file:
+    path: "{{ awx_gatekeeper_manifest_cache_dir }}"
+    state: directory
+    mode: '0755'
+  when: awx_gatekeeper_should_apply | bool
+
+- name: Cache Gatekeeper release manifest
+  ansible.builtin.get_url:
+    url: "{{ awx_gatekeeper_manifest_url }}"
+    dest: "{{ awx_gatekeeper_manifest_path }}"
+    mode: '0644'
+    force: false
+    timeout: 60
+  register: awx_gatekeeper_manifest_download
+  retries: "{{ awx_gatekeeper_manifest_download_retries }}"
+  delay: "{{ awx_gatekeeper_manifest_download_delay }}"
+  until: awx_gatekeeper_manifest_download is succeeded
+  when: awx_gatekeeper_should_apply | bool
+
 - name: Apply Gatekeeper release manifest
   ansible.builtin.command:
-    cmd: "{{ awx_gatekeeper_kubectl }} apply -f {{ awx_gatekeeper_manifest_url }}"
+    cmd: "{{ awx_gatekeeper_kubectl }} apply -f {{ awx_gatekeeper_manifest_path }}"
   register: awx_gatekeeper_apply
   changed_when: "'created' in awx_gatekeeper_apply.stdout or 'configured' in awx_gatekeeper_apply.stdout"
+  when: awx_gatekeeper_should_apply | bool
 
 - name: Wait for Gatekeeper controller rollout
   ansible.builtin.command:
