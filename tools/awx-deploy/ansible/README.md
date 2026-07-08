@@ -408,6 +408,28 @@ snapshot rollback drills, snapshot the current state first, revert to the
 chosen snapshot, smoke-test the old state, then run the matching deploy or
 upgrade playbook to fail forward and smoke-test again.
 
+## Lifecycle Evidence Verification
+
+After a deploy, backup, restore, upgrade, or failback drill, collect the smoke
+reports and backup paths into one repeatable evidence check. This does not run
+destructive operations; it verifies that the expected AWX/Quay database dumps,
+Kubernetes exports, manifests, optional storage archives, and smoke JSON reports
+exist and passed.
+
+```bash
+python3 ../scripts/verify_lifecycle_evidence.py \
+  --artifact awx-k8s:/var/backups/awx/awx-k8s-20260625T010101Z \
+  --artifact quay-k8s:/var/backups/awx/quay-k8s-20260625T010101Z \
+  --smoke-report /tmp/awx-content-smoke.json \
+  --smoke-report /tmp/awx-eda-smoke.json \
+  --require-storage \
+  --json-output /tmp/awx-lifecycle-evidence.json
+```
+
+Supported artifact profiles are `awx-server`, `awx-k8s`, `quay-server`, and
+`quay-k8s`. Use `--require-storage` for storage-inclusive Quay and
+projects/media proof.
+
 ## EDA Live Smoke
 
 After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke

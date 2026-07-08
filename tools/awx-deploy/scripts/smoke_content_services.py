@@ -72,9 +72,7 @@ def split_env_words(name: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description='Smoke test AWX-managed Galaxy NG and Project Quay integrations.'
-    )
+    parser = argparse.ArgumentParser(description='Smoke test AWX-managed Galaxy NG and Project Quay integrations.')
     parser.add_argument(
         '--url',
         action='append',
@@ -268,10 +266,11 @@ def check_galaxy(base_url: str, args: argparse.Namespace) -> list[Check]:
     configured = bool(status.get('enabled') and status.get('configured') and not status.get('controller_error'))
     if not configured and not args.allow_galaxy_unconfigured:
         raise SmokeFailure(f"Galaxy NG is not configured: {status.get('message') or status.get('controller_error')}")
+    allowed_unconfigured = bool(not configured and args.allow_galaxy_unconfigured)
     checks.append(
         Check(
             'galaxy/status',
-            configured,
+            configured or allowed_unconfigured,
             f"configured={configured} repositories={status.get('counts', {}).get('repositories', '-')}",
             {'status': status.get('status'), 'counts': status.get('counts', {})},
         )
@@ -292,10 +291,11 @@ def check_quay(base_url: str, args: argparse.Namespace) -> list[Check]:
     configured = bool(status.get('enabled') and status.get('configured') and not status.get('controller_error'))
     if not configured and not args.allow_quay_unconfigured:
         raise SmokeFailure(f"Project Quay is not configured: {status.get('message') or status.get('controller_error')}")
+    allowed_unconfigured = bool(not configured and args.allow_quay_unconfigured)
     checks.append(
         Check(
             'quay/status',
-            configured,
+            configured or allowed_unconfigured,
             f"configured={configured} repositories={status.get('counts', {}).get('repositories', '-')}",
             {'status': status.get('status'), 'counts': status.get('counts', {})},
         )
