@@ -62,6 +62,6 @@
 
 - name: Wait for AWX web
   ansible.builtin.wait_for:
-    host: "{{ inventory_hostname }}"
+    host: "{{ ansible_host | default(inventory_hostname) }}"
     port: "{{ awx_web_http_port }}"
     timeout: 180

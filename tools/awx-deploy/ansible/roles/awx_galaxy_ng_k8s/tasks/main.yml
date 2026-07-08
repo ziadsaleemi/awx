@@ -82,30 +82,30 @@
 - name: Resolve Galaxy NG Kubernetes secrets
   ansible.builtin.set_fact:
     awx_galaxy_ng_effective_admin_password: >-
-      {{ awx_galaxy_ng_admin_password
-        if awx_galaxy_ng_admin_password | length > 0
-        else (awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | b64decode
-          if awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | length > 0
+      {{ awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | b64decode
+        if awx_galaxy_ng_existing_secret_data.DJANGO_SUPERUSER_PASSWORD | default('') | length > 0
+        else (awx_galaxy_ng_admin_password
+          if awx_galaxy_ng_admin_password | length > 0
           else awx_galaxy_ng_generated_admin_password.stdout) }}
     awx_galaxy_ng_effective_postgres_password: >-
-      {{ awx_galaxy_ng_postgres_password
-        if awx_galaxy_ng_postgres_password | length > 0
-        else (awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | b64decode
-          if awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | length > 0
+      {{ awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | b64decode
+        if awx_galaxy_ng_existing_secret_data.PULP_DB_PASSWORD | default('') | length > 0
+        else (awx_galaxy_ng_postgres_password
+          if awx_galaxy_ng_postgres_password | length > 0
           else awx_galaxy_ng_generated_postgres_password.stdout) }}
     awx_galaxy_ng_effective_secret_key: >-
-      {{ awx_galaxy_ng_secret_key
-        if awx_galaxy_ng_secret_key | length > 0
-        else (awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | b64decode
-          if awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | length > 0
+      {{ awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | b64decode
+        if awx_galaxy_ng_existing_secret_data.PULP_SECRET_KEY | default('') | length > 0
+        else (awx_galaxy_ng_secret_key
+          if awx_galaxy_ng_secret_key | length > 0
           else awx_galaxy_ng_generated_secret_key.stdout) }}
     awx_galaxy_ng_effective_database_fields_symmetric_key: >-
-      {{ awx_galaxy_ng_database_fields_symmetric_key
-        if awx_galaxy_ng_database_fields_symmetric_key | length > 0
-        else (awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | b64decode
-          if awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | length > 0
-          else (awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | b64decode
-            if awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | length > 0
+      {{ awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | b64decode
+        if awx_galaxy_ng_existing_secret_data.PULP_DATABASE_FIELDS_SYMMETRIC_KEY | default('') | length > 0
+        else (awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | b64decode
+          if awx_galaxy_ng_existing_secret_data['database_fields.symmetric.key'] | default('') | length > 0
+          else (awx_galaxy_ng_database_fields_symmetric_key
+            if awx_galaxy_ng_database_fields_symmetric_key | length > 0
             else awx_galaxy_ng_generated_database_fields_symmetric_key.stdout)) }}
   no_log: true
 

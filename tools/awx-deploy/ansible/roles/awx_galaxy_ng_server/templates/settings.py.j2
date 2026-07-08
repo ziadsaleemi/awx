@@ -1,0 +1,37 @@
+SECRET_KEY = {{ awx_galaxy_ng_secret_key | to_json }}
+DB_ENCRYPTION_KEY = "/etc/pulp/certs/database_fields.symmetric.key"
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": {{ awx_galaxy_ng_postgres_database | to_json }},
+        "USER": {{ awx_galaxy_ng_postgres_user | to_json }},
+        "PASSWORD": {{ awx_galaxy_ng_postgres_password | to_json }},
+        "HOST": "postgres",
+        "PORT": "5432",
+        "CONN_MAX_AGE": 0,
+    }
+}
+REDIS_HOST = "redis"
+REDIS_PORT = 6379
+REDIS_PASSWORD = None
+REDIS_SSL = False
+ANALYTICS = False
+REDIRECT_TO_OBJECT_STORAGE = False
+GALAXY_DEPLOYMENT_MODE = "standalone"
+DEFAULT_FILE_STORAGE = "pulpcore.app.models.storage.FileSystem"
+FILE_UPLOAD_TEMP_DIR = "/var/lib/pulp/tmp"
+CONTENT_ORIGIN = {{ awx_galaxy_ng_effective_public_url | to_json }}
+ANSIBLE_API_HOSTNAME = {{ awx_galaxy_ng_effective_public_url | to_json }}
+ANSIBLE_CONTENT_HOSTNAME = {{ awx_galaxy_ng_effective_public_url | to_json }}
+GALAXY_API_PATH_PREFIX = {{ awx_galaxy_ng_api_path_prefix | to_json }}
+CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }}
+TOKEN_AUTH_DISABLED = False
+TOKEN_SERVER = {{ (awx_galaxy_ng_effective_public_url ~ "/token/") | to_json }}
+TOKEN_SIGNATURE_ALGORITHM = "ES256"
+PUBLIC_KEY_PATH = "/app/dev/common/container_auth_public_key.pem"
+PRIVATE_KEY_PATH = "/app/dev/common/container_auth_private_key.pem"
+ALLOWED_EXPORT_PATHS = ["/app/tmp"]
+ALLOWED_IMPORT_PATHS = ["/app/tmp"]
+RESOURCE_SERVER_SYNC_ENABLED = False
+ANSIBLE_BASE_ROLES_REQUIRE_VIEW = False
+ANSIBLE_LOCAL_TMP = "/tmp/ansible"

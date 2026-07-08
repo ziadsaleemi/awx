@@ -301,6 +301,7 @@ def check_eda_status(base_url: str, args: argparse.Namespace) -> Check:
     if not args.allow_eda_unconfigured and not payload.get('configured'):
         raise SmokeFailure('/api/v2/eda/status/ is not configured. Use --allow-eda-unconfigured only for non-EDA environments.')
     check.detail = f'status={payload.get("status")} configured={payload.get("configured")}'
+    check.data = compact_payload(payload)
     return check
 
 
@@ -605,7 +606,11 @@ def check_rbac(base_url: str, args: argparse.Namespace) -> list[Check]:
 def run_url(base_url: str, args: argparse.Namespace) -> list[Check]:
     checks: list[Check] = [check_root_assets(base_url, args)]
     checks.extend(check_authenticated_core(base_url, args))
-    checks.append(check_eda_status(base_url, args))
+    status_check = check_eda_status(base_url, args)
+    checks.append(status_check)
+    if args.allow_eda_unconfigured and not status_check.data.get('configured'):
+        checks.append(Check('eda resource checks', True, 'skipped; EDA is not configured'))
+        return checks
     resource_checks, _ = check_eda_resources(base_url, args)
     checks.extend(resource_checks)
     checks.append(check_eda_rbac_sync(base_url, args))

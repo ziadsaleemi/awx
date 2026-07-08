@@ -4,6 +4,19 @@
   gather_facts: false
   vars:
     awx_deploy_method: k8s
+  pre_tasks:
+    - name: Resolve kubectl binary on target
+      ansible.builtin.shell:
+        cmd: >-
+          command -v {{ awx_k8s_kubectl_binary | default('kubectl') }} ||
+          command -v /usr/local/bin/kubectl ||
+          command -v /usr/bin/kubectl
+      register: awx_k8s_resolved_kubectl
+      changed_when: false
+
+    - name: Use resolved kubectl binary for all Kubernetes roles
+      ansible.builtin.set_fact:
+        awx_k8s_kubectl_binary: "{{ awx_k8s_resolved_kubectl.stdout_lines[0] }}"
   roles:
     - awx_k8s
     - role: awx_opa_k8s

@@ -30,6 +30,54 @@
         if awx_galaxy_ng_public_url | length > 0
         else 'http://' ~ (ansible_host | default(inventory_hostname)) ~ ':' ~ (awx_galaxy_ng_public_port | string) }}
 
+- name: Check existing Galaxy NG database encryption key file
+  ansible.builtin.stat:
+    path: "{{ awx_galaxy_ng_data_dir }}/etc-pulp/certs/database_fields.symmetric.key"
+  register: awx_galaxy_ng_existing_database_key_file
+  no_log: true
+
+- name: Read existing Galaxy NG database encryption key file
+  ansible.builtin.slurp:
+    src: "{{ awx_galaxy_ng_data_dir }}/etc-pulp/certs/database_fields.symmetric.key"
+  register: awx_galaxy_ng_existing_database_key
+  when: awx_galaxy_ng_existing_database_key_file.stat.exists | default(false)
+  no_log: true
+
+- name: Read existing Galaxy NG database encryption key from env
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      awk -F= '/^PULP_DATABASE_FIELDS_SYMMETRIC_KEY=/{sub(/^[^=]*=/, ""); print; exit}'
+      {{ awx_galaxy_ng_env_file | quote }}
+    executable: /bin/bash
+  register: awx_galaxy_ng_existing_database_env_key
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Generate Galaxy NG database encryption key when missing
+  ansible.builtin.command:
+    cmd: openssl rand -base64 32
+  register: awx_galaxy_ng_generated_database_fields_symmetric_key
+  changed_when: true
+  when:
+    - awx_galaxy_ng_database_fields_symmetric_key | length == 0
+    - awx_galaxy_ng_existing_database_key.content | default('') | length == 0
+    - awx_galaxy_ng_existing_database_env_key.stdout | default('') | length == 0
+  no_log: true
+
+- name: Resolve Galaxy NG database encryption key
+  ansible.builtin.set_fact:
+    awx_galaxy_ng_effective_database_fields_symmetric_key: >-
+      {{ awx_galaxy_ng_existing_database_key.content | default('') | b64decode
+        if awx_galaxy_ng_existing_database_key.content | default('') | length > 0
+        else (awx_galaxy_ng_existing_database_env_key.stdout
+          if awx_galaxy_ng_existing_database_env_key.stdout | default('') | length > 0
+          else (awx_galaxy_ng_database_fields_symmetric_key
+            if awx_galaxy_ng_database_fields_symmetric_key | length > 0
+            else awx_galaxy_ng_generated_database_fields_symmetric_key.stdout)) }}
+  no_log: true
+
 - name: Create Galaxy NG directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -44,6 +92,31 @@
     - "{{ awx_galaxy_ng_data_dir }}/redis"
     - "{{ awx_galaxy_ng_data_dir }}/pulp"
     - "{{ awx_galaxy_ng_data_dir }}/etc-pulp"
+    - "{{ awx_galaxy_ng_data_dir }}/etc-pulp/certs"
+    - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible"
+
+- name: Render Galaxy NG database encryption key
+  ansible.builtin.copy:
+    dest: "{{ awx_galaxy_ng_data_dir }}/etc-pulp/certs/database_fields.symmetric.key"
+    content: "{{ awx_galaxy_ng_effective_database_fields_symmetric_key }}"
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+
+- name: Create Galaxy NG writable Pulp directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "0"
+    mode: "0775"
+  loop:
+    - "{{ awx_galaxy_ng_data_dir }}/pulp"
+    - "{{ awx_galaxy_ng_data_dir }}/pulp/tmp"
+    - "{{ awx_galaxy_ng_data_dir }}/pulp/media"
+    - "{{ awx_galaxy_ng_data_dir }}/pulp/artifact"
+    - "{{ awx_galaxy_ng_data_dir }}/pulp/content"
     - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible"
 
 - name: Render Galaxy NG environment
@@ -71,6 +144,24 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Render Galaxy NG settings
+  ansible.builtin.template:
+    src: settings.py.j2
+    dest: "{{ awx_galaxy_ng_settings_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+
+- name: Render Galaxy NG UI proxy config
+  ansible.builtin.template:
+    src: galaxy-ng-ui.conf.j2
+    dest: "{{ awx_galaxy_ng_ui_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: awx_galaxy_ng_ui_enabled | bool
 
 - name: Render Galaxy NG systemd service
   ansible.builtin.template:

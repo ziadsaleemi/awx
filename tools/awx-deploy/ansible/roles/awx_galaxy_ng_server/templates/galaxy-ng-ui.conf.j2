@@ -1,0 +1,17 @@
+location /ui/ {
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $http_host;
+    rewrite /ui* /static/galaxy_ng/index.html break;
+    proxy_redirect off;
+    proxy_pass http://api:{{ awx_galaxy_ng_api_port }}/static/galaxy_ng/index.html;
+}
+
+location /api/ {
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $http_host;
+    proxy_redirect off;
+    proxy_pass http://api:{{ awx_galaxy_ng_api_port }};
+    client_max_body_size 0;
+}

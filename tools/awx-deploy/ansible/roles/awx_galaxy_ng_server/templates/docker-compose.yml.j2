@@ -2,8 +2,12 @@ services:
   redis:
     image: "{{ awx_galaxy_ng_redis_image }}"
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - redis
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/redis:/data:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/redis:/data:z"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -13,9 +17,13 @@ services:
   postgres:
     image: "{{ awx_galaxy_ng_postgres_image }}"
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - postgres
     env_file: "{{ awx_galaxy_ng_env_file }}"
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/postgres:/var/lib/postgresql/data:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/postgres:/var/lib/postgresql/data:z"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "{{ awx_galaxy_ng_postgres_user }}"]
       interval: 10s
@@ -31,17 +39,25 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:z"
+      - "{{ awx_galaxy_ng_settings_file }}:/etc/pulp/settings.py:ro,z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:z"
     command:
       - bash
       - -lc
-      - django-admin fix-squashed-migrations && django-admin migrate && django-admin createsuperuser --noinput || true
+      - |
+        django-admin fix-squashed-migrations
+        django-admin migrate
+        django-admin shell -c 'import os; from django.contrib.auth import get_user_model; User = get_user_model(); username = os.environ["DJANGO_SUPERUSER_USERNAME"]; User.objects.filter(username=username).exists() or User.objects.create_superuser(username, os.environ.get("DJANGO_SUPERUSER_EMAIL", ""), os.environ["DJANGO_SUPERUSER_PASSWORD"])'
 
   api:
     image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - pulp-api
     env_file: "{{ awx_galaxy_ng_env_file }}"
     environment:
       WAIT_FOR_MIGRATIONS: "1"
@@ -54,14 +70,19 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:z"
+      - "{{ awx_galaxy_ng_settings_file }}:/etc/pulp/settings.py:ro,z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:z"
     command: ["run", "api"]
 
   content:
     image: "{{ awx_galaxy_ng_image }}:{{ awx_galaxy_ng_image_tag }}"
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - pulp-content
     env_file: "{{ awx_galaxy_ng_env_file }}"
     environment:
       WAIT_FOR_MIGRATIONS: "1"
@@ -74,9 +95,10 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:z"
+      - "{{ awx_galaxy_ng_settings_file }}:/etc/pulp/settings.py:ro,z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:z"
     command: ["run", "content-app"]
 
   worker:
@@ -93,9 +115,10 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:Z"
-      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:Z"
+      - "{{ awx_galaxy_ng_data_dir }}/pulp:/var/lib/pulp:z"
+      - "{{ awx_galaxy_ng_data_dir }}/etc-pulp:/etc/pulp:z"
+      - "{{ awx_galaxy_ng_settings_file }}:/etc/pulp/settings.py:ro,z"
+      - "{{ awx_galaxy_ng_data_dir }}/tmp-ansible:/tmp/ansible:z"
     command: ["run", "worker"]
 
 {% if awx_galaxy_ng_ui_enabled | bool %}
@@ -105,6 +128,8 @@ services:
     depends_on:
       - api
       - content
+    volumes:
+      - "{{ awx_galaxy_ng_ui_conf }}:/opt/app-root/etc/nginx.default.d/galaxy_ng.conf:ro,z"
 {% endif %}
 
   nginx:
@@ -119,4 +144,4 @@ services:
     ports:
       - "{{ awx_galaxy_ng_public_port }}:5001"
     volumes:
-      - "{{ awx_galaxy_ng_nginx_conf }}:/etc/nginx/nginx.conf:ro,Z"
+      - "{{ awx_galaxy_ng_nginx_conf }}:/etc/nginx/nginx.conf:ro,z"

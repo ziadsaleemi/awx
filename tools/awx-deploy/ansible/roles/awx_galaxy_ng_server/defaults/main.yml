@@ -1,6 +1,6 @@
 ---
 awx_galaxy_ng_enabled: false
-awx_galaxy_ng_image: quay.io/cloudservices/automation-hub-galaxy-ng
+awx_galaxy_ng_image: quay.io/ansible/galaxy-ng
 awx_galaxy_ng_image_tag: latest
 awx_galaxy_ng_nginx_image: docker.io/library/nginx:1.27
 awx_galaxy_ng_ui_enabled: true
@@ -15,11 +15,14 @@ awx_galaxy_ng_postgres_database: galaxy_ng
 awx_galaxy_ng_postgres_user: galaxy_ng
 awx_galaxy_ng_postgres_password: "{{ lookup('env', 'GALAXY_NG_POSTGRES_PASSWORD') }}"
 awx_galaxy_ng_secret_key: "{{ lookup('env', 'GALAXY_NG_SECRET_KEY') }}"
+awx_galaxy_ng_database_fields_symmetric_key: "{{ lookup('env', 'GALAXY_NG_DATABASE_FIELDS_SYMMETRIC_KEY') }}"
 awx_galaxy_ng_base_dir: /opt/galaxy-ng
 awx_galaxy_ng_data_dir: /var/lib/galaxy-ng
 awx_galaxy_ng_env_file: "{{ awx_galaxy_ng_base_dir }}/galaxy-ng.env"
 awx_galaxy_ng_compose_file: "{{ awx_galaxy_ng_base_dir }}/docker-compose.yml"
 awx_galaxy_ng_nginx_conf: "{{ awx_galaxy_ng_base_dir }}/nginx.conf"
+awx_galaxy_ng_ui_conf: "{{ awx_galaxy_ng_base_dir }}/galaxy-ng-ui.conf"
+awx_galaxy_ng_settings_file: "{{ awx_galaxy_ng_base_dir }}/settings.py"
 awx_galaxy_ng_compose_project: galaxy-ng
 awx_galaxy_ng_compose_command: /usr/bin/docker compose
 awx_galaxy_ng_install_packages: true

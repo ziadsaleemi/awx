@@ -36,5 +36,5 @@ services:
     ports:
       - "{{ awx_quay_public_port }}:{{ awx_quay_container_port }}"
     volumes:
-      - "{{ awx_quay_config_dir }}:/conf/stack:Z"
-      - "{{ awx_quay_data_dir }}/storage:/datastorage:Z"
+      - "{{ awx_quay_config_dir }}:/conf/stack:z"
+      - "{{ awx_quay_data_dir }}/storage:/datastorage:z"

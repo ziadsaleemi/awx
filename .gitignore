@@ -169,3 +169,9 @@ _readthedocs/
 
 # Local Codex deployment tracker, source of truth for in-flight lab status.
 .codex/awx-deploy-tracker.md
+.codex/awx-ap160-proof.md
+.codex/awx-direct-integrated-proof.ini
+.codex/awx-k8s-proof.ini
+.codex/awx-vanilla-proof.ini
+.codex/latest-direct-snapshot.txt
+.codex/proof/

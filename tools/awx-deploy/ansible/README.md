@@ -540,7 +540,7 @@ Set `awx_vcenter_datastore` to a management-local VMFS datastore. The lab role
 rejects datastore names containing `truenas`, requires the selected datastore to
 match `awx_vcenter_allowed_datastore_types` (default: `["VMFS"]`), and only
 allows the management datastores listed in `awx_vcenter_allowed_datastore_names`
-(default: `["datastore1", "datastore1 (1)"]`). It also verifies the actual
+(default: `["datastore1", "datastore1 (1)", "datastore1 (2)"]`). It also verifies the actual
 cloned disk backing after vCenter completes the clone, because a clone request
 can otherwise report success while the disk lands on the wrong backing
 datastore. Template disk backing is verified before clone as well; if vCenter

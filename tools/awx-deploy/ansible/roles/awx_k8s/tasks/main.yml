@@ -13,6 +13,15 @@
   until: awx_k8s_readyz.rc == 0
   changed_when: false
 
+- name: Ensure AWX Kubernetes namespace exists
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_k8s_kubectl }} create namespace {{ awx_k8s_namespace }}
+      --dry-run=client -o yaml |
+      {{ awx_k8s_kubectl }} apply -f -
+  register: awx_k8s_namespace_apply
+  changed_when: "'created' in awx_k8s_namespace_apply.stdout"
+
 - name: Check firewalld state for Kubernetes pod networking
   ansible.builtin.command:
     cmd: systemctl is-active firewalld

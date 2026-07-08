@@ -1,9 +1,17 @@
 ---
+- name: Check k3s prerequisites
+  ansible.builtin.shell:
+    cmd: command -v curl
+  register: awx_k3s_curl_check
+  changed_when: false
+  failed_when: false
+
 - name: Install k3s prerequisites
   ansible.builtin.package:
     name:
       - curl
     state: present
+  when: awx_k3s_curl_check.rc != 0
 
 - name: Install Oracle UEK netfilter modules when available
   ansible.builtin.package:
