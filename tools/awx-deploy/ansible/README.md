@@ -416,6 +416,28 @@ destructive operations; it verifies that the expected AWX/Quay database dumps,
 Kubernetes exports, manifests, optional storage archives, and smoke JSON reports
 exist and passed.
 
+To run the standard AWX/Galaxy NG/Project Quay and EDA smoke checks, write a
+manifest, and verify everything in one step:
+
+```bash
+export AWX_PASSWORD='change-me'
+python3 ../scripts/run_lifecycle_evidence.py \
+  --url http://awx.example.com \
+  --username admin \
+  --artifact awx-k8s:/var/backups/awx/awx-k8s-20260625T010101Z \
+  --artifact quay-k8s:/var/backups/awx/quay-k8s-20260625T010101Z \
+  --require-storage
+```
+
+The runner writes `content-smoke.json`, `eda-smoke.json`,
+`evidence-manifest.json`, and `evidence-result.json` under an ignored
+`output/awx-lifecycle-<timestamp>/` directory. Use `--skip-eda-smoke`,
+`--skip-content-smoke`, `--allow-galaxy-unconfigured`,
+`--allow-quay-unconfigured`, and `--allow-eda-unconfigured` for partial lab
+proof while integrations are intentionally disabled.
+
+To verify a manifest produced elsewhere:
+
 ```bash
 python3 ../scripts/verify_lifecycle_evidence.py \
   --evidence-file /tmp/awx-k8s-upgrade-evidence.json \
