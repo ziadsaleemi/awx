@@ -69,6 +69,16 @@ roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
 or collections. Use the VMware-only requirements and vars example only when
 running `playbooks/vcenter-lab.yml`.
 
+For management-cluster labs with host-local VMFS datastores and limited free
+space, set `awx_vcenter_provisioner=govc` and `awx_vcenter_linked_clone=true`.
+The vCenter lab role still rejects forbidden or inaccessible datastores and
+verifies cloned disk backing, but linked clones avoid requiring a full template
+disk allocation for every proof VM. Keep `awx_vcenter_linked_clone=false` for
+full clone capacity tests. The govc path also retries transient vCenter SDK
+gateway failures through `awx_vcenter_govc_retries` and
+`awx_vcenter_govc_delay`; persistent `502 Bad Gateway` responses still require
+vCenter service recovery before lifecycle drills can continue.
+
 ## Quick Start: Server
 
 ```bash

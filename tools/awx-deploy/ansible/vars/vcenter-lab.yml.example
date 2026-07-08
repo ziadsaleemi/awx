@@ -12,6 +12,9 @@ awx_vcenter_host: ""
 awx_vcenter_provisioner: auto
 awx_vcenter_govc_binary: govc
 awx_vcenter_govc_wait_ip_timeout: 10m
+awx_vcenter_govc_retries: 3
+awx_vcenter_govc_delay: 5
+awx_vcenter_linked_clone: false
 awx_vcenter_allowed_datastore_types:
   - VMFS
 awx_vcenter_allowed_datastore_names:

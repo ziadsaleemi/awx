@@ -52,6 +52,8 @@
       govc
       {% elif awx_vcenter_provisioner == 'community.vmware' %}
       community.vmware
+      {% elif awx_vcenter_linked_clone | bool and awx_vcenter_govc_check.rc | default(1) == 0 %}
+      govc
       {% elif awx_vcenter_python_vmware_check.rc | default(1) == 0 %}
       community.vmware
       {% elif awx_vcenter_govc_check.rc | default(1) == 0 %}
@@ -73,6 +75,13 @@
       - awx_vcenter_govc_check.rc | default(1) == 0
     fail_msg: "govc provisioning needs '{{ awx_vcenter_govc_binary }}' in PATH. Install govc or set awx_vcenter_provisioner=community.vmware with a working Python VMware SDK."
   when: awx_vcenter_effective_provisioner | trim == 'govc'
+
+- name: Require govc for linked clone provisioning
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_effective_provisioner | trim == 'govc'
+    fail_msg: "vCenter linked clone provisioning is implemented through govc. Install govc or set awx_vcenter_linked_clone=false."
+  when: awx_vcenter_linked_clone | bool
 
 - name: Show vCenter provisioner
   ansible.builtin.debug:
