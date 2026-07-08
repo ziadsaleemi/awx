@@ -260,7 +260,7 @@ class RunQuayImageBuildJob(BaseTask):
     def run(self, pk, **kwargs):
         self.instance = self.update_model(pk)
 
-        if self.instance.status == 'waiting':
+        if self.instance.status in ('pending', 'waiting'):
             UnifiedJob.objects.filter(pk=pk).update(status='running', start_args='')
             self.instance.refresh_from_db()
 

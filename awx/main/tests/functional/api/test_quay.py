@@ -2,7 +2,15 @@ import pytest
 from django.test import override_settings
 
 from awx.api.versioning import reverse
-from awx.main.models import InstanceGroup, Project, QuayImageBuildJob, QuayImageBuildTemplate, Schedule
+from awx.main.models import (
+    InstanceGroup,
+    Project,
+    QuayImageBuild,
+    QuayImageBuildJob,
+    QuayImageBuildTemplate,
+    Schedule,
+)
+from awx.main.tasks.quay import RunQuayImageBuildJob
 
 
 def quay_response(mocker, payload):
@@ -788,6 +796,52 @@ def test_quay_execution_environment_image_build_template_crud_and_launch(post, g
     assert object_roles_response.data['count'] >= 3
     assert notifications_started_response.data['count'] == 0
     assert delete_response.status_code == 204
+
+
+@pytest.mark.django_db
+def test_quay_image_build_task_promotes_pending_job_to_running(organization, tmp_path, mocker):
+    project_root = tmp_path / 'ee-project'
+    source_dir = project_root / 'ee'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'execution-environment.yml').write_text('version: 3\n', encoding='utf-8')
+    project = Project.objects.create(name='EE Project', organization=organization, scm_type='', local_path='ee-project')
+    template = QuayImageBuildTemplate.objects.create(
+        name='Platform EE',
+        project=project,
+        namespace='awx',
+        repository='platform-ee',
+        tag='latest',
+        runtime='podman',
+        definition_file='ee/execution-environment.yml',
+        context_path='ee',
+    )
+    job = template.create_quay_image_build_job()
+    job.status = 'pending'
+    job.save(update_fields=['status'])
+    build = QuayImageBuild.objects.create(
+        template=template,
+        project=project,
+        project_name=project.name,
+        project_path=str(project_root),
+        namespace='awx',
+        repository='platform-ee',
+        tag='latest',
+        image='quay.example.test/awx/platform-ee:latest',
+        registry='quay.example.test',
+        runtime='podman',
+        definition_file='ee/execution-environment.yml',
+        context_path='ee',
+        unified_job=job,
+    )
+    execute_build = mocker.patch('awx.main.tasks.quay._execute_quay_image_build', return_value='successful')
+
+    RunQuayImageBuildJob().run(job.pk)
+
+    job.refresh_from_db()
+    execute_build.assert_called_once()
+    assert execute_build.call_args.args[0] == build
+    assert execute_build.call_args.kwargs['job'].status == 'running'
+    assert job.status == 'running'
 
 
 @pytest.mark.django_db

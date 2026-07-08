@@ -14,7 +14,7 @@ module.exports = function (env, argv) {
   // FavIcons
   config.plugins.unshift(
     new FaviconsWebpackPlugin({
-      logo: './frontend/assets/awx-logo.svg',
+      logo: './frontend/assets/brand-fallback.svg',
       mode: 'webapp',
       devMode: 'webapp',
       inject: true,

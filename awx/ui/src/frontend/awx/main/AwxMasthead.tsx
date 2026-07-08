@@ -22,7 +22,6 @@ import { PageMastheadDropdown } from '../../../framework/PageMasthead/PageMasthe
 import { PageNotificationsIcon } from '../../../framework/PageMasthead/PageNotificationsIcon';
 import { PageThemeSwitcher } from '../../../framework/PageMasthead/PageThemeSwitcher';
 import { usePageNotifications } from '../../../framework/PageNotifications/PageNotificationsProvider';
-import AwxBrand from '../../assets/awx-logo.svg';
 import { useAnsibleAboutModal } from '../../common/AboutModal';
 import { PageRefreshIcon } from '../../common/PageRefreshIcon';
 import { useGet } from '../../common/crud/useGet';
@@ -41,6 +40,79 @@ import { useAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotification';
 
 const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
+const CUSTOM_LOGO_KEY = 'awx-custom-logo';
+const BLANK_BRAND_IMAGE =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"%3E%3C/svg%3E';
+
+function getCachedCustomLogo() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  try {
+    return window.localStorage.getItem(CUSTOM_LOGO_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function cacheCustomLogo(logo?: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    if (logo) {
+      window.localStorage.setItem(CUSTOM_LOGO_KEY, logo);
+    } else {
+      window.localStorage.removeItem(CUSTOM_LOGO_KEY);
+    }
+  } catch {
+    // Ignore browsers that block local storage.
+  }
+}
+
+function applyCustomFavicon(logo: string) {
+  const iconLinks = document.querySelectorAll<HTMLLinkElement>(
+    'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'
+  );
+  iconLinks.forEach((link) => {
+    link.href = logo;
+    if (logo.startsWith('data:image/png')) {
+      link.type = 'image/png';
+    } else if (logo.startsWith('data:image/svg')) {
+      link.type = 'image/svg+xml';
+    }
+  });
+
+  const manifestLink = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (!manifestLink || typeof URL === 'undefined' || typeof Blob === 'undefined') {
+    return undefined;
+  }
+
+  const manifestUrl = URL.createObjectURL(
+    new Blob(
+      [
+        JSON.stringify({
+          name: 'AWX',
+          short_name: 'AWX',
+          start_url: '/',
+          display: 'standalone',
+          background_color: '#000000',
+          theme_color: '#000000',
+          icons: [
+            {
+              src: logo,
+              sizes: 'any',
+              type: logo.startsWith('data:image/png') ? 'image/png' : 'image/svg+xml',
+            },
+          ],
+        }),
+      ],
+      { type: 'application/manifest+json' }
+    )
+  );
+  manifestLink.href = manifestUrl;
+  return () => URL.revokeObjectURL(manifestUrl);
+}
 
 export function AwxMasthead() {
   const { t } = useTranslation();
@@ -59,9 +131,14 @@ export function AwxMasthead() {
   const [aiOpen, setAiOpen] = useState(false);
 
   const [logoHeight] = useState<number>(() => {
-    const stored = localStorage.getItem(LOGO_SIZE_KEY);
-    return stored ? parseInt(stored, 10) : 48;
+    try {
+      const stored = window.localStorage.getItem(LOGO_SIZE_KEY);
+      return stored ? parseInt(stored, 10) : 48;
+    } catch {
+      return 48;
+    }
   });
+  const [cachedCustomLogo, setCachedCustomLogo] = useState<string | undefined>(getCachedCustomLogo);
   const logout = useCallback(async () => {
     await fetch('/api/logout/');
     refreshActiveAwxUser?.();
@@ -77,11 +154,32 @@ export function AwxMasthead() {
     config?.custom_logo && config.custom_logo.startsWith('data:image/')
       ? config.custom_logo
       : undefined;
+  const brandLogoSrc = customLogoSrc ?? cachedCustomLogo;
 
-  const brandElement = customLogoSrc ? (
-    <Brand src={customLogoSrc} alt={t('Custom logo')} style={{ height: logoHeight }} />
+  useEffect(() => {
+    if (customLogoSrc) {
+      cacheCustomLogo(customLogoSrc);
+      setCachedCustomLogo(customLogoSrc);
+    } else if (config) {
+      cacheCustomLogo(undefined);
+      setCachedCustomLogo(undefined);
+    }
+  }, [config, customLogoSrc]);
+
+  useEffect(() => {
+    if (!brandLogoSrc) {
+      return undefined;
+    }
+    return applyCustomFavicon(brandLogoSrc);
+  }, [brandLogoSrc]);
+
+  const brandElement = brandLogoSrc ? (
+    <Brand src={brandLogoSrc} alt={t('Custom logo')} style={{ height: logoHeight }} />
   ) : (
-    <AwxBrand style={{ height: logoHeight }} />
+    <span
+      aria-hidden="true"
+      style={{ display: 'inline-block', height: logoHeight, width: logoHeight }}
+    />
   );
 
   return (
@@ -150,7 +248,9 @@ export function AwxMasthead() {
               </DropdownItem>
               <DropdownItem
                 id="about"
-                onClick={() => openAnsibleAboutModal({ brandImageSrc: '/assets/awx-logo.svg' })}
+                onClick={() =>
+                  openAnsibleAboutModal({ brandImageSrc: brandLogoSrc ?? BLANK_BRAND_IMAGE })
+                }
                 data-cy="masthead-about"
               >
                 {t('About')}

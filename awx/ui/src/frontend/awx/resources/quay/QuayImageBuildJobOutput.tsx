@@ -22,8 +22,10 @@ const OutputGrid = styled.div<{ $lineChars: number }>`
   border: 1px solid var(--pf-v5-global--BorderColor--100);
   background-color: var(--pf-v5-global--BackgroundColor--100);
   color: var(--pf-v5-global--Color--100);
-  overflow: auto;
+  overflow: hidden auto;
   font-family: var(--pf-v5-global--FontFamily--monospace);
+  font-size: var(--pf-v5-global--FontSize--sm);
+  line-height: var(--pf-v5-global--LineHeight--md);
 
   .pf-v5-theme-dark & {
     background-color: var(--pf-v5-global--BackgroundColor--200);
@@ -54,10 +56,12 @@ const LineNumberGutter = styled.div`
 
 const StdOutColumn = styled.div`
   grid-column: 2;
-  min-width: max-content;
+  min-width: 0;
   padding-block: 2px;
   padding-inline: 16px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 `;
 
 function commandPlanToText(job: QuayImageBuildJob) {
@@ -101,10 +105,8 @@ export function QuayImageBuildJobOutput(props: { job: Job & QuayImageBuildJob })
           <OutputGrid aria-label={t('Build output')} $lineChars={lineChars}>
             {outputLines.map((line, index) => (
               <OutputRow key={`${index}-${line}`}>
-                <LineNumberGutter data-cy="quay-output-line-number">
-                  {index + 1}
-                </LineNumberGutter>
-                <StdOutColumn>
+                <LineNumberGutter data-cy="quay-output-line-number">{index + 1}</LineNumberGutter>
+                <StdOutColumn data-cy="quay-output-line">
                   <Ansi input={line || ' '} />
                 </StdOutColumn>
               </OutputRow>

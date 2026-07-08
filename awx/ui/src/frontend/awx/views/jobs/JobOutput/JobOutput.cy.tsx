@@ -94,7 +94,8 @@ describe('JobOutput.cy.tsx', () => {
         'Starting Project Quay image build host.docker.internal:30881/admin/awx-ee-demo:latest\n' +
         'Project: AWX EE Demo\n' +
         'Running command:\n' +
-        '  podman build -f ee/Containerfile -t host.docker.internal:30881/admin/awx-ee-demo:latest ee\n',
+        '  podman build -f ee/Containerfile -t host.docker.internal:30881/admin/awx-ee-demo:latest ee\n' +
+        'Error: creating build container: unable to copy from source docker://quay.io/ansible/awx-ee:latest: copying system image from manifest list: writing blob: adding layer with blob "sha256:88d62d30b41a4f29ea7f28739f09e0b7bdea7fa39b593da5347019ac00e92824"/""/"sha256:cdcdb1f603d8c61abe8c7d0de970323dbaa25414b4abe9b7198125836d0d8650": unpacking failed (error: exit status 1; output: potentially insufficient UIDs or GIDs available in user namespace)\n',
     };
 
     cy.mount(<JobOutput job={quayJob as unknown as Job} reloadJob={() => null} />);
@@ -106,11 +107,16 @@ describe('JobOutput.cy.tsx', () => {
           '2',
           '3',
           '4',
+          '5',
         ]);
       });
       cy.contains('Starting Project Quay image build');
       cy.contains('Project: AWX EE Demo');
       cy.contains('podman build -f ee/Containerfile');
+      cy.contains('potentially insufficient UIDs or GIDs available');
+      cy.get('[data-cy="quay-output-line"]').each(($line) => {
+        expect($line[0].scrollWidth).to.be.at.most($line[0].clientWidth + 1);
+      });
     });
   });
 });

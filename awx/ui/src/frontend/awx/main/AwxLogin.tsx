@@ -1,4 +1,5 @@
 import { Page } from '@patternfly/react-core';
+import { useEffect, useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import { LoadingState } from '../../../framework/components/LoadingState';
 import { AnsibleLogin } from '../../common/AnsibleLogin/AnsibleLogin';
@@ -15,6 +16,19 @@ type AwxAuthOptions = {
     login_url: string;
   };
 };
+
+const CUSTOM_LOGO_KEY = 'awx-custom-logo';
+
+function getCachedCustomLogo() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  try {
+    return window.localStorage.getItem(CUSTOM_LOGO_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function AwxLogin(props: { children: React.ReactNode }) {
   const { data: options } = useSWR<AwxAuthOptions>(awxAPI`/auth/`, requestGet);
@@ -33,6 +47,30 @@ export function AwxLogin(props: { children: React.ReactNode }) {
   }
 
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
+  const [cachedCustomLogo, setCachedCustomLogo] = useState<string | undefined>(getCachedCustomLogo);
+
+  const customLogo =
+    rootInfo?.custom_logo && rootInfo.custom_logo.startsWith('data:image/')
+      ? rootInfo.custom_logo
+      : undefined;
+
+  useEffect(() => {
+    if (customLogo) {
+      setCachedCustomLogo(customLogo);
+      try {
+        window.localStorage.setItem(CUSTOM_LOGO_KEY, customLogo);
+      } catch {
+        // Ignore browsers that block local storage.
+      }
+    } else if (rootInfo) {
+      setCachedCustomLogo(undefined);
+      try {
+        window.localStorage.removeItem(CUSTOM_LOGO_KEY);
+      } catch {
+        // Ignore browsers that block local storage.
+      }
+    }
+  }, [customLogo, rootInfo]);
 
   if (activeAwxUser === undefined) {
     return (
@@ -42,10 +80,7 @@ export function AwxLogin(props: { children: React.ReactNode }) {
     );
   }
 
-  const brandImg =
-    rootInfo?.custom_logo && rootInfo.custom_logo.startsWith('data:image/')
-      ? rootInfo.custom_logo
-      : '/assets/awx-logo.svg';
+  const brandImg = customLogo ?? cachedCustomLogo;
 
   if (!activeAwxUser) {
     return (
