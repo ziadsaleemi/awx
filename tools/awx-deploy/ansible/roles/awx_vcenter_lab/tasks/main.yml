@@ -92,7 +92,7 @@
   when: awx_vcenter_effective_provisioner | trim == 'govc'
 
 - name: Finish vCenter lab role after govc provisioning
-  ansible.builtin.meta: end_role
+  ansible.builtin.meta: end_play
   when: awx_vcenter_effective_provisioner | trim == 'govc'
 
 - name: Gather vCenter datastore inventory

@@ -16,6 +16,12 @@
       GOVC_DATACENTER: "{{ awx_vcenter_datacenter }}"
   no_log: true
 
+- name: Reset govc lab facts
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_vm_names: []
+    awx_vcenter_govc_missing_vm_names: []
+    awx_vcenter_lab_vms: []
+
 - name: Build govc lab VM names
   ansible.builtin.set_fact:
     awx_vcenter_govc_vm_names: "{{ (awx_vcenter_govc_vm_names | default([])) + [awx_vcenter_vm_prefix ~ '-' ~ ('%02d' | format(item))] }}"
@@ -182,23 +188,21 @@
     - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
 
 - name: Create AWX lab VMs from template with govc
-  ansible.builtin.command:
-    argv: >-
-      {{
-        [awx_vcenter_govc_binary, 'vm.clone', '-vm', awx_vcenter_template]
-        + ((awx_vcenter_linked_clone | bool) | ternary(['-link'], []))
-        + ((awx_vcenter_host | length > 0) | ternary(['-host', awx_vcenter_host], ['-cluster', awx_vcenter_cluster]))
-        + [
-          '-ds', awx_vcenter_datastore,
-          '-net', awx_vcenter_network,
-          '-c', awx_vcenter_vm_cpus | string,
-          '-m', awx_vcenter_vm_memory_mb | string,
-          '-on=' ~ ((awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false')),
-          '-waitip=' ~ (((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false'))
-        ]
-        + ((awx_vcenter_folder | length > 0) | ternary(['-folder', awx_vcenter_folder], []))
-        + [item]
-      }}
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_vcenter_govc_binary | quote }}
+      vm.clone
+      -vm {{ awx_vcenter_template | quote }}
+      {{ (awx_vcenter_linked_clone | bool) | ternary('-link', '') }}
+      {{ (awx_vcenter_host | length > 0) | ternary('-host ' ~ (awx_vcenter_host | quote), '-cluster ' ~ (awx_vcenter_cluster | quote)) }}
+      -ds {{ awx_vcenter_datastore | quote }}
+      -net {{ awx_vcenter_network | quote }}
+      -c {{ awx_vcenter_vm_cpus | string | quote }}
+      -m {{ awx_vcenter_vm_memory_mb | string | quote }}
+      -on={{ (awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      -waitip={{ ((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      {{ (awx_vcenter_folder | length > 0) | ternary('-folder ' ~ (awx_vcenter_folder | quote), '') }}
+      {{ item | quote }}
   environment: "{{ awx_vcenter_govc_environment }}"
   loop: "{{ awx_vcenter_govc_missing_vm_names | default([]) }}"
   register: awx_vcenter_govc_created_vms
