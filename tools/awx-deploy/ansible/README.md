@@ -524,8 +524,11 @@ Optional checks:
 
 ## vCenter Lab
 
-Set credentials only in environment variables. The Ansible control node must
-have `community.vmware` and a working `pyVmomi` / `pyVim` import path.
+Set credentials only in environment variables. The lab role defaults to
+`awx_vcenter_provisioner: auto`: it uses `community.vmware` when the local
+Python VMware SDK import path works and falls back to `govc` when available.
+Set `awx_vcenter_provisioner` to `community.vmware` or `govc` to force a
+specific backend.
 
 ```bash
 ansible-galaxy collection install -r requirements-vmware.yml
@@ -546,6 +549,11 @@ can otherwise report success while the disk lands on the wrong backing
 datastore. Template disk backing is verified before clone as well; if vCenter
 still creates a VM on a forbidden or unapproved datastore, the role deletes the
 bad clone by default before failing the run.
+
+When using host-local VMFS datastores, set `awx_vcenter_host` to the ESXi host
+that owns the selected datastore. This pins the clone target and avoids DRS
+placing the VM on another host before the post-clone storage guard verifies the
+actual backing.
 
 By default the role writes a generated inventory to
 `/tmp/awx-vcenter-lab.ini`. Use that file as the input to `deploy-server.yml`

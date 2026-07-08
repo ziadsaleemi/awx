@@ -1,0 +1,393 @@
+---
+- name: Resolve govc connection environment
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_url: >-
+      {{ awx_vcenter_hostname
+        if (awx_vcenter_hostname | regex_search('^https?://'))
+        else 'https://' ~ awx_vcenter_hostname }}
+    awx_vcenter_govc_environment:
+      GOVC_URL: >-
+        {{ awx_vcenter_hostname
+          if (awx_vcenter_hostname | regex_search('^https?://'))
+          else 'https://' ~ awx_vcenter_hostname }}
+      GOVC_USERNAME: "{{ awx_vcenter_username }}"
+      GOVC_PASSWORD: "{{ awx_vcenter_password }}"
+      GOVC_INSECURE: "{{ (not (awx_vcenter_validate_certs | bool)) | ternary('1', '0') }}"
+      GOVC_DATACENTER: "{{ awx_vcenter_datacenter }}"
+  no_log: true
+
+- name: Build govc lab VM names
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_vm_names: "{{ (awx_vcenter_govc_vm_names | default([])) + [awx_vcenter_vm_prefix ~ '-' ~ ('%02d' | format(item))] }}"
+  loop: "{{ range(1, (awx_vcenter_vm_count | int) + 1) | list }}"
+
+- name: Check existing govc lab VMs
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - find
+      - "/{{ awx_vcenter_datacenter }}/vm"
+      - -type
+      - m
+      - -name
+      - "{{ item }}"
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_vm_names }}"
+  register: awx_vcenter_govc_existing_vms
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Require govc VM lookup to succeed
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: "Unable to query vCenter for VM '{{ item.item }}': {{ item.stderr | default('govc find failed') }}"
+  loop: "{{ awx_vcenter_govc_existing_vms.results | default([]) }}"
+
+- name: Build missing govc lab VM names
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_missing_vm_names: "{{ (awx_vcenter_govc_missing_vm_names | default([])) + [item.item] }}"
+  loop: "{{ awx_vcenter_govc_existing_vms.results | default([]) }}"
+  when: item.stdout | default('') | trim | length == 0
+
+- name: Gather selected datastore details with govc
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - datastore.info
+      - -json
+      - "{{ awx_vcenter_datastore }}"
+  environment: "{{ awx_vcenter_govc_environment }}"
+  register: awx_vcenter_govc_datastore_info
+  changed_when: false
+  no_log: true
+
+- name: Parse selected datastore details
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_datastores: >-
+      {{
+        (awx_vcenter_govc_datastore_info.stdout | from_json).Datastores
+        | default((awx_vcenter_govc_datastore_info.stdout | from_json).datastores | default([]))
+      }}
+
+- name: Require selected govc datastore to exist
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_govc_datastores | length > 0
+    fail_msg: "Refusing unknown vCenter datastore '{{ awx_vcenter_datastore }}'."
+
+- name: Resolve selected govc datastore type
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_datastore_type: >-
+      {{ awx_vcenter_govc_datastores[0].Summary.Type
+        | default(awx_vcenter_govc_datastores[0].summary.type | default(awx_vcenter_govc_datastores[0].summary.Type | default(''))) }}
+    awx_vcenter_govc_datastore_accessible: >-
+      {{ awx_vcenter_govc_datastores[0].Summary.Accessible
+        | default(awx_vcenter_govc_datastores[0].summary.accessible | default(awx_vcenter_govc_datastores[0].summary.Accessible | default(false))) }}
+
+- name: Require accessible govc datastore
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_govc_datastore_accessible | bool
+    fail_msg: "Refusing inaccessible vCenter datastore '{{ awx_vcenter_datastore }}'. Select an accessible management-local datastore."
+
+- name: Require approved govc datastore type
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_govc_datastore_type in awx_vcenter_allowed_datastore_types
+    fail_msg: "Refusing datastore '{{ awx_vcenter_datastore }}' with type '{{ awx_vcenter_govc_datastore_type | default('unknown') }}'. Approved datastore types: {{ awx_vcenter_allowed_datastore_types | join(', ') }}."
+  when: awx_vcenter_allowed_datastore_types | default([]) | length > 0
+
+- name: Require approved govc datastore name
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_datastore in awx_vcenter_allowed_datastore_names
+    fail_msg: "Refusing datastore '{{ awx_vcenter_datastore }}'. Approved management datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
+  when: awx_vcenter_allowed_datastore_names | default([]) | length > 0
+
+- name: Gather source template disk backing with govc
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - device.info
+      - -vm
+      - "{{ awx_vcenter_template }}"
+      - -json
+      - disk-*
+  environment: "{{ awx_vcenter_govc_environment }}"
+  register: awx_vcenter_govc_template_disk_info
+  changed_when: false
+  no_log: true
+  when: awx_vcenter_verify_template_backing | bool
+
+- name: Parse source template disk backing
+  ansible.builtin.set_fact:
+    awx_vcenter_template_disk_backing_files: >-
+      {{
+        (
+          (awx_vcenter_govc_template_disk_info.stdout | from_json).devices
+          | default((awx_vcenter_govc_template_disk_info.stdout | from_json).Devices | default([]))
+        )
+        | map(attribute='backing.fileName')
+        | select('defined')
+        | list
+      }}
+    awx_vcenter_template_disk_datastore_names: >-
+      {{
+        (
+          (
+            (awx_vcenter_govc_template_disk_info.stdout | from_json).devices
+            | default((awx_vcenter_govc_template_disk_info.stdout | from_json).Devices | default([]))
+          )
+          | map(attribute='backing.fileName')
+          | select('defined')
+          | map('regex_replace', '^\[([^]]+)\].*$', '\g<1>')
+          | reject('equalto', '')
+          | unique
+          | list
+        )
+      }}
+  when: awx_vcenter_verify_template_backing | bool
+
+- name: Reject forbidden govc source template disk backing
+  ansible.builtin.assert:
+    that:
+      - item | lower not in ((awx_vcenter_template_disk_backing_files | default([])) | join(' ') | lower)
+      - item | lower not in ((awx_vcenter_template_disk_datastore_names | default([])) | join(' ') | lower)
+    fail_msg: "Refusing to clone from template '{{ awx_vcenter_template }}' because its disk backing references forbidden datastore term '{{ item }}'. Template backing files: {{ awx_vcenter_template_disk_backing_files | default([]) }}"
+  loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
+  when:
+    - awx_vcenter_verify_template_backing | bool
+    - awx_vcenter_template_disk_backing_files | default([]) | length > 0
+
+- name: Require approved govc source template disk backing
+  ansible.builtin.assert:
+    that:
+      - item in awx_vcenter_allowed_datastore_names
+    fail_msg: "Refusing to clone from template '{{ awx_vcenter_template }}' because datastore '{{ item }}' is outside approved management datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
+  loop: "{{ awx_vcenter_template_disk_datastore_names | default([]) }}"
+  when:
+    - awx_vcenter_verify_template_backing | bool
+    - awx_vcenter_allowed_datastore_names | default([]) | length > 0
+    - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
+
+- name: Create AWX lab VMs from template with govc in target folder
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_vcenter_govc_binary | quote }} vm.clone
+      -vm {{ awx_vcenter_template | quote }}
+      {% if awx_vcenter_host | length > 0 %}
+      -host {{ awx_vcenter_host | quote }}
+      {% else %}
+      -cluster {{ awx_vcenter_cluster | quote }}
+      {% endif %}
+      -ds {{ awx_vcenter_datastore | quote }}
+      -net {{ awx_vcenter_network | quote }}
+      -c {{ awx_vcenter_vm_cpus | string | quote }}
+      -m {{ awx_vcenter_vm_memory_mb | string | quote }}
+      -on={{ (awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      -waitip={{ ((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      -folder {{ awx_vcenter_folder | quote }}
+      {{ item | quote }}
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_missing_vm_names | default([]) }}"
+  register: awx_vcenter_govc_created_vms
+  when: awx_vcenter_folder | length > 0
+  changed_when: true
+  no_log: true
+
+- name: Create AWX lab VMs from template with govc
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_vcenter_govc_binary | quote }} vm.clone
+      -vm {{ awx_vcenter_template | quote }}
+      {% if awx_vcenter_host | length > 0 %}
+      -host {{ awx_vcenter_host | quote }}
+      {% else %}
+      -cluster {{ awx_vcenter_cluster | quote }}
+      {% endif %}
+      -ds {{ awx_vcenter_datastore | quote }}
+      -net {{ awx_vcenter_network | quote }}
+      -c {{ awx_vcenter_vm_cpus | string | quote }}
+      -m {{ awx_vcenter_vm_memory_mb | string | quote }}
+      -on={{ (awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      -waitip={{ ((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
+      {{ item | quote }}
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_missing_vm_names | default([]) }}"
+  register: awx_vcenter_govc_created_vms_no_folder
+  when: awx_vcenter_folder | length == 0
+  changed_when: true
+  no_log: true
+
+- name: Gather govc VM IP addresses
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - vm.ip
+      - -v4
+      - -wait
+      - "{{ awx_vcenter_govc_wait_ip_timeout }}"
+      - "{{ item }}"
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_vm_names }}"
+  register: awx_vcenter_govc_vm_ips
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - awx_vcenter_wait_for_ip | bool
+    - awx_vcenter_vm_state == 'poweredon'
+
+- name: Build AWX lab VM inventory facts from govc IPs
+  ansible.builtin.set_fact:
+    awx_vcenter_lab_vms: >-
+      {{
+        (awx_vcenter_lab_vms | default([])) +
+        [{
+          'name': item.item,
+          'ip': (item.stdout_lines | default([]) | select('match', '^\\d+\\.\\d+\\.\\d+\\.\\d+$') | list | first | default(item.stdout | default('') | trim))
+        }]
+      }}
+  loop: "{{ awx_vcenter_govc_vm_ips.results | default([]) }}"
+  when:
+    - awx_vcenter_wait_for_ip | bool
+    - awx_vcenter_vm_state == 'poweredon'
+
+- name: Build AWX lab VM inventory facts without govc IP wait
+  ansible.builtin.set_fact:
+    awx_vcenter_lab_vms: "{{ (awx_vcenter_lab_vms | default([])) + [{'name': item, 'ip': ''}] }}"
+  loop: "{{ awx_vcenter_govc_vm_names }}"
+  when: not (awx_vcenter_wait_for_ip | bool and awx_vcenter_vm_state == 'poweredon')
+
+- name: Gather cloned VM disk backing with govc
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - device.info
+      - -vm
+      - "{{ item }}"
+      - -json
+      - disk-*
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_vm_names }}"
+  register: awx_vcenter_govc_disk_info
+  changed_when: false
+  no_log: true
+  when: awx_vcenter_verify_disk_backing | bool
+
+- name: Collect cloned VM disk backing files from govc
+  ansible.builtin.set_fact:
+    awx_vcenter_disk_backing_files: >-
+      {{
+        (awx_vcenter_disk_backing_files | default([])) +
+        (
+          (
+            (item.stdout | from_json).devices
+            | default((item.stdout | from_json).Devices | default([]))
+          )
+          | map(attribute='backing.fileName')
+          | select('defined')
+          | list
+        )
+      }}
+  loop: "{{ awx_vcenter_govc_disk_info.results | default([]) }}"
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_govc_disk_info is defined
+
+- name: Collect cloned VM disk datastore names from govc
+  ansible.builtin.set_fact:
+    awx_vcenter_disk_datastore_names: >-
+      {{
+        awx_vcenter_disk_backing_files | default([])
+        | map('regex_replace', '^\[([^]]+)\].*$', '\g<1>')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Flag invalid cloned VM disk backing from govc
+  ansible.builtin.set_fact:
+    awx_vcenter_invalid_disk_backing_detected: >-
+      {{
+        (
+          awx_vcenter_forbidden_datastore_terms | default([])
+          | map('lower')
+          | select('in', ((awx_vcenter_disk_backing_files | default([])) | join(' ') | lower))
+          | list
+          | length > 0
+        )
+        or
+        (
+          awx_vcenter_allowed_datastore_names | default([]) | length > 0
+          and
+          ((awx_vcenter_disk_datastore_names | default([])) | difference(awx_vcenter_allowed_datastore_names | default([])) | list | length > 0)
+        )
+      }}
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Delete cloned lab VMs with invalid govc disk backing
+  ansible.builtin.command:
+    argv:
+      - "{{ awx_vcenter_govc_binary }}"
+      - vm.destroy
+      - "{{ item }}"
+  environment: "{{ awx_vcenter_govc_environment }}"
+  loop: "{{ awx_vcenter_govc_vm_names }}"
+  no_log: true
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_delete_on_invalid_backing | bool
+    - awx_vcenter_invalid_disk_backing_detected | default(false) | bool
+
+- name: Reject forbidden govc cloned VM disk backing
+  ansible.builtin.assert:
+    that:
+      - item | lower not in ((awx_vcenter_disk_backing_files | default([])) | join(' ') | lower)
+      - item | lower not in ((awx_vcenter_disk_datastore_names | default([])) | join(' ') | lower)
+    fail_msg: "vCenter placed a cloned VM disk on a forbidden datastore. Disk backing files: {{ awx_vcenter_disk_backing_files | default([]) }}"
+  loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Require approved govc cloned VM disk backing
+  ansible.builtin.assert:
+    that:
+      - item in awx_vcenter_allowed_datastore_names
+    fail_msg: "vCenter placed a cloned VM disk outside approved management datastores. Datastore: {{ item }}. Approved datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
+  loop: "{{ awx_vcenter_disk_datastore_names | default([]) }}"
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_allowed_datastore_names | default([]) | length > 0
+    - awx_vcenter_disk_datastore_names | default([]) | length > 0
+
+- name: Show govc cloned VM disk backing
+  ansible.builtin.debug:
+    msg: "{{ awx_vcenter_disk_backing_files | default([]) }}"
+  when:
+    - awx_vcenter_verify_disk_backing | bool
+    - awx_vcenter_disk_backing_files | default([]) | length > 0
+
+- name: Write generated AWX lab inventory from govc
+  ansible.builtin.template:
+    src: lab-inventory.ini.j2
+    dest: "{{ awx_vcenter_inventory_path }}"
+    mode: "0600"
+  when:
+    - awx_vcenter_inventory_path | length > 0
+    - awx_vcenter_lab_vms | default([]) | length > 0
+
+- name: Show generated govc inventory path
+  ansible.builtin.debug:
+    msg: "Generated lab inventory: {{ awx_vcenter_inventory_path }}"
+  when:
+    - awx_vcenter_inventory_path | length > 0
+    - awx_vcenter_lab_vms | default([]) | length > 0

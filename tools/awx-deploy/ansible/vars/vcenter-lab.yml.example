@@ -8,6 +8,10 @@ awx_vcenter_cluster: ""
 awx_vcenter_folder: ""
 awx_vcenter_template: ""
 awx_vcenter_datastore: ""
+awx_vcenter_host: ""
+awx_vcenter_provisioner: auto
+awx_vcenter_govc_binary: govc
+awx_vcenter_govc_wait_ip_timeout: 10m
 awx_vcenter_allowed_datastore_types:
   - VMFS
 awx_vcenter_allowed_datastore_names:

@@ -20,6 +20,72 @@
     fail_msg: "Refusing to use forbidden vCenter datastore '{{ awx_vcenter_datastore }}'. Select a management-local datastore such as datastore1."
   loop: "{{ awx_vcenter_forbidden_datastore_terms | default([]) }}"
 
+- name: Validate vCenter provisioner mode
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_provisioner in ['auto', 'community.vmware', 'govc']
+    fail_msg: "awx_vcenter_provisioner must be one of: auto, community.vmware, govc."
+
+- name: Check community.vmware Python SDK imports
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - "import pyVim, pyVmomi"
+  register: awx_vcenter_python_vmware_check
+  changed_when: false
+  failed_when: false
+  when: awx_vcenter_provisioner in ['auto', 'community.vmware']
+
+- name: Check govc availability
+  ansible.builtin.shell:
+    cmd: "command -v {{ awx_vcenter_govc_binary | quote }}"
+  register: awx_vcenter_govc_check
+  changed_when: false
+  failed_when: false
+  when: awx_vcenter_provisioner in ['auto', 'govc']
+
+- name: Resolve vCenter provisioner
+  ansible.builtin.set_fact:
+    awx_vcenter_effective_provisioner: >-
+      {% if awx_vcenter_provisioner == 'govc' %}
+      govc
+      {% elif awx_vcenter_provisioner == 'community.vmware' %}
+      community.vmware
+      {% elif awx_vcenter_python_vmware_check.rc | default(1) == 0 %}
+      community.vmware
+      {% elif awx_vcenter_govc_check.rc | default(1) == 0 %}
+      govc
+      {% else %}
+      community.vmware
+      {% endif %}
+
+- name: Require working community.vmware SDK when selected
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_python_vmware_check.rc | default(1) == 0
+    fail_msg: "community.vmware provisioning needs pyVmomi/pyVim imports. Install requirements-vmware.yml dependencies or set awx_vcenter_provisioner=govc with govc installed."
+  when: awx_vcenter_effective_provisioner | trim == 'community.vmware'
+
+- name: Require govc when selected
+  ansible.builtin.assert:
+    that:
+      - awx_vcenter_govc_check.rc | default(1) == 0
+    fail_msg: "govc provisioning needs '{{ awx_vcenter_govc_binary }}' in PATH. Install govc or set awx_vcenter_provisioner=community.vmware with a working Python VMware SDK."
+  when: awx_vcenter_effective_provisioner | trim == 'govc'
+
+- name: Show vCenter provisioner
+  ansible.builtin.debug:
+    msg: "Using vCenter provisioner: {{ awx_vcenter_effective_provisioner | trim }}"
+
+- name: Provision vCenter lab VMs with govc
+  ansible.builtin.include_tasks: govc.yml
+  when: awx_vcenter_effective_provisioner | trim == 'govc'
+
+- name: Finish vCenter lab role after govc provisioning
+  ansible.builtin.meta: end_role
+  when: awx_vcenter_effective_provisioner | trim == 'govc'
+
 - name: Gather vCenter datastore inventory
   community.vmware.vmware_datastore_info:
     hostname: "{{ awx_vcenter_hostname }}"
@@ -99,7 +165,7 @@
             | dict2items
             | map(attribute='value.backing_filename')
             | select('defined')
-            | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
+            | map('regex_replace', '^\[([^]]+)\].*$', '\g<1>')
             | list
           )
         )
@@ -150,6 +216,7 @@
     validate_certs: "{{ awx_vcenter_validate_certs }}"
     datacenter: "{{ awx_vcenter_datacenter }}"
     cluster: "{{ awx_vcenter_cluster }}"
+    esxi_hostname: "{{ awx_vcenter_host | default(omit, true) }}"
     folder: "{{ awx_vcenter_folder | default(omit, true) }}"
     name: "{{ awx_vcenter_vm_prefix }}-{{ '%02d' | format(item) }}"
     template: "{{ awx_vcenter_template }}"
@@ -236,7 +303,7 @@
           +
           (
             awx_vcenter_disk_backing_files | default([])
-            | map('regex_replace', '^\\[([^\\]]+)\\].*$', '\\1')
+            | map('regex_replace', '^\[([^]]+)\].*$', '\g<1>')
             | list
           )
         )
@@ -327,7 +394,7 @@
 - name: Require approved cloned VM disk backing
   ansible.builtin.assert:
     that:
-      - (item | regex_replace('^\\[([^\\]]+)\\].*$', '\\1')) in awx_vcenter_allowed_datastore_names
+      - (item | regex_replace('^\[([^]]+)\].*$', '\g<1>')) in awx_vcenter_allowed_datastore_names
     fail_msg: "vCenter placed a cloned VM disk outside approved management datastores. Disk backing file: {{ item }}. Approved datastores: {{ awx_vcenter_allowed_datastore_names | join(', ') }}."
   loop: "{{ awx_vcenter_disk_backing_files | default([]) }}"
   when:

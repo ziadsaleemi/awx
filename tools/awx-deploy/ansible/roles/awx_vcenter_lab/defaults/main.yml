@@ -9,6 +9,10 @@ awx_vcenter_folder: ""
 awx_vcenter_template: ""
 awx_vcenter_datastore: ""
 awx_vcenter_network: ""
+awx_vcenter_host: ""
+awx_vcenter_provisioner: auto
+awx_vcenter_govc_binary: govc
+awx_vcenter_govc_wait_ip_timeout: 10m
 awx_vcenter_vm_prefix: awx-test
 awx_vcenter_vm_count: 1
 awx_vcenter_vm_cpus: 2
