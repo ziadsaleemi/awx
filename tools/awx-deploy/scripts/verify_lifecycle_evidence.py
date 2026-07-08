@@ -75,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='Backup artifact directory to verify. Profile: awx-server, awx-k8s, quay-server, quay-k8s.',
     )
     parser.add_argument(
+        '--evidence-file',
+        action='append',
+        default=[],
+        help='JSON evidence manifest with artifacts and smoke reports. Can be passed more than once.',
+    )
+    parser.add_argument(
         '--smoke-report',
         action='append',
         default=[],
@@ -103,6 +109,13 @@ def file_size(path: str) -> int:
         return 0
 
 
+def resolve_path(path: str, base_dir: str | None = None) -> str:
+    path = os.path.expanduser(path)
+    if os.path.isabs(path) or not base_dir:
+        return os.path.abspath(path)
+    return os.path.abspath(os.path.join(base_dir, path))
+
+
 def validate_file_set(base_path: str, patterns: tuple[str, ...], *, required: bool, label: str) -> Check:
     missing: list[str] = []
     matches: dict[str, list[dict[str, Any]]] = {}
@@ -116,7 +129,34 @@ def validate_file_set(base_path: str, patterns: tuple[str, ...], *, required: bo
     return Check(label, ok, detail, {'path': base_path, 'matches': matches, 'missing': missing})
 
 
+def normalize_artifact_spec(entry: Any, base_dir: str | None = None) -> str:
+    if isinstance(entry, str):
+        if ':' not in entry:
+            raise EvidenceFailure(f'Artifact spec {entry!r} must be PROFILE:PATH.')
+        profile_name, path = entry.split(':', 1)
+        return f'{profile_name}:{resolve_path(path, base_dir)}'
+    if isinstance(entry, dict):
+        profile_name = str(entry.get('profile') or '').strip()
+        path = str(entry.get('path') or '').strip()
+        if not profile_name or not path:
+            raise EvidenceFailure('Artifact objects must include profile and path.')
+        return f'{profile_name}:{resolve_path(path, base_dir)}'
+    raise EvidenceFailure('Artifact entries must be strings or objects.')
+
+
+def normalize_smoke_report(entry: Any, base_dir: str | None = None) -> str:
+    if isinstance(entry, str):
+        return resolve_path(entry, base_dir)
+    if isinstance(entry, dict):
+        path = str(entry.get('path') or '').strip()
+        if not path:
+            raise EvidenceFailure('Smoke report objects must include path.')
+        return resolve_path(path, base_dir)
+    raise EvidenceFailure('Smoke report entries must be strings or objects.')
+
+
 def validate_artifact(spec: str, require_storage: bool) -> list[Check]:
+    spec = normalize_artifact_spec(spec)
     if ':' not in spec:
         raise EvidenceFailure(f'Artifact spec {spec!r} must be PROFILE:PATH.')
     profile_name, path = spec.split(':', 1)
@@ -140,17 +180,66 @@ def validate_artifact(spec: str, require_storage: bool) -> list[Check]:
     return checks
 
 
+def prefix_checks(prefix: str, checks: list[Check]) -> list[Check]:
+    if not prefix:
+        return checks
+    return [Check(f'{prefix}/{check.label}', check.ok, check.detail, check.data) for check in checks]
+
+
 def load_json(path: str) -> dict[str, Any]:
     try:
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
     except OSError as exc:
-        raise EvidenceFailure(f'Cannot read smoke report {path}: {exc}') from exc
+        raise EvidenceFailure(f'Cannot read JSON file {path}: {exc}') from exc
     except json.JSONDecodeError as exc:
-        raise EvidenceFailure(f'Smoke report {path} is not valid JSON: {exc}') from exc
+        raise EvidenceFailure(f'JSON file {path} is not valid JSON: {exc}') from exc
     if not isinstance(payload, dict):
-        raise EvidenceFailure(f'Smoke report {path} must contain a JSON object.')
+        raise EvidenceFailure(f'JSON file {path} must contain a JSON object.')
     return payload
+
+
+def evidence_sections(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    scenarios = payload.get('scenarios')
+    if scenarios is None:
+        name = str(payload.get('name') or payload.get('scenario') or 'default').strip()
+        return [(name or 'default', payload)]
+    if not isinstance(scenarios, list) or not scenarios:
+        raise EvidenceFailure('Evidence file scenarios must be a non-empty list.')
+    sections: list[tuple[str, dict[str, Any]]] = []
+    for index, scenario in enumerate(scenarios, start=1):
+        if not isinstance(scenario, dict):
+            raise EvidenceFailure('Each evidence file scenario must be an object.')
+        name = str(scenario.get('name') or scenario.get('scenario') or f'scenario-{index}').strip()
+        sections.append((name or f'scenario-{index}', scenario))
+    return sections
+
+
+def validate_evidence_file(path: str, global_require_storage: bool) -> list[Check]:
+    path = resolve_path(path)
+    payload = load_json(path)
+    base_dir = os.path.dirname(path)
+    sections = evidence_sections(payload)
+    payload_require_storage = bool(payload.get('require_storage') or payload.get('requireStorage'))
+    checks = [Check('evidence-file/schema', True, f'scenarios={len(sections)}', {'path': path})]
+
+    for name, section in sections:
+        artifacts = section.get('artifacts', [])
+        smoke_reports = section.get('smoke_reports', section.get('smokeReports', []))
+        if not isinstance(artifacts, list):
+            raise EvidenceFailure(f'Evidence scenario {name!r} artifacts must be a list.')
+        if not isinstance(smoke_reports, list):
+            raise EvidenceFailure(f'Evidence scenario {name!r} smoke_reports must be a list.')
+        if not artifacts and not smoke_reports:
+            raise EvidenceFailure(f'Evidence scenario {name!r} must include artifacts or smoke_reports.')
+        require_storage = bool(global_require_storage or payload_require_storage or section.get('require_storage') or section.get('requireStorage'))
+        scenario_checks: list[Check] = []
+        for artifact in artifacts:
+            scenario_checks.extend(validate_artifact(normalize_artifact_spec(artifact, base_dir), require_storage))
+        for smoke_report in smoke_reports:
+            scenario_checks.extend(validate_smoke_report(normalize_smoke_report(smoke_report, base_dir)))
+        checks.extend(prefix_checks(f'evidence/{name}', scenario_checks))
+    return checks
 
 
 def validate_content_smoke(path: str, payload: dict[str, Any]) -> list[Check]:
@@ -234,12 +323,14 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         checks: list[Check] = []
+        for evidence_file in args.evidence_file:
+            checks.extend(validate_evidence_file(evidence_file, args.require_storage))
         for artifact in args.artifact:
             checks.extend(validate_artifact(artifact, args.require_storage))
         for report_path in args.smoke_report:
             checks.extend(validate_smoke_report(report_path))
         if not checks:
-            raise EvidenceFailure('Provide at least one --artifact or --smoke-report.')
+            raise EvidenceFailure('Provide at least one --evidence-file, --artifact, or --smoke-report.')
 
         ok = all(check.ok for check in checks)
         report = {

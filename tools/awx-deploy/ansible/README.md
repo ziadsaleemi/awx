@@ -418,17 +418,42 @@ exist and passed.
 
 ```bash
 python3 ../scripts/verify_lifecycle_evidence.py \
-  --artifact awx-k8s:/var/backups/awx/awx-k8s-20260625T010101Z \
-  --artifact quay-k8s:/var/backups/awx/quay-k8s-20260625T010101Z \
-  --smoke-report /tmp/awx-content-smoke.json \
-  --smoke-report /tmp/awx-eda-smoke.json \
+  --evidence-file /tmp/awx-k8s-upgrade-evidence.json \
   --require-storage \
   --json-output /tmp/awx-lifecycle-evidence.json
 ```
 
+Example evidence manifest:
+
+```json
+{
+  "name": "k8s-upgrade-drill",
+  "require_storage": true,
+  "artifacts": [
+    {
+      "profile": "awx-k8s",
+      "path": "/var/backups/awx/awx-k8s-20260625T010101Z"
+    },
+    {
+      "profile": "quay-k8s",
+      "path": "/var/backups/awx/quay-k8s-20260625T010101Z"
+    }
+  ],
+  "smoke_reports": [
+    "/tmp/awx-content-smoke.json",
+    "/tmp/awx-eda-smoke.json"
+  ]
+}
+```
+
+To prove multiple paths in one run, use a top-level `scenarios` array with the
+same fields for each scenario. Relative artifact and smoke paths are resolved
+from the manifest file directory.
+
 Supported artifact profiles are `awx-server`, `awx-k8s`, `quay-server`, and
 `quay-k8s`. Use `--require-storage` for storage-inclusive Quay and
-projects/media proof.
+projects/media proof. The old one-off flags also remain available:
+`--artifact PROFILE:PATH` and `--smoke-report PATH`.
 
 ## EDA Live Smoke
 
