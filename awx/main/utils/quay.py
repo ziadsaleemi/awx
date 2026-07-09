@@ -292,13 +292,16 @@ def normalize_tag_list(payload, offset=0):
 def normalize_quay_list(payload, keys, offset=0):
     items = []
     if isinstance(payload, dict):
+        found_keyed_list = False
         for key in keys:
             if isinstance(payload.get(key), list):
                 items = payload[key]
+                found_keyed_list = True
                 break
-        if not items and isinstance(payload.get('results'), list):
+        if not found_keyed_list and isinstance(payload.get('results'), list):
             items = payload['results']
-        elif not items and payload:
+            found_keyed_list = True
+        elif not found_keyed_list and payload:
             items = [payload]
     elif isinstance(payload, list):
         items = payload

@@ -504,6 +504,22 @@ def test_quay_robots_list_uses_organization_endpoint(get, admin_user, mocker):
     QUAY_NAMESPACE='awx',
     QUAY_API_TOKEN='quay-token',
 )
+def test_quay_robots_list_normalizes_empty_robot_payload(get, admin_user, mocker):
+    mocker.patch('awx.main.utils.quay.requests.get', return_value=quay_response(mocker, {'robots': []}))
+
+    response = get(reverse('api:quay_robots_list') + '?namespace_kind=user', user=admin_user, expect=200)
+
+    assert response.data['count'] == 0
+    assert response.data['results'] == []
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_QUAY_ENABLED=True,
+    QUAY_REGISTRY_URL='https://quay.example.test',
+    QUAY_NAMESPACE='awx',
+    QUAY_API_TOKEN='quay-token',
+)
 def test_quay_robot_create_delete_and_regenerate_call_quay_api(post, admin_user, mocker):
     put_mock = mocker.patch('awx.main.utils.quay.requests.put', return_value=quay_response(mocker, {'name': 'awx+builder'}))
     delete_mock = mocker.patch('awx.main.utils.quay.requests.delete', return_value=quay_response(mocker, {}))
