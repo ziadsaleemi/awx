@@ -215,6 +215,50 @@
     state: directory
     mode: "0700"
 
+- name: Read Project Quay token secret for AWX settings
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} get secret {{ awx_quay_token_secret_name }} -o json"
+  register: awx_k8s_quay_token_secret
+  changed_when: false
+  failed_when: false
+  when:
+    - awx_quay_configure_awx_settings | bool
+    - awx_quay_token_secret_name | length > 0
+    - (awx_quay_api_token | default('') | length == 0) or (awx_quay_push_username | default('') | length == 0) or (awx_quay_push_token | default('') | length == 0)
+  no_log: true
+
+- name: Resolve Project Quay token secret data
+  ansible.builtin.set_fact:
+    awx_k8s_quay_token_secret_data: >-
+      {{ ((awx_k8s_quay_token_secret.stdout | from_json).data | default({}))
+        if (awx_k8s_quay_token_secret is defined and awx_k8s_quay_token_secret.rc == 0)
+        else {} }}
+  when: awx_quay_configure_awx_settings | bool
+  no_log: true
+
+- name: Resolve Project Quay settings credentials
+  ansible.builtin.set_fact:
+    awx_quay_effective_api_token: >-
+      {{ awx_quay_api_token
+        if (awx_quay_api_token | default('') | length > 0)
+        else (awx_k8s_quay_token_secret_data.QUAY_API_TOKEN | default('') | b64decode
+          if (awx_k8s_quay_token_secret_data.QUAY_API_TOKEN | default('') | length > 0)
+          else '') }}
+    awx_quay_effective_push_username: >-
+      {{ awx_quay_push_username
+        if (awx_quay_push_username | default('') | length > 0)
+        else (awx_k8s_quay_token_secret_data.QUAY_PUSH_USERNAME | default('') | b64decode
+          if (awx_k8s_quay_token_secret_data.QUAY_PUSH_USERNAME | default('') | length > 0)
+          else '') }}
+    awx_quay_effective_push_token: >-
+      {{ awx_quay_push_token
+        if (awx_quay_push_token | default('') | length > 0)
+        else (awx_k8s_quay_token_secret_data.QUAY_PUSH_TOKEN | default('') | b64decode
+          if (awx_k8s_quay_token_secret_data.QUAY_PUSH_TOKEN | default('') | length > 0)
+          else '') }}
+  when: awx_quay_configure_awx_settings | bool
+  no_log: true
+
 - name: Render Kubernetes manifests
   ansible.builtin.template:
     src: "{{ item }}.j2"

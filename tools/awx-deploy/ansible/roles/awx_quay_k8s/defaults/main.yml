@@ -11,6 +11,11 @@ awx_quay_admin_password: "{{ lookup('env', 'QUAY_ADMIN_PASSWORD') | default(look
 awx_quay_admin_email: admin@example.com
 awx_quay_initialize_admin: true
 awx_quay_init_image: docker.io/curlimages/curl:8.8.0
+awx_quay_token_secret_name: "{{ awx_quay_name }}-awx-tokens"
+awx_quay_bootstrap_token_title: Capstan Project Quay Management
+awx_quay_api_token: "{{ lookup('env', 'QUAY_API_TOKEN') | default('', true) }}"
+awx_quay_push_username: "{{ lookup('env', 'QUAY_PUSH_USERNAME') | default('', true) }}"
+awx_quay_push_token: "{{ lookup('env', 'QUAY_PUSH_TOKEN') | default('', true) }}"
 awx_quay_namespace: admin
 awx_quay_postgres_database: quay
 awx_quay_postgres_user: quay

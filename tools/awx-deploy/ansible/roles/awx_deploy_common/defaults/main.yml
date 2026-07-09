@@ -206,6 +206,9 @@ awx_quay_k8s_url: "http://{{ awx_quay_name }}.{{ awx_quay_k8s_namespace }}.svc.c
 awx_quay_api_token: "{{ lookup('env', 'QUAY_API_TOKEN') | default('', true) }}"
 awx_quay_push_username: "{{ lookup('env', 'QUAY_PUSH_USERNAME') | default('', true) }}"
 awx_quay_push_token: "{{ lookup('env', 'QUAY_PUSH_TOKEN') | default('', true) }}"
+awx_quay_token_secret_name: "{{ awx_quay_name }}-awx-tokens"
+awx_quay_bootstrap_token_title: Capstan Project Quay Management
+awx_refresh_awx_settings_after_integrations: true
 awx_quay_verify_ssl: false
 awx_quay_request_timeout: 10
 awx_quay_service_type: ClusterIP

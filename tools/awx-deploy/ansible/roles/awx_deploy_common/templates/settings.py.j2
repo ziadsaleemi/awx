@@ -114,9 +114,9 @@ GALAXY_NG_CONTENT_PATH_PREFIX = {{ awx_galaxy_ng_content_path_prefix | to_json }
 {% endif %}
 QUAY_REGISTRY_URL = {{ effective_quay_registry_url | to_json }}
 QUAY_NAMESPACE = {{ awx_quay_namespace | to_json }}
-QUAY_API_TOKEN = {{ awx_quay_api_token | to_json }}
-QUAY_PUSH_USERNAME = {{ awx_quay_push_username | to_json }}
-QUAY_PUSH_TOKEN = {{ awx_quay_push_token | to_json }}
+QUAY_API_TOKEN = {{ (awx_quay_effective_api_token | default(awx_quay_api_token)) | to_json }}
+QUAY_PUSH_USERNAME = {{ (awx_quay_effective_push_username | default(awx_quay_push_username)) | to_json }}
+QUAY_PUSH_TOKEN = {{ (awx_quay_effective_push_token | default(awx_quay_push_token)) | to_json }}
 QUAY_VERIFY_SSL = {{ 'True' if awx_quay_verify_ssl | bool else 'False' }}
 QUAY_REQUEST_TIMEOUT = {{ awx_quay_request_timeout | int }}
 {% endif %}

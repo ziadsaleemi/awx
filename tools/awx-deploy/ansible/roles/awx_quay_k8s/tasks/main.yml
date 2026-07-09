@@ -175,6 +175,95 @@
     - awx_quay_admin_password | length > 0
   no_log: true
 
+- name: Read Project Quay AWX token secret
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} get secret {{ awx_quay_token_secret_name }}"
+  register: awx_quay_awx_token_secret
+  changed_when: false
+  failed_when: false
+  when: awx_quay_token_secret_name | length > 0
+  no_log: true
+
+- name: Resolve supplied Project Quay AWX tokens
+  ansible.builtin.set_fact:
+    awx_quay_supplied_api_token: "{{ awx_quay_api_token if awx_quay_api_token | length > 0 else awx_quay_push_token }}"
+    awx_quay_supplied_push_username: "{{ awx_quay_push_username if awx_quay_push_username | length > 0 else awx_quay_admin_user }}"
+    awx_quay_supplied_push_token: "{{ awx_quay_push_token if awx_quay_push_token | length > 0 else awx_quay_api_token }}"
+  when:
+    - awx_quay_token_secret_name | length > 0
+    - (awx_quay_api_token | length > 0) or (awx_quay_push_token | length > 0)
+  no_log: true
+
+- name: Store supplied Project Quay AWX tokens
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} create secret generic {{ awx_quay_token_secret_name }}
+      --from-literal=QUAY_API_TOKEN={{ awx_quay_supplied_api_token | quote }}
+      --from-literal=QUAY_PUSH_USERNAME={{ awx_quay_supplied_push_username | quote }}
+      --from-literal=QUAY_PUSH_TOKEN={{ awx_quay_supplied_push_token | quote }}
+      --dry-run=client -o yaml |
+      {{ awx_k8s_kubectl }} apply -f -
+  register: awx_quay_store_supplied_tokens
+  changed_when: "'created' in awx_quay_store_supplied_tokens.stdout or 'configured' in awx_quay_store_supplied_tokens.stdout"
+  when:
+    - awx_quay_token_secret_name | length > 0
+    - awx_quay_supplied_api_token | default('') | length > 0
+    - awx_quay_supplied_push_token | default('') | length > 0
+  no_log: true
+
+- name: Bootstrap Project Quay AWX app token
+  ansible.builtin.shell:
+    cmd: |
+      {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} exec -i deployment/{{ awx_quay_name }} -- \
+        env QUAY_BOOTSTRAP_USERNAME={{ awx_quay_admin_user | quote }} QUAY_BOOTSTRAP_TOKEN_TITLE={{ awx_quay_bootstrap_token_title | quote }} \
+        python3 - <<'PY'
+      import os
+
+      import app as quay_app  # noqa: F401
+      from data.database import db
+      from data.model import appspecifictoken
+      from data.model import user as user_model
+
+      username = os.environ["QUAY_BOOTSTRAP_USERNAME"]
+      title = os.environ["QUAY_BOOTSTRAP_TOKEN_TITLE"]
+
+      with db.atomic():
+          user = user_model.get_user(username)
+          for token in appspecifictoken.list_tokens(user):
+              if token.title == title:
+                  print(appspecifictoken.get_full_token_string(token))
+                  break
+          else:
+              token = appspecifictoken.create_token(user, title, expiration=None)
+              print(appspecifictoken.get_full_token_string(token))
+      PY
+  register: awx_quay_bootstrap_token
+  changed_when: false
+  when:
+    - awx_quay_token_secret_name | length > 0
+    - awx_quay_awx_token_secret.rc | default(1) != 0
+    - awx_quay_api_token | length == 0
+    - awx_quay_push_token | length == 0
+    - awx_quay_initialize_admin | bool
+    - awx_quay_admin_password | length > 0
+  no_log: true
+
+- name: Store bootstrapped Project Quay AWX token
+  ansible.builtin.shell:
+    cmd: >-
+      {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} create secret generic {{ awx_quay_token_secret_name }}
+      --from-literal=QUAY_API_TOKEN={{ awx_quay_bootstrap_token.stdout | quote }}
+      --from-literal=QUAY_PUSH_USERNAME={{ awx_quay_admin_user | quote }}
+      --from-literal=QUAY_PUSH_TOKEN={{ awx_quay_bootstrap_token.stdout | quote }}
+      --dry-run=client -o yaml |
+      {{ awx_k8s_kubectl }} apply -f -
+  register: awx_quay_store_bootstrap_token
+  changed_when: "'created' in awx_quay_store_bootstrap_token.stdout or 'configured' in awx_quay_store_bootstrap_token.stdout"
+  when:
+    - awx_quay_bootstrap_token is defined
+    - awx_quay_bootstrap_token.stdout | default('') | length > 0
+  no_log: true
+
 - name: Check firewalld state for Project Quay NodePort
   ansible.builtin.command:
     cmd: systemctl is-active firewalld

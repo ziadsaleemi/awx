@@ -29,3 +29,11 @@
       when: awx_galaxy_ng_enabled | default(false) | bool
     - role: awx_quay_k8s
       when: awx_quay_enabled | default(false) | bool
+    - role: awx_k8s
+      when:
+        - awx_refresh_awx_settings_after_integrations | default(true) | bool
+        - (awx_opa_enabled | default(false) | bool)
+          or (awx_gatekeeper_enabled | default(false) | bool)
+          or (awx_eda_enabled | default(false) | bool)
+          or (awx_galaxy_ng_enabled | default(false) | bool)
+          or (awx_quay_enabled | default(false) | bool)
