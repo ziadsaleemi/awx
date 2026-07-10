@@ -68,7 +68,7 @@ export function useAwxSettingsGroupsBase() {
       {
         id: 'modules',
         name: t('Modules'),
-        description: t('Enable or disable optional AWX integrations.'),
+        description: t('Enable or disable optional Capstan integrations.'),
         defaultSlugs: ['modules'],
         categories: [],
       },
@@ -119,14 +119,14 @@ export function useAwxSettingsGroupsBase() {
       {
         id: 'galaxy-ng',
         name: t('Galaxy NG'),
-        description: t('Configure Automation Hub content API access for AWX.'),
+        description: t('Configure Automation Hub content API access for Capstan.'),
         defaultSlugs: ['galaxy-ng'],
         categories: [],
       },
       {
         id: 'quay',
         name: t('Project Quay'),
-        description: t('Configure execution environment image registry access for AWX.'),
+        description: t('Configure execution environment image registry access for Capstan.'),
         defaultSlugs: ['quay'],
         categories: [],
       },

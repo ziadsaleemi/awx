@@ -233,6 +233,13 @@ spec:
       containers:
         - name: awx-task
           image: {{ awx_image }}:{{ awx_image_tag }}
+{% if awx_k8s_ee_builds_enabled | default(false) | bool %}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            privileged: true
+            allowPrivilegeEscalation: true
+{% endif %}
           command:
             - /usr/bin/launch_awx_task.sh
           env:

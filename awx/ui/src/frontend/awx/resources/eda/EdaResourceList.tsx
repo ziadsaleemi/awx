@@ -806,7 +806,7 @@ function EdaResourceFormModal(props: {
             title={t('Managed credential type')}
             style={{ marginBottom: 16 }}
           >
-            {t('This credential type is managed by EDA and cannot be edited from AWX.')}
+            {t('This credential type is managed by EDA and cannot be edited from Capstan.')}
           </Alert>
         )}
         {isManagedRoleDefinition && (
@@ -816,7 +816,7 @@ function EdaResourceFormModal(props: {
             title={t('Managed EDA role')}
             style={{ marginBottom: 16 }}
           >
-            {t('This role is managed by EDA and cannot be edited from AWX.')}
+            {t('This role is managed by EDA and cannot be edited from Capstan.')}
           </Alert>
         )}
         {formUsesName(form) && (

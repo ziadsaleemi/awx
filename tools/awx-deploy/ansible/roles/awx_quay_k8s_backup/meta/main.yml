@@ -1,7 +1,7 @@
 ---
 galaxy_info:
-  author: AWX
-  description: Back up Kubernetes Project Quay for AWX execution environment image hosting
+  author: Capstan
+  description: Back up Kubernetes Project Quay for Capstan execution environment image hosting
   license: Apache-2.0
   min_ansible_version: "2.15"
 dependencies: []

@@ -478,7 +478,7 @@ export const galaxyNgResourceTitles: Record<GalaxyNgResourceKind, string> = {
 
 export const galaxyNgResourceDescriptions: Record<GalaxyNgResourceKind, string> = {
   namespaces: 'Collection namespaces available in the private automation hub.',
-  collections: 'Collections available to AWX project updates and execution environments.',
+  collections: 'Collections available to Capstan project updates and execution environments.',
   repositories: 'Pulp Ansible repositories backing Galaxy NG content distribution.',
   remotes: 'Remote Automation Hub sources Galaxy NG can sync collections from.',
   'remote-registries':
@@ -797,7 +797,7 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
             uiRoute={nativeUiRoute}
             page={title}
             prompt={t(
-              'Help me review this Galaxy NG resource page for AWX. Explain what this resource does, what looks missing or unhealthy, and what actions should be taken next.'
+              'Help me review this Galaxy NG resource page for Capstan. Explain what this resource does, what looks missing or unhealthy, and what actions should be taken next.'
             )}
             context={{
               resource,

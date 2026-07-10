@@ -572,7 +572,7 @@ function GalaxyNgCollectionDetails(props: {
             uiRoute={galaxyNgResourceNativeRoutes[resource]}
             page={title}
             prompt={t(
-              'Help me review this Galaxy NG collection in AWX. Explain install steps, contents, dependencies, signatures, and follow-up actions.'
+              'Help me review this Galaxy NG collection in Capstan. Explain install steps, contents, dependencies, signatures, and follow-up actions.'
             )}
             context={{
               resource,
@@ -705,7 +705,7 @@ export function GalaxyNgResourceDetails() {
             uiRoute={galaxyNgResourceNativeRoutes[resource]}
             page={title}
             prompt={t(
-              'Help me review this Galaxy NG resource in AWX. Explain what it is, what metadata matters, and what follow-up actions make sense.'
+              'Help me review this Galaxy NG resource in Capstan. Explain what it is, what metadata matters, and what follow-up actions make sense.'
             )}
             context={{
               resource,

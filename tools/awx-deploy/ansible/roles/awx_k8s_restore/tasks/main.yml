@@ -6,17 +6,17 @@
       - awx_k8s_restore_path | length > 0
     fail_msg: "Kubernetes restore is destructive. Set awx_k8s_restore_confirm=true and awx_k8s_restore_path."
 
-- name: Resolve kubectl command for AWX Kubernetes restore
+- name: Resolve kubectl command for Capstan Kubernetes restore
   ansible.builtin.set_fact:
     awx_k8s_restore_kubectl: >-
       {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
 
-- name: Validate AWX Kubernetes database backup file
+- name: Validate Capstan Kubernetes database backup file
   ansible.builtin.stat:
     path: "{{ awx_k8s_restore_path }}/awx.sql"
   register: awx_k8s_restore_sql_stat
 
-- name: Fail when AWX Kubernetes database backup is missing
+- name: Fail when Capstan Kubernetes database backup is missing
   ansible.builtin.assert:
     that:
       - awx_k8s_restore_sql_stat.stat.exists
@@ -31,7 +31,7 @@
   until: awx_k8s_restore_readyz.rc == 0
   changed_when: false
 
-- name: Scale AWX application deployments down before Kubernetes restore
+- name: Scale Capstan application deployments down before Kubernetes restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} scale deployment/{{ item }} --replicas=0"
   loop:
@@ -41,42 +41,42 @@
   changed_when: "'scaled' in awx_k8s_restore_scale_down.stdout"
   failed_when: false
 
-- name: Check backed up AWX Kubernetes secrets file
+- name: Check backed up Capstan Kubernetes secrets file
   ansible.builtin.stat:
     path: "{{ awx_k8s_restore_path }}/k8s-secrets.yml"
   register: awx_k8s_restore_secrets_stat
 
-- name: Apply backed up AWX Kubernetes secrets
+- name: Apply backed up Capstan Kubernetes secrets
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} apply -f {{ awx_k8s_restore_path }}/k8s-secrets.yml"
   register: awx_k8s_restore_apply_secrets
   changed_when: "'created' in awx_k8s_restore_apply_secrets.stdout or 'configured' in awx_k8s_restore_apply_secrets.stdout"
   when: awx_k8s_restore_secrets_stat.stat.exists
 
-- name: Check backed up AWX Kubernetes config maps file
+- name: Check backed up Capstan Kubernetes config maps file
   ansible.builtin.stat:
     path: "{{ awx_k8s_restore_path }}/k8s-configmaps.yml"
   register: awx_k8s_restore_configmaps_stat
 
-- name: Apply backed up AWX Kubernetes config maps
+- name: Apply backed up Capstan Kubernetes config maps
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} apply -f {{ awx_k8s_restore_path }}/k8s-configmaps.yml"
   register: awx_k8s_restore_apply_configmaps
   changed_when: "'created' in awx_k8s_restore_apply_configmaps.stdout or 'configured' in awx_k8s_restore_apply_configmaps.stdout"
   when: awx_k8s_restore_configmaps_stat.stat.exists
 
-- name: Wait for AWX PostgreSQL deployment before restore
+- name: Wait for Capstan PostgreSQL deployment before restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-postgres --timeout=300s"
   changed_when: false
 
-- name: Resolve AWX PostgreSQL pod for restore
+- name: Resolve Capstan PostgreSQL pod for restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_k8s_name }}-postgres -o jsonpath='{.items[0].metadata.name}'"
   register: awx_k8s_restore_postgres_pod
   changed_when: false
 
-- name: Terminate AWX PostgreSQL connections before restore
+- name: Terminate Capstan PostgreSQL connections before restore
   ansible.builtin.command:
     cmd: >-
       {{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }}
@@ -85,7 +85,7 @@
       -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{{ awx_postgres_database }}' AND pid <> pg_backend_pid();"
   changed_when: true
 
-- name: Restore AWX PostgreSQL database into Kubernetes
+- name: Restore Capstan PostgreSQL database into Kubernetes
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -96,13 +96,13 @@
     executable: /bin/bash
   changed_when: true
 
-- name: Check AWX Kubernetes project/media backup archive
+- name: Check Capstan Kubernetes project/media backup archive
   ansible.builtin.stat:
     path: "{{ awx_k8s_restore_path }}/data.tar.gz"
   register: awx_k8s_restore_data_archive
   when: awx_k8s_restore_data | bool
 
-- name: Remove stale AWX Kubernetes restore helper pod
+- name: Remove stale Capstan Kubernetes restore helper pod
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} delete pod {{ awx_k8s_restore_helper_pod }} --ignore-not-found=true"
   register: awx_k8s_restore_delete_helper
@@ -111,7 +111,7 @@
     - awx_k8s_restore_data | bool
     - awx_k8s_restore_data_archive.stat.size | default(0) > 128
 
-- name: Create AWX Kubernetes restore helper pod
+- name: Create Capstan Kubernetes restore helper pod
   ansible.builtin.shell:
     cmd: |
       cat <<'EOF' | {{ awx_k8s_restore_kubectl }} apply -f -
@@ -149,7 +149,7 @@
     - awx_k8s_restore_data | bool
     - awx_k8s_restore_data_archive.stat.size | default(0) > 128
 
-- name: Wait for AWX Kubernetes restore helper pod
+- name: Wait for Capstan Kubernetes restore helper pod
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} wait --for=condition=Ready pod/{{ awx_k8s_restore_helper_pod }} --timeout=180s"
   changed_when: false
@@ -157,7 +157,7 @@
     - awx_k8s_restore_data | bool
     - awx_k8s_restore_data_archive.stat.size | default(0) > 128
 
-- name: Restore AWX Kubernetes projects and media PVC data
+- name: Restore Capstan Kubernetes projects and media PVC data
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -171,7 +171,7 @@
     - awx_k8s_restore_data | bool
     - awx_k8s_restore_data_archive.stat.size | default(0) > 128
 
-- name: Remove AWX Kubernetes restore helper pod after data restore
+- name: Remove Capstan Kubernetes restore helper pod after data restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} delete pod {{ awx_k8s_restore_helper_pod }} --ignore-not-found=true"
   register: awx_k8s_restore_cleanup_helper
@@ -180,7 +180,7 @@
     - awx_k8s_restore_data | bool
     - awx_k8s_restore_data_archive.stat.size | default(0) > 128
 
-- name: Scale AWX application deployments up after Kubernetes restore
+- name: Scale Capstan application deployments up after Kubernetes restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} scale deployment/{{ item.name }} --replicas={{ item.replicas }}"
   loop:
@@ -192,13 +192,13 @@
   changed_when: "'scaled' in awx_k8s_restore_scale_up.stdout"
   when: awx_k8s_restore_start_after_restore | bool
 
-- name: Wait for AWX web deployment after Kubernetes restore
+- name: Wait for Capstan web deployment after Kubernetes restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-web --timeout=300s"
   changed_when: false
   when: awx_k8s_restore_start_after_restore | bool
 
-- name: Wait for AWX task deployment after Kubernetes restore
+- name: Wait for Capstan task deployment after Kubernetes restore
   ansible.builtin.command:
     cmd: "{{ awx_k8s_restore_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-task --timeout=300s"
   changed_when: false

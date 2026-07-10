@@ -175,7 +175,7 @@
     - awx_quay_admin_password | length > 0
   no_log: true
 
-- name: Read Project Quay AWX token secret
+- name: Read Project Quay Capstan token secret
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} get secret {{ awx_quay_token_secret_name }}"
   register: awx_quay_awx_token_secret
@@ -184,7 +184,7 @@
   when: awx_quay_token_secret_name | length > 0
   no_log: true
 
-- name: Resolve supplied Project Quay AWX tokens
+- name: Resolve supplied Project Quay Capstan tokens
   ansible.builtin.set_fact:
     awx_quay_supplied_api_token: "{{ awx_quay_api_token if awx_quay_api_token | length > 0 else awx_quay_push_token }}"
     awx_quay_supplied_push_username: "{{ awx_quay_push_username if awx_quay_push_username | length > 0 else awx_quay_admin_user }}"
@@ -194,7 +194,7 @@
     - (awx_quay_api_token | length > 0) or (awx_quay_push_token | length > 0)
   no_log: true
 
-- name: Store supplied Project Quay AWX tokens
+- name: Store supplied Project Quay Capstan tokens
   ansible.builtin.shell:
     cmd: >-
       {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} create secret generic {{ awx_quay_token_secret_name }}
@@ -211,7 +211,7 @@
     - awx_quay_supplied_push_token | default('') | length > 0
   no_log: true
 
-- name: Bootstrap Project Quay AWX app token
+- name: Bootstrap Project Quay Capstan app token
   ansible.builtin.shell:
     cmd: |
       {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} exec -i deployment/{{ awx_quay_name }} -- \
@@ -248,7 +248,7 @@
     - awx_quay_admin_password | length > 0
   no_log: true
 
-- name: Store bootstrapped Project Quay AWX token
+- name: Store bootstrapped Project Quay Capstan token
   ansible.builtin.shell:
     cmd: >-
       {{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} create secret generic {{ awx_quay_token_secret_name }}

@@ -1,5 +1,9 @@
 Dockerfile
 .git
+.codex
+.env
+cookies.txt
+tools/docker-compose/_sources
 awx/ui/build
 awx/ui/src/build
 awx/ui/src/node_modules

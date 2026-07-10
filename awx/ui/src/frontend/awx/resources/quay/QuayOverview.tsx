@@ -71,7 +71,7 @@ export function QuayOverview() {
       <PageDashboardCard
         id="quay-control-plane"
         title={t('Project Quay')}
-        subtitle={t('Container registry for AWX execution environment images')}
+        subtitle={t('Container registry for Capstan execution environment images')}
         width="full"
         linkText={t('Open settings')}
         to={settingsUrl}
@@ -99,7 +99,7 @@ export function QuayOverview() {
                 module="quay"
                 page={t('Project Quay overview')}
                 prompt={t(
-                  'Help me operate Project Quay for AWX execution environments. Use this registry status, namespace, repository counts, and AWX settings to explain what is configured, what is missing, and what I should do next.'
+                  'Help me operate Project Quay for Capstan execution environments. Use this registry status, namespace, repository counts, and Capstan settings to explain what is configured, what is missing, and what I should do next.'
                 )}
                 context={{
                   registry: data?.registry,
@@ -155,7 +155,7 @@ export function QuayOverview() {
                     {
                       label: t('Image push'),
                       value: data?.push_configured ? t('Ready') : t('Missing'),
-                      detail: t('Used by AWX build and push plans'),
+                      detail: t('Used by Capstan build and push plans'),
                     },
                   ]}
                 />
@@ -214,7 +214,9 @@ export function QuayOverview() {
                     <DescriptionListTerm>{t('Status')}</DescriptionListTerm>
                     <DescriptionListDescription>
                       {ready
-                        ? t('Project Quay is ready for AWX execution environment image workflows.')
+                        ? t(
+                            'Project Quay is ready for Capstan execution environment image workflows.'
+                          )
                         : data?.message || t('Complete Project Quay settings before use.')}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
@@ -228,7 +230,7 @@ export function QuayOverview() {
       <PageDashboardCard
         id="quay-workflows"
         title={t('Registry workspace')}
-        subtitle={t('Build, govern, and use execution environment images from AWX')}
+        subtitle={t('Build, govern, and use execution environment images from Capstan')}
         width="full"
       >
         <CardBody>
@@ -236,17 +238,17 @@ export function QuayOverview() {
             groups={[
               {
                 title: t('Operate images'),
-                description: t('Inventory and build paths used by AWX execution environments.'),
+                description: t('Inventory and build paths used by Capstan execution environments.'),
                 links: [
                   {
                     to: repositoriesUrl,
                     label: t('Repositories'),
-                    description: t('Inspect repositories visible to AWX.'),
+                    description: t('Inspect repositories visible to Capstan.'),
                   },
                   {
                     to: imagesUrl,
                     label: t('EE Build Templates'),
-                    description: t('Build and push images from an AWX Project checkout.'),
+                    description: t('Build and push images from a Capstan Project checkout.'),
                   },
                 ],
               },

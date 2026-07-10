@@ -185,13 +185,15 @@ export function QuayRobots() {
     <PageLayout>
       <PageHeader
         title={t('Robot Accounts')}
-        description={t('Manage Project Quay robot accounts used by AWX to push and pull images.')}
+        description={t(
+          'Manage Project Quay robot accounts used by Capstan to push and pull images.'
+        )}
         headerActions={
           <ModuleAIAssistantAction
             module="quay"
             page={t('Project Quay robot accounts')}
             prompt={t(
-              'Help me manage Project Quay robot accounts for AWX execution environment image workflows. Explain which robots should be used for push credentials and repository permissions.'
+              'Help me manage Project Quay robot accounts for Capstan execution environment image workflows. Explain which robots should be used for push credentials and repository permissions.'
             )}
             context={{
               namespace_kind: namespaceKind,
@@ -219,7 +221,7 @@ export function QuayRobots() {
               title={t('Project Quay robot management needs an API token.')}
             >
               {t(
-                'Configure QUAY_API_TOKEN with user:admin or org:admin scope before managing robot accounts from AWX.'
+                'Configure QUAY_API_TOKEN with user:admin or org:admin scope before managing robot accounts from Capstan.'
               )}
             </Alert>
           ) : null}

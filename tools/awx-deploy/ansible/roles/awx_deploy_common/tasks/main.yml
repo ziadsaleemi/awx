@@ -38,7 +38,7 @@
     - awx_deploy_method in ['server', 'k3s', 'k8s']
   no_log: true
 
-- name: Create AWX server directories
+- name: Create Capstan server directories
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -103,7 +103,7 @@
       mode: "0775"
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
-- name: Check existing AWX secret key
+- name: Check existing Capstan secret key
   ansible.builtin.stat:
     path: "{{ awx_server_config_dir }}/SECRET_KEY"
   register: awx_secret_key_stat
@@ -111,7 +111,7 @@
   run_once: true
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
-- name: Generate AWX secret key
+- name: Generate Capstan secret key
   ansible.builtin.command:
     cmd: openssl rand -base64 32
   register: awx_generated_secret_key
@@ -123,7 +123,7 @@
     - not awx_secret_key_stat.stat.exists
   no_log: true
 
-- name: Persist AWX secret key
+- name: Persist Capstan secret key
   ansible.builtin.copy:
     dest: "{{ awx_server_config_dir }}/SECRET_KEY"
     content: "{{ awx_generated_secret_key.stdout }}\n"
@@ -137,7 +137,7 @@
     - not awx_secret_key_stat.stat.exists
   no_log: true
 
-- name: Read cluster AWX secret key
+- name: Read cluster Capstan secret key
   ansible.builtin.slurp:
     src: "{{ awx_server_config_dir }}/SECRET_KEY"
   register: awx_cluster_secret_key
@@ -146,7 +146,7 @@
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
   no_log: true
 
-- name: Sync cluster AWX secret key
+- name: Sync cluster Capstan secret key
   ansible.builtin.copy:
     dest: "{{ awx_server_config_dir }}/SECRET_KEY"
     content: "{{ awx_cluster_secret_key.content | b64decode }}"
@@ -156,7 +156,7 @@
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
   no_log: true
 
-- name: Check existing AWX system UUID
+- name: Check existing Capstan system UUID
   ansible.builtin.stat:
     path: "{{ awx_server_config_dir }}/SYSTEM_UUID"
   register: awx_system_uuid_stat
@@ -164,7 +164,7 @@
   run_once: true
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
-- name: Generate AWX system UUID
+- name: Generate Capstan system UUID
   ansible.builtin.command:
     cmd: python3 -c 'import uuid; print(uuid.uuid4())'
   register: awx_generated_system_uuid
@@ -175,7 +175,7 @@
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_system_uuid_stat.stat.exists
 
-- name: Persist AWX system UUID
+- name: Persist Capstan system UUID
   ansible.builtin.copy:
     dest: "{{ awx_server_config_dir }}/SYSTEM_UUID"
     content: "{{ awx_generated_system_uuid.stdout }}\n"
@@ -188,7 +188,7 @@
     - inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
     - not awx_system_uuid_stat.stat.exists
 
-- name: Read cluster AWX system UUID
+- name: Read cluster Capstan system UUID
   ansible.builtin.slurp:
     src: "{{ awx_server_config_dir }}/SYSTEM_UUID"
   register: awx_cluster_system_uuid
@@ -196,7 +196,7 @@
   run_once: true
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
-- name: Sync cluster AWX system UUID
+- name: Sync cluster Capstan system UUID
   ansible.builtin.copy:
     dest: "{{ awx_server_config_dir }}/SYSTEM_UUID"
     content: "{{ awx_cluster_system_uuid.content | b64decode }}"
@@ -205,7 +205,7 @@
     mode: "0644"
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
 
-- name: Render AWX settings
+- name: Render Capstan settings
   ansible.builtin.template:
     src: settings.py.j2
     dest: "{{ awx_server_config_dir }}/settings.py"
@@ -215,7 +215,7 @@
   when: inventory_hostname in (groups.get('awx_server_nodes', []) | default([]))
   no_log: true
 
-- name: Render AWX nginx config
+- name: Render Capstan nginx config
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ awx_server_config_dir }}/{{ item.dest }}"

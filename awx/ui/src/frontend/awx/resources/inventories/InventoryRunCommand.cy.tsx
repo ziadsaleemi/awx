@@ -76,7 +76,7 @@ describe('Run command wizard', () => {
     cy.getByDataCy('become_enabled').click();
     cy.get('.view-line').type('test: "test"');
     cy.clickButton(/^Next$/);
-    cy.singleSelectByDataCy('executionEnvironment', 'AWX EE (latest)');
+    cy.singleSelectByDataCy('executionEnvironment', 'Capstan EE (latest)');
     cy.clickButton(/^Next$/);
     cy.selectSingleSelectOption('[data-cy="credential"]', 'Demo Credential');
 
@@ -92,6 +92,6 @@ describe('Run command wizard', () => {
     cy.getByDataCy('privilege-escalation').should('contain', 'On');
     cy.getByDataCy('code-block-value').should('contain', 'test: test');
     cy.getByDataCy('credentials').should('contain', 'Demo Credential');
-    cy.getByDataCy('execution-environment').should('contain', 'AWX EE (latest)');
+    cy.getByDataCy('execution-environment').should('contain', 'Capstan EE (latest)');
   });
 });

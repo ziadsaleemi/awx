@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run AWX Deploy smoke checks and lifecycle evidence verification.
+"""Run Capstan Deploy smoke checks and lifecycle evidence verification.
 
 This wrapper keeps live drill proof repeatable: it runs the content-service and
 EDA smoke scripts, writes a portable evidence manifest, then invokes the
@@ -44,22 +44,22 @@ def timestamp() -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description='Run AWX Deploy smoke checks and lifecycle evidence verification.')
+    parser = argparse.ArgumentParser(description='Run Capstan Deploy smoke checks and lifecycle evidence verification.')
     parser.add_argument(
         '--url',
         action='append',
         dest='urls',
-        help='AWX base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.',
+        help='Capstan base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.',
     )
     parser.add_argument(
         '--username',
         default=os.environ.get('AWX_USERNAME', 'admin'),
-        help='AWX admin username. Defaults to AWX_USERNAME or admin.',
+        help='Capstan admin username. Defaults to AWX_USERNAME or admin.',
     )
     parser.add_argument(
         '--password',
         default=os.environ.get('AWX_PASSWORD'),
-        help='AWX admin password. Defaults to AWX_PASSWORD.',
+        help='Capstan admin password. Defaults to AWX_PASSWORD.',
     )
     parser.add_argument(
         '--verify-tls',
@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--skip-content-smoke',
         action='store_true',
-        help='Do not run the AWX/Galaxy NG/Project Quay smoke check.',
+        help='Do not run the Capstan/Galaxy NG/Project Quay smoke check.',
     )
     parser.add_argument(
         '--skip-eda-smoke',
@@ -110,13 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
         '--allow-galaxy-unconfigured',
         action='store_true',
         default=env_bool('GALAXY_NG_ALLOW_UNCONFIGURED', False),
-        help='Do not fail when Galaxy NG is disabled or unconfigured in AWX.',
+        help='Do not fail when Galaxy NG is disabled or unconfigured in Capstan.',
     )
     parser.add_argument(
         '--allow-quay-unconfigured',
         action='store_true',
         default=env_bool('QUAY_ALLOW_UNCONFIGURED', False),
-        help='Do not fail when Project Quay is disabled or unconfigured in AWX.',
+        help='Do not fail when Project Quay is disabled or unconfigured in Capstan.',
     )
     parser.add_argument(
         '--allow-eda-unconfigured',
@@ -124,8 +124,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=env_bool('EDA_ALLOW_UNCONFIGURED', False),
         help='Do not fail when /api/v2/eda/status/ reports unconfigured.',
     )
-    parser.add_argument('--galaxy-url', default=os.environ.get('GALAXY_NG_URL'), help='Optional direct Galaxy NG base URL to check outside AWX.')
-    parser.add_argument('--quay-url', default=os.environ.get('QUAY_URL'), help='Optional direct Project Quay base URL to check outside AWX.')
+    parser.add_argument('--galaxy-url', default=os.environ.get('GALAXY_NG_URL'), help='Optional direct Galaxy NG base URL to check outside Capstan.')
+    parser.add_argument('--quay-url', default=os.environ.get('QUAY_URL'), help='Optional direct Project Quay base URL to check outside Capstan.')
     return parser
 
 
@@ -135,7 +135,7 @@ def normalize_urls(args: argparse.Namespace) -> list[str]:
         urls = [os.environ['AWX_URL']]
     normalized = [url.rstrip('/') for url in urls if url.strip()]
     if not normalized:
-        raise EvidenceRunnerFailure('Provide at least one AWX URL with --url, AWX_URLS, or AWX_URL.')
+        raise EvidenceRunnerFailure('Provide at least one Capstan URL with --url, AWX_URLS, or AWX_URL.')
     return normalized
 
 
@@ -248,7 +248,7 @@ def verify_manifest(args: argparse.Namespace, manifest_path: Path, directory: Pa
 def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     runs_smoke = not args.skip_content_smoke or not args.skip_eda_smoke
     if runs_smoke and not args.password:
-        parser.error('AWX admin password is required via --password or AWX_PASSWORD when smoke checks run.')
+        parser.error('Capstan admin password is required via --password or AWX_PASSWORD when smoke checks run.')
     if args.skip_content_smoke and args.skip_eda_smoke and not args.artifact:
         parser.error('Provide --artifact when both smoke checks are skipped.')
 

@@ -291,7 +291,7 @@ function TerraformTemplateFormInputs() {
       <PageFormInventorySelect<TerraformTemplateFormValues>
         name="target_inventory"
         labelHelp={t(
-          'Optional. After a successful apply, AWX will read Terraform output variables and register hosts named "host_ip_*" into this inventory.'
+          'Optional. After a successful apply, Capstan will read Terraform output variables and register hosts named "host_ip_*" into this inventory.'
         )}
         additionalControls={
           <PageFormCheckbox label={t('Prompt on launch')} name="ask_inventory_on_launch" />

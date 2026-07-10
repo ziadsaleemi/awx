@@ -41,8 +41,13 @@ import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotificati
 
 const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
 const CUSTOM_LOGO_KEY = 'awx-custom-logo';
-const BLANK_BRAND_IMAGE =
-  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"%3E%3C/svg%3E';
+const STATIC_BRAND_LOGO = '/static/media/brand-logo.png';
+
+function imageType(logo: string) {
+  return logo.startsWith('data:image/png') || logo.endsWith('.png')
+    ? 'image/png'
+    : 'image/svg+xml';
+}
 
 function getCachedCustomLogo() {
   if (typeof window === 'undefined') {
@@ -76,11 +81,7 @@ function applyCustomFavicon(logo: string) {
   );
   iconLinks.forEach((link) => {
     link.href = logo;
-    if (logo.startsWith('data:image/png')) {
-      link.type = 'image/png';
-    } else if (logo.startsWith('data:image/svg')) {
-      link.type = 'image/svg+xml';
-    }
+    link.type = imageType(logo);
   });
 
   const manifestLink = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
@@ -92,8 +93,8 @@ function applyCustomFavicon(logo: string) {
     new Blob(
       [
         JSON.stringify({
-          name: 'AWX',
-          short_name: 'AWX',
+          name: 'Capstan',
+          short_name: 'Capstan',
           start_url: '/',
           display: 'standalone',
           background_color: '#000000',
@@ -102,7 +103,7 @@ function applyCustomFavicon(logo: string) {
             {
               src: logo,
               sizes: 'any',
-              type: logo.startsWith('data:image/png') ? 'image/png' : 'image/svg+xml',
+              type: imageType(logo),
             },
           ],
         }),
@@ -154,7 +155,7 @@ export function AwxMasthead() {
     config?.custom_logo && config.custom_logo.startsWith('data:image/')
       ? config.custom_logo
       : undefined;
-  const brandLogoSrc = customLogoSrc ?? cachedCustomLogo;
+  const brandLogoSrc = customLogoSrc ?? cachedCustomLogo ?? STATIC_BRAND_LOGO;
 
   useEffect(() => {
     if (customLogoSrc) {
@@ -173,13 +174,8 @@ export function AwxMasthead() {
     return applyCustomFavicon(brandLogoSrc);
   }, [brandLogoSrc]);
 
-  const brandElement = brandLogoSrc ? (
-    <Brand src={brandLogoSrc} alt={t('Custom logo')} style={{ height: logoHeight }} />
-  ) : (
-    <span
-      aria-hidden="true"
-      style={{ display: 'inline-block', height: logoHeight, width: logoHeight }}
-    />
+  const brandElement = (
+    <Brand src={brandLogoSrc} alt={t('Capstan logo')} style={{ height: logoHeight }} />
   );
 
   return (
@@ -249,7 +245,20 @@ export function AwxMasthead() {
               <DropdownItem
                 id="about"
                 onClick={() =>
-                  openAnsibleAboutModal({ brandImageSrc: brandLogoSrc ?? BLANK_BRAND_IMAGE })
+                  openAnsibleAboutModal({
+                    brandImageSrc: brandLogoSrc,
+                    productName: t('Capstan'),
+                    moduleVersionEndpoints: [
+                      { label: t('OPA'), url: awxAPI`/opa/policies/?include_version=1` },
+                      {
+                        label: t('Gatekeeper'),
+                        url: awxAPI`/opa/gatekeeper/?include_version=1`,
+                      },
+                      { label: t('EDA Controller'), url: awxAPI`/eda/status/?include_version=1` },
+                      { label: t('Galaxy NG'), url: awxAPI`/galaxy_ng/status/?include_version=1` },
+                      { label: t('Project Quay'), url: awxAPI`/quay/status/?include_version=1` },
+                    ],
+                  })
                 }
                 data-cy="masthead-about"
               >

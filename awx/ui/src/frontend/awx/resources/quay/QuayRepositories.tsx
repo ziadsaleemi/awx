@@ -679,7 +679,7 @@ function QuayRepositoryBuildsTab(props: {
             <Alert
               isInline
               variant="warning"
-              title={t('Project Quay push credentials are required to run builds from AWX.')}
+              title={t('Project Quay push credentials are required to run builds from Capstan.')}
             >
               {t('Configure QUAY_PUSH_USERNAME and QUAY_PUSH_TOKEN before launching builds.')}
             </Alert>
@@ -698,7 +698,7 @@ function QuayRepositoryBuildsTab(props: {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
               }}
             >
-              <FormGroup label={t('AWX Project')} fieldId="quay-build-project" isRequired>
+              <FormGroup label={t('Capstan Project')} fieldId="quay-build-project" isRequired>
                 <FormSelect
                   id="quay-build-project"
                   value={selectedProjectId}
@@ -1019,7 +1019,7 @@ function QuayRepositoryConsole(props: {
             </Button>
           }
         >
-          {t('Create or push an execution environment image repository to manage it from AWX.')}
+          {t('Create or push an execution environment image repository to manage it from Capstan.')}
         </Alert>
       </PageSection>
     );
@@ -1080,7 +1080,7 @@ function QuayRepositoryConsole(props: {
           <PageDetail label={t('Last modified')}>
             <DateTimeCell value={lastModified(repository)} />
           </PageDetail>
-          <PageDetail label={t('Managed from AWX')}>
+          <PageDetail label={t('Managed from Capstan')}>
             {props.statusData?.management_configured ? t('Yes') : t('No')}
           </PageDetail>
           <PageDetail label={t('Image value')} fullWidth>
@@ -1145,7 +1145,7 @@ function QuayRepositoryConsole(props: {
               <DateTimeCell value={latestTagTimestamp} />
             </PageDetail>
             <PageDetail label={t('Usage log source')}>
-              {t('Project Quay usage logs are not exposed by the current AWX API.')}
+              {t('Project Quay usage logs are not exposed by the current Capstan API.')}
             </PageDetail>
           </PageDetails>
           <PageSection variant="light">
@@ -1153,7 +1153,7 @@ function QuayRepositoryConsole(props: {
               <StackItem>
                 <Alert isInline variant="info" title={t('Usage logs need Quay event data')}>
                   {t(
-                    'AWX can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
+                    'Capstan can show repository and tag state now. Pull/push usage charts and event export need a dedicated Quay usage-log endpoint before they can be rendered with real data.'
                   )}
                 </Alert>
               </StackItem>
@@ -1206,7 +1206,7 @@ function QuayRepositoryConsole(props: {
                     }
                   >
                     {t(
-                      'Configure QUAY_API_TOKEN with repo:admin scope before managing repository permissions from AWX.'
+                      'Configure QUAY_API_TOKEN with repo:admin scope before managing repository permissions from Capstan.'
                     )}
                   </Alert>
                 </StackItem>
@@ -1355,7 +1355,7 @@ function QuayRepositoryConsole(props: {
               }
             >
               {t(
-                'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from AWX.'
+                'Deleting a repository removes the hosted image tags from Project Quay. This action cannot be undone from Capstan.'
               )}
             </Alert>
           </PageSection>
@@ -1584,7 +1584,7 @@ export function QuayRepositoryDetails() {
                   module="quay"
                   page={t('Project Quay repository details')}
                   prompt={t(
-                    'Review this Project Quay repository for AWX execution environment use. Explain tag health, pull commands, visibility, repository settings, and any cleanup or access risks.'
+                    'Review this Project Quay repository for Capstan execution environment use. Explain tag health, pull commands, visibility, repository settings, and any cleanup or access risks.'
                   )}
                   context={{
                     namespace: repository.namespace || defaultNamespace,
@@ -1905,13 +1905,13 @@ export function QuayRepositories() {
     <PageLayout>
       <PageHeader
         title={t('Repositories')}
-        description={t('Project Quay repositories visible to AWX for execution environments.')}
+        description={t('Project Quay repositories visible to Capstan for execution environments.')}
         headerActions={
           <ModuleAIAssistantAction
             module="quay"
             page={t('Project Quay repositories')}
             prompt={t(
-              'Help me review Project Quay repositories for AWX execution environment images. Explain whether repository names, namespaces, and visibility look correct for AWX usage.'
+              'Help me review Project Quay repositories for Capstan execution environment images. Explain whether repository names, namespaces, and visibility look correct for Capstan usage.'
             )}
             context={{
               namespace: statusData?.namespace,
@@ -1952,7 +1952,7 @@ export function QuayRepositories() {
           style={{ margin: '0 24px 16px' }}
         >
           {t(
-            'Configure QUAY_API_TOKEN with repo:read, repo:create, repo:write, and repo:admin scopes before creating, editing, or deleting repositories from AWX.'
+            'Configure QUAY_API_TOKEN with repo:read, repo:create, repo:write, and repo:admin scopes before creating, editing, or deleting repositories from Capstan.'
           )}
         </Alert>
       ) : null}

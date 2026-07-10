@@ -1,5 +1,5 @@
 ---
-- name: Resolve kubectl command for AWX Kubernetes backup
+- name: Resolve kubectl command for Capstan Kubernetes backup
   ansible.builtin.set_fact:
     awx_k8s_backup_kubectl: >-
       {{ awx_k8s_kubectl_binary }}{% if awx_k8s_kubeconfig | length > 0 %} --kubeconfig {{ awx_k8s_kubeconfig }}{% endif %}
@@ -21,19 +21,19 @@
     group: root
     mode: "0700"
 
-- name: Resolve AWX PostgreSQL pod
+- name: Resolve Capstan PostgreSQL pod
   ansible.builtin.command:
     cmd: "{{ awx_k8s_backup_kubectl }} -n {{ awx_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_k8s_name }}-postgres -o jsonpath='{.items[0].metadata.name}'"
   register: awx_k8s_backup_postgres_pod
   changed_when: false
 
-- name: Validate AWX PostgreSQL pod
+- name: Validate Capstan PostgreSQL pod
   ansible.builtin.assert:
     that:
       - awx_k8s_backup_postgres_pod.stdout | length > 0
     fail_msg: "No {{ awx_k8s_name }}-postgres pod found in namespace {{ awx_k8s_namespace }}."
 
-- name: Dump AWX PostgreSQL database from Kubernetes
+- name: Dump Capstan PostgreSQL database from Kubernetes
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -44,7 +44,7 @@
     executable: /bin/bash
   changed_when: true
 
-- name: Export AWX Kubernetes secrets
+- name: Export Capstan Kubernetes secrets
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -55,7 +55,7 @@
     executable: /bin/bash
   changed_when: true
 
-- name: Export AWX Kubernetes config maps
+- name: Export Capstan Kubernetes config maps
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -66,7 +66,7 @@
     executable: /bin/bash
   changed_when: true
 
-- name: Export AWX Kubernetes resource inventory
+- name: Export Capstan Kubernetes resource inventory
   ansible.builtin.shell:
     cmd: >-
       {{ awx_k8s_backup_kubectl }} -n {{ awx_k8s_namespace }}
@@ -76,14 +76,14 @@
   changed_when: true
   failed_when: false
 
-- name: Resolve AWX web pod for project/media backup
+- name: Resolve Capstan web pod for project/media backup
   ansible.builtin.command:
     cmd: "{{ awx_k8s_backup_kubectl }} -n {{ awx_k8s_namespace }} get pod -l app.kubernetes.io/name={{ awx_k8s_name }}-web -o jsonpath='{.items[0].metadata.name}'"
   register: awx_k8s_backup_web_pod
   changed_when: false
   when: awx_k8s_backup_collect_projects | bool
 
-- name: Archive AWX Kubernetes projects and media PVC data
+- name: Archive Capstan Kubernetes projects and media PVC data
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
@@ -97,7 +97,7 @@
     - awx_k8s_backup_collect_projects | bool
     - awx_k8s_backup_web_pod.stdout | length > 0
 
-- name: Write AWX Kubernetes backup manifest
+- name: Write Capstan Kubernetes backup manifest
   ansible.builtin.copy:
     dest: "{{ awx_k8s_backup_path }}/manifest-{{ inventory_hostname }}.yml"
     owner: root

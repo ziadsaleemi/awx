@@ -66,7 +66,7 @@ from ansible_base.lib.workload_identity.controller import AutomationControllerJo
 # flags
 from flags.state import flag_enabled
 
-# AWX
+# Capstan
 from awx.main.utils.workload_identity import retrieve_workload_identity_jwt_with_claims
 from awx.main.tasks.system import send_notifications, update_inventory_computed_fields
 from awx.main.access import get_user_queryset
@@ -397,7 +397,7 @@ class DashboardJobsGraphView(APIView):
 
 class InstanceList(ListCreateAPIView):
     """
-    Creates an instance if used on a Kubernetes or OpenShift deployment of Ansible Automation Platform.
+    Creates an instance if used on a Kubernetes or OpenShift deployment of Capstan.
     """
 
     name = _("Instances")
@@ -1720,7 +1720,7 @@ class OIDCCredentialTestMixin:
     def _decode_jwt_payload_for_display(jwt_token):
         """Decode JWT payload for display purposes only (signature not verified).
 
-        This is safe because the JWT was just created by AWX and is only decoded
+        This is safe because the JWT was just created by Capstan and is only decoded
         to show the user what claims are being sent to the external system.
         The external system will perform proper signature verification.
 
@@ -5777,7 +5777,7 @@ class CatalogItemDeploy(GenericAPIView):
         target_provider = request.data.get('target_provider', None)
 
         # Inject per-provider inventory/group config into extra_vars so workflow
-        # nodes (e.g. Configure VM) can target the correct AWX inventory and group.
+        # nodes (e.g. Configure VM) can target the correct Capstan inventory and group.
         if target_provider and item.provider_field_configs:
             pfc = item.provider_field_configs.get(target_provider, {})
             catalog_target_inventory = pfc.get('target_inventory', '')
@@ -6311,7 +6311,7 @@ class CloudProviderStateDetail(GenericAPIView):
         return Response(serializer.data)
 
 
-_CLOUD_INVENTORY_AI_SYSTEM_PROMPT = """You are an AWX inventory generation expert.
+_CLOUD_INVENTORY_AI_SYSTEM_PROMPT = """You are a Capstan inventory generation expert.
 Convert cloud provider resource metadata into a valid Ansible inventory in INI format.
 Group resources by provider, location, resource group, cluster, node, and status when useful.
 Use safe group names and safe variable names.
@@ -6393,7 +6393,7 @@ class CloudProviderInventorySuggestions(GenericAPIView):
     """
     POST /api/v2/catalog_cloud/provider_state/<provider_id>/inventory_suggestions/
 
-    Builds an AWX static-inventory suggestion from org-scoped pulled cloud
+    Builds a Capstan static-inventory suggestion from org-scoped pulled cloud
     provider state. When the AI assistant is configured, the deterministic
     inventory is refined through the configured model provider; otherwise the
     deterministic plan is returned.

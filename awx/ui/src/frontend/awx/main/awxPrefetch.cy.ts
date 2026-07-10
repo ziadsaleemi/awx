@@ -31,7 +31,7 @@ describe('awxPrefetch', () => {
     expect(adminUrls.length).to.be.greaterThan(coreUrls.length);
   });
 
-  it('uses the configured AWX API path', () => {
+  it('uses the configured Capstan API path', () => {
     setAwxApiPath('/gateway/api/v2');
 
     expect(getAwxPrefetchUrls()).to.include('/gateway/api/v2/hosts/?page_size=1');

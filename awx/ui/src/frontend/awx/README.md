@@ -1,3 +1,3 @@
-# AWX
+# Capstan
 
-The AWX user interface.
+The Capstan user interface.

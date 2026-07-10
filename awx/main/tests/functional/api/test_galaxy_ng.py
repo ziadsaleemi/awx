@@ -23,6 +23,8 @@ def test_galaxy_ng_status_reports_module_disabled(get, admin_user):
     assert response.data['configured'] is False
     assert response.data['status'] == 'disabled'
     assert response.data['server_url'] == ''
+    assert response.data['version'] == ''
+    assert response.data['component_versions'] == {}
     assert response.data['settings_url'].endswith('/api/v2/settings/galaxy-ng/')
 
 
@@ -93,6 +95,8 @@ def test_galaxy_ng_status_reads_live_counts(get, admin_user, mocker):
         'collection_approvals': 7,
         'tasks': 8,
     }
+    assert response.data['version'] == ''
+    assert response.data['component_versions'] == {}
     assert response.data['controller_error'] == ''
     assert request_mock.call_count == 9
     first_call = request_mock.call_args_list[0]
@@ -129,6 +133,48 @@ def test_galaxy_ng_status_caches_live_counts(get, admin_user, mocker):
 
     assert first_response.data['counts']['collections'] == 5
     assert second_response.data['counts']['collections'] == 5
+    assert request_mock.call_count == 9
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_status_exposes_component_versions_for_about_modal(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        side_effect=[
+            galaxy_response(
+                mocker,
+                {
+                    'database_connection': {'connected': True},
+                    'versions': [
+                        {'component': 'pulpcore', 'version': '3.63.0'},
+                        {'component': 'galaxy_ng', 'version': '4.10.0'},
+                    ],
+                },
+            ),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+            galaxy_response(mocker, {'count': 0, 'results': []}),
+        ],
+    )
+
+    response = get(reverse('api:galaxy_ng_status') + '?refresh=1', user=admin_user, expect=200)
+
+    assert response.data['configured'] is True
+    assert response.data['version'] == '4.10.0'
+    assert response.data['component_versions'] == {
+        'pulpcore': '3.63.0',
+        'galaxy_ng': '4.10.0',
+    }
     assert request_mock.call_count == 9
 
 

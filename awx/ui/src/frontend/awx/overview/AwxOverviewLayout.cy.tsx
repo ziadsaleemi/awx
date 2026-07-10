@@ -179,7 +179,7 @@ describe('AwxOverview layout', () => {
       </PageDashboard>
     );
 
-    cy.contains('Control hub signals').should('be.visible');
+    cy.contains('Capstan signals').should('be.visible');
     cy.getByDataCy('control-hub-signals-chart').should('be.visible');
     cy.getByDataCy('control-hub-signals-table').should('be.visible');
     cy.getByDataCy('control-hub-signals-row').should('have.length', 6);

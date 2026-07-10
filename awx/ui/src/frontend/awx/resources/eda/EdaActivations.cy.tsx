@@ -890,7 +890,7 @@ describe('EdaActivations', () => {
     cy.contains('Resource JSON').should('not.exist');
     cy.wait('@credentialTypes');
     cy.get('#eda-credential-name').type('Controller API');
-    cy.get('#eda-credential-description').type('AWX controller access for EDA');
+    cy.get('#eda-credential-description').type('Capstan controller access for EDA');
     cy.get('#eda-credential-type').select('20');
     cy.get('#eda-credential-input-host').type('https://awx.example.test');
     cy.get('#eda-credential-input-username').type('admin');
@@ -901,7 +901,7 @@ describe('EdaActivations', () => {
       .its('request.body')
       .then((body: Record<string, unknown>) => {
         expect(body.name).to.equal('Controller API');
-        expect(body.description).to.equal('AWX controller access for EDA');
+        expect(body.description).to.equal('Capstan controller access for EDA');
         expect(body.credential_type_id).to.equal(20);
         expect(body.inputs).to.deep.equal({
           host: 'https://awx.example.test',

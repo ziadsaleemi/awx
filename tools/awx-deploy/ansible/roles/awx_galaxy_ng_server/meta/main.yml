@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   role_name: awx_galaxy_ng_server
-  author: AWX
+  author: Capstan
   description: Deploy Galaxy NG on a dedicated server VM.
   license: GPL-3.0-or-later
   min_ansible_version: "2.15"

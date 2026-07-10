@@ -1,7 +1,7 @@
 """
-MCP (Model Context Protocol) Server for AWX.
+MCP (Model Context Protocol) Server for Capstan.
 
-Exposes AWX resources as MCP tools so external AI agents (Claude Desktop,
+Exposes Capstan resources as MCP tools so external AI agents (Claude Desktop,
 Cursor, VS Code Copilot, etc.) can discover and invoke automation without
 custom integrations.
 
@@ -11,7 +11,7 @@ GET  /api/v2/mcp/manifest/   — MCP manifest (protocol discovery)
 GET  /api/v2/mcp/tools/      — List available MCP tools
 POST /api/v2/mcp/invoke/     — Invoke an MCP tool
 
-Authentication: AWX token or session (same as the rest of the v2 API).
+Authentication: Capstan token or session (same as the rest of the v2 API).
 Every MCP-initiated action is tagged activity-stream with source="mcp".
 Configured MCP policy context is returned with tool responses and included in
 OPA guardrail input for launch tools.
@@ -31,8 +31,8 @@ MCP Tool catalogue
 - list_catalog_deployments → GET /api/v2/catalog_deployments/
 - get_catalog_deployment   → GET /api/v2/catalog_deployments/<id>/
 - get_policy_context       → Retrieve configured MCP policy context
-- preview_resource_action  → Validate an AWX resource-authoring plan without saving
-- apply_resource_action    → Apply an explicit AWX resource-authoring plan
+- preview_resource_action  → Validate a Capstan resource-authoring plan without saving
+- apply_resource_action    → Apply an explicit Capstan resource-authoring plan
 """
 
 import hashlib
@@ -89,7 +89,7 @@ MCP_RESOURCE_ACTION_TYPES = (
 MCP_TOOLS = [
     {
         'name': 'list_job_templates',
-        'description': 'List all job templates in AWX. Returns name, id, description, and playbook.',
+        'description': 'List all job templates in Capstan. Returns name, id, description, and playbook.',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -136,7 +136,7 @@ MCP_TOOLS = [
     },
     {
         'name': 'list_inventories',
-        'description': 'List all inventories in AWX.',
+        'description': 'List all inventories in Capstan.',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -169,7 +169,7 @@ MCP_TOOLS = [
     },
     {
         'name': 'list_projects',
-        'description': 'List all projects (SCM repositories) in AWX.',
+        'description': 'List all projects (SCM repositories) in Capstan.',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -180,7 +180,7 @@ MCP_TOOLS = [
     },
     {
         'name': 'list_terraform_templates',
-        'description': 'List all Terraform job templates in AWX.',
+        'description': 'List all Terraform job templates in Capstan.',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -225,7 +225,7 @@ MCP_TOOLS = [
     },
     {
         'name': 'get_policy_context',
-        'description': 'Retrieve AWX policy and best-practice context relevant to a planned MCP action.',
+        'description': 'Retrieve Capstan policy and best-practice context relevant to a planned MCP action.',
         'inputSchema': {
             'type': 'object',
             'properties': {
@@ -237,7 +237,7 @@ MCP_TOOLS = [
     {
         'name': 'preview_resource_action',
         'description': (
-            'Validate a typed AWX resource-authoring plan without saving. Supports projects, playbooks/roles via '
+            'Validate a typed Capstan resource-authoring plan without saving. Supports projects, playbooks/roles via '
             'project_file, inventories, smart/constructed inventories, inventory sources, job templates, workflow '
             'templates, schedules, catalog items, role assignments, survey specs, and credential references.'
         ),
@@ -253,7 +253,7 @@ MCP_TOOLS = [
     {
         'name': 'apply_resource_action',
         'description': (
-            'Apply an explicit typed AWX resource-authoring plan using the same serializers, RBAC, OPA guardrails, '
+            'Apply an explicit typed Capstan resource-authoring plan using the same serializers, RBAC, OPA guardrails, '
             'Activity Stream audit, and rollback behavior as /api/v2/ai/resource_actions/. Use preview_resource_action first.'
         ),
         'inputSchema': {
@@ -1000,7 +1000,7 @@ class MCPManifestView(APIView):
             {
                 'protocolVersion': MCP_VERSION,
                 'serverInfo': {
-                    'name': 'AWX MCP Server',
+                    'name': 'Capstan MCP Server',
                     'version': '1.0.0',
                 },
                 'capabilities': {

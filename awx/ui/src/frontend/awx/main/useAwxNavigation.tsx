@@ -267,10 +267,10 @@ function policyModuleSubtitle(
   gatekeeperEnabled: boolean
 ) {
   if (opaEnabled && gatekeeperEnabled) {
-    return t('OPA and Kubernetes Gatekeeper');
+    return t('OPA and Gatekeeper');
   }
   if (gatekeeperEnabled) {
-    return t('Kubernetes Gatekeeper');
+    return t('Gatekeeper');
   }
   return t('OPA policy engine');
 }
@@ -361,7 +361,7 @@ export function useAwxNavigation() {
     {
       id: AwxRoute.Analytics,
       label: t('Analytics'),
-      subtitle: t('Insights and usage'),
+      subtitle: t('Metrics and usage'),
       path: 'analytics',
       icon: <ChartBarIcon />,
       children: [
@@ -722,7 +722,7 @@ export function useAwxNavigation() {
         },
         {
           id: AwxRoute.SettingsEda,
-          label: t('Event-Driven Ansible'),
+          label: t('Event Engine'),
           path: 'eda',
           children: [
             {
@@ -752,7 +752,7 @@ export function useAwxNavigation() {
         },
         {
           id: AwxRoute.SettingsQuay,
-          label: t('Project Quay'),
+          label: t('Quay'),
           path: 'quay',
           children: [
             {
@@ -871,7 +871,7 @@ export function useAwxNavigation() {
                 canManageQuay: capabilities.canManageQuay,
                 canAdminGalaxy: false,
               }),
-              t('Automation Hub'),
+              t('Collections'),
               t('Galaxy NG')
             ),
           ]
@@ -880,16 +880,16 @@ export function useAwxNavigation() {
         ? [
             withNavigationDetails(
               filterQuayRoutesByPermissions(awxQuayRoutes, capabilities.canManageQuay),
-              t('Project Quay'),
-              t('EE image registry')
+              t('Image Registry'),
+              t('Quay integration')
             ),
           ]
         : []),
     ];
     const automationContentGroup = pathlessNavigationGroup(
       AwxNavigationGroup.AutomationContent,
-      t('Automation Content'),
-      t('Catalog, hub, and registries'),
+      t('Content Foundry'),
+      t('Catalog, collections, images'),
       automationContentChildren
     );
     const cloudItems = [
@@ -900,8 +900,8 @@ export function useAwxNavigation() {
 
     const automationExecutionGroup = pathlessNavigationGroup(
       AwxNavigationGroup.AutomationExecution,
-      t('Automation Execution'),
-      t('Automation Controller'),
+      t('Run Operations'),
+      t('Jobs, templates, projects'),
       automationExecutionChildren
     );
 
@@ -917,7 +917,7 @@ export function useAwxNavigation() {
                 awxPolicyRoutesForModules,
                 capabilities.canManagePolicy
               ),
-              t('Policy as Code'),
+              t('Policy Guardrails'),
               policySubtitle
             ),
           ]
@@ -925,11 +925,7 @@ export function useAwxNavigation() {
       ...(moduleEdaEnabled && capabilities.canViewEda
         ? [
             {
-              ...withNavigationDetails(
-                awxEdaRoutes,
-                t('Automation Decisions'),
-                t('Event-Driven Ansible')
-              ),
+              ...withNavigationDetails(awxEdaRoutes, t('Event Engine'), t('Rulebooks and streams')),
               icon: <ProcessAutomationIcon />,
             },
           ]
@@ -945,8 +941,8 @@ export function useAwxNavigation() {
 
   const automationExecutionGroup = pathlessNavigationGroup(
     AwxNavigationGroup.AutomationExecution,
-    t('Automation Execution'),
-    t('Automation Controller'),
+    t('Run Operations'),
+    t('Jobs, templates, projects'),
     [
       awxJobsRoutes,
       awxTemplateRoutes,
@@ -962,8 +958,8 @@ export function useAwxNavigation() {
     ...(hasVisibleSidebarItem(automationExecutionGroup) ? [automationExecutionGroup] : []),
     pathlessNavigationGroup(
       AwxNavigationGroup.AutomationContent,
-      t('Automation Content'),
-      t('Catalog, hub, and registries'),
+      t('Content Foundry'),
+      t('Catalog, collections, images'),
       [
         withNavigationDetails(awxCatalogRoutes, t('Service Catalog'), t('Requestable automation')),
         ...(moduleGalaxyNgEnabled
@@ -976,7 +972,7 @@ export function useAwxNavigation() {
                       canAdminGalaxy: false,
                     })
                   : awxGalaxyRoutes,
-                t('Automation Hub'),
+                t('Collections'),
                 t('Galaxy NG')
               ),
             ]
@@ -987,8 +983,8 @@ export function useAwxNavigation() {
                 activeAwxUser?.is_system_auditor
                   ? filterQuayRoutesByPermissions(awxQuayRoutes, false)
                   : awxQuayRoutes,
-                t('Project Quay'),
-                t('EE image registry')
+                t('Image Registry'),
+                t('Quay integration')
               ),
             ]
           : []),
@@ -998,16 +994,12 @@ export function useAwxNavigation() {
       ? [withNavigationDetails(awxCloudRoutes, t('Cloud'), t('Provider connections'))]
       : []),
     ...(modulePolicyEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
-      ? [withNavigationDetails(awxPolicyRoutesForModules, t('Policy as Code'), policySubtitle)]
+      ? [withNavigationDetails(awxPolicyRoutesForModules, t('Policy Guardrails'), policySubtitle)]
       : []),
     ...(moduleEdaEnabled && (activeAwxUser?.is_superuser || activeAwxUser?.is_system_auditor)
       ? [
           {
-            ...withNavigationDetails(
-              awxEdaRoutes,
-              t('Automation Decisions'),
-              t('Event-Driven Ansible')
-            ),
+            ...withNavigationDetails(awxEdaRoutes, t('Event Engine'), t('Rulebooks and streams')),
             icon: <ProcessAutomationIcon />,
           },
         ]

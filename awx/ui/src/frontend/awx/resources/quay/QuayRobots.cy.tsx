@@ -48,7 +48,7 @@ const robots = {
       _awx_key: 'awx+builder',
       name: 'awx+builder',
       shortname: 'builder',
-      description: 'AWX image builder',
+      description: 'Capstan image builder',
       repositories: [{ name: 'custom-ee' }],
       created: '2026-06-29T10:00:00Z',
     },
@@ -91,7 +91,7 @@ describe('QuayRobots', () => {
     cy.contains('td', 'awx+builder').should('be.visible');
     cy.contains('button', 'Create robot').click();
     cy.get('#quay-robot-shortname').type('deployer');
-    cy.get('#quay-robot-description').type('AWX deployment image pusher');
+    cy.get('#quay-robot-description').type('Capstan deployment image pusher');
     cy.get('.pf-v5-c-modal-box').within(() => {
       cy.contains('button', 'Create robot').click();
     });
@@ -99,7 +99,7 @@ describe('QuayRobots', () => {
       namespace_kind: 'organization',
       namespace: 'awx',
       robot: 'deployer',
-      description: 'AWX deployment image pusher',
+      description: 'Capstan deployment image pusher',
     });
 
     cy.contains('button', 'Regenerate token').click();

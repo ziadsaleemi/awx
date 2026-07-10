@@ -19,7 +19,7 @@ export function Templates() {
         title={t('Templates')}
         titleHelpTitle={t('Templates')}
         titleHelp={t(
-          'Templates are reusable definitions for automation work. AWX supports Ansible job templates, workflow templates, Terraform templates, and Project Quay execution environment build templates.'
+          'Templates are reusable definitions for automation work. Capstan supports Ansible job templates, workflow templates, Terraform templates, and Project Quay execution environment build templates.'
         )}
         titleDocLink={useGetDocsUrl(config, 'templates')}
         description={t(

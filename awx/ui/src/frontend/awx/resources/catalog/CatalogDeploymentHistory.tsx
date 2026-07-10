@@ -74,7 +74,7 @@ function historyEntryDuration(entry: {
   return formatDuration(entry.created, entry.finished);
 }
 
-// ─── Workflow job topology preview (matches AWX workflow visualizer) ──────────
+// ─── Workflow job topology preview (matches Capstan workflow visualizer) ──────────
 
 function HistoryWorkflowTopology({ jobId }: { jobId: number }) {
   const { t } = useTranslation();

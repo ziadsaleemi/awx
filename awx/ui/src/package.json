@@ -1,14 +1,14 @@
 {
-  "name": "@ansible/ansible-ui",
-  "description": "Ansible UI",
-  "version": "25.1.7",
-  "author": "Red Hat",
+  "name": "@capstan/control-ui",
+  "description": "Capstan UI",
+  "version": "25.1.8",
+  "author": "Ziad Saleemi",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ansible/ansible-ui.git"
+    "url": "https://github.com/ziadsaleemi/awx.git"
   },
-  "homepage": "https://github.com/ansible/ansible-ui#readme",
+  "homepage": "https://github.com/ziadsaleemi/awx#readme",
   "scripts": {
     "start": "echo Usage: npm run [awx:hub:eda]",
     "awx": "UI_MODE=AWX webpack serve --mode development --config ./webpack/webpack.awx.cjs --port 4012 --no-open",

@@ -44,7 +44,7 @@ export function QuayImageBuildTemplateDetails() {
     <PageDetails>
       <PageDetail label={t('Name')}>{template.name}</PageDetail>
       <PageDetail label={t('Description')}>{template.description}</PageDetail>
-      <PageDetail label={t('AWX Project')} isEmpty={!project?.id}>
+      <PageDetail label={t('Capstan Project')} isEmpty={!project?.id}>
         {project?.id ? (
           <Link to={getPageUrl(AwxRoute.ProjectDetails, { params: { id: project.id } })}>
             {project.name}

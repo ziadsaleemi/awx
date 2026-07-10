@@ -55,6 +55,9 @@ def test_eda_status_reports_not_configured(get, admin_user):
     assert response.data['configured'] is False
     assert response.data['status'] == 'not_configured'
     assert response.data['controller_url'] == ''
+    assert response.data['version'] == ''
+    assert response.data['version_detail'] == {}
+    assert response.data['version_error'] == ''
     assert response.data['auth_configured'] is False
     assert response.data['settings_url'].endswith('/api/v2/settings/eda/')
     assert response.data['activations_url'].endswith('/api/v2/eda/activations/')
@@ -77,6 +80,25 @@ def test_eda_status_reports_configured_controller(get, admin_user):
     assert response.data['activation_events_api_path'] == '/api/eda/v1/activations/{activation_id}/events/'
     assert response.data['activation_poll_attempts'] == 1
     assert response.data['activation_poll_interval'] == 0
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test', EDA_AUTH_TOKEN='eda-token')
+def test_eda_status_can_include_version_for_about_modal(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, {'version': '2.6.1', 'build': {'sha': 'abc123'}}),
+    )
+
+    response = get(reverse('api:eda_status') + '?include_version=1', user=admin_user, expect=200)
+
+    assert response.data['configured'] is True
+    assert response.data['version'] == '2.6.1'
+    assert response.data['version_detail']['build']['sha'] == 'abc123'
+    assert response.data['version_error'] == ''
+    request_mock.assert_called_once()
+    assert request_mock.call_args.args[:2] == ('GET', 'https://eda.example.test/api/eda/v1/status/')
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
 
 
 @pytest.mark.django_db

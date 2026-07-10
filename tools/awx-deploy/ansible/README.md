@@ -1,19 +1,19 @@
-# AWX Deploy Roles
+# Capstan Deploy Roles
 
-This tree deploys this repository's AWX build. It does not merge or pull AWX
+This tree deploys this repository's Capstan build. It does not merge or pull Capstan
 application code from upstream.
 
 Supported paths:
 
 - `server`: containerized services on VMs, managed by systemd.
-- `k3s`: install k3s, then deploy AWX into the cluster.
-- `k8s`: deploy AWX into an existing Kubernetes cluster.
+- `k3s`: install k3s, then deploy Capstan into the cluster.
+- `k8s`: deploy Capstan into an existing Kubernetes cluster.
 - `eda-server`: deploy EDA on a dedicated VM for server deployments.
-- `eda-k8s`: deploy EDA beside AWX in k3s or Kubernetes.
+- `eda-k8s`: deploy EDA beside Capstan in k3s or Kubernetes.
 - `galaxy-ng-server`: deploy Galaxy NG/private automation hub on a dedicated VM.
-- `galaxy-ng-k8s`: deploy Galaxy NG/private automation hub beside AWX in k3s or Kubernetes.
+- `galaxy-ng-k8s`: deploy Galaxy NG/private automation hub beside Capstan in k3s or Kubernetes.
 - `quay-server`: deploy Project Quay/EE image registry on a dedicated VM.
-- `quay-k8s`: deploy Project Quay/EE image registry beside AWX in k3s or Kubernetes.
+- `quay-k8s`: deploy Project Quay/EE image registry beside Capstan in k3s or Kubernetes.
 - `opa-server`: deploy standalone OPA on a dedicated VM/container host.
 - `gatekeeper-k8s`: deploy Gatekeeper into k3s or Kubernetes.
 
@@ -28,9 +28,9 @@ components can be split across multiple hosts:
 - `awx_lb`
 
 For a single-node install, put the same host in `awx_database`, `awx_redis`,
-`awx_web`, `awx_task`, and `awx_receptor`. The Receptor role runs from the AWX
+`awx_web`, `awx_task`, and `awx_receptor`. The Receptor role runs from the Capstan
 image so local execution has `ansible-runner` and the same mounted project,
-media, and container storage paths as AWX.
+media, and container storage paths as Capstan.
 
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
@@ -39,32 +39,32 @@ EDA is intentionally a separate workload. For k3s/k8s, EDA runs as separate
 pods in the same cluster through the upstream EDA Server Operator. For direct
 server deployments, EDA runs on hosts in the `awx_eda` inventory group as its
 own Docker Compose/systemd stack. See
-`docs/eda_deployment_topology.md` for the non-native AWX topology contract.
+`docs/eda_deployment_topology.md` for the non-native Capstan topology contract.
 
 Policy services are intentionally split. OPA is a standalone policy engine and
 can run on hosts in the `awx_opa` inventory group or any external OPA endpoint.
 Gatekeeper is Kubernetes-only and is deployed only in k3s/k8s paths unless a
-server AWX install is explicitly configured to manage a remote Kubernetes API.
+server Capstan install is explicitly configured to manage a remote Kubernetes API.
 See `docs/policy_deployment_topology.md`.
 
 Galaxy NG is intentionally a separate content hub workload. For k3s/k8s, it
-runs as API/content/worker/UI/nginx/PostgreSQL/Redis pods beside AWX. For direct
+runs as API/content/worker/UI/nginx/PostgreSQL/Redis pods beside Capstan. For direct
 server deployments, it runs on hosts in the `awx_galaxy_ng` inventory group as
-its own Docker Compose/systemd stack with a real Galaxy NG UI at `/ui/`. AWX
+its own Docker Compose/systemd stack with a real Galaxy NG UI at `/ui/`. Capstan
 stores only connection settings and uses Galaxy NG as private automation hub
 inventory/content source. Set `awx_galaxy_ng_ui_enabled=false` only for API-only
 lab stacks.
 
 Project Quay is intentionally a separate execution environment image registry.
 Galaxy NG handles collection content; Project Quay handles container images
-built from AWX Projects and referenced by AWX execution environments. For
-k3s/k8s, Quay runs as Quay/PostgreSQL/Redis pods beside AWX. For direct server
+built from Capstan Projects and referenced by Capstan execution environments. For
+k3s/k8s, Quay runs as Quay/PostgreSQL/Redis pods beside Capstan. For direct server
 deployments, it runs on hosts in the `awx_quay` inventory group as its own
 Docker Compose/systemd stack. The default local-storage configuration is for
 local, lab, and proof-of-concept installs; production deployments should replace
 it with durable object or shared storage supported by Project Quay.
 
-VMware/vCenter provisioning is intentionally separate from the AWX deployment
+VMware/vCenter provisioning is intentionally separate from the Capstan deployment
 roles. The `server`, `k3s`, and `k8s` paths do not depend on VMware variables
 or collections. Use the VMware-only requirements and vars example only when
 running `playbooks/vcenter-lab.yml`.
@@ -84,8 +84,8 @@ vCenter service recovery before lifecycle drills can continue.
 ```bash
 cd tools/awx-deploy/ansible
 cp group_vars/all.yml.example group_vars/all.yml
-export AWX_ADMIN_PASSWORD='change-me'
-export AWX_POSTGRES_PASSWORD='change-me'
+export Capstan_ADMIN_PASSWORD='change-me'
+export Capstan_POSTGRES_PASSWORD='change-me'
 ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml
 ```
 
@@ -94,12 +94,12 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml
 ```bash
 cd tools/awx-deploy/ansible
 export KUBECONFIG=/path/to/kubeconfig
-export AWX_ADMIN_PASSWORD='change-me'
-export AWX_POSTGRES_PASSWORD='change-me'
+export Capstan_ADMIN_PASSWORD='change-me'
+export Capstan_POSTGRES_PASSWORD='change-me'
 ansible-playbook -i localhost, playbooks/deploy-k8s.yml
 ```
 
-To expose AWX through a node port instead of an ingress, set:
+To expose Capstan through a node port instead of an ingress, set:
 
 ```bash
 ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
@@ -111,18 +111,18 @@ ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
 
 ```bash
 cd tools/awx-deploy/ansible
-export AWX_ADMIN_PASSWORD='change-me'
-export AWX_POSTGRES_PASSWORD='change-me'
+export Capstan_ADMIN_PASSWORD='change-me'
+export Capstan_POSTGRES_PASSWORD='change-me'
 ansible-playbook -i inventories/example.ini playbooks/deploy-k3s.yml
 ```
 
-To install k3s without deploying AWX, use:
+To install k3s without deploying Capstan, use:
 
 ```bash
 ansible-playbook -i inventories/example.ini playbooks/install-k3s.yml
 ```
 
-To deploy EDA alongside AWX on k3s, enable EDA:
+To deploy EDA alongside Capstan on k3s, enable EDA:
 
 ```bash
 export EDA_ADMIN_PASSWORD='change-me'
@@ -140,7 +140,7 @@ want to test a constrained node.
 
 ## Quick Start: EDA on Server VM
 
-For direct server AWX deployments, put EDA on a dedicated VM in the `awx_eda`
+For direct server Capstan deployments, put EDA on a dedicated VM in the `awx_eda`
 inventory group:
 
 ```bash
@@ -149,7 +149,7 @@ export EDA_ADMIN_PASSWORD='change-me'
 ansible-playbook -i inventories/example.ini playbooks/deploy-eda-server.yml
 ```
 
-Then configure AWX to point at that VM and rerun the AWX server deployment or
+Then configure Capstan to point at that VM and rerun the Capstan server deployment or
 upgrade:
 
 ```bash
@@ -171,7 +171,7 @@ ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
 
 ## Quick Start: Galaxy NG on Server VM
 
-For direct server AWX deployments, put Galaxy NG on a dedicated VM in the
+For direct server Capstan deployments, put Galaxy NG on a dedicated VM in the
 `awx_galaxy_ng` inventory group:
 
 ```bash
@@ -182,7 +182,7 @@ export GALAXY_NG_SECRET_KEY="$(openssl rand -base64 48)"
 ansible-playbook -i inventories/example.ini playbooks/deploy-galaxy-ng-server.yml
 ```
 
-Then configure AWX to point at that VM and rerun the AWX server deployment or
+Then configure Capstan to point at that VM and rerun the Capstan server deployment or
 upgrade:
 
 ```bash
@@ -191,7 +191,7 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
   -e awx_galaxy_ng_configure_awx_settings=true
 ```
 
-Module visibility is controlled from AWX under **Settings → Modules**. Deploy
+Module visibility is controlled from Capstan under **Settings → Modules**. Deploy
 roles configure service endpoints and credentials, but they do not lock the
 module enable switches in generated `settings.py`.
 
@@ -218,7 +218,7 @@ multi-node Kubernetes or when scaling Galaxy NG replicas.
 
 ## Quick Start: Project Quay on Server VM
 
-For direct server AWX deployments, put Project Quay on a dedicated VM in the
+For direct server Capstan deployments, put Project Quay on a dedicated VM in the
 `awx_quay` inventory group:
 
 ```bash
@@ -230,9 +230,9 @@ export QUAY_SECRET_KEY="$(openssl rand -base64 48)"
 ansible-playbook -i inventories/example.ini playbooks/deploy-quay-server.yml
 ```
 
-Then configure AWX to point at that VM and rerun the AWX server deployment or
+Then configure Capstan to point at that VM and rerun the Capstan server deployment or
 upgrade. `QUAY_API_TOKEN` must be a Project Quay OAuth access token with
-`repo:read`, `repo:create`, `repo:write`, and `repo:admin` scopes for AWX
+`repo:read`, `repo:create`, `repo:write`, and `repo:admin` scopes for Capstan
 repository management. `QUAY_PUSH_USERNAME` and `QUAY_PUSH_TOKEN` are used only
 to generate image push commands without printing stored tokens:
 
@@ -263,7 +263,7 @@ database/signing secrets once. The role can initialize the first Quay admin user
 when `awx_quay_initialize_admin=true` and `QUAY_ADMIN_PASSWORD` is set.
 
 For Docker Desktop or other single-node local Kubernetes testing, expose Quay
-through NodePort so the local AWX dev container can reach it without a
+through NodePort so the local Capstan dev container can reach it without a
 long-running port-forward:
 
 ```bash
@@ -285,7 +285,7 @@ you create a dedicated Quay organization such as `awx`.
 
 ## Project Quay Backup / Restore / Upgrade / Failback
 
-Project Quay lifecycle is separate from AWX lifecycle because it owns registry
+Project Quay lifecycle is separate from Capstan lifecycle because it owns registry
 metadata and registry storage. Server backups capture `quay.sql`, rendered
 Quay config/compose files, registry storage, and a manifest. Kubernetes backups
 capture `quay.sql`, Quay secrets, resource inventory, registry PVC contents,
@@ -343,7 +343,7 @@ ansible-playbook -i localhost, -c local playbooks/backup-quay-k8s.yml \
 
 ## Quick Start: OPA on Server VM
 
-For direct server AWX deployments, put OPA on a dedicated VM in the `awx_opa`
+For direct server Capstan deployments, put OPA on a dedicated VM in the `awx_opa`
 inventory group:
 
 ```bash
@@ -351,7 +351,7 @@ cd tools/awx-deploy/ansible
 ansible-playbook -i inventories/example.ini playbooks/deploy-opa-server.yml
 ```
 
-Then configure AWX to point at that VM and rerun the AWX server deployment or
+Then configure Capstan to point at that VM and rerun the Capstan server deployment or
 upgrade:
 
 ```bash
@@ -363,7 +363,7 @@ ansible-playbook -i inventories/example.ini playbooks/deploy-server.yml \
 ## Quick Start: Gatekeeper on k3s/Kubernetes
 
 Gatekeeper is a Kubernetes admission controller. Enable it only for k3s/k8s
-deployments or when AWX is managing a remote cluster through an explicit API
+deployments or when Capstan is managing a remote cluster through an explicit API
 URL/token.
 
 ```bash
@@ -375,14 +375,14 @@ ansible-playbook -i localhost, playbooks/deploy-k8s.yml \
   -e awx_gatekeeper_configure_awx_settings=true
 ```
 
-For k3s, use `playbooks/deploy-k3s.yml` with the same variables. The AWX
+For k3s, use `playbooks/deploy-k3s.yml` with the same variables. The Capstan
 service account receives Gatekeeper read/write RBAC only when
 `awx_gatekeeper_configure_awx_settings=true`.
 
-When multiple Gatekeeper contexts are configured through the AWX settings API,
+When multiple Gatekeeper contexts are configured through the Capstan settings API,
 `GATEKEEPER_K8S_CONTEXTS` is encrypted JSON text keyed by context name. The
 deploy roles may still render a native Python dictionary in file-based settings,
-and AWX keeps reading legacy `OrderedDict` text from earlier builds during
+and Capstan keeps reading legacy `OrderedDict` text from earlier builds during
 upgrades.
 
 ## Backup / Restore
@@ -395,7 +395,7 @@ ansible-playbook -i inventories/example.ini playbooks/restore.yml \
 ```
 
 For k3s or Kubernetes deployments, use the Kubernetes-native lifecycle
-playbooks. They dump PostgreSQL through the `awx-postgres` pod, export AWX
+playbooks. They dump PostgreSQL through the `awx-postgres` pod, export Capstan
 secrets/config maps/resource inventory, and archive projects/media from the
 projects PVC through a temporary helper pod.
 
@@ -422,15 +422,15 @@ upgrade playbook to fail forward and smoke-test again.
 
 After a deploy, backup, restore, upgrade, or failback drill, collect the smoke
 reports and backup paths into one repeatable evidence check. This does not run
-destructive operations; it verifies that the expected AWX/Quay database dumps,
+destructive operations; it verifies that the expected Capstan/Quay database dumps,
 Kubernetes exports, manifests, optional storage archives, and smoke JSON reports
 exist and passed.
 
-To run the standard AWX/Galaxy NG/Project Quay and EDA smoke checks, write a
+To run the standard Capstan/Galaxy NG/Project Quay and EDA smoke checks, write a
 manifest, and verify everything in one step:
 
 ```bash
-export AWX_PASSWORD='change-me'
+export Capstan_PASSWORD='change-me'
 python3 ../scripts/run_lifecycle_evidence.py \
   --url http://awx.example.com \
   --username admin \
@@ -489,14 +489,14 @@ projects/media proof. The old one-off flags also remain available:
 
 ## EDA Live Smoke
 
-After deploying AWX with Event-Driven Ansible enabled, run the repeatable smoke
-wrapper from the repository root. It checks AWX root/static assets, authenticated
+After deploying Capstan with Event-Driven Ansible enabled, run the repeatable smoke
+wrapper from the repository root. It checks Capstan root/static assets, authenticated
 API access, EDA Controller status, live EDA Controller-backed resource list
-endpoints, AWX-to-EDA RBAC sync preview, anonymous access denial, and optional
+endpoints, Capstan-to-EDA RBAC sync preview, anonymous access denial, and optional
 RBAC/project/activation flows.
 
 ```bash
-export AWX_PASSWORD='change-me'
+export Capstan_PASSWORD='change-me'
 python3 tools/awx-deploy/scripts/smoke_eda.py \
   --url http://awx.example.com \
   --username admin
@@ -509,8 +509,8 @@ as well as proxied API calls.
 To prove multiple deployment paths in one run:
 
 ```bash
-export AWX_PASSWORD='change-me'
-export AWX_URLS='http://direct.example.com http://k3s.example.com http://lb.example.com'
+export Capstan_PASSWORD='change-me'
+export Capstan_URLS='http://direct.example.com http://k3s.example.com http://lb.example.com'
 python3 tools/awx-deploy/scripts/smoke_eda.py
 ```
 

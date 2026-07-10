@@ -1,7 +1,7 @@
 import { awxAPI } from '../../../common/api/awx-utils';
 import { AddRolesToUser } from './AddRolesToUser';
 
-describe('AWX user: Add roles', () => {
+describe('Capstan user: Add roles', () => {
   const component = <AddRolesToUser />;
   const path = '/user/:id/roles/add-roles';
   const initialEntries = [`/user/7/roles/add-roles`];

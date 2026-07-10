@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable AWX + Galaxy NG + Project Quay smoke checks.
+"""Repeatable Capstan + Galaxy NG + Project Quay smoke checks.
 
 The script intentionally uses only the Python standard library so it can run
 from a fresh control node after the Ansible deployment roles finish.
@@ -72,22 +72,22 @@ def split_env_words(name: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description='Smoke test AWX-managed Galaxy NG and Project Quay integrations.')
+    parser = argparse.ArgumentParser(description='Smoke test Capstan-managed Galaxy NG and Project Quay integrations.')
     parser.add_argument(
         '--url',
         action='append',
         dest='urls',
-        help='AWX base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.',
+        help='Capstan base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.',
     )
     parser.add_argument(
         '--username',
         default=os.environ.get('AWX_USERNAME', 'admin'),
-        help='AWX username. Defaults to AWX_USERNAME or admin.',
+        help='Capstan username. Defaults to AWX_USERNAME or admin.',
     )
     parser.add_argument(
         '--password',
         default=os.environ.get('AWX_PASSWORD'),
-        help='AWX password. Defaults to AWX_PASSWORD.',
+        help='Capstan password. Defaults to AWX_PASSWORD.',
     )
     parser.add_argument(
         '--verify-tls',
@@ -105,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
         '--user-agent',
         default=os.environ.get(
             'AWX_SMOKE_USER_AGENT',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AWX-Content-Smoke/1.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Capstan-Content-Smoke/1.0',
         ),
         help='HTTP User-Agent for smoke requests.',
     )
@@ -113,23 +113,23 @@ def build_parser() -> argparse.ArgumentParser:
         '--allow-galaxy-unconfigured',
         action='store_true',
         default=env_bool('GALAXY_NG_ALLOW_UNCONFIGURED', False),
-        help='Do not fail when Galaxy NG is disabled or unconfigured in AWX.',
+        help='Do not fail when Galaxy NG is disabled or unconfigured in Capstan.',
     )
     parser.add_argument(
         '--allow-quay-unconfigured',
         action='store_true',
         default=env_bool('QUAY_ALLOW_UNCONFIGURED', False),
-        help='Do not fail when Project Quay is disabled or unconfigured in AWX.',
+        help='Do not fail when Project Quay is disabled or unconfigured in Capstan.',
     )
     parser.add_argument(
         '--galaxy-url',
         default=os.environ.get('GALAXY_NG_URL'),
-        help='Optional direct Galaxy NG base URL to check outside AWX.',
+        help='Optional direct Galaxy NG base URL to check outside Capstan.',
     )
     parser.add_argument(
         '--quay-url',
         default=os.environ.get('QUAY_URL'),
-        help='Optional direct Project Quay base URL to check outside AWX.',
+        help='Optional direct Project Quay base URL to check outside Capstan.',
     )
     parser.add_argument(
         '--json-output',
@@ -145,7 +145,7 @@ def normalize_urls(args: argparse.Namespace) -> list[str]:
         urls = [os.environ['AWX_URL']]
     normalized = [url.rstrip('/') for url in urls if url.strip()]
     if not normalized:
-        raise SmokeFailure('Provide at least one AWX URL with --url, AWX_URLS, or AWX_URL.')
+        raise SmokeFailure('Provide at least one Capstan URL with --url, AWX_URLS, or AWX_URL.')
     return normalized
 
 
@@ -239,8 +239,8 @@ def get_json(base_url: str, path: str, label: str, args: argparse.Namespace) -> 
 
 
 def check_awx(base_url: str, args: argparse.Namespace) -> list[Check]:
-    ping = get_json(base_url, '/api/v2/ping/', 'AWX ping', args)
-    me = get_json(base_url, '/api/v2/me/', 'AWX me', args)
+    ping = get_json(base_url, '/api/v2/ping/', 'Capstan ping', args)
+    me = get_json(base_url, '/api/v2/me/', 'Capstan me', args)
     me_result = me
     if isinstance(me.get('results'), list) and me['results']:
         me_result = me['results'][0]

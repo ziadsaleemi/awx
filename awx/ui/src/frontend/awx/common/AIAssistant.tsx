@@ -845,7 +845,7 @@ export function AIAssistantPanel({ isOpen, onClose }: AIAssistantPanelProps) {
             <TextContent style={{ color: 'var(--pf-v5-global--Color--200)', marginTop: 16 }}>
               <Text component={TextVariants.small}>
                 {t(
-                  'Ask anything about AWX — job templates, inventories, Terraform, catalog items, and more.'
+                  'Ask anything about Capstan — job templates, inventories, Terraform, catalog items, and more.'
                 )}
               </Text>
             </TextContent>

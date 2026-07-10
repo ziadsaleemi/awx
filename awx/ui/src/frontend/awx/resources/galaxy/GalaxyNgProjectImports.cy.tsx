@@ -32,7 +32,7 @@ const status = {
 };
 
 describe('GalaxyNgProjectImports', () => {
-  it('generates collection build and publish commands from an AWX Project', () => {
+  it('generates collection build and publish commands from a Capstan Project', () => {
     cy.viewport(1920, 1080);
     cy.intercept('GET', awxAPI`/galaxy_ng/status/`, status).as('status');
     cy.intercept('GET', `${awxAPI`/projects/`}*`, {

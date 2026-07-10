@@ -350,7 +350,7 @@ function OPAOverview() {
       <PageDashboardCard
         id="opa-control-plane"
         title={t('OPA control plane')}
-        subtitle={t('Standalone guardrails for AWX launches, AI actions, and Rego modules')}
+        subtitle={t('Standalone guardrails for Capstan launches, AI actions, and Rego modules')}
         width="full"
         height="sm"
         headerControls={
@@ -425,7 +425,7 @@ function OPAOverview() {
       <PageDashboardCard
         id="opa-status"
         title={t('OPA status')}
-        subtitle={t('Live policy API and AWX-managed bundle state')}
+        subtitle={t('Live policy API and Capstan-managed bundle state')}
         width="half"
         height="sm"
         linkText={t('Open OPA settings')}
@@ -486,7 +486,7 @@ function OPAOverview() {
       <PageDashboardCard
         id="opa-decision-coverage"
         title={t('Decision coverage')}
-        subtitle={t('AWX guardrail paths currently routed through OPA')}
+        subtitle={t('Capstan guardrail paths currently routed through OPA')}
         width="half"
         height="sm"
         linkText={t('Test policies')}
@@ -538,7 +538,7 @@ function OPAOverview() {
         id="opa-workflows"
         title={t('OPA workflows')}
         subtitle={t(
-          'Manage modules, sync Rego from AWX Projects, test inputs, and review evidence'
+          'Manage modules, sync Rego from Capstan Projects, test inputs, and review evidence'
         )}
         width="full"
         height="xs"
@@ -553,7 +553,7 @@ function OPAOverview() {
             <OPAQuickLink
               to={pageUrl(AwxRoute.PolicyAsCodeOpaProjectSync, '/policy-as-code/opa/project-sync')}
               label={t('Project Sync')}
-              description={t('Pull bounded .rego files from synced AWX Project checkouts.')}
+              description={t('Pull bounded .rego files from synced Capstan Project checkouts.')}
             />
             <OPAQuickLink
               to={pageUrl(AwxRoute.PolicyAsCodeOpaTester, '/policy-as-code/opa/tester')}
@@ -577,7 +577,7 @@ function OPAOverview() {
       <PageDashboardCard
         id="opa-recent-evidence"
         title={t('Recent OPA evidence')}
-        subtitle={t('Allow and deny decisions recorded through AWX audit paths')}
+        subtitle={t('Allow and deny decisions recorded through Capstan audit paths')}
         width="full"
         height="xs"
         linkText={t('View decisions')}
@@ -743,7 +743,7 @@ function OPAProjectSync() {
         <StackItem>
           <Card isFlat>
             <CardHeader>
-              <CardTitle>{t('Sync Rego from AWX Project')}</CardTitle>
+              <CardTitle>{t('Sync Rego from Capstan Project')}</CardTitle>
             </CardHeader>
             <CardBody>
               <Stack hasGutter>
@@ -836,7 +836,11 @@ function OPAProjectSync() {
                 </StackItem>
                 {projectsResponse.error ? (
                   <StackItem>
-                    <Alert variant="danger" isInline title={t('Could not load AWX projects.')} />
+                    <Alert
+                      variant="danger"
+                      isInline
+                      title={t('Could not load Capstan projects.')}
+                    />
                   </StackItem>
                 ) : null}
                 {syncError ? (

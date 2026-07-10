@@ -75,8 +75,8 @@ export function AICodeAssistant<TFieldValues extends FieldValues = FieldValues>(
 
   const fieldContext = context ?? `${formatLabel} variables`;
 
-  const systemInstruction = `You are an AWX automation assistant. The user wants to generate ${fieldContext}. 
-Respond ONLY with the raw ${formatLabel} content — no markdown fences, no explanations, no surrounding text. 
+  const systemInstruction = `You are a Capstan automation assistant. The user wants to generate ${fieldContext}.
+Respond ONLY with the raw ${formatLabel} content — no markdown fences, no explanations, no surrounding text.
 Just the ${formatLabel} code itself.`;
 
   const generate = useCallback(async () => {

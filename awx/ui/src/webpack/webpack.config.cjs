@@ -37,7 +37,7 @@ switch (process.env.UI_MODE) {
 if (!process.env.PRODUCT) {
   switch (process.env.UI_MODE) {
     case 'AWX':
-      process.env.PRODUCT = 'AWX';
+      process.env.PRODUCT = 'Capstan';
       break;
     case 'HUB':
       process.env.PRODUCT = 'Automation Hub';

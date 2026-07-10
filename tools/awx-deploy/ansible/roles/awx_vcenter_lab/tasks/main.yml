@@ -217,7 +217,7 @@
     - awx_vcenter_allowed_datastore_names | default([]) | length > 0
     - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
 
-- name: Create AWX lab VMs from template
+- name: Create Capstan lab VMs from template
   community.vmware.vmware_guest:
     hostname: "{{ awx_vcenter_hostname }}"
     username: "{{ awx_vcenter_username }}"
@@ -251,7 +251,7 @@
     msg: "{{ awx_vcenter_created_vms.results | map(attribute='instance.hw_name') | list }}"
   when: awx_vcenter_created_vms is defined
 
-- name: Build AWX lab VM inventory facts
+- name: Build Capstan lab VM inventory facts
   ansible.builtin.set_fact:
     awx_vcenter_lab_vms: >-
       {{
@@ -418,7 +418,7 @@
     - awx_vcenter_verify_disk_backing | bool
     - awx_vcenter_disk_backing_files | default([]) | length > 0
 
-- name: Write generated AWX lab inventory
+- name: Write generated Capstan lab inventory
   ansible.builtin.template:
     src: lab-inventory.ini.j2
     dest: "{{ awx_vcenter_inventory_path }}"

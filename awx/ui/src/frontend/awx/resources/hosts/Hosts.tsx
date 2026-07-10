@@ -17,7 +17,7 @@ import { PlusCircleIcon } from '@patternfly/react-icons';
 
 export function Hosts() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const pageNavigate = usePageNavigate();
   const toolbarFilters = useHostsFilters();
   const tableColumns = useHostsColumns();

@@ -26,7 +26,7 @@ awx_quay_public_port: 8081
 awx_quay_container_port: 8080
 awx_quay_public_url: ""
 awx_quay_preferred_url_scheme: http
-awx_quay_registry_title: AWX Project Quay
+awx_quay_registry_title: Capstan Project Quay
 awx_quay_service_type: ClusterIP
 awx_quay_node_port: 30881
 awx_quay_ingress_enabled: false

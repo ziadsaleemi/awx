@@ -34,14 +34,14 @@ export function GalaxyNgApiToken() {
     <PageLayout>
       <PageHeader
         title={t('API Token')}
-        description={t('Galaxy NG credentials AWX uses to read Automation Hub content APIs.')}
+        description={t('Galaxy NG credentials Capstan uses to read Automation Hub content APIs.')}
         headerActions={
           <GalaxyNgHeaderActions
             status={status.data}
             uiRoute="token/"
             page={t('Galaxy NG API token')}
             prompt={t(
-              'Help me configure Galaxy NG API token access for AWX. Explain what is configured, what is missing, and how this affects namespaces, collections, repositories, remotes, and tasks.'
+              'Help me configure Galaxy NG API token access for Capstan. Explain what is configured, what is missing, and how this affects namespaces, collections, repositories, remotes, and tasks.'
             )}
             context={{
               server_url: status.data?.server_url,
@@ -63,7 +63,7 @@ export function GalaxyNgApiToken() {
           ) : null}
           <StackItem>
             <Card>
-              <CardTitle>{t('AWX Galaxy NG authentication')}</CardTitle>
+              <CardTitle>{t('Capstan Galaxy NG authentication')}</CardTitle>
               <CardBody>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
@@ -109,7 +109,7 @@ export function GalaxyNgApiToken() {
                 <TextContent>
                   <Text component={TextVariants.p}>
                     {t(
-                      'Store the Galaxy NG API token in AWX settings. AWX uses that token when loading Automation Hub namespaces, collections, repositories, remotes, signing services, and task data.'
+                      'Store the Galaxy NG API token in Capstan settings. Capstan uses that token when loading Automation Hub namespaces, collections, repositories, remotes, signing services, and task data.'
                     )}
                   </Text>
                   <Text component={TextVariants.p}>

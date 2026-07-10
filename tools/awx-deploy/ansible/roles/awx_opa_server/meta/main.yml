@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: awx_opa_server
   author: awx
-  description: Deploy standalone Open Policy Agent for AWX policy checks.
+  description: Deploy standalone Open Policy Agent for Capstan policy checks.
   license: Apache-2.0
   min_ansible_version: "2.15"
 dependencies: []

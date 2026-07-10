@@ -83,15 +83,18 @@ def _raise_if_canceled(job, proc=None):
         raise QuayImageBuildCanceled('Project Quay image build was canceled.')
 
 
-def _run_command(build, args, cwd=None, input_text=None, job=None):
+def _run_command(build, args, cwd=None, input_text=None, job=None, extra_env=None):
     _raise_if_canceled(job)
     display = shlex.join([str(arg) for arg in args])
     _append_log(build, f'\n$ {display}\n')
     logger.info('Quay image build %s running: %s', build.pk, display)
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.Popen(
         args,
         cwd=cwd,
-        env=os.environ.copy(),
+        env=env,
         stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -155,7 +158,12 @@ def _execute_quay_image_build(build, job=None):
             '-c',
             build.context_path,
         ]
-        if _run_command(build, build_args, cwd=build.project_path, job=job) != 0:
+        build_env = {}
+        if build.runtime == 'podman':
+            # AWX k8s task pods run rootless Podman without a writable /proc/sys
+            # namespace. Chroot isolation keeps EE builds inside that sandbox.
+            build_env['BUILDAH_ISOLATION'] = os.environ.get('BUILDAH_ISOLATION', 'chroot')
+        if _run_command(build, build_args, cwd=build.project_path, job=job, extra_env=build_env) != 0:
             raise RuntimeError('ansible-builder build failed.')
         _mark(build, progress=70, job=job)
 

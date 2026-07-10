@@ -4,7 +4,7 @@
 awx_deploy_method: server # server | k3s | k8s
 
 awx_image: docker.io/ziadsaleemi/awx
-awx_image_tag: "25.1.7"
+awx_image_tag: "25.1.8"
 awx_ee_image: quay.io/ansible/awx-ee:latest
 
 awx_admin_user: admin
@@ -88,10 +88,10 @@ awx_k8s_restore_start_after_restore: true
 awx_k8s_restore_data: true
 
 # Event-Driven Ansible deployment integration.
-# For k3s/k8s, enabling this deploys EDA in Kubernetes beside AWX and configures
-# AWX to talk to the in-cluster EDA service.
+# For k3s/k8s, enabling this deploys EDA in Kubernetes beside Capstan and configures
+# Capstan to talk to the in-cluster EDA service.
 # For server deployments, deploy EDA on hosts in [awx_eda], then set
-# awx_eda_configure_awx_settings=true so AWX points to that EDA VM.
+# awx_eda_configure_awx_settings=true so Capstan points to that EDA VM.
 awx_eda_enabled: false
 awx_eda_configure_awx_settings: "{{ awx_eda_enabled }}"
 awx_eda_namespace: eda
@@ -119,7 +119,7 @@ awx_eda_k8s_api_service_port: 8000
 awx_eda_k8s_api_url: "http://{{ awx_eda_k8s_api_service_name }}.{{ awx_eda_namespace }}.svc.cluster.local:{{ awx_eda_k8s_api_service_port }}"
 
 # Galaxy NG / private automation hub deployment integration.
-# For k3s/k8s, enabling this deploys Galaxy NG beside AWX and configures AWX to
+# For k3s/k8s, enabling this deploys Galaxy NG beside Capstan and configures Capstan to
 # talk to the in-cluster hub service. For server deployments, deploy Galaxy NG
 # on hosts in [awx_galaxy_ng], then set awx_galaxy_ng_configure_awx_settings=true.
 awx_galaxy_ng_enabled: false
@@ -152,8 +152,8 @@ awx_galaxy_ng_ui_replicas: 1
 
 # Project Quay / execution environment image registry integration.
 # Galaxy NG stores collection content. Project Quay stores container images for
-# AWX execution environments built from AWX Projects.
-# For k3s/k8s, enabling this deploys Project Quay beside AWX and configures AWX
+# Capstan execution environments built from Capstan Projects.
+# For k3s/k8s, enabling this deploys Project Quay beside Capstan and configures Capstan
 # to talk to the in-cluster Quay service. For server deployments, deploy Quay on
 # hosts in [awx_quay], then set awx_quay_configure_awx_settings=true.
 awx_quay_enabled: false
@@ -202,9 +202,9 @@ awx_quay_upgrade_skip_backup: false
 awx_quay_upgrade_skip_pull: false
 
 # Policy as Code integration.
-# OPA can run beside AWX in k3s/k8s or on a dedicated VM/container host.
+# OPA can run beside Capstan in k3s/k8s or on a dedicated VM/container host.
 # Gatekeeper is Kubernetes-only; enable it only for k3s/k8s clusters or when a
-# server AWX deployment is managing a remote Kubernetes API.
+# server Capstan deployment is managing a remote Kubernetes API.
 awx_opa_enabled: false
 awx_opa_configure_awx_settings: "{{ awx_opa_enabled }}"
 awx_opa_host: ""

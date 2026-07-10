@@ -45,7 +45,7 @@
   retries: "{{ awx_vcenter_govc_retries | int }}"
   delay: "{{ awx_vcenter_govc_delay | int }}"
   until: awx_vcenter_govc_existing_vms.rc == 0
-  no_log: true
+  no_log: "{{ awx_vcenter_hide_sensitive_logs | bool }}"
 
 - name: Require govc VM lookup to succeed
   ansible.builtin.assert:
@@ -187,22 +187,44 @@
     - awx_vcenter_allowed_datastore_names | default([]) | length > 0
     - awx_vcenter_template_disk_datastore_names | default([]) | length > 0
 
-- name: Create AWX lab VMs from template with govc
-  ansible.builtin.shell:
-    cmd: >-
-      {{ awx_vcenter_govc_binary | quote }}
-      vm.clone
-      -vm {{ awx_vcenter_template | quote }}
-      {{ (awx_vcenter_linked_clone | bool) | ternary('-link', '') }}
-      {{ (awx_vcenter_host | length > 0) | ternary('-host ' ~ (awx_vcenter_host | quote), '-cluster ' ~ (awx_vcenter_cluster | quote)) }}
-      -ds {{ awx_vcenter_datastore | quote }}
-      -net {{ awx_vcenter_network | quote }}
-      -c {{ awx_vcenter_vm_cpus | string | quote }}
-      -m {{ awx_vcenter_vm_memory_mb | string | quote }}
-      -on={{ (awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
-      -waitip={{ ((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false') }}
-      {{ (awx_vcenter_folder | length > 0) | ternary('-folder ' ~ (awx_vcenter_folder | quote), '') }}
-      {{ item | quote }}
+- name: Build govc clone placement arguments
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_clone_placement_args: >-
+      {{
+        (awx_vcenter_host | length > 0)
+        | ternary(['-host', awx_vcenter_host], ['-cluster', awx_vcenter_cluster])
+      }}
+
+- name: Build govc clone base arguments
+  ansible.builtin.set_fact:
+    awx_vcenter_govc_clone_base_args: >-
+      {{
+        [
+          awx_vcenter_govc_binary,
+          'vm.clone',
+          '-vm',
+          awx_vcenter_template,
+        ]
+        + ((awx_vcenter_linked_clone | bool) | ternary(['-link'], []))
+        + awx_vcenter_govc_clone_placement_args
+        + [
+          '-ds',
+          awx_vcenter_datastore,
+          '-net',
+          awx_vcenter_network,
+          '-c',
+          awx_vcenter_vm_cpus | string,
+          '-m',
+          awx_vcenter_vm_memory_mb | string,
+          '-on=' ~ ((awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false')),
+          '-waitip=' ~ (((awx_vcenter_wait_for_ip | bool) and awx_vcenter_vm_state == 'poweredon') | ternary('true', 'false')),
+        ]
+        + ((awx_vcenter_folder | length > 0) | ternary(['-folder', awx_vcenter_folder], []))
+      }}
+
+- name: Create Capstan lab VMs from template with govc
+  ansible.builtin.command:
+    argv: "{{ awx_vcenter_govc_clone_base_args + [item] }}"
   environment: "{{ awx_vcenter_govc_environment }}"
   loop: "{{ awx_vcenter_govc_missing_vm_names | default([]) }}"
   register: awx_vcenter_govc_created_vms
@@ -210,7 +232,7 @@
   retries: "{{ awx_vcenter_govc_retries | int }}"
   delay: "{{ awx_vcenter_govc_delay | int }}"
   until: awx_vcenter_govc_created_vms.rc == 0
-  no_log: true
+  no_log: "{{ awx_vcenter_hide_sensitive_logs | bool }}"
 
 - name: Gather govc VM IP addresses
   ansible.builtin.command:
@@ -231,7 +253,7 @@
     - awx_vcenter_wait_for_ip | bool
     - awx_vcenter_vm_state == 'poweredon'
 
-- name: Build AWX lab VM inventory facts from govc IPs
+- name: Build Capstan lab VM inventory facts from govc IPs
   ansible.builtin.set_fact:
     awx_vcenter_lab_vms: >-
       {{
@@ -246,7 +268,7 @@
     - awx_vcenter_wait_for_ip | bool
     - awx_vcenter_vm_state == 'poweredon'
 
-- name: Build AWX lab VM inventory facts without govc IP wait
+- name: Build Capstan lab VM inventory facts without govc IP wait
   ansible.builtin.set_fact:
     awx_vcenter_lab_vms: "{{ (awx_vcenter_lab_vms | default([])) + [{'name': item, 'ip': ''}] }}"
   loop: "{{ awx_vcenter_govc_vm_names }}"
@@ -370,7 +392,7 @@
     - awx_vcenter_verify_disk_backing | bool
     - awx_vcenter_disk_backing_files | default([]) | length > 0
 
-- name: Write generated AWX lab inventory from govc
+- name: Write generated Capstan lab inventory from govc
   ansible.builtin.template:
     src: lab-inventory.ini.j2
     dest: "{{ awx_vcenter_inventory_path }}"

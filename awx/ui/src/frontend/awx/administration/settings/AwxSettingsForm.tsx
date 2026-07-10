@@ -131,7 +131,7 @@ export function AwxSettingsForm(props: {
     [navigate, patch, props.options, refreshAwxConfig]
   );
 
-  // This is used for AWX LDAP settings which need groups
+  // This is used for Capstan LDAP settings which need groups
   const { options, groups } = useMemo(() => {
     const options: Record<string, AwxSettingsOptionsAction> = {};
     const groups: { groupName: string; options: Record<string, AwxSettingsOptionsAction> }[] = [];

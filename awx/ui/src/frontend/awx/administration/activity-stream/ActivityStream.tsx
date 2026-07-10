@@ -11,7 +11,7 @@ import { useActivityStreamFilter } from './hooks/useActivityStreamFilters';
 
 export function ActivityStreams() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const toolbarFilters = useActivityStreamFilter();
   const tableColumns = useActivityStreamColumns();
 

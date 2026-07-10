@@ -30,6 +30,9 @@ def test_quay_status_reports_module_disabled(get, admin_user):
     assert response.data['configured'] is False
     assert response.data['status'] == 'disabled'
     assert response.data['server_url'] == ''
+    assert response.data['version'] == ''
+    assert response.data['version_detail'] == {}
+    assert response.data['version_error'] == ''
     assert response.data['settings_url'].endswith('/api/v2/settings/quay/')
 
 
@@ -41,6 +44,9 @@ def test_quay_status_reports_missing_namespace(get, admin_user):
     assert response.data['enabled'] is True
     assert response.data['configured'] is True
     assert response.data['namespace'] == ''
+    assert response.data['version'] == ''
+    assert response.data['version_detail'] == {}
+    assert response.data['version_error'] == ''
     assert response.data['controller_error'] == 'Project Quay namespace is not configured.'
 
 
@@ -56,7 +62,10 @@ def test_quay_status_reports_missing_namespace(get, admin_user):
 def test_quay_status_reads_repository_count(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.quay.requests.get',
-        return_value=quay_response(mocker, {'repositories': [{'name': 'custom-ee'}, {'name': 'job-ee'}]}),
+        side_effect=[
+            quay_response(mocker, {'info': {'title': 'Quay Frontend', 'version': 'v1'}}),
+            quay_response(mocker, {'repositories': [{'name': 'custom-ee'}, {'name': 'job-ee'}]}),
+        ],
     )
 
     response = get(reverse('api:quay_status'), user=admin_user, expect=200)
@@ -71,9 +80,13 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
     assert response.data['management_configured'] is True
     assert response.data['management_required_scopes'] == ['repo:read', 'repo:create', 'repo:write', 'repo:admin', 'user:admin', 'org:admin']
     assert response.data['counts']['repositories'] == 2
-    assert request_mock.call_args.args[0] == 'https://quay.example.test/api/v1/repository'
-    assert request_mock.call_args.kwargs['params']['namespace'] == 'awx'
-    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer quay-token'
+    assert response.data['version'] == 'v1'
+    assert response.data['version_detail']['info']['version'] == 'v1'
+    assert response.data['version_error'] == ''
+    assert request_mock.call_args_list[0].args[0] == 'https://quay.example.test/api/v1/discovery'
+    assert request_mock.call_args_list[1].args[0] == 'https://quay.example.test/api/v1/repository'
+    assert request_mock.call_args_list[1].kwargs['params']['namespace'] == 'awx'
+    assert request_mock.call_args_list[1].kwargs['headers']['Authorization'] == 'Bearer quay-token'
 
 
 @pytest.mark.django_db
@@ -86,7 +99,12 @@ def test_quay_status_reads_repository_count(get, admin_user, mocker):
 def test_quay_status_caches_live_repository_count(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.quay.requests.get',
-        return_value=quay_response(mocker, {'repositories': [{'name': 'custom-ee'}]}),
+        side_effect=[
+            quay_response(mocker, {'version': '3.13.0'}),
+            quay_response(mocker, {'repositories': [{'name': 'custom-ee'}]}),
+            quay_response(mocker, {'version': '3.13.1'}),
+            quay_response(mocker, {'repositories': [{'name': 'custom-ee'}]}),
+        ],
     )
 
     first_response = get(reverse('api:quay_status'), user=admin_user, expect=200)
@@ -94,11 +112,13 @@ def test_quay_status_caches_live_repository_count(get, admin_user, mocker):
 
     assert first_response.data['counts']['repositories'] == 1
     assert second_response.data['counts']['repositories'] == 1
-    assert request_mock.call_count == 1
+    assert first_response.data['version'] == '3.13.0'
+    assert second_response.data['version'] == '3.13.0'
+    assert request_mock.call_count == 2
 
     get(reverse('api:quay_status') + '?refresh=1', user=admin_user, expect=200)
 
-    assert request_mock.call_count == 2
+    assert request_mock.call_count == 4
 
 
 @pytest.mark.django_db

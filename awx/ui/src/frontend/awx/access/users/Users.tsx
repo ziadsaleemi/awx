@@ -38,7 +38,7 @@ import { useUsersFilters } from './hooks/useUsersFilters';
 
 export function Users() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const pageNavigate = usePageNavigate();
   const getPageUrl = useGetPageUrl();
   usePersistentFilters('users');

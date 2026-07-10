@@ -35,6 +35,9 @@ def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
 
     assert response.data['enabled'] is True
     assert response.data['server_url'] == 'https://opa.example.com:8181'
+    assert response.data['version'] == ''
+    assert response.data['version_detail'] == {}
+    assert response.data['version_error'] == ''
     assert {policy['id'] for policy in response.data['policies']} >= {'job_launch', 'ai_action'}
     job_launch_policy = next(policy for policy in response.data['policies'] if policy['id'] == 'job_launch')
     ai_action_policy = next(policy for policy in response.data['policies'] if policy['id'] == 'ai_action')
@@ -48,6 +51,42 @@ def test_opa_policy_list_uses_registered_policy_settings(get, admin_user):
     assert response.data['policy_bundle']['line_count'] == 2
     assert response.data['policy_bundle']['sha256'] == hashlib.sha256(b'package awx\nallow := true').hexdigest()
     assert response.data['policy_bundle']['sync_endpoint'] == '/api/v2/opa/policies/sync/'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181)
+def test_opa_policy_list_can_include_version_for_about_modal(get, admin_user):
+    with mock.patch('awx.api.views.opa.requests.get', return_value=_json_response({'Version': '0.66.0', 'Commit': 'abc123'})) as requests_get:
+        response = get(reverse('api:opa_policies') + '?include_version=1', user=admin_user, expect=200)
+
+    assert response.data['enabled'] is True
+    assert response.data['version'] == '0.66.0'
+    assert response.data['version_detail']['Commit'] == 'abc123'
+    assert response.data['version_error'] == ''
+    requests_get.assert_called_once()
+    assert requests_get.call_args.args[0] == 'http://opa.example.com:8181/version'
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181)
+def test_opa_policy_list_uses_config_version_fallback_for_about_modal(get, admin_user):
+    with mock.patch(
+        'awx.api.views.opa.requests.get',
+        side_effect=[
+            _json_error_response({'error': 'not found'}, status_code=404, message='not found'),
+            _json_response({'result': {'labels': {'id': 'opa-dev', 'version': '1.18.0'}}}),
+        ],
+    ) as requests_get:
+        response = get(reverse('api:opa_policies') + '?include_version=1', user=admin_user, expect=200)
+
+    assert response.data['enabled'] is True
+    assert response.data['version'] == '1.18.0'
+    assert response.data['version_detail']['source'] == '/v1/config'
+    assert response.data['version_detail']['labels']['id'] == 'opa-dev'
+    assert response.data['version_error'] == ''
+    assert requests_get.call_count == 2
+    assert requests_get.call_args_list[0].args[0] == 'http://opa.example.com:8181/version'
+    assert requests_get.call_args_list[1].args[0] == 'http://opa.example.com:8181/v1/config'
 
 
 @pytest.mark.django_db
@@ -316,6 +355,9 @@ def test_gatekeeper_policy_manager_disabled_returns_empty_state(get, admin_user)
     response = get(reverse('api:opa_gatekeeper'), user=admin_user, expect=200)
 
     assert response.data['configured'] is False
+    assert response.data['version'] == ''
+    assert response.data['version_detail'] == {}
+    assert response.data['version_error'] == ''
     assert response.data['counts'] == {
         'constraint_templates': 0,
         'constraints': 0,
@@ -527,6 +569,45 @@ def test_gatekeeper_policy_manager_summarizes_templates_constraints_configs_and_
         headers={'Accept': 'application/json', 'Authorization': 'Bearer secret-token'},
         verify=False,
         timeout=7.0,
+    )
+
+
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_AUTH_TOKEN='secret-token',
+    GATEKEEPER_K8S_VERIFY_SSL=False,
+)
+def test_gatekeeper_policy_manager_can_include_version_for_about_modal(get, admin_user):
+    responses = _gatekeeper_policy_manager_responses()
+    responses.append(
+        _json_response(
+            {
+                'spec': {
+                    'template': {
+                        'spec': {
+                            'containers': [
+                                {'name': 'manager', 'image': 'openpolicyagent/gatekeeper:v3.17.1'},
+                            ]
+                        }
+                    }
+                }
+            }
+        )
+    )
+
+    with mock.patch('awx.api.views.gatekeeper.requests.get', side_effect=responses) as requests_get:
+        response = get(reverse('api:opa_gatekeeper') + '?include_version=1', user=admin_user, expect=200)
+
+    assert response.data['configured'] is True
+    assert response.data['version'] == 'v3.17.1'
+    assert response.data['version_detail']['image'] == 'openpolicyagent/gatekeeper:v3.17.1'
+    assert response.data['version_error'] == ''
+    requests_get.assert_any_call(
+        'https://kube.example.test/apis/apps/v1/namespaces/gatekeeper-system/deployments/gatekeeper-controller-manager',
+        headers={'Accept': 'application/json', 'Authorization': 'Bearer secret-token'},
+        verify=False,
+        timeout=5.0,
     )
 
 

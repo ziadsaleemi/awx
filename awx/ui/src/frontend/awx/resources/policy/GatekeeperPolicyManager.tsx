@@ -534,7 +534,7 @@ function gatekeeperLiveActionDescription(
   }
   if (action === 'project_sync') {
     return t(
-      'This reads manifests from the selected AWX Project checkout and applies them to the Kubernetes API after RBAC and OPA checks.'
+      'This reads manifests from the selected Capstan Project checkout and applies them to the Kubernetes API after RBAC and OPA checks.'
     );
   }
   return t('This applies the manifest to the Kubernetes API after RBAC and OPA checks.');
@@ -1040,7 +1040,7 @@ export function GatekeeperPolicyManager(props?: {
 
   const handleProjectSync = async () => {
     if (!projectSyncProjectId) {
-      setProjectSyncError(t('Select an AWX Project before syncing Gatekeeper manifests.'));
+      setProjectSyncError(t('Select a Capstan Project before syncing Gatekeeper manifests.'));
       return;
     }
     setProjectSyncLoading(true);
@@ -1451,7 +1451,7 @@ export function GatekeeperPolicyManager(props?: {
                       <div style={{ fontWeight: 600 }}>{t('Project manifests')}</div>
                       <div>
                         {t(
-                          'Read Gatekeeper YAML or JSON from an already-synced AWX Project checkout and run it through the same preview, dry-run, apply, OPA, and audit flow.'
+                          'Read Gatekeeper YAML or JSON from an already-synced Capstan Project checkout and run it through the same preview, dry-run, apply, OPA, and audit flow.'
                         )}
                       </div>
                     </StackItem>
@@ -1460,7 +1460,7 @@ export function GatekeeperPolicyManager(props?: {
                         <Alert
                           variant="warning"
                           isInline
-                          title={t('Unable to load AWX Projects.')}
+                          title={t('Unable to load Capstan Projects.')}
                         />
                       </StackItem>
                     ) : null}
@@ -2044,7 +2044,7 @@ export function GatekeeperPolicyManager(props?: {
                       <Stack hasGutter>
                         <StackItem>
                           {t(
-                            'Author, preview, dry-run, apply, delete, and roll back Gatekeeper manifests through AWX RBAC, OPA guardrails, and Activity Stream audit.'
+                            'Author, preview, dry-run, apply, delete, and roll back Gatekeeper manifests through Capstan RBAC, OPA guardrails, and Activity Stream audit.'
                           )}
                         </StackItem>
                         <StackItem>
@@ -2109,7 +2109,7 @@ export function GatekeeperPolicyManager(props?: {
                       <Stack hasGutter>
                         <StackItem>
                           {t(
-                            '{{count}} current violations show where Kubernetes resources are out of policy for this AWX-visible context.',
+                            '{{count}} current violations show where Kubernetes resources are out of policy for this Capstan-visible context.',
                             { count: data.counts.violations }
                           )}
                         </StackItem>
@@ -2147,13 +2147,13 @@ export function GatekeeperPolicyManager(props?: {
                 <GridItem sm={12} md={6} xl={4}>
                   <Card isFlat style={{ height: '100%' }}>
                     <CardHeader>
-                      <CardTitle>{t('AWX Audit Path')}</CardTitle>
+                      <CardTitle>{t('Capstan Audit Path')}</CardTitle>
                     </CardHeader>
                     <CardBody>
                       <Stack hasGutter>
                         <StackItem>
                           {t(
-                            'Changes made here are intended to flow through AWX permissions, optional AI drafting, OPA approval, Kubernetes admission, rollback plans, and Activity Stream evidence.'
+                            'Changes made here are intended to flow through Capstan permissions, optional AI drafting, OPA approval, Kubernetes admission, rollback plans, and Activity Stream evidence.'
                           )}
                         </StackItem>
                         <StackItem>

@@ -1,5 +1,5 @@
 ---
-- name: Wait for AWX dependencies
+- name: Wait for Capstan dependencies
   ansible.builtin.wait_for:
     host: "{{ item.host }}"
     port: "{{ item.port }}"
@@ -10,7 +10,7 @@
     - host: "{{ awx_redis_host }}"
       port: "{{ awx_redis_port }}"
 
-- name: Run AWX database migrations
+- name: Run Capstan database migrations
   ansible.builtin.command:
     cmd: >-
       {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
@@ -37,7 +37,7 @@
   when: inventory_hostname == (groups.get('awx_task', []) | first)
   no_log: true
 
-- name: Synchronize AWX admin user
+- name: Synchronize Capstan admin user
   ansible.builtin.command:
     cmd: >-
       {{ awx_container_engine_cmd }} run --rm --network host --user 1000:0
@@ -60,7 +60,7 @@
   when: inventory_hostname == (groups.get('awx_task', []) | first)
   no_log: true
 
-- name: Render AWX task systemd service
+- name: Render Capstan task systemd service
   ansible.builtin.template:
     src: awx-task.service.j2
     dest: /etc/systemd/system/awx-task.service
@@ -72,7 +72,7 @@
 - name: Flush systemd handlers
   ansible.builtin.meta: flush_handlers
 
-- name: Start AWX task
+- name: Start Capstan task
   ansible.builtin.systemd:
     name: awx-task
     state: restarted

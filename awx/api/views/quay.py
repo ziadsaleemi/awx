@@ -84,6 +84,28 @@ def _quay_status_cache_key(client, server_url, namespace):
     return f'awx:quay:status:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
 
 
+def _quay_version_summary(discovery):
+    summary = {'version': '', 'version_detail': discovery if isinstance(discovery, dict) else {}}
+    if not isinstance(discovery, dict):
+        return summary
+    for key in ('version', 'quay_version', 'registry_version'):
+        value = discovery.get(key)
+        if value:
+            summary['version'] = str(value)
+            return summary
+    config = discovery.get('config') if isinstance(discovery.get('config'), dict) else {}
+    for key in ('version', 'quay_version', 'registry_version'):
+        value = config.get(key)
+        if value:
+            summary['version'] = str(value)
+            return summary
+    info = discovery.get('info') if isinstance(discovery.get('info'), dict) else {}
+    value = info.get('version')
+    if value:
+        summary['version'] = str(value)
+    return summary
+
+
 def _parse_positive_int(value, default, maximum=None):
     try:
         parsed = int(value)
@@ -394,9 +416,9 @@ def _quay_image_build_plan_from_data(request, data):
             'pull': 'missing',
         },
         'notes': [
-            _('Project Quay hosts AWX execution environment container images. Galaxy NG remains the Automation Hub for collections and related content.'),
-            _('Set QUAY_TOKEN to a robot account token before running the generated login command; AWX does not print stored secret values.'),
-            _('Use the AWX image value when creating or updating an AWX execution environment.'),
+            _('Project Quay hosts Capstan execution environment container images. Galaxy NG remains the Automation Hub for collections and related content.'),
+            _('Set QUAY_TOKEN to a robot account token before running the generated login command; Capstan does not print stored secret values.'),
+            _('Use the Capstan image value when creating or updating a Capstan execution environment.'),
         ],
     }
     if runtime == 'docker' and insecure_registry:
@@ -673,6 +695,9 @@ class QuayStatusView(APIView):
                 'repositories': 0,
                 'tags': 0,
             },
+            'version': '',
+            'version_detail': {},
+            'version_error': '',
             'controller_error': '',
         }
 
@@ -689,8 +714,15 @@ class QuayStatusView(APIView):
                     'repositories': 0,
                     'tags': 0,
                 },
+                'version': '',
+                'version_detail': {},
+                'version_error': '',
                 'controller_error': '',
             }
+            try:
+                live_status.update(_quay_version_summary(client.discovery()))
+            except QuayControllerError as exc:
+                live_status['version_error'] = str(exc)
             try:
                 repositories = normalize_repository_list(client.repositories(namespace=namespace, params={'limit': 100}))
                 live_status['counts']['repositories'] = repositories['count']
@@ -699,6 +731,9 @@ class QuayStatusView(APIView):
             cache.set(cache_key, live_status, QUAY_STATUS_CACHE_TIMEOUT)
 
         response['counts'].update(live_status.get('counts') or {})
+        response['version'] = live_status.get('version') or ''
+        response['version_detail'] = live_status.get('version_detail') or {}
+        response['version_error'] = live_status.get('version_error') or ''
         response['controller_error'] = live_status.get('controller_error') or ''
 
         return Response(response)
@@ -727,13 +762,13 @@ class QuayApiTokenPlanView(APIView):
             "token_setting": "QUAY_API_TOKEN",
             "push_settings": ["QUAY_PUSH_USERNAME", "QUAY_PUSH_TOKEN"],
             "oauth_application": {
-                "name": "AWX Project Quay Management",
-                "description": _("OAuth application used by AWX to manage Project Quay repositories, robots, permissions, and tags."),
+                "name": "Capstan Project Quay Management",
+                "description": _("OAuth application used by Capstan to manage Project Quay repositories, robots, permissions, and tags."),
                 "create_method": "POST",
                 "create_url": f"{server_url}/api/v1/organization/{namespace}/applications" if registry_status == "configured" and namespace else "",
                 "payload": {
-                    "name": "AWX Project Quay Management",
-                    "description": "AWX-managed Project Quay integration",
+                    "name": "Capstan Project Quay Management",
+                    "description": "Capstan-managed Project Quay integration",
                     "application_uri": server_url,
                     "redirect_uri": server_url,
                 },
@@ -741,11 +776,11 @@ class QuayApiTokenPlanView(APIView):
             "app_specific_token": {
                 "create_method": "POST",
                 "create_url": f"{server_url}/api/v1/user/apptoken" if registry_status == "configured" else "",
-                "payload": {"friendlyName": "AWX Project Quay Management"},
+                "payload": {"friendlyName": "Capstan Project Quay Management"},
             },
             "validation_commands": [],
             "notes": [
-                _("Store only the final token value in QUAY_API_TOKEN. AWX does not display stored secret values."),
+                _("Store only the final token value in QUAY_API_TOKEN. Capstan does not display stored secret values."),
                 _("Use robot push credentials separately for image push commands; QUAY_API_TOKEN is for Quay API management."),
             ],
         }
@@ -956,7 +991,7 @@ class QuayRepositoriesListView(APIView):
 
 class QuayExecutionEnvironmentDefinitionFilesView(APIView):
     name = _('Project Quay Execution Environment Definition Files')
-    resource_purpose = 'execution environment definition files in an AWX Project checkout'
+    resource_purpose = 'execution environment definition files in a Capstan Project checkout'
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, format=None):
@@ -968,7 +1003,7 @@ class QuayExecutionEnvironmentDefinitionFilesView(APIView):
             root = Path(project.get_project_path()).resolve(strict=True)
         except OSError as exc:
             return Response(
-                {'detail': _('Could not read AWX Project checkout: %(error)s') % {'error': exc}, 'status': 'bad_request'},
+                {'detail': _('Could not read Capstan Project checkout: %(error)s') % {'error': exc}, 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1501,7 +1536,7 @@ class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
             raise PermissionDenied()
         if template.project_id is None:
             return Response(
-                {'detail': _('Project Quay image build template no longer has an AWX Project.'), 'status': 'bad_request'},
+                {'detail': _('Project Quay image build template no longer has a Capstan Project.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
         plan, error_response = _quay_image_build_plan_from_data(request, _data_from_template(template))
@@ -1509,7 +1544,7 @@ class QuayExecutionEnvironmentImageBuildTemplateLaunchView(APIView):
             return error_response
         if not plan['registry']['push_username_configured'] or not plan['registry']['push_token_configured']:
             return Response(
-                {'detail': _('Project Quay push credentials are required before AWX can launch an image build.'), 'status': 'bad_request'},
+                {'detail': _('Project Quay push credentials are required before Capstan can launch an image build.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
         job = template.create_quay_image_build_job()
@@ -1641,7 +1676,7 @@ class QuayExecutionEnvironmentImageBuildsView(APIView):
             return error_response
         if not plan['registry']['push_username_configured'] or not plan['registry']['push_token_configured']:
             return Response(
-                {'detail': _('Project Quay push credentials are required before AWX can launch an image build.'), 'status': 'bad_request'},
+                {'detail': _('Project Quay push credentials are required before Capstan can launch an image build.'), 'status': 'bad_request'},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
 

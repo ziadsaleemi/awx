@@ -6,7 +6,7 @@
       - awx_restore_path | length > 0
     fail_msg: "Restore is destructive. Set awx_restore_confirm=true and awx_restore_path."
 
-- name: Stop AWX services before restore
+- name: Stop Capstan services before restore
   ansible.builtin.systemd:
     name: "{{ item }}"
     state: stopped
@@ -29,19 +29,19 @@
     fail_msg: "Database backup not found at {{ awx_restore_path }}/awx.sql."
   when: inventory_hostname in (groups.get('awx_database', []) | default([]))
 
-- name: Restore AWX configuration archive
+- name: Restore Capstan configuration archive
   ansible.builtin.unarchive:
     src: "{{ awx_restore_path }}/config-{{ inventory_hostname }}.tar.gz"
     dest: "{{ awx_server_config_dir }}"
     remote_src: true
   ignore_errors: true
 
-- name: Check AWX project/media archive
+- name: Check Capstan project/media archive
   ansible.builtin.stat:
     path: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
   register: awx_restore_data_archive
 
-- name: Restore AWX project/media archive
+- name: Restore Capstan project/media archive
   ansible.builtin.unarchive:
     src: "{{ awx_restore_path }}/data-{{ inventory_hostname }}.tar.gz"
     dest: "{{ awx_server_data_dir }}"
@@ -60,19 +60,19 @@
   changed_when: true
   when: inventory_hostname in (groups.get('awx_database', []) | default([]))
 
-- name: Start AWX receptor after restore
+- name: Start Capstan receptor after restore
   ansible.builtin.systemd:
     name: awx-receptor
     state: started
   failed_when: false
 
-- name: Start AWX task after restore
+- name: Start Capstan task after restore
   ansible.builtin.systemd:
     name: awx-task
     state: started
   failed_when: false
 
-- name: Start AWX web after restore
+- name: Start Capstan web after restore
   ansible.builtin.systemd:
     name: awx-web
     state: started

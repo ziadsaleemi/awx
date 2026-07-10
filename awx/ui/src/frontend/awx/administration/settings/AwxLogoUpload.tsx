@@ -14,7 +14,7 @@ const LOGO_SIZES = [
 /**
  * A custom logo upload field for the CUSTOM_LOGO setting.
  * Accepts PNG, JPEG, or GIF files and converts them to a base64
- * data URL, which is the format expected by the AWX API.
+ * data URL, which is the format expected by the Capstan API.
  */
 export function AwxLogoUpload(props: { name: string; label: string; helpText?: string }) {
   const { control } = useFormContext();

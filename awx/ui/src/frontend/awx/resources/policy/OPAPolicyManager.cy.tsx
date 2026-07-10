@@ -157,7 +157,7 @@ describe('OPAPolicyManager', () => {
     cy.get('[data-cy="opa-violations"]').should('contain', 'awx/gatekeeper_resource/allow');
   });
 
-  it('syncs Rego modules from an AWX Project checkout', () => {
+  it('syncs Rego modules from a Capstan Project checkout', () => {
     cy.intercept('POST', awxAPI`/opa/policy-modules/project-sync/`, (req) => {
       expect(req.body).to.deep.equal({
         project: 42,

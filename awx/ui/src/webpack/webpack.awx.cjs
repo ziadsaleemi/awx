@@ -14,15 +14,15 @@ module.exports = function (env, argv) {
   // FavIcons
   config.plugins.unshift(
     new FaviconsWebpackPlugin({
-      logo: './frontend/assets/brand-fallback.svg',
+      logo: './frontend/assets/brand-fallback.png',
       mode: 'webapp',
       devMode: 'webapp',
       inject: true,
       favicons: {
-        appName: 'AWX',
-        appShortName: 'AWX',
-        appDescription: 'AWX',
-        developerName: 'Red Hat',
+        appName: 'Capstan',
+        appShortName: 'Capstan',
+        appDescription: 'Capstan',
+        developerName: null,
         developerURL: null,
         background: '#000000',
         theme_color: '#000000',

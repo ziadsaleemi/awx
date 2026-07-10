@@ -1,4 +1,4 @@
-"""Gatekeeper Policy Manager style API for AWX."""
+"""Gatekeeper Policy Manager style API for Capstan."""
 
 import ast
 import difflib
@@ -361,6 +361,49 @@ class GatekeeperKubernetesClient:
                     item['_gatekeeper_version'] = version
                     constraints.append(item)
         return constraints, errors
+
+
+def _container_image_version(image):
+    image = str(image or '').strip()
+    if not image:
+        return ''
+    if '@sha256:' in image:
+        return image.rsplit('@sha256:', 1)[1][:12]
+    last_segment = image.rsplit('/', 1)[-1]
+    if ':' in last_segment:
+        return last_segment.rsplit(':', 1)[-1]
+    return ''
+
+
+def _gatekeeper_version_summary(client):
+    summary = {'version': '', 'version_detail': {}, 'version_error': ''}
+    if not client.is_configured():
+        return summary
+    try:
+        deployment = client.get('/apis/apps/v1/namespaces/gatekeeper-system/deployments/gatekeeper-controller-manager')
+    except requests.RequestException as exc:
+        summary['version_error'] = str(exc)
+        return summary
+
+    containers = (((deployment.get('spec') or {}).get('template') or {}).get('spec') or {}).get('containers') or []
+    image = ''
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        candidate = container.get('image') or ''
+        if 'gatekeeper' in candidate:
+            image = candidate
+            break
+    if not image and containers and isinstance(containers[0], dict):
+        image = containers[0].get('image') or ''
+
+    summary['version'] = _container_image_version(image)
+    summary['version_detail'] = {
+        'image': image,
+        'namespace': 'gatekeeper-system',
+        'deployment': 'gatekeeper-controller-manager',
+    }
+    return summary
 
 
 def _metadata(item):
@@ -1221,15 +1264,15 @@ def _gatekeeper_context_for_ai(client):
 def _gatekeeper_ai_system_prompt(user, gatekeeper_context, ui_context):
     awx_context = _ai_authoring_context(user)
     return (
-        'You author Open Policy Agent Gatekeeper Kubernetes manifests for AWX. '
+        'You author Open Policy Agent Gatekeeper Kubernetes manifests for Capstan. '
         'Return only one YAML Kubernetes object. No markdown fences. No prose.\n\n'
         'Supported objects: templates.gatekeeper.sh/v1 or v1beta1 ConstraintTemplate, constraints.gatekeeper.sh constraints, '
         'and config.gatekeeper.sh/v1alpha1 Config. Do not return lists, Helm charts, kubectl commands, or placeholders.\n'
         'Use existing ConstraintTemplate kinds from Gatekeeper context when writing Constraints. If creating a new policy, prefer a '
         'ConstraintTemplate with a clear Rego package, input.review checks, and an openAPIV3Schema for parameters. '
         'Use enforcementAction deny unless the user explicitly asks for dryrun or warn. Do not include secrets, tokens, kubeconfig data, '
-        'private keys, or credential values. Scope matches and parameters to visible AWX/Gatekeeper context when relevant.\n\n'
-        f'Visible AWX context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
+        'private keys, or credential values. Scope matches and parameters to visible Capstan/Gatekeeper context when relevant.\n\n'
+        f'Visible Capstan context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
         f'Visible Gatekeeper context:\n{json.dumps(_json_safe(gatekeeper_context), indent=2)}\n\n'
         f'UI context:\n{json.dumps(_json_safe(ui_context or {}), indent=2)}'
     )
@@ -1278,7 +1321,7 @@ def _gatekeeper_remediation_system_prompt(user, gatekeeper_context, violation, t
         },
     }
     return (
-        'You propose safe remediations for Open Policy Agent Gatekeeper violations in AWX. '
+        'You propose safe remediations for Open Policy Agent Gatekeeper violations in Capstan. '
         'Return only one JSON object. No markdown fences. No prose outside JSON.\n\n'
         'Schema:\n'
         '{\n'
@@ -1295,7 +1338,7 @@ def _gatekeeper_remediation_system_prompt(user, gatekeeper_context, violation, t
         'or placeholders that require secret values. If the violation cannot be safely remediated with metadata labels or annotations, '
         'set "patch" to null and provide manual_steps instead. Use existing labels or annotations when possible. For missing required '
         'label values with no better context, use "awx-remediated".\n\n'
-        f'Visible AWX context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
+        f'Visible Capstan context:\n{json.dumps(_json_safe(awx_context), indent=2)}\n\n'
         f'Visible Gatekeeper context:\n{json.dumps(_json_safe(gatekeeper_context), indent=2)}\n\n'
         f'Selected violation:\n{json.dumps(_json_safe(violation), indent=2)}\n\n'
         f'Selected target:\n{json.dumps(_json_safe(_safe_gatekeeper_target(target)), indent=2)}\n\n'
@@ -1425,7 +1468,7 @@ class GatekeeperPolicyAuthorView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/author/
 
-    Generate one Gatekeeper manifest from AI using visible AWX and Gatekeeper context.
+    Generate one Gatekeeper manifest from AI using visible Capstan and Gatekeeper context.
     """
 
     permission_classes = [PolicyAsCodeAuthorPermission]
@@ -1648,7 +1691,7 @@ class GatekeeperProjectSyncView(GatekeeperModuleAPIView):
     """
     POST /api/v2/opa/gatekeeper/project-sync/
 
-    Discover Gatekeeper manifests from an already-synced AWX Project checkout
+    Discover Gatekeeper manifests from an already-synced Capstan Project checkout
     and preview, dry-run, or apply them through the same governed write path.
     """
 
@@ -1851,12 +1894,16 @@ class GatekeeperPolicyManagerView(GatekeeperModuleAPIView):
 
     def get(self, request, *args, **kwargs):
         client = GatekeeperKubernetesClient(_requested_gatekeeper_context(request))
+        include_version = str(request.query_params.get('include_version') or '').strip().lower() in ('1', 'true', 'yes', 'on')
         if client.context_error:
             return Response({'detail': client.context_error, 'contexts': client.context_options()}, status=status.HTTP_400_BAD_REQUEST)
         if not client.is_configured():
             return Response(
                 {
                     'configured': False,
+                    'version': '',
+                    'version_detail': {},
+                    'version_error': '',
                     'contexts': client.context_options(),
                     'cluster': {
                         'server_url': '',
@@ -1920,10 +1967,12 @@ class GatekeeperPolicyManagerView(GatekeeperModuleAPIView):
         violation_offset = (violation_page - 1) * violation_limit
         page_violations = violations[violation_offset : violation_offset + violation_limit]
         constraint_summaries.sort(key=lambda item: (-int(item.get('total_violations') or 0), item['kind'], item['name']))
+        version_summary = _gatekeeper_version_summary(client) if include_version else {'version': '', 'version_detail': {}, 'version_error': ''}
 
         return Response(
             {
                 'configured': True,
+                **version_summary,
                 'contexts': client.context_options(),
                 'cluster': {
                     'server_url': client.server_url,

@@ -589,14 +589,14 @@ export function QuayExecutionEnvironmentImages() {
         titleHelp={
           mode === 'list'
             ? t(
-                'An EE build template is a reusable AWX Project-backed definition for building and pushing an execution environment image to Project Quay.'
+                'An EE build template is a reusable Capstan Project-backed definition for building and pushing an execution environment image to Project Quay.'
               )
             : undefined
         }
         description={
           mode === 'list'
             ? t(
-                'An EE build template is a definition and set of parameters for building an AWX execution environment image.'
+                'An EE build template is a definition and set of parameters for building a Capstan execution environment image.'
               )
             : undefined
         }
@@ -615,7 +615,7 @@ export function QuayExecutionEnvironmentImages() {
                 module="quay"
                 page={t('Project Quay EE Build Template')}
                 prompt={t(
-                  'Help with this Project Quay execution environment build template. Use the selected project, namespace, repository, build runs, tags, and my AWX permissions. Explain how to launch, troubleshoot, and use the resulting image in AWX job templates.'
+                  'Help with this Project Quay execution environment build template. Use the selected project, namespace, repository, build runs, tags, and my Capstan permissions. Explain how to launch, troubleshoot, and use the resulting image in Capstan job templates.'
                 )}
                 context={{
                   registry: status.data?.registry,
@@ -630,7 +630,7 @@ export function QuayExecutionEnvironmentImages() {
               module="quay"
               page={t('Project Quay EE Build Templates')}
               prompt={t(
-                'Help with Project Quay execution environment build templates in AWX. Explain how to save reusable builds, launch them, troubleshoot failures, and use resulting images in job templates.'
+                'Help with Project Quay execution environment build templates in Capstan. Explain how to save reusable builds, launch them, troubleshoot failures, and use resulting images in job templates.'
               )}
               context={{ registry: status.data?.registry, namespace: status.data?.namespace }}
             />
@@ -895,7 +895,7 @@ function ListView(props: {
         errorStateTitle={t('Error loading EE build templates')}
         emptyStateTitle={t('No EE build templates found')}
         emptyStateDescription={t(
-          'Create a template to save the AWX Project, Quay image, tag, and build paths.'
+          'Create a template to save the Capstan Project, Quay image, tag, and build paths.'
         )}
         emptyStateButtonIcon={<PlusCircleIcon />}
         emptyStateButtonText={props.configured ? t('Create template') : undefined}
@@ -976,7 +976,7 @@ function FormView(props: {
               onChange={(_, value) => props.setDescription(value)}
             />
           </FormGroup>
-          <FormGroup label={t('AWX Project')} fieldId="project" isRequired>
+          <FormGroup label={t('Capstan Project')} fieldId="project" isRequired>
             <FormSelect
               id="project"
               value={props.selectedProjectId}
@@ -1188,7 +1188,9 @@ function DetailsView(props: {
             <PageDetail label={t('Organization')}>
               {props.template.project.organization?.name || '-'}
             </PageDetail>
-            <PageDetail label={t('AWX Project')}>{props.template.project.name || '-'}</PageDetail>
+            <PageDetail label={t('Capstan Project')}>
+              {props.template.project.name || '-'}
+            </PageDetail>
             <PageDetail label={t('Image')}>
               <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
                 {props.template.image}
@@ -1446,7 +1448,7 @@ function TagsTable(props: {
   if (!props.canLoadTags) {
     return (
       <Alert isInline variant="info" title={t('Project Quay API token is not set.')}>
-        {t('AWX needs a Project Quay API token before it can list hosted image tags.')}
+        {t('Capstan needs a Project Quay API token before it can list hosted image tags.')}
       </Alert>
     );
   }

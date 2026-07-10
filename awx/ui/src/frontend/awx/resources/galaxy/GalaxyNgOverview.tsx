@@ -101,7 +101,7 @@ export function GalaxyNgOverview() {
                 module="galaxy_ng"
                 page={t('Galaxy NG overview')}
                 prompt={t(
-                  'Review this Galaxy NG Automation Hub overview for AWX. Explain connection health, content counts, missing setup, and next actions for collections, repositories, remotes, approvals, signing, and API token access.'
+                  'Review this Galaxy NG Automation Hub overview for Capstan. Explain connection health, content counts, missing setup, and next actions for collections, repositories, remotes, approvals, signing, and API token access.'
                 )}
                 context={{
                   configured: data?.configured,
@@ -141,7 +141,7 @@ export function GalaxyNgOverview() {
                   <Alert
                     variant="warning"
                     isInline
-                    title={t('Galaxy NG is not ready for AWX content workflows')}
+                    title={t('Galaxy NG is not ready for Capstan content workflows')}
                   >
                     {data?.message || t('Configure Galaxy NG settings before using this module.')}
                   </Alert>
@@ -266,12 +266,12 @@ export function GalaxyNgOverview() {
                   {
                     to: getPageUrl(AwxRoute.GalaxyNGCollections),
                     label: t('Collections'),
-                    description: t('Browse collections available to AWX.'),
+                    description: t('Browse collections available to Capstan.'),
                   },
                   {
                     to: getPageUrl(AwxRoute.GalaxyNGProjectImports),
                     label: t('Project Imports'),
-                    description: t('Build and publish collection artifacts from AWX Projects.'),
+                    description: t('Build and publish collection artifacts from Capstan Projects.'),
                   },
                   {
                     to: getPageUrl(AwxRoute.GalaxyNGCollectionApprovals),
@@ -302,7 +302,7 @@ export function GalaxyNgOverview() {
                   {
                     to: getPageUrl(AwxRoute.Templates),
                     label: t('EE Build Templates'),
-                    description: t('Build EE images from AWX Projects and push them to Quay.'),
+                    description: t('Build EE images from Capstan Projects and push them to Quay.'),
                   },
                 ],
               },
@@ -323,7 +323,7 @@ export function GalaxyNgOverview() {
                   {
                     to: getPageUrl(AwxRoute.GalaxyNGApiToken),
                     label: t('API Token'),
-                    description: t('Review AWX authentication for Galaxy NG APIs.'),
+                    description: t('Review Capstan authentication for Galaxy NG APIs.'),
                   },
                   {
                     href: getGalaxyBrowserUrl(data?.ui_url),

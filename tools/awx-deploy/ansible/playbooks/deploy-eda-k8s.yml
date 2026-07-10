@@ -1,5 +1,5 @@
 ---
-- name: Deploy EDA alongside AWX on Kubernetes
+- name: Deploy EDA alongside Capstan on Kubernetes
   hosts: all
   gather_facts: false
   roles:

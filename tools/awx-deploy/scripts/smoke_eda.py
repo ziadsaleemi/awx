@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable AWX + EDA live smoke checks.
+"""Repeatable Capstan + EDA live smoke checks.
 
 The script intentionally uses only the Python standard library so it can run
 from a fresh control node after the Ansible deployment roles finish.
@@ -93,10 +93,10 @@ def split_env_words(name: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description='Smoke test AWX EDA management through AWX API endpoints.')
-    parser.add_argument('--url', action='append', dest='urls', help='AWX base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.')
-    parser.add_argument('--username', default=os.environ.get('AWX_USERNAME', 'admin'), help='AWX admin username. Defaults to AWX_USERNAME or admin.')
-    parser.add_argument('--password', default=os.environ.get('AWX_PASSWORD'), help='AWX admin password. Defaults to AWX_PASSWORD.')
+    parser = argparse.ArgumentParser(description='Smoke test Capstan EDA management through Capstan API endpoints.')
+    parser.add_argument('--url', action='append', dest='urls', help='Capstan base URL. Can be passed more than once. Defaults to AWX_URLS/AWX_URL.')
+    parser.add_argument('--username', default=os.environ.get('AWX_USERNAME', 'admin'), help='Capstan admin username. Defaults to AWX_USERNAME or admin.')
+    parser.add_argument('--password', default=os.environ.get('AWX_PASSWORD'), help='Capstan admin password. Defaults to AWX_PASSWORD.')
     parser.add_argument(
         '--verify-tls',
         action='store_true',
@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         '--user-agent',
         default=os.environ.get(
             'AWX_SMOKE_USER_AGENT',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AWX-EDA-Smoke/1.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Capstan-EDA-Smoke/1.0',
         ),
         help='HTTP User-Agent for smoke requests. Defaults to a browser-style value so Cloudflare/browser-integrity checks do not block the script.',
     )
@@ -178,7 +178,7 @@ def normalize_urls(args: argparse.Namespace) -> list[str]:
         urls = [os.environ['AWX_URL']]
     normalized = [url.rstrip('/') for url in urls if url.strip()]
     if not normalized:
-        raise SmokeFailure('Provide at least one AWX URL with --url, AWX_URLS, or AWX_URL.')
+        raise SmokeFailure('Provide at least one Capstan URL with --url, AWX_URLS, or AWX_URL.')
     return normalized
 
 
@@ -460,7 +460,7 @@ def check_project_e2e(base_url: str, args: argparse.Namespace) -> list[Check]:
             username=args.username,
             password=args.password,
             method='POST',
-            payload={'name': name, 'description': 'AWX EDA smoke project', 'url': args.project_url, 'scm_branch': args.project_branch, 'verify_ssl': False},
+            payload={'name': name, 'description': 'Capstan EDA smoke project', 'url': args.project_url, 'scm_branch': args.project_branch, 'verify_ssl': False},
             verify_tls=args.verify_tls,
             timeout=args.timeout,
             user_agent=args.user_agent,
@@ -630,7 +630,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     if not args.password:
-        parser.error('AWX admin password is required via --password or AWX_PASSWORD.')
+        parser.error('Capstan admin password is required via --password or AWX_PASSWORD.')
     urls = normalize_urls(args)
     report: dict[str, Any] = {
         'generated_at': datetime.now(timezone.utc).isoformat(),

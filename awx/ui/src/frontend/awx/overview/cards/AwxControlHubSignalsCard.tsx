@@ -311,8 +311,8 @@ export function AwxControlHubSignalsCard(props: { data: IAwxDashboardData }) {
   return (
     <PageDashboardCard
       id="awx-control-hub-signals"
-      title={t('Control hub signals')}
-      subtitle={t('Graph and table view of the systems AWX is coordinating.')}
+      title={t('Capstan signals')}
+      subtitle={t('Graph and table view of coordinated automation systems.')}
       width="full"
       height="lg"
     >
@@ -357,7 +357,7 @@ export function AwxControlHubSignalsCard(props: { data: IAwxDashboardData }) {
           </StackItem>
           <StackItem>
             <Table
-              aria-label={t('AWX control hub systems')}
+              aria-label={t('Capstan systems')}
               variant="compact"
               data-cy="control-hub-signals-table"
             >

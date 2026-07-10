@@ -1,5 +1,5 @@
 ---
-- name: Prepare AWX server nodes
+- name: Prepare Capstan server nodes
   hosts: awx_server_nodes
   gather_facts: true
   become: true
@@ -23,28 +23,28 @@
   roles:
     - awx_redis
 
-- name: Deploy AWX receptor nodes
+- name: Deploy Capstan receptor nodes
   hosts: awx_receptor
   gather_facts: true
   become: true
   roles:
     - awx_receptor
 
-- name: Deploy AWX task nodes
+- name: Deploy Capstan task nodes
   hosts: awx_task
   gather_facts: true
   become: true
   roles:
     - awx_task
 
-- name: Deploy AWX web nodes
+- name: Deploy Capstan web nodes
   hosts: awx_web
   gather_facts: true
   become: true
   roles:
     - awx_web
 
-- name: Deploy AWX load balancer
+- name: Deploy Capstan load balancer
   hosts: awx_lb
   gather_facts: true
   become: true

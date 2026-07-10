@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import serializers
 
-# AWX
+# Capstan
 from awx.main.models import ActivityStream, Inventory, JobTemplate, Role, User, InstanceGroup, InventoryUpdateEvent, InventoryUpdate
 
 from ansible_base.lib.utils.schema import extend_schema_if_available

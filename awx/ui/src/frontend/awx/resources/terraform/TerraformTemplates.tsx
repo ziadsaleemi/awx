@@ -107,7 +107,7 @@ export function TerraformTemplates() {
       <PageHeader
         title={t('Terraform Templates')}
         description={t(
-          'Terraform templates define how AWX runs Terraform against a project — the working directory, extra variables, credentials, and inventory to populate after apply.'
+          'Terraform templates define how Capstan runs Terraform against a project — the working directory, extra variables, credentials, and inventory to populate after apply.'
         )}
         titleHelpTitle={t('Terraform Template')}
         titleHelp={t(

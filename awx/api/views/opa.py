@@ -1,5 +1,5 @@
 """
-G6a — OPA (Open Policy Agent) Guardrails Integration for AWX.
+G6a — OPA (Open Policy Agent) Guardrails Integration for Capstan.
 
 Provides:
   - `OPAPolicyEngine` — thin client that evaluates policies against OPA server
@@ -7,7 +7,7 @@ Provides:
   - `OPAPolicyView` — REST endpoint to evaluate a policy check interactively
   - `OPAPolicyListView` — list configured policy bundles/paths
 
-Configuration (in AWX settings):
+Configuration (in Capstan settings):
   OPA_HOST            — OPA server hostname; empty disables policy checks
   OPA_PORT            — OPA server port, e.g. 8181
   OPA_SSL             — whether to use https
@@ -176,6 +176,21 @@ class OPAPolicyEngine:
             headers['Authorization'] = f"Bearer {getattr(settings, 'OPA_AUTH_TOKEN', '')}"
         return headers
 
+    def _get(self, path: str, content_type='application/json'):
+        self.validate_configuration()
+        url = f'{self.base_url}{path}'
+        with opa_cert_file() as cert_files:
+            cert, verify = cert_files
+            resp = requests.get(
+                url,
+                timeout=self.timeout,
+                headers=self._headers(content_type=content_type),
+                cert=cert,
+                verify=verify,
+            )
+        resp.raise_for_status()
+        return resp
+
     def validate_configuration(self):
         auth_type = getattr(settings, 'OPA_AUTH_TYPE', OPA_AUTH_TYPES.NONE)
         if auth_type == OPA_AUTH_TYPES.CERTIFICATE and not self.ssl:
@@ -221,7 +236,7 @@ class OPAPolicyEngine:
         """
         PUT Rego module text to /v1/policies/<policy_id>.
 
-        This uses OPA's real Policy API; AWX only stores/syncs the admin-managed
+        This uses OPA's real Policy API; Capstan only stores/syncs the admin-managed
         Rego source and does not evaluate policy locally.
         """
         self.validate_configuration()
@@ -319,6 +334,64 @@ class OPAPolicyEngine:
             except ValueError:
                 return {'status_code': resp.status_code}
         return {'status_code': resp.status_code}
+
+    def version(self) -> dict:
+        """
+        Return OPA build metadata.
+
+        OPA deployments do not all expose the same version endpoint. Newer
+        server builds commonly return build data at `/version`, while the
+        runtime used by our dev deployment exposes the version in `/v1/config`
+        labels and on the root HTML page.
+        """
+        self.validate_configuration()
+        if not self.is_available():
+            raise ValueError(_('OPA is not enabled or configured.'))
+
+        errors = []
+
+        try:
+            resp = self._get('/version')
+            if getattr(resp, 'content', b''):
+                payload = resp.json()
+                return payload if isinstance(payload, dict) else {'version': str(payload)}
+            return {}
+        except (ValueError, requests.RequestException) as exc:
+            errors.append(str(exc))
+
+        try:
+            resp = self._get('/v1/config')
+            payload = resp.json() if getattr(resp, 'content', b'') else {}
+            result = payload.get('result') if isinstance(payload, dict) else {}
+            labels = result.get('labels') if isinstance(result, dict) else {}
+            detail = {
+                'source': '/v1/config',
+                'labels': labels if isinstance(labels, dict) else {},
+            }
+            version = detail['labels'].get('version')
+            if version:
+                detail['Version'] = str(version)
+            return detail
+        except (ValueError, requests.RequestException) as exc:
+            errors.append(str(exc))
+
+        try:
+            resp = self._get('/', content_type='text/plain')
+            text = getattr(resp, 'text', '') or ''
+            detail = {'source': '/'}
+            for raw_line in re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE).splitlines():
+                line = re.sub(r'<[^>]+>', '', raw_line).strip()
+                if not line or ':' not in line:
+                    continue
+                key, value = [part.strip() for part in line.split(':', 1)]
+                if key in ('Version', 'Build Commit', 'Build Timestamp') and value:
+                    detail[key] = value
+            if detail.get('Version'):
+                return detail
+        except requests.RequestException as exc:
+            errors.append(str(exc))
+
+        raise ValueError('; '.join(error for error in errors if error) or _('Unable to read OPA version.'))
 
 
 def check_opa_policy(policy_path: str, input_data: dict) -> bool:
@@ -443,6 +516,22 @@ def _opa_policy_module_summary(module, include_raw=False):
     if include_raw:
         summary['raw'] = raw
         summary['ast'] = ast
+    return summary
+
+
+def _opa_version_summary(engine):
+    summary = {'version': '', 'version_detail': {}, 'version_error': ''}
+    if not engine.is_available():
+        return summary
+    try:
+        version_detail = engine.version()
+    except (ValueError, requests.RequestException) as exc:
+        summary['version_error'] = str(exc)
+        return summary
+
+    if isinstance(version_detail, dict):
+        summary['version_detail'] = version_detail
+        summary['version'] = str(version_detail.get('Version') or version_detail.get('version') or '').strip()
     return summary
 
 
@@ -861,7 +950,7 @@ def _template_summary(template):
 
 def build_opa_launch_input(request, template, launch_kwargs=None, source='api', action='launch', metadata=None):
     """
-    Build a secret-safe OPA input for any AWX launch surface.
+    Build a secret-safe OPA input for any Capstan launch surface.
 
     OPA gets stable context: user, template, inventory, credential ids/types,
     launch intent, and extra-var keys. Launch values are intentionally omitted.
@@ -936,12 +1025,14 @@ class OPAPolicyListView(OPAModuleAPIView):
 
     def get(self, request, *args, **kwargs):
         engine = OPAPolicyEngine()
+        include_version = str(request.query_params.get('include_version') or '').strip().lower() in ('1', 'true', 'yes', 'on')
         policy_bundle = getattr(settings, 'OPA_POLICY_BUNDLE', '') or ''
         policy_bundle_configured = bool(policy_bundle.strip())
         return Response(
             {
                 'enabled': engine.is_available(),
                 'server_url': engine.base_url,
+                **(_opa_version_summary(engine) if include_version else {'version': '', 'version_detail': {}, 'version_error': ''}),
                 'policies': DEFAULT_POLICIES,
                 'policy_bundle': {
                     'configured': policy_bundle_configured,
@@ -1189,7 +1280,7 @@ class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
     """
     POST /api/v2/opa/policy-modules/project-sync/
 
-    Discover Rego modules from an already-synced AWX Project checkout and
+    Discover Rego modules from an already-synced Capstan Project checkout and
     preview, dry-run, or apply them through OPA's Policy API.
     """
 
@@ -1415,7 +1506,7 @@ class OPAPolicySyncView(OPAModuleAPIView):
     """
     POST /api/v2/opa/policies/sync/
 
-    Sync the configured AWX-managed Rego source to the configured OPA server
+    Sync the configured Capstan-managed Rego source to the configured OPA server
     through OPA's Policy API.
     """
 

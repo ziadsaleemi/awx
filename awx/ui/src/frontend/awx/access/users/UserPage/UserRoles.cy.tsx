@@ -1,7 +1,7 @@
 import { awxAPI } from '../../../common/api/awx-utils';
 import { UserRoles } from './UserRoles';
 
-describe('AWX user roles', () => {
+describe('Capstan user roles', () => {
   const component = <UserRoles />;
   const path = '/users/:id/roles';
   const initialEntries = [`/users/1/roles`];
@@ -57,7 +57,7 @@ describe('AWX user roles', () => {
       cy.clickButton(/^Close$/);
     });
   });
-  describe('AWX user roles - empty list', () => {
+  describe('Capstan user roles - empty list', () => {
     beforeEach(() => {
       cy.intercept('GET', awxAPI`/role_user_assignments/*`, {
         fixture: 'emptyList.json',

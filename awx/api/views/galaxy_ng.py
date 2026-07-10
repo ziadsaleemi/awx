@@ -80,6 +80,30 @@ def _galaxy_ng_collection_detail_cache_key(client, detail_path):
     return f'awx:galaxy-ng:collection-detail:{hashlib.sha256(fingerprint.encode()).hexdigest()}'
 
 
+def _galaxy_ng_version_summary(pulp_status):
+    summary = {'version': '', 'component_versions': {}}
+    if not isinstance(pulp_status, dict):
+        return summary
+
+    versions = {}
+    for entry in pulp_status.get('versions') or []:
+        if not isinstance(entry, dict):
+            continue
+        component = entry.get('component') or entry.get('package') or entry.get('name')
+        version = entry.get('version')
+        if component and version:
+            versions[str(component)] = str(version)
+
+    summary['component_versions'] = versions
+    for component in ('galaxy_ng', 'galaxy-ng', 'pulp_ansible', 'pulp-container', 'pulpcore'):
+        if versions.get(component):
+            summary['version'] = versions[component]
+            return summary
+
+    summary['version'] = str(pulp_status.get('version') or pulp_status.get('Version') or '').strip()
+    return summary
+
+
 def _parse_positive_int(value, default, maximum=None):
     try:
         parsed = int(value)
@@ -340,7 +364,7 @@ def _validate_relative_cli_path(value, default, field_name):
         return '', _('%s cannot start with a dash.') % field_name
     pure_path = PurePosixPath(value)
     if pure_path.is_absolute() or '..' in pure_path.parts:
-        return '', _('%s must be relative to the selected AWX project and cannot include parent directory traversal.') % field_name
+        return '', _('%s must be relative to the selected Capstan project and cannot include parent directory traversal.') % field_name
     if any(part.startswith('.') and part not in ('.',) for part in pure_path.parts):
         return '', _('%s cannot include hidden files or directories.') % field_name
     return value, ''
@@ -350,13 +374,13 @@ def _project_for_build_plan(user, project_id):
     try:
         project_id = int(project_id)
     except (TypeError, ValueError):
-        return None, _('AWX Project is required.')
+        return None, _('Capstan Project is required.')
     project = Project.accessible_objects(user, 'read_role').filter(pk=project_id).first()
     if project is None:
-        return None, _('AWX Project was not found or you do not have access to it.')
+        return None, _('Capstan Project was not found or you do not have access to it.')
     project_path = project.get_project_path()
     if not project_path:
-        return None, _('AWX Project has not been synced to a local checkout yet.')
+        return None, _('Capstan Project has not been synced to a local checkout yet.')
     return project, ''
 
 
@@ -364,7 +388,7 @@ def _resolve_project_build_source(project, definition_file, context_path):
     try:
         root = Path(project.get_project_path()).resolve(strict=True)
     except OSError as exc:
-        return None, _('Could not read AWX Project checkout: %(error)s') % {'error': exc}
+        return None, _('Could not read Capstan Project checkout: %(error)s') % {'error': exc}
 
     definition_path = (root / definition_file).resolve(strict=False)
     context = (root / context_path).resolve(strict=False)
@@ -372,14 +396,14 @@ def _resolve_project_build_source(project, definition_file, context_path):
         definition_path.relative_to(root)
         context.relative_to(root)
     except ValueError:
-        return None, _('Execution environment build paths must stay inside the selected AWX Project checkout.')
+        return None, _('Execution environment build paths must stay inside the selected Capstan Project checkout.')
     try:
         if not definition_path.is_file():
-            return None, _('Definition file was not found in the selected AWX Project.')
+            return None, _('Definition file was not found in the selected Capstan Project.')
         if not context.is_dir():
-            return None, _('Build context was not found in the selected AWX Project.')
+            return None, _('Build context was not found in the selected Capstan Project.')
     except OSError as exc:
-        return None, _('Could not inspect AWX Project build paths: %(error)s') % {'error': exc}
+        return None, _('Could not inspect Capstan Project build paths: %(error)s') % {'error': exc}
 
     return {
         'project_id': project.pk,
@@ -399,7 +423,7 @@ def _resolve_project_collection_source(project, collection_path, artifact_dir):
     try:
         root = Path(project.get_project_path()).resolve(strict=True)
     except OSError as exc:
-        return None, _('Could not read AWX Project checkout: %(error)s') % {'error': exc}
+        return None, _('Could not read Capstan Project checkout: %(error)s') % {'error': exc}
 
     collection_root = (root / collection_path).resolve(strict=False)
     output_path = (collection_root / artifact_dir).resolve(strict=False)
@@ -407,10 +431,10 @@ def _resolve_project_collection_source(project, collection_path, artifact_dir):
         collection_root.relative_to(root)
         output_path.relative_to(root)
     except ValueError:
-        return None, _('Collection source and artifact paths must stay inside the selected AWX Project checkout.')
+        return None, _('Collection source and artifact paths must stay inside the selected Capstan Project checkout.')
     try:
         if not collection_root.is_dir():
-            return None, _('Collection path was not found in the selected AWX Project.')
+            return None, _('Collection path was not found in the selected Capstan Project.')
         galaxy_yml = collection_root / 'galaxy.yml'
         if not galaxy_yml.is_file():
             return None, _('Collection path must contain galaxy.yml.')
@@ -513,6 +537,8 @@ class GalaxyNGStatusView(APIView):
                 'tasks': 0,
             },
             'pulp_status': {},
+            'version': '',
+            'component_versions': {},
             'controller_error': '',
         }
 
@@ -545,10 +571,13 @@ class GalaxyNGStatusView(APIView):
                     'tasks': 0,
                 },
                 'pulp_status': {},
+                'version': '',
+                'component_versions': {},
                 'controller_error': '',
             }
             try:
                 live_status['pulp_status'] = client.pulp_status()
+                live_status.update(_galaxy_ng_version_summary(live_status['pulp_status']))
                 for key, path in count_paths.items():
                     try:
                         params = {'repository': 'staging'} if key == 'collection_approvals' else None
@@ -561,6 +590,8 @@ class GalaxyNGStatusView(APIView):
 
         response['counts'].update(live_status.get('counts') or {})
         response['pulp_status'] = live_status.get('pulp_status') or {}
+        response['version'] = live_status.get('version') or ''
+        response['component_versions'] = live_status.get('component_versions') or {}
         response['controller_error'] = live_status.get('controller_error') or ''
 
         return Response(response)
@@ -877,8 +908,8 @@ class GalaxyNGCollectionImportPlanView(APIView):
                 'message': _('If Galaxy NG requires content approval, the uploaded collection will appear in Collection Approvals before it is published.'),
             },
             'notes': [
-                _('Set GALAXY_TOKEN to a Galaxy NG token before running the generated publish command; AWX does not print stored secret values.'),
-                _('The selected AWX Project must be synced before generating this plan so the collection source is available on disk.'),
+                _('Set GALAXY_TOKEN to a Galaxy NG token before running the generated publish command; Capstan does not print stored secret values.'),
+                _('The selected Capstan Project must be synced before generating this plan so the collection source is available on disk.'),
                 _('Execution environment images remain in Project Quay; Galaxy NG stores Ansible collection content.'),
             ],
         }

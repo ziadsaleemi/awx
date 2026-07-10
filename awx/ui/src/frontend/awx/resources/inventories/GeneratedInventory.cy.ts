@@ -54,7 +54,7 @@ http_port=8080
     expect(countGeneratedInventoryHosts(plan)).to.equal(3);
   });
 
-  it('formats generated variable records as AWX YAML fields', () => {
+  it('formats generated variable records as Capstan YAML fields', () => {
     expect(inventoryVariablesToYaml({ ansible_user: 'admin' })).to.contain('ansible_user: admin');
     expect(inventoryVariablesToYaml({})).to.equal('---\n');
   });

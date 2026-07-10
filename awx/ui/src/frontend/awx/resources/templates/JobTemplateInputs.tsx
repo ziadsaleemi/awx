@@ -21,7 +21,7 @@ import { PageFormInventorySelect } from '../inventories/components/PageFormInven
 import { PageFormProjectSelect } from '../projects/components/PageFormProjectSelect';
 import { WebhookSubForm } from './components/WebhookSubForm';
 
-// This list below comes from the previous AWX code
+// This list below comes from the previous Capstan code
 //https//github.com / ansible / awx / blob / c760577855bf2afacc58579e743111552dae38ef / awx / ui / src / api / models / CredentialTypes.js#L10
 const acceptableCredentialKinds = [
   'machine',

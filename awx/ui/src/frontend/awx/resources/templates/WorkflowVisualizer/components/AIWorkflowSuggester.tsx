@@ -124,7 +124,7 @@ interface ResolvedWorkflowPlan {
   errors: string[];
 }
 
-const SYSTEM_PROMPT = `You are an AWX workflow automation architect.
+const SYSTEM_PROMPT = `You are a Capstan workflow automation architect.
 Return ONLY JSON. No markdown fences. No prose.
 Schema:
 {
@@ -136,7 +136,7 @@ Schema:
       "name": "node label",
       "type": "job|workflow_job|terraform_job|project_update|inventory_update|system_job|workflow_approval|eda_rulebook|ai_task",
       "template_id": 123,
-      "template_name": "exact existing AWX template name when template_id is unknown",
+      "template_name": "exact existing Capstan template name when template_id is unknown",
       "model": "optional model override for ai_task nodes",
       "description": "what this node does",
       "after": "previous-node-id",
@@ -150,10 +150,10 @@ Schema:
   ],
   "warnings": []
 }
-Use only available AWX template ids/names from context for executable nodes.
+Use only available Capstan template ids/names from context for executable nodes.
 Use workflow_approval for human gates.
-Use eda_rulebook only when user explicitly asks for event-driven behavior; AWX persists these nodes and can create/start/poll activation status from the configured EDA Controller at runtime.
-Use ai_task only when user explicitly asks for runtime AI behavior; AWX persists these nodes and generates execution-plan artifacts from the configured AI provider at runtime.
+Use eda_rulebook only when user explicitly asks for event-driven behavior; Capstan persists these nodes and can create/start/poll activation status from the configured EDA Controller at runtime.
+Use ai_task only when user explicitly asks for runtime AI behavior; Capstan persists these nodes and generates execution-plan artifacts from the configured AI provider at runtime.
 List at most 8 nodes.`;
 
 const typeAliases: Record<string, UnifiedJobType | 'eda_rulebook' | 'ai_task'> = {
@@ -454,7 +454,7 @@ export function AIWorkflowSuggester() {
             content: [
               `Workflow template: ${state.workflowTemplate?.name || 'current workflow'}`,
               `Existing visualizer nodes: ${existingNodes.join(', ') || 'none'}`,
-              `Available AWX templates:\n${templateContext || 'none'}`,
+              `Available Capstan templates:\n${templateContext || 'none'}`,
               `EDA controller: ${edaContext.status?.configured ? `configured at ${edaContext.status.controller_url}` : 'not configured'}`,
               `Recent EDA activations:\n${edaActivationContext || 'none'}`,
               `User request:\n${description.trim()}`,
@@ -652,7 +652,7 @@ export function AIWorkflowSuggester() {
                 value={description}
                 onChange={(_e, value) => setDescription(value)}
                 rows={4}
-                placeholder={t('Describe a multi-step AWX workflow goal…')}
+                placeholder={t('Describe a multi-step Capstan workflow goal…')}
                 onKeyDown={(event) => {
                   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                     void handleGenerate();

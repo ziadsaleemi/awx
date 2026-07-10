@@ -1,7 +1,7 @@
 /**
  * G2b - Real-time Actionable Insights Card
  *
- * Surfaces live reliability signals from AWX data:
+ * Surfaces live reliability signals from automation data:
  *  - recent job failure rate and top failing templates
  *  - execution-time anomalies against recent runtime baseline
  *  - inventory drift from failed/stale inventory sources and active host failures
@@ -499,7 +499,7 @@ export function AwxInsightsCard() {
     setAiLoading(true);
     setAiError(null);
     try {
-      const prompt = `Analyze the following AWX automation platform reliability signals and provide 2-3 concise, actionable recommendations for the platform administrator.
+      const prompt = `Analyze the following Capstan reliability signals and provide 2-3 concise, actionable recommendations for the platform administrator.
 
 Recent jobs:
 - Total jobs: ${stats.jobs.total}
@@ -527,7 +527,7 @@ Be specific, brief, and actionable. Format as a short bulleted list.`;
       >(awxAPI`/ai/chat/`, {
         messages: [{ role: 'user', content: prompt }],
         system_override:
-          'You are an AWX automation reliability engineer. Provide concise, actionable recommendations based on job, project, runtime, and inventory signals. Use plain text with bullet points. No markdown headings or code blocks.',
+          'You are a Capstan reliability engineer. Provide concise, actionable recommendations based on job, project, runtime, and inventory signals. Use plain text with bullet points. No markdown headings or code blocks.',
       });
       setAiSummary(resp.message.content);
     } catch {

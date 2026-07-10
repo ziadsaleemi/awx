@@ -168,7 +168,7 @@ export function EdaRbacSync() {
       <PageHeader
         title={t('Access Sync')}
         description={t(
-          'Preview, sync, and enforce EDA role assignments from AWX organization RBAC.'
+          'Preview, sync, and enforce EDA role assignments from Capstan organization RBAC.'
         )}
         headerActions={headerActions}
       />
@@ -193,7 +193,7 @@ export function EdaRbacSync() {
             />
             <ReportSection
               title={t('Extra assignments')}
-              emptyText={t('No extra EDA assignments in AWX-managed scope.')}
+              emptyText={t('No extra EDA assignments in Capstan-managed scope.')}
               rows={report.extra_assignments.map(formatAssignment)}
             />
             <ReportSection
@@ -217,7 +217,10 @@ export function EdaRbacSync() {
 function SummaryCards(props: { summary: EdaRbacSummary }) {
   const { t } = useTranslation();
   const items = [
-    { label: t('AWX organizations'), value: props.summary.awx_organizations ?? 0 },
+    {
+      label: t('Capstan organizations'),
+      value: props.summary.awx_organizations ?? 0,
+    },
     { label: t('Desired assignments'), value: props.summary.desired_assignments ?? 0 },
     { label: t('Current assignments'), value: props.summary.current_assignments ?? 0 },
     { label: t('Missing assignments'), value: props.summary.missing_assignments ?? 0 },

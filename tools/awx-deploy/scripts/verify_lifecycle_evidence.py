@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validate AWX Deploy lifecycle evidence artifacts.
+"""Validate Capstan Deploy lifecycle evidence artifacts.
 
 This script is intentionally standard-library-only so it can run on a fresh
 control node after live deploy, backup, restore, upgrade, and failback drills.
-It validates the files produced by the AWX/Quay lifecycle playbooks and the
-JSON reports produced by the AWX Deploy smoke scripts.
+It validates the files produced by the Capstan/Quay lifecycle playbooks and the
+JSON reports produced by the Capstan Deploy smoke scripts.
 """
 
 from __future__ import annotations
@@ -41,13 +41,13 @@ class ArtifactProfile:
 
 ARTIFACT_PROFILES: dict[str, ArtifactProfile] = {
     'awx-server': ArtifactProfile(
-        label='AWX server backup',
+        label='Capstan server backup',
         required_files=('awx.sql', 'manifest-*.yml'),
         optional_files=('config-*.tar.gz', 'data-*.tar.gz'),
         storage_files=('data-*.tar.gz',),
     ),
     'awx-k8s': ArtifactProfile(
-        label='AWX Kubernetes backup',
+        label='Capstan Kubernetes backup',
         required_files=('awx.sql', 'k8s-secrets.yml', 'k8s-configmaps.yml', 'k8s-resources.yml', 'manifest-*.yml'),
         optional_files=('data.tar.gz',),
         storage_files=('data.tar.gz',),
@@ -66,7 +66,7 @@ ARTIFACT_PROFILES: dict[str, ArtifactProfile] = {
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description='Verify AWX Deploy lifecycle proof artifacts.')
+    parser = argparse.ArgumentParser(description='Verify Capstan Deploy lifecycle proof artifacts.')
     parser.add_argument(
         '--artifact',
         action='append',

@@ -159,7 +159,7 @@ export function useAwxView<T extends { id: number }>(options: {
   }
 
   // Strip any legacy ":N" direction suffix that may appear in stale browser
-  // URLs (e.g. "name:1" → "name"). AWX API uses order_by=name / order_by=-name.
+  // URLs (e.g. "name:1" → "name"). Capstan API uses order_by=name / order_by=-name.
   const cleanSort = sort ? sort.replace(/:[-\d]+$/, '') : sort;
   if (cleanSort && !queryString.includes('order_by')) {
     queryString ? (queryString += '&') : (queryString += '?');

@@ -1,5 +1,5 @@
 ---
-- name: Upgrade AWX server deployment
+- name: Upgrade Capstan server deployment
   hosts: awx_server_nodes
   gather_facts: true
   become: true

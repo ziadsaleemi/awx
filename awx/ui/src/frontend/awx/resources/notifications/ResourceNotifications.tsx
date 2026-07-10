@@ -54,7 +54,7 @@ export function ResourceNotifications({ resourceType, id }: { resourceType: stri
   };
 
   const params = useParams();
-  // The id in the URL may not be the id of the AWX resource so we support explicitly passing the id and then falling back to the URL id
+  // The id in the URL may not be the id of the Capstan resource so we support explicitly passing the id and then falling back to the URL id
   const resourceId =
     id ?? params[resourceToParamMap[resourceType as keyof ResourceTypeMapper] ?? ''];
   const resourcePath = resourceToPathMap[resourceType as keyof ResourceTypeMapper] ?? resourceType;

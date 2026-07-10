@@ -1,7 +1,7 @@
 import { awxAPI } from '../../../common/api/awx-utils';
 import { AwxTeamRoles } from './AwxTeamRoles';
 
-describe('AWX team roles', () => {
+describe('Capstan team roles', () => {
   const component = <AwxTeamRoles />;
   const path = '/teams/:id/roles';
   const initialEntries = [`/teams/1/roles`];
@@ -48,7 +48,7 @@ describe('AWX team roles', () => {
       cy.clickButton(/^Close$/);
     });
   });
-  describe('AWX team roles - empty list', () => {
+  describe('Capstan team roles - empty list', () => {
     beforeEach(() => {
       cy.intercept('GET', awxAPI`/role_team_assignments/*`, {
         fixture: 'emptyList.json',

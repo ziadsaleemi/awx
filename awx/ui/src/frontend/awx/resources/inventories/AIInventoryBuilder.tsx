@@ -2,7 +2,7 @@
  * G4a — AI Natural-Language Inventory Builder
  *
  * A modal wizard where the user describes their infrastructure in plain text.
- * The AI generates a structured AWX inventory plan with groups, hosts, and
+ * The AI generates a structured Capstan inventory plan with groups, hosts, and
  * variables as a preview before saving.
  *
  * The button is hidden when AI is not enabled.
@@ -52,9 +52,9 @@ interface AIInventoryBuilderProps {
   fieldName?: string;
 }
 
-const SYSTEM_PROMPT = `You are an AWX/Ansible inventory generation expert.
+const SYSTEM_PROMPT = `You are a Capstan/Ansible inventory generation expert.
 The user will describe their infrastructure in plain text.
-Generate a valid AWX static inventory in INI format (Ansible inventory INI syntax) with:
+Generate a valid Capstan static inventory in INI format (Ansible inventory INI syntax) with:
   - Logical group names in square brackets
   - Hosts under each group
   - A [all:vars] section with common variables if applicable

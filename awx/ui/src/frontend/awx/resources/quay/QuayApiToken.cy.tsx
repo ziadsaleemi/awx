@@ -52,13 +52,13 @@ const tokenPlan = {
   token_setting: 'QUAY_API_TOKEN',
   push_settings: ['QUAY_PUSH_USERNAME', 'QUAY_PUSH_TOKEN'],
   oauth_application: {
-    name: 'AWX Project Quay Management',
-    description: 'OAuth application used by AWX to manage Project Quay.',
+    name: 'Capstan Project Quay Management',
+    description: 'OAuth application used by Capstan to manage Project Quay.',
     create_method: 'POST',
     create_url: 'https://quay.example.test/api/v1/organization/awx/applications',
     payload: {
-      name: 'AWX Project Quay Management',
-      description: 'AWX-managed Project Quay integration',
+      name: 'Capstan Project Quay Management',
+      description: 'Capstan-managed Project Quay integration',
       application_uri: 'https://quay.example.test',
       redirect_uri: 'https://quay.example.test',
     },
@@ -66,7 +66,7 @@ const tokenPlan = {
   app_specific_token: {
     create_method: 'POST',
     create_url: 'https://quay.example.test/api/v1/user/apptoken',
-    payload: { friendlyName: 'AWX Project Quay Management' },
+    payload: { friendlyName: 'Capstan Project Quay Management' },
   },
   validation_commands: [
     {
@@ -76,7 +76,7 @@ const tokenPlan = {
     },
   ],
   notes: [
-    'Store only the final token value in QUAY_API_TOKEN. AWX does not display stored secret values.',
+    'Store only the final token value in QUAY_API_TOKEN. Capstan does not display stored secret values.',
   ],
 };
 

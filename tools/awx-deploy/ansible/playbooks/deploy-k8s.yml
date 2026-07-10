@@ -1,5 +1,5 @@
 ---
-- name: Deploy AWX to Kubernetes
+- name: Deploy Capstan to Kubernetes
   hosts: all
   gather_facts: false
   vars:

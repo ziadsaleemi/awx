@@ -90,14 +90,14 @@ export function QuayApiToken() {
       <PageHeader
         title={t('API Token')}
         description={t(
-          'Create, validate, and store the Project Quay management token used by AWX.'
+          'Create, validate, and store the Project Quay management token used by Capstan.'
         )}
         headerActions={
           <ModuleAIAssistantAction
             module="quay"
             page={t('Project Quay API token')}
             prompt={t(
-              'Help me configure Project Quay API token access for AWX. Explain the required scopes, validation commands, token storage setting, and difference between API management token and robot push credentials.'
+              'Help me configure Project Quay API token access for Capstan. Explain the required scopes, validation commands, token storage setting, and difference between API management token and robot push credentials.'
             )}
             context={{
               server_url: data?.server_url,
@@ -119,7 +119,7 @@ export function QuayApiToken() {
           ) : null}
           <StackItem>
             <Card>
-              <CardTitle>{t('AWX Quay management authentication')}</CardTitle>
+              <CardTitle>{t('Capstan Quay management authentication')}</CardTitle>
               <CardBody>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
@@ -147,7 +147,7 @@ export function QuayApiToken() {
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('AWX setting')}</DescriptionListTerm>
+                    <DescriptionListTerm>{t('Capstan setting')}</DescriptionListTerm>
                     <DescriptionListDescription>
                       {data?.token_setting || 'QUAY_API_TOKEN'}
                     </DescriptionListDescription>
@@ -176,7 +176,7 @@ export function QuayApiToken() {
                     <TextContent>
                       <Text component={TextVariants.small}>
                         {t(
-                          'These scopes allow AWX to read repositories, create repositories, manage repository visibility, manage repository permissions, manage robot accounts, and delete image tags.'
+                          'These scopes allow Capstan to read repositories, create repositories, manage repository visibility, manage repository permissions, manage robot accounts, and delete image tags.'
                         )}
                       </Text>
                     </TextContent>
@@ -257,7 +257,7 @@ export function QuayApiToken() {
                     <Alert
                       isInline
                       variant="info"
-                      title={t('Store the validated token in AWX settings.')}
+                      title={t('Store the validated token in Capstan settings.')}
                     >
                       <TextContent>
                         <Text component={TextVariants.p}>

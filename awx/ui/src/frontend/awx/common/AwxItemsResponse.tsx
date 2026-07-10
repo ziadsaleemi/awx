@@ -1,5 +1,5 @@
 /**
- * Interface for AWX API responses that return a list of items.
+ * Interface for Capstan API responses that return a list of items.
  */
 export interface AwxItemsResponse<T> {
   count: number;

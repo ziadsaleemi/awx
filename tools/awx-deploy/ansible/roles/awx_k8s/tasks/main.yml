@@ -13,7 +13,7 @@
   until: awx_k8s_readyz.rc == 0
   changed_when: false
 
-- name: Ensure AWX Kubernetes namespace exists
+- name: Ensure Capstan Kubernetes namespace exists
   ansible.builtin.shell:
     cmd: >-
       {{ awx_k8s_kubectl }} create namespace {{ awx_k8s_namespace }}
@@ -215,7 +215,7 @@
     state: directory
     mode: "0700"
 
-- name: Read Project Quay token secret for AWX settings
+- name: Read Project Quay token secret for Capstan settings
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_quay_k8s_namespace }} get secret {{ awx_quay_token_secret_name }} -o json"
   register: awx_k8s_quay_token_secret
@@ -310,13 +310,13 @@
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} wait --for=condition=complete job/{{ awx_k8s_name }}-migrate --timeout=600s"
   changed_when: false
 
-- name: Apply AWX application
+- name: Apply Capstan application
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} apply -f {{ awx_k8s_work_dir }}/30-awx.yml"
   register: awx_k8s_apply_awx
   changed_when: "'created' in awx_k8s_apply_awx.stdout or 'configured' in awx_k8s_apply_awx.stdout"
 
-- name: Restart AWX deployments after config changes
+- name: Restart Capstan deployments after config changes
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout restart deployment/{{ item }}"
   loop:
@@ -363,12 +363,12 @@
     - awx_k8s_firewalld_state.stdout == "active"
     - awx_k8s_firewalld_open is changed
 
-- name: Wait for AWX web deployment
+- name: Wait for Capstan web deployment
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-web --timeout=300s"
   changed_when: false
 
-- name: Wait for AWX task deployment
+- name: Wait for Capstan task deployment
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_k8s_namespace }} rollout status deployment/{{ awx_k8s_name }}-task --timeout=300s"
   changed_when: false

@@ -18,7 +18,7 @@
   changed_when: true
   when: inventory_hostname in (groups.get('awx_database', []) | default([]))
 
-- name: Archive AWX configuration
+- name: Archive Capstan configuration
   ansible.builtin.archive:
     path:
       - "{{ awx_server_config_dir }}/settings.py"
@@ -30,7 +30,7 @@
     mode: "0600"
   ignore_errors: true
 
-- name: Archive AWX projects and media
+- name: Archive Capstan projects and media
   ansible.builtin.archive:
     path:
       - "{{ awx_projects_dir }}"

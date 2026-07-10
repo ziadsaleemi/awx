@@ -145,6 +145,40 @@ def _is_known_resource(resource):
     return resource in EDA_RESOURCE_API_PATHS
 
 
+def _eda_version_summary(payload):
+    summary = {'version': '', 'version_detail': payload if isinstance(payload, dict) else {}, 'version_error': ''}
+    if not isinstance(payload, dict):
+        return summary
+    for key in ('version', 'eda_version', 'controller_version', 'application_version'):
+        value = payload.get(key)
+        if value:
+            summary['version'] = str(value)
+            return summary
+    for key in ('build', 'server', 'data'):
+        nested = payload.get(key)
+        if not isinstance(nested, dict):
+            continue
+        for nested_key in ('version', 'eda_version', 'controller_version', 'application_version'):
+            value = nested.get(nested_key)
+            if value:
+                summary['version'] = str(value)
+                return summary
+    return summary
+
+
+def _eda_live_version_summary(client):
+    summary = {'version': '', 'version_detail': {}, 'version_error': ''}
+    if not client.is_configured:
+        return summary
+    for path in ('/api/eda/v1/status/', '/api/eda/v1/ping/'):
+        try:
+            return _eda_version_summary(client.get_json(path))
+        except EDAControllerError as exc:
+            summary['version_error'] = str(exc)
+            continue
+    return summary
+
+
 class EDAStatusView(APIView):
     name = _('EDA Status')
     resource_purpose = 'event-driven ansible controller status'
@@ -154,17 +188,20 @@ class EDAStatusView(APIView):
         client = EDAControllerClient()
         controller_url = configured_url()
         status = connection_status(controller_url)
+        include_version = str(request.query_params.get('include_version') or '').strip().lower() in ('1', 'true', 'yes', 'on')
         messages = {
             'configured': _('EDA Controller URL is configured.'),
             'disabled': _('Event-Driven Ansible module is disabled.'),
             'invalid': _('EDA Controller URL is invalid.'),
             'not_configured': _('EDA Controller URL is not configured.'),
         }
+        version_summary = _eda_live_version_summary(client) if include_version else {'version': '', 'version_detail': {}, 'version_error': ''}
         return Response(
             {
                 'configured': status == 'configured',
                 'status': status,
                 'controller_url': controller_url,
+                **version_summary,
                 'auth_configured': client.auth_configured,
                 'verify_ssl': client.verify_ssl,
                 'request_timeout': client.timeout,
@@ -234,7 +271,7 @@ class EDAActivationListView(APIView):
                 'started': _date_to_iso(job.started),
                 'finished': _date_to_iso(job.finished),
                 'rulebook': job.name,
-                'event_source': 'AWX job metadata',
+                'event_source': 'Capstan job metadata',
                 'source': 'awx_job_match',
                 'related': {'job': reverse('api:job_detail', kwargs={'pk': job.id}, request=request)},
             }

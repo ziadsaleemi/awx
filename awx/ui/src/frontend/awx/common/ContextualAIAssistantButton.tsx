@@ -75,23 +75,23 @@ export function ContextualAIAssistantButton(props: { isEnabled: boolean }) {
 
   const pageKind = useMemo(() => getContextualPageKind(location.pathname), [location.pathname]);
   const pageLabel = useMemo(() => getPageLabel(location.pathname), [location.pathname]);
-  const resourceLabel = pageLabel || t('AWX resource');
+  const resourceLabel = pageLabel || t('Capstan resource');
 
   const prompt = useMemo(() => {
     switch (pageKind) {
       case 'create':
         return t(
-          'Help create this {{resource}} in AWX. Use the current page context, existing AWX resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
+          'Help create this {{resource}} in Capstan. Use the current page context, existing Capstan resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
           { resource: resourceLabel }
         );
       case 'edit':
         return t(
-          'Help edit this {{resource}} in AWX. Use the current object, related AWX resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
+          'Help edit this {{resource}} in Capstan. Use the current object, related Capstan resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
           { resource: resourceLabel }
         );
       case 'detail':
         return t(
-          'Help with this {{resource}} in AWX. Use the current object, related AWX resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
+          'Help with this {{resource}} in Capstan. Use the current object, related Capstan resources, organization scope, and my permissions. If changes are needed, produce a reviewable resource plan.',
           { resource: resourceLabel }
         );
       default:

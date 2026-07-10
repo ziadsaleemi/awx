@@ -47,7 +47,7 @@ const repositories = {
       _awx_key: 'awx/custom-ee',
       name: 'custom-ee',
       namespace: 'awx',
-      description: 'Custom AWX execution environment',
+      description: 'Custom Capstan execution environment',
       is_public: false,
       last_modified: '2026-06-29T10:00:00Z',
     },

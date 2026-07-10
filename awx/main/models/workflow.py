@@ -27,7 +27,7 @@ from jinja2.exceptions import TemplateSyntaxError, UndefinedError, SecurityError
 
 from ansible_base.lib.utils.models import prevent_search
 
-# AWX
+# Capstan
 from awx.api.versioning import reverse
 from awx.main.models import accepts_json, UnifiedJobTemplate, UnifiedJob
 from awx.main.models.notifications import NotificationTemplate, JobNotificationMixin
@@ -123,12 +123,12 @@ def run_ai_workflow_task(prompt, parent_artifacts=None, model_name=''):
     )
     artifacts_json = json.dumps(parent_artifacts or {}, default=str, sort_keys=True)[:12000]
     system_prompt = (
-        'You are an AWX runtime workflow planner. Generate an execution plan for the requested automation. '
-        'Do not mutate AWX resources or claim that actions were executed. Return concise JSON when possible. '
-        'When the task should create or update AWX resources, return a resource-action plan shaped as '
+        'You are a Capstan runtime workflow planner. Generate an execution plan for the requested automation. '
+        'Do not mutate Capstan resources or claim that actions were executed. Return concise JSON when possible. '
+        'When the task should create or update Capstan resources, return a resource-action plan shaped as '
         '{"name": "...", "operations": [{"id": "op-1", "operation": "create|update", '
         '"resource_type": "inventory|smart_inventory|constructed_inventory|project|job_template|workflow_job_template|schedule|catalog_item", '
-        '"object_id": 123, "data": {}}]}. AWX will validate and require approval before applying by default.'
+        '"object_id": 123, "data": {}}]}. Capstan will validate and require approval before applying by default.'
     )
     messages = [
         {

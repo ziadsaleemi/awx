@@ -1751,7 +1751,7 @@ def _answer_resource_count(user, spec: dict, message: str) -> str:
     queryset, labels = _visible_resource_queryset_for_message(user, spec, message)
     count = queryset.count()
     noun = spec['singular'] if count == 1 else spec['plural']
-    return f'There are {count} {noun} visible to you in AWX{_format_scope_suffix(labels)}.'
+    return f'There are {count} {noun} visible to you in Capstan{_format_scope_suffix(labels)}.'
 
 
 def _answer_resource_list(user, spec: dict, message: str) -> str:
@@ -1759,11 +1759,11 @@ def _answer_resource_list(user, spec: dict, message: str) -> str:
     count = queryset.count()
     scope_suffix = _format_scope_suffix(labels)
     if count == 0:
-        return f'There are no {spec["plural"]} visible to you in AWX{scope_suffix}.'
+        return f'There are no {spec["plural"]} visible to you in Capstan{scope_suffix}.'
 
     rows = [_resource_context_row(obj, spec) for obj in queryset[:_AI_DIRECT_LIST_LIMIT]]
     noun = spec['singular'] if count == 1 else spec['plural']
-    lines = [f'There are {count} {noun} visible to you in AWX{scope_suffix}:']
+    lines = [f'There are {count} {noun} visible to you in Capstan{scope_suffix}:']
     lines.extend(_format_resource_list_item(row) for row in rows)
     if count > len(rows):
         lines.append(f'- Showing the first {len(rows)} of {count}. Narrow the question to list a specific inventory, organization, or resource type.')
@@ -1908,7 +1908,7 @@ def _answer_cloud_resource_count(user, message: str, provider_ids: list[str], ki
     provider_label = _cloud_resource_provider_label(provider_ids)
     prefix = 'at least ' if truncated else ''
     suffix = _cloud_resource_scope_suffix(labels)
-    return f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}.'
+    return f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in Capstan{suffix}.'
 
 
 def _answer_cloud_resource_list(user, message: str, provider_ids: list[str], kinds: set[str], singular: str, plural: str) -> str:
@@ -1917,11 +1917,11 @@ def _answer_cloud_resource_list(user, message: str, provider_ids: list[str], kin
     provider_label = _cloud_resource_provider_label(provider_ids)
     suffix = _cloud_resource_scope_suffix(labels)
     if count == 0:
-        return f'There are no pulled {provider_label} {plural} visible to you in AWX{suffix}.'
+        return f'There are no pulled {provider_label} {plural} visible to you in Capstan{suffix}.'
 
     noun = singular if count == 1 else plural
     prefix = 'at least ' if truncated else ''
-    lines = [f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in AWX{suffix}:']
+    lines = [f'There are {prefix}{count} pulled {provider_label} {noun} visible to you in Capstan{suffix}:']
     lines.extend(_format_cloud_resource_item(resource) for resource in resources[:_AI_DIRECT_LIST_LIMIT])
     if truncated:
         lines.append(f'- Showing the first {len(resources)} pulled resources. Narrow by provider, organization, connection, or resource type.')
@@ -1993,41 +1993,41 @@ def _answer_eda_status() -> str:
     controller_url = eda_configured_url()
     controller_status = eda_connection_status(controller_url)
     if controller_status == 'configured':
-        return f'EDA Controller is configured in AWX. URL: {controller_url}.'
+        return f'EDA Controller is configured in Capstan. URL: {controller_url}.'
     if controller_status == 'invalid':
-        return 'EDA Controller URL is invalid in AWX settings.'
-    return 'EDA Controller is not configured in AWX.'
+        return 'EDA Controller URL is invalid in Capstan settings.'
+    return 'EDA Controller is not configured in Capstan.'
 
 
 def _answer_eda_activation_count() -> str:
     controller_url = eda_configured_url()
     controller_status = eda_connection_status(controller_url)
     if controller_status != 'configured':
-        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+        return 'EDA Controller is not configured in Capstan, so there are no live EDA activations available through Capstan.'
 
     try:
         data = EDAControllerClient().list_activations(page=1, page_size=1)
     except EDAControllerError as exc:
-        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+        return f'EDA Controller is configured in Capstan but activations are unavailable: {exc}'
 
     try:
         count = int(data.get('count') or 0)
     except (TypeError, ValueError):
         count = 0
     noun = 'EDA activation' if count == 1 else 'EDA activations'
-    return f'There are {count} {noun} visible through AWX EDA Controller.'
+    return f'There are {count} {noun} visible through Capstan EDA Controller.'
 
 
 def _answer_eda_activation_list() -> str:
     controller_url = eda_configured_url()
     controller_status = eda_connection_status(controller_url)
     if controller_status != 'configured':
-        return 'EDA Controller is not configured in AWX, so there are no live EDA activations available through AWX.'
+        return 'EDA Controller is not configured in Capstan, so there are no live EDA activations available through Capstan.'
 
     try:
         data = EDAControllerClient().list_activations(page=1, page_size=_AI_DIRECT_LIST_LIMIT)
     except EDAControllerError as exc:
-        return f'EDA Controller is configured in AWX but activations are unavailable: {exc}'
+        return f'EDA Controller is configured in Capstan but activations are unavailable: {exc}'
 
     try:
         count = int(data.get('count') or 0)
@@ -2035,10 +2035,10 @@ def _answer_eda_activation_list() -> str:
         count = 0
     rows = data.get('results') if isinstance(data.get('results'), list) else []
     if count == 0:
-        return 'There are no EDA activations visible through AWX EDA Controller.'
+        return 'There are no EDA activations visible through Capstan EDA Controller.'
 
     noun = 'EDA activation' if count == 1 else 'EDA activations'
-    lines = [f'There are {count} {noun} visible through AWX EDA Controller:']
+    lines = [f'There are {count} {noun} visible through Capstan EDA Controller:']
     lines.extend(_format_eda_activation_item(row) for row in rows[:_AI_DIRECT_LIST_LIMIT] if isinstance(row, dict))
     if count > len(rows):
         lines.append(f'- Showing the first {len(rows)} of {count}.')
@@ -2085,18 +2085,18 @@ def _answer_opa_status() -> str:
     policy_ids = ', '.join(policy['id'] for policy in DEFAULT_POLICIES)
     if engine.is_available():
         return (
-            f'OPA guardrails are enabled in AWX. Server URL: {engine.base_url}. '
+            f'OPA guardrails are enabled in Capstan. Server URL: {engine.base_url}. '
             f'Managed policy bundle: {bundle_status}. Registered policy paths: {policy_ids}.'
         )
-    return f'OPA guardrails are disabled in AWX because OPA_HOST is not configured. Managed policy bundle: {bundle_status}.'
+    return f'OPA guardrails are disabled in Capstan because OPA_HOST is not configured. Managed policy bundle: {bundle_status}.'
 
 
 def _answer_opa_policy_count() -> str:
-    return f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX.'
+    return f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in Capstan.'
 
 
 def _answer_opa_policy_list() -> str:
-    lines = [f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in AWX:']
+    lines = [f'There are {len(DEFAULT_POLICIES)} OPA policy paths registered in Capstan:']
     lines.extend(f"- {policy['id']} (path: {policy['path']}, purpose: {policy['description']})" for policy in DEFAULT_POLICIES)
     return '\n'.join(lines)
 
@@ -2189,17 +2189,17 @@ def _answer_opa_guardrail_audit_count(user, *, denied_only=False) -> str:
     rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only, limit=_AI_DIRECT_LIST_LIMIT)
     qualifier = 'denied ' if denied_only else ''
     if scanned >= _AI_DIRECT_LIST_LIMIT:
-        return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX among the last {scanned} AI resource-action audits.'
-    return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+        return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in Capstan among the last {scanned} AI resource-action audits.'
+    return f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in Capstan.'
 
 
 def _answer_opa_guardrail_audit_list(user, *, denied_only=False) -> str:
     rows, scanned = _opa_guardrail_audit_rows(user, denied_only=denied_only)
     qualifier = 'denied ' if denied_only else ''
     if not rows:
-        return f'There are no recent {qualifier}OPA guardrail audit events visible to you in AWX.'
+        return f'There are no recent {qualifier}OPA guardrail audit events visible to you in Capstan.'
 
-    lines = [f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in AWX:']
+    lines = [f'There are {len(rows)} recent {qualifier}OPA guardrail audit events visible to you in Capstan:']
     lines.extend(_format_opa_guardrail_audit_item(row) for row in rows)
     if scanned >= _AI_DIRECT_LIST_LIMIT:
         lines.append(f'- Scanned the last {scanned} AI resource-action audit events. Narrow the question for older history.')
@@ -2214,7 +2214,7 @@ def _try_answer_opa_fact_question(user, messages: list) -> str | None:
     if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author)\b', normalized):
         return None
     if not user.is_superuser:
-        return 'OPA guardrail details require system administrator access in AWX.'
+        return 'OPA guardrail details require system administrator access in Capstan.'
 
     policy_pattern = r'\bpolic(?:y|ies)\b|\bpolicy paths?\b|\brules?\b'
     audit_pattern = r'\bdecisions?\b|\bhistory\b|\baudit\b|\bdenials?\b|\bdenied\b|\bguardrail events?\b'
@@ -2272,12 +2272,12 @@ def _gatekeeper_resource_label(violation: dict) -> str:
 def _answer_gatekeeper_status() -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     errors = _gatekeeper_error_text(context)
     cluster = context.get('cluster') or {}
     counts = context.get('counts') or {}
     status_line = (
-        f"Gatekeeper is configured in AWX. Context: {cluster.get('context') or 'default'}. "
+        f"Gatekeeper is configured in Capstan. Context: {cluster.get('context') or 'default'}. "
         f"Server URL: {cluster.get('server_url') or 'not set'}. "
         f"Templates: {counts.get('constraint_templates', 0)}. Constraints: {counts.get('constraints', 0)}. "
         f"Violations: {counts.get('violations', 0)}. Configs: {counts.get('configs', 0)}."
@@ -2290,11 +2290,11 @@ def _answer_gatekeeper_status() -> str:
 def _answer_gatekeeper_count(resource_key: str, label: str) -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     errors = _gatekeeper_error_text(context)
     count = int((context.get('counts') or {}).get(resource_key) or 0)
     noun = label if count == 1 else f'{label}s'
-    answer = f'There are {count} Gatekeeper {noun} visible through AWX.'
+    answer = f'There are {count} Gatekeeper {noun} visible through Capstan.'
     if errors:
         answer = f'{answer} Latest read errors: {errors}'
     return answer
@@ -2303,12 +2303,12 @@ def _answer_gatekeeper_count(resource_key: str, label: str) -> str:
 def _answer_gatekeeper_templates() -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     rows = context.get('constraint_templates') if isinstance(context.get('constraint_templates'), list) else []
     count = int((context.get('counts') or {}).get('constraint_templates') or len(rows))
     if not rows:
-        return f'There are no Gatekeeper ConstraintTemplates visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
-    lines = [f'There are {count} Gatekeeper ConstraintTemplates visible through AWX:']
+        return f'There are no Gatekeeper ConstraintTemplates visible through Capstan. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper ConstraintTemplates visible through Capstan:']
     for row in rows:
         targets = ', '.join(row.get('targets') or [])
         detail = [f"kind: {row.get('kind') or 'unknown'}", f"constraints: {row.get('constraint_count', 0)}"]
@@ -2321,12 +2321,12 @@ def _answer_gatekeeper_templates() -> str:
 def _answer_gatekeeper_constraints() -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     rows = context.get('constraints') if isinstance(context.get('constraints'), list) else []
     count = int((context.get('counts') or {}).get('constraints') or len(rows))
     if not rows:
-        return f'There are no Gatekeeper constraints visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
-    lines = [f'There are {count} Gatekeeper constraints visible through AWX:']
+        return f'There are no Gatekeeper constraints visible through Capstan. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper constraints visible through Capstan:']
     for row in rows:
         detail = [
             f"enforcement: {row.get('enforcement_action') or 'deny'}",
@@ -2342,12 +2342,12 @@ def _answer_gatekeeper_constraints() -> str:
 def _answer_gatekeeper_violations() -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     rows = context.get('violations') if isinstance(context.get('violations'), list) else []
     count = int((context.get('counts') or {}).get('violations') or len(rows))
     if not rows:
-        return f'There are no Gatekeeper violations visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
-    lines = [f'There are {count} Gatekeeper violations visible through AWX:']
+        return f'There are no Gatekeeper violations visible through Capstan. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper violations visible through Capstan:']
     for row in rows:
         constraint = f"{row.get('constraint_kind') or 'Constraint'}/{row.get('constraint_name') or 'unnamed'}"
         lines.append(
@@ -2360,12 +2360,12 @@ def _answer_gatekeeper_violations() -> str:
 def _answer_gatekeeper_configs() -> str:
     context = _gatekeeper_context()
     if not context.get('configured'):
-        return 'Gatekeeper Kubernetes API is not configured in AWX. Configure it in Settings.'
+        return 'Gatekeeper Kubernetes API is not configured in Capstan. Configure it in Settings.'
     rows = context.get('configs') if isinstance(context.get('configs'), list) else []
     count = int((context.get('counts') or {}).get('configs') or len(rows))
     if not rows:
-        return f'There are no Gatekeeper configs visible through AWX. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
-    lines = [f'There are {count} Gatekeeper configs visible through AWX:']
+        return f'There are no Gatekeeper configs visible through Capstan. Latest read errors: {_gatekeeper_error_text(context)}'.rstrip()
+    lines = [f'There are {count} Gatekeeper configs visible through Capstan:']
     for row in rows:
         lines.append(
             f"- {row.get('name') or 'config'} "
@@ -2382,7 +2382,7 @@ def _try_answer_gatekeeper_fact_question(user, messages: list) -> str | None:
     if re.search(r'\bhow to\b|\b(create|add|set up|setup|write|author|install|apply|delete|remove)\b', normalized):
         return None
     if not user.is_superuser:
-        return 'Gatekeeper policy-manager details require system administrator access in AWX.'
+        return 'Gatekeeper policy-manager details require system administrator access in Capstan.'
 
     violation_pattern = r'\bviolations?\b|\bdenials?\b|\bdenied\b|\baudit findings?\b'
     template_pattern = r'\bconstraint\s*templates?\b|\bconstrainttemplates?\b|\btemplates?\b'
@@ -2705,14 +2705,14 @@ def _system_prompt_with_awx_context(system_prompt: str, user, ui_context: dict |
     try:
         snapshot = _visible_awx_context_snapshot(user)
     except Exception as exc:
-        logger.warning('Could not build AI assistant AWX context: %s', exc)
+        logger.warning('Could not build AI assistant Capstan context: %s', exc)
         return system_prompt
 
     context = (
-        '\n\nLive AWX context for the requesting user:\n'
+        '\n\nLive Capstan context for the requesting user:\n'
         f'{json.dumps(_json_safe(snapshot), indent=2)}\n'
-        'Use this live context when answering direct questions about this AWX instance. '
-        'Do not say you cannot see the AWX instance when the answer is present in this context. '
+        'Use this live context when answering direct questions about this Capstan instance. '
+        'Do not say you cannot see the Capstan instance when the answer is present in this context. '
         'If a resource list is truncated, say so and ask the user to narrow by inventory, organization, or resource type.'
     )
     job_context = _job_output_page_context(user, ui_context)
@@ -2961,13 +2961,13 @@ def _ai_authoring_context(user) -> dict:
 def _ai_resource_plan_system_prompt(user, context: dict) -> str:
     authoring_context = _ai_authoring_context(user)
     return (
-        'You turn natural-language AWX authoring requests into a typed JSON resource plan. '
+        'You turn natural-language Capstan authoring requests into a typed JSON resource plan. '
         'Return only JSON. Do not include markdown fences or prose.\n\n'
         'Supported resource_type values: credential_reference, inventory, group, host, smart_inventory, constructed_inventory, project, '
         'project_file, inventory_source, job_template, workflow_job_template, schedule, catalog_item, role_assignment, survey_spec.\n'
         'Supported operation values: create, update, attach, detach. '
         'Use attach/detach only for credential_reference and role_assignment operations.\n'
-        'For smart_inventory, data must include organization and a valid AWX host_filter expression, for example '
+        'For smart_inventory, data must include organization and a valid Capstan host_filter expression, for example '
         '"name__icontains=web" or "groups__name=webservers". Smart inventory plans are previewed against visible hosts and groups before save.\n'
         'For constructed_inventory, data must include organization and may include input_inventories as an array of existing inventory IDs plus '
         'source_vars as a YAML or JSON object for the constructed inventory source. Constructed inventory plans are validated and previewed '
@@ -2990,14 +2990,14 @@ def _ai_resource_plan_system_prompt(user, context: dict) -> str:
         'For project_file, data must include an existing manual project ID or project_ref, relative path, and UTF-8 text content. '
         'Use it to author playbooks, roles, defaults, vars, handlers, templates, meta, README, and ansible.cfg files inside a project before '
         'creating or updating job templates that reference those playbooks. Do not target SCM-backed projects or hidden/source-control paths.\n'
-        'Use existing numeric IDs from the supplied AWX context for related objects. '
+        'Use existing numeric IDs from the supplied Capstan context for related objects. '
         'Do not invent organization, project, inventory, workflow, user, team, or catalog item IDs. '
         'Do not include secrets, API keys, passwords, private keys, or credential input values.\n\n'
         'Schema:\n'
         '{"name": "short plan name", "description": "short summary", "operations": ['
         '{"id": "stable id", "operation": "create|update|delete|attach|detach", "resource_type": "credential_reference|role_assignment|survey_spec|project_file|inventory|group|host|smart_inventory|constructed_inventory|project|inventory_source|job_template|workflow_job_template|schedule|catalog_item", '
         '"object_id": 123, "data": {"name": "...", "project_ref": "prior-project-op-id", "inventory_ref": "prior-inventory-op-id", "group_ref": "prior-group-op-id"}}]}\n\n'
-        f'Current AWX context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
+        f'Current Capstan context visible to the requester:\n{json.dumps(_json_safe(authoring_context), indent=2)}\n\n'
         f'Route/resource context supplied by the UI:\n{json.dumps(_json_safe(context or {}), indent=2)}'
     )
 
@@ -3272,7 +3272,7 @@ def _normalize_ai_project_local_path(data: dict) -> tuple[str | None, str | None
         return None, _('Project local_path must be a single relative directory name.')
     local_path = path.name
     if not local_path or local_path.startswith(('.', '_')):
-        return None, _('Project local_path cannot be empty, hidden, or AWX-reserved.')
+        return None, _('Project local_path cannot be empty, hidden, or Capstan-reserved.')
     if len(local_path) > _AI_PROJECT_LOCAL_PATH_MAX_LENGTH:
         return None, _('Project local_path exceeds the AI workspace length limit.')
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', local_path):
@@ -5175,7 +5175,7 @@ class AIResourceActionView(APIView):
     """
     POST /api/v2/ai/resource_actions/
 
-    Turns a natural-language request or supplied JSON plan into validated AWX
+    Turns a natural-language request or supplied JSON plan into validated Capstan
     resource operations. Preview validates without saving. Apply requires
     explicit mode="apply" or apply=true and reuses existing serializers, RBAC,
     Activity Stream, and OPA guardrails.

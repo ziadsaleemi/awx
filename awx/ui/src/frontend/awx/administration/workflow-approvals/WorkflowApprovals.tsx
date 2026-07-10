@@ -16,7 +16,7 @@ import { ActivityStreamIcon } from '../../common/ActivityStreamIcon';
 
 export function WorkflowApprovals() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const toolbarFilters = useWorkflowApprovalsFilters();
   const tableColumns = useWorkflowApprovalsColumns();
   const view = useAwxView<WorkflowApproval>({

@@ -12,7 +12,7 @@ export function useAwxPolicyRoutes() {
   return useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.PolicyAsCode,
-      label: t('Policy as Code'),
+      label: t('Policy Guardrails'),
       path: 'policy-as-code',
       icon: <SecurityIcon />,
       children: [
@@ -25,6 +25,7 @@ export function useAwxPolicyRoutes() {
         {
           id: AwxRoute.PolicyAsCodeOpa,
           label: t('OPA'),
+          subtitle: t('Policy decisions'),
           path: 'opa',
           children: [
             {
@@ -73,6 +74,7 @@ export function useAwxPolicyRoutes() {
         {
           id: AwxRoute.PolicyAsCodeGatekeeper,
           label: t('Gatekeeper'),
+          subtitle: t('Kubernetes admission'),
           path: 'gatekeeper',
           children: [
             {

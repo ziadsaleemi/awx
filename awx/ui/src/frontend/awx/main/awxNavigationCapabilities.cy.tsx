@@ -28,7 +28,7 @@ function nestedChildIds(route: PageNavigationItem, id: AwxRoute) {
   return child.children.map((item) => item.id);
 }
 
-describe('AWX navigation capabilities', () => {
+describe('Capstan navigation capabilities', () => {
   it('maps catalog-user permissions to catalog-only navigation capability', () => {
     const capabilities = buildAwxNavigationCapabilities([
       'awx.view_catalogitem',

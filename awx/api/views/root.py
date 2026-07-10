@@ -55,7 +55,7 @@ class ApiRootView(APIView):
         '''List supported API versions'''
         v2 = reverse('api:api_v2_root_view', request=request, kwargs={'version': 'v2'})
         data = OrderedDict()
-        data['description'] = _('AWX REST API')
+        data['description'] = _('Capstan REST API')
         data['current_version'] = v2
         data['available_versions'] = dict(v2=v2)
         data['custom_logo'] = settings.CUSTOM_LOGO

@@ -124,7 +124,7 @@ export function GalaxyNgProjectImports() {
     if (!selectedProjectId) {
       alertToaster.addAlert({
         variant: 'danger',
-        title: t('Select an AWX Project before generating commands.'),
+        title: t('Select a Capstan Project before generating commands.'),
       });
       return;
     }
@@ -160,7 +160,7 @@ export function GalaxyNgProjectImports() {
       <PageHeader
         title={t('Project Imports')}
         description={t(
-          'Build collection artifacts from AWX Projects and publish them to Galaxy NG.'
+          'Build collection artifacts from Capstan Projects and publish them to Galaxy NG.'
         )}
         headerActions={
           <GalaxyNgHeaderActions
@@ -168,7 +168,7 @@ export function GalaxyNgProjectImports() {
             uiRoute="collections/"
             page={t('Galaxy NG project imports')}
             prompt={t(
-              'Help with Galaxy NG project imports in AWX. Use the selected AWX Project, collection path, generated commands, Galaxy NG settings, and approval workflow. Explain how to build, publish, approve, and install this collection.'
+              'Help with Galaxy NG project imports in Capstan. Use the selected Capstan Project, collection path, generated commands, Galaxy NG settings, and approval workflow. Explain how to build, publish, approve, and install this collection.'
             )}
             context={{
               configured: status.data?.configured,
@@ -201,7 +201,7 @@ export function GalaxyNgProjectImports() {
                   <CardBody>
                     <Stack hasGutter>
                       <StackItem>
-                        <Alert isInline variant="info" title={t('AWX Project-backed content')}>
+                        <Alert isInline variant="info" title={t('Capstan Project-backed content')}>
                           {t(
                             'The selected project must already be synced and the collection path must contain a valid galaxy.yml file.'
                           )}
@@ -212,7 +212,7 @@ export function GalaxyNgProjectImports() {
                           <Alert
                             isInline
                             variant="warning"
-                            title={t('Could not load AWX Projects.')}
+                            title={t('Could not load Capstan Projects.')}
                           />
                         </StackItem>
                       ) : null}
@@ -227,7 +227,7 @@ export function GalaxyNgProjectImports() {
                             }}
                           >
                             <FormGroup
-                              label={t('AWX Project')}
+                              label={t('Capstan Project')}
                               fieldId="galaxy-ng-import-project"
                               isRequired
                             >
@@ -338,7 +338,7 @@ export function GalaxyNgProjectImports() {
                       <TextContent>
                         <Text component={TextVariants.p}>
                           {t(
-                            'Select an AWX Project and collection path to generate the collection artifact and publish commands.'
+                            'Select a Capstan Project and collection path to generate the collection artifact and publish commands.'
                           )}
                         </Text>
                       </TextContent>

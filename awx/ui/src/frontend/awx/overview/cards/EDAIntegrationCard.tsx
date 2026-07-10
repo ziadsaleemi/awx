@@ -2,7 +2,7 @@
  * G5b — EDA (Event-Driven Ansible) Integration Status Card
  *
  * Shows the EDA controller connection status and lists recent EDA
- * activations that triggered AWX jobs. Provides a quick link to the
+ * activations that triggered automation jobs. Provides a quick link to the
  * EDA controller and shows activation stats.
  *
  * EDA integration is detected via /api/v2/eda/status/. Recent rows come
@@ -204,7 +204,7 @@ export function EDAIntegrationCard() {
                     component={TextVariants.small}
                     style={{ color: 'var(--pf-v5-global--Color--200)' }}
                   >
-                    {t('No recent EDA-linked AWX jobs found.')}
+                    {t('No recent EDA-linked automation jobs found.')}
                   </Text>
                 </TextContent>
               </StackItem>

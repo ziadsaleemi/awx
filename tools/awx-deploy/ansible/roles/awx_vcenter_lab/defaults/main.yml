@@ -12,6 +12,7 @@ awx_vcenter_network: ""
 awx_vcenter_host: ""
 awx_vcenter_provisioner: auto
 awx_vcenter_govc_binary: govc
+awx_vcenter_hide_sensitive_logs: true
 awx_vcenter_govc_wait_ip_timeout: 10m
 awx_vcenter_govc_retries: 3
 awx_vcenter_govc_delay: 5

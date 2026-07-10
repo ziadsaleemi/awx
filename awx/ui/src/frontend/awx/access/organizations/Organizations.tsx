@@ -39,7 +39,7 @@ import { useDeleteOrganizations } from './hooks/useDeleteOrganizations';
 
 export function Organizations() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const pageNavigate = usePageNavigate();
   const getPageUrl = useGetPageUrl();
   usePersistentFilters('organizations');

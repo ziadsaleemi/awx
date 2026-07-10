@@ -1,5 +1,5 @@
 ---
-- name: Backup AWX
+- name: Backup Capstan
   hosts: awx_server_nodes
   gather_facts: true
   become: true

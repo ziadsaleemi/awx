@@ -18,6 +18,7 @@ type AwxAuthOptions = {
 };
 
 const CUSTOM_LOGO_KEY = 'awx-custom-logo';
+const STATIC_BRAND_LOGO = '/static/media/brand-logo.png';
 
 function getCachedCustomLogo() {
   if (typeof window === 'undefined') {
@@ -80,7 +81,7 @@ export function AwxLogin(props: { children: React.ReactNode }) {
     );
   }
 
-  const brandImg = customLogo ?? cachedCustomLogo;
+  const brandImg = customLogo ?? cachedCustomLogo ?? STATIC_BRAND_LOGO;
 
   if (!activeAwxUser) {
     return (

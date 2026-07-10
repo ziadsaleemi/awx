@@ -2,7 +2,7 @@
 awx_deploy_method: server
 
 awx_image: docker.io/ziadsaleemi/awx
-awx_image_tag: "25.1.7"
+awx_image_tag: "25.1.8"
 awx_skip_image_pull: false
 awx_ee_image: quay.io/ansible/awx-ee:latest
 
@@ -86,6 +86,7 @@ awx_k8s_postgres_storage_size: 20Gi
 awx_k8s_projects_storage_size: 10Gi
 awx_k8s_web_replicas: 2
 awx_k8s_task_replicas: 2
+awx_k8s_ee_builds_enabled: false
 awx_k8s_service_type: ClusterIP
 awx_k8s_node_port: 30813
 awx_k8s_ingress_enabled: false

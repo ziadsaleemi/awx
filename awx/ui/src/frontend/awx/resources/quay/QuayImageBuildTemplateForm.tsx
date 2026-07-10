@@ -151,12 +151,7 @@ export function EditQuayImageBuildTemplate() {
 
   const formError = error || instanceGroupsError;
   if (formError) {
-    return (
-      <AwxError
-        error={formError}
-        handleRefresh={error ? refresh : refreshInstanceGroups}
-      />
-    );
+    return <AwxError error={formError} handleRefresh={error ? refresh : refreshInstanceGroups} />;
   }
   if (isLoadingTemplate || isLoadingInstanceGroups || !template) return <LoadingPage />;
 
@@ -338,7 +333,7 @@ function QuayImageBuildTemplateFormInputs() {
         label={t('Definition file')}
         labelHelpTitle={t('Definition file')}
         labelHelp={t(
-          'Path inside the AWX Project checkout to the execution environment definition file.'
+          'Path inside the Capstan Project checkout to the execution environment definition file.'
         )}
         isRequired={Boolean(definitionFile) || definitionFileOptions.length !== 1}
         options={definitionFileOptions}
@@ -356,7 +351,9 @@ function QuayImageBuildTemplateFormInputs() {
         name="context"
         label={t('Build context')}
         labelHelpTitle={t('Build context')}
-        labelHelp={t('Directory inside the AWX Project checkout used as the image build context.')}
+        labelHelp={t(
+          'Directory inside the Capstan Project checkout used as the image build context.'
+        )}
         isRequired
         placeholder="."
       />

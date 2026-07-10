@@ -8,7 +8,7 @@
   roles:
     - awx_k3s
 
-- name: Deploy AWX to k3s
+- name: Deploy Capstan to k3s
   hosts: awx_k3s_servers[0]
   gather_facts: true
   become: true
@@ -39,7 +39,7 @@
         fail_msg: >-
           k3s integrated service deployment is enabled, but this node has
           {{ ansible_memtotal_mb }} MB RAM and {{ awx_k3s_effective_vcpus }} vCPU.
-          AWX plus EDA Controller, Galaxy NG, or Project Quay requires at least
+          Capstan plus EDA Controller, Galaxy NG, or Project Quay requires at least
           {{ awx_k3s_effective_min_memory_mb }} MB RAM and {{ awx_k3s_effective_min_vcpus }} vCPU.
           Resize the k3s VM, disable the heavy integrated services for this run,
           or set awx_k3s_integrated_capacity_check_enabled=false only for an explicit constrained lab run.
@@ -102,7 +102,7 @@
     - role: awx_quay_k8s
       when: awx_quay_enabled | default(false) | bool
 
-- name: Refresh AWX k3s settings after integrated services
+- name: Refresh Capstan k3s settings after integrated services
   hosts: awx_k3s_servers[0]
   gather_facts: true
   become: true

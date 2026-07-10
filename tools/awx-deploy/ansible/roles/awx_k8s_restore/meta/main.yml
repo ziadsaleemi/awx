@@ -1,8 +1,8 @@
 ---
 galaxy_info:
   role_name: awx_k8s_restore
-  author: AWX
-  description: Restore AWX into a k3s or Kubernetes deployment.
+  author: Capstan
+  description: Restore Capstan into a k3s or Kubernetes deployment.
   license: Apache-2.0
   min_ansible_version: "2.15"
 dependencies: []

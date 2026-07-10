@@ -20,7 +20,7 @@ import { ActivityStreamIcon } from '../../common/ActivityStreamIcon';
 
 export function Projects() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   const pageNavigate = usePageNavigate();
   const toolbarFilters = useProjectsFilters();
   const tableColumns = useProjectsColumns();

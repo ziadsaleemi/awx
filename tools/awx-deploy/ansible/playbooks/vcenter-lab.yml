@@ -1,5 +1,5 @@
 ---
-- name: Create vCenter AWX test lab VMs
+- name: Create vCenter Capstan test lab VMs
   hosts: localhost
   gather_facts: false
   roles:

@@ -4,7 +4,7 @@
     name: awx_backup
   when: not awx_upgrade_skip_backup | bool
 
-- name: Pull target AWX image
+- name: Pull target Capstan image
   ansible.builtin.command:
     cmd: "{{ awx_container_engine_cmd }} pull {{ awx_image }}:{{ awx_image_tag }}"
   changed_when: "'Downloaded newer image' in awx_upgrade_pull.stdout or 'Pull complete' in awx_upgrade_pull.stdout"

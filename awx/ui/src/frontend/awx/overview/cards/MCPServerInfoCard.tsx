@@ -3,7 +3,7 @@
  *
  * Shows the MCP server endpoint URLs and configuration snippet so users
  * can connect external AI agents (Claude Desktop, Cursor, VS Code Copilot, etc.)
- * to their AWX instance.
+ * to their Capstan instance.
  */
 
 import {
@@ -79,7 +79,7 @@ export function MCPServerInfoCard() {
           command: 'npx',
           args: ['-y', 'mcp-remote', manifestUrl],
           env: {
-            MCP_AUTH_HEADER: 'Authorization: Bearer <YOUR_AWX_TOKEN>',
+            MCP_AUTH_HEADER: 'Authorization: Bearer <YOUR_CAPSTAN_TOKEN>',
           },
         },
       },
@@ -89,7 +89,7 @@ export function MCPServerInfoCard() {
   );
 
   const curlExample = `curl -s -X POST ${invokeUrl} \\
-  -H "Authorization: Bearer <YOUR_AWX_TOKEN>" \\
+  -H "Authorization: Bearer <YOUR_CAPSTAN_TOKEN>" \\
   -H "Content-Type: application/json" \\
   -d '{"name":"list_job_templates","arguments":{"search":"deploy"}}' | jq .`;
 
@@ -112,7 +112,7 @@ export function MCPServerInfoCard() {
         <TextContent style={{ marginBottom: 12 }}>
           <Text component={TextVariants.p}>
             {t(
-              'Your AWX instance exposes a Model Context Protocol (MCP) server. Connect any MCP-compatible AI agent to automate and query AWX resources using natural language.'
+              'Your Capstan instance exposes a Model Context Protocol (MCP) server. Connect any MCP-compatible AI agent to automate and query automation resources using natural language.'
             )}
           </Text>
         </TextContent>
@@ -160,7 +160,7 @@ export function MCPServerInfoCard() {
           <DescriptionListGroup>
             <DescriptionListTerm>{t('Authentication')}</DescriptionListTerm>
             <DescriptionListDescription>
-              {t('AWX personal access token (Bearer). Create one under User → Tokens.')}
+              {t('Capstan personal access token (Bearer). Create one under User → Tokens.')}
             </DescriptionListDescription>
           </DescriptionListGroup>
           <DescriptionListGroup>

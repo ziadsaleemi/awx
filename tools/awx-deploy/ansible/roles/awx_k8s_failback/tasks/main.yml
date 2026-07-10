@@ -5,7 +5,7 @@
       - awx_failback_image_tag | length > 0 or awx_failback_restore_path | length > 0
     fail_msg: "Set awx_failback_image_tag for image failback or awx_failback_restore_path for full Kubernetes restore."
 
-- name: Restore AWX Kubernetes backup for failback
+- name: Restore Capstan Kubernetes backup for failback
   ansible.builtin.include_role:
     name: awx_k8s_restore
   vars:
@@ -22,7 +22,7 @@
     - awx_failback_image_tag | length > 0
     - awx_failback_preserve_k8s_service | bool
 
-- name: Read current AWX Kubernetes web service type
+- name: Read current Capstan Kubernetes web service type
   ansible.builtin.command:
     cmd: "{{ awx_k8s_failback_kubectl }} -n {{ awx_k8s_namespace }} get service {{ awx_k8s_name }}-web -o jsonpath='{.spec.type}'"
   register: awx_k8s_failback_existing_service_type
@@ -32,7 +32,7 @@
     - awx_failback_image_tag | length > 0
     - awx_failback_preserve_k8s_service | bool
 
-- name: Read current AWX Kubernetes web service node port
+- name: Read current Capstan Kubernetes web service node port
   ansible.builtin.command:
     cmd: "{{ awx_k8s_failback_kubectl }} -n {{ awx_k8s_namespace }} get service {{ awx_k8s_name }}-web -o jsonpath='{.spec.ports[0].nodePort}'"
   register: awx_k8s_failback_existing_node_port
@@ -42,7 +42,7 @@
     - awx_failback_image_tag | length > 0
     - awx_failback_preserve_k8s_service | bool
 
-- name: Decide whether to preserve AWX Kubernetes service settings for image failback
+- name: Decide whether to preserve Capstan Kubernetes service settings for image failback
   ansible.builtin.set_fact:
     awx_k8s_failback_preserve_existing_service: >-
       {{ awx_failback_preserve_k8s_service | bool
@@ -50,7 +50,7 @@
         and awx_k8s_failback_existing_service_type.stdout | default('') in ['NodePort', 'LoadBalancer'] }}
   when: awx_failback_image_tag | length > 0
 
-- name: Resolve AWX Kubernetes service settings for image failback
+- name: Resolve Capstan Kubernetes service settings for image failback
   ansible.builtin.set_fact:
     awx_k8s_failback_effective_service_type: >-
       {{ awx_k8s_failback_existing_service_type.stdout
@@ -63,7 +63,7 @@
         else awx_k8s_node_port }}
   when: awx_failback_image_tag | length > 0
 
-- name: Re-apply AWX Kubernetes deployment for image failback
+- name: Re-apply Capstan Kubernetes deployment for image failback
   ansible.builtin.include_role:
     name: awx_k8s
   vars:

@@ -1,5 +1,5 @@
 ---
-- name: Render AWX receptor systemd service
+- name: Render Capstan receptor systemd service
   ansible.builtin.template:
     src: awx-receptor.service.j2
     dest: /etc/systemd/system/awx-receptor.service
@@ -11,13 +11,13 @@
 - name: Flush systemd handlers
   ansible.builtin.meta: flush_handlers
 
-- name: Start AWX receptor
+- name: Start Capstan receptor
   ansible.builtin.systemd:
     name: awx-receptor
     state: restarted
     enabled: true
 
-- name: Wait for AWX receptor control socket
+- name: Wait for Capstan receptor control socket
   ansible.builtin.wait_for:
     path: "{{ awx_receptor_socket_dir }}/{{ awx_receptor_socket_file | basename }}"
     timeout: 120

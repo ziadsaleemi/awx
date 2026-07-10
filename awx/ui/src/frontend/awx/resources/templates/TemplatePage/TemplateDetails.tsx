@@ -316,7 +316,7 @@ export function TemplateDetails(props: { templateId?: string; disableScroll?: bo
             <p>{t`Concurrent jobs: If enabled, simultaneous runs of this job template will be allowed.`}</p>
             <p>{t`Fact storage: If enabled, this will store gathered facts so they can be viewed at the host level. Facts are persisted and injected into the fact cache at runtime.`}</p>
             <p>{t`Privilege escalation: If enabled, run this playbook as an administrator.`}</p>
-            <p>{t`Provisioning callbacks: Enables creation of a provisioning callback URL. Using the URL a host can contact Ansible AWX and request a configuration update using this job template.`}</p>
+            <p>{t`Provisioning callbacks: Enables creation of a provisioning callback URL. Using the URL a host can contact Capstan and request a configuration update using this job template.`}</p>
             <p>{t`Webhooks: Enable webhook for this template.`}</p>
             <p>{t`Prevent Instance Group Fallback: If enabled, the job template will prevent adding any inventory or organization instance groups to the list of preferred instances groups to run on.`}</p>
           </>

@@ -16,7 +16,7 @@ export function useAwxGalaxyRoutes() {
   return useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.GalaxyNG,
-      label: t('Automation Hub'),
+      label: t('Collections'),
       path: 'galaxy-ng',
       icon: <CubesIcon />,
       children: [

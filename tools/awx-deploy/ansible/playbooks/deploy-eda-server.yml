@@ -1,5 +1,5 @@
 ---
-- name: Deploy EDA server VM for AWX server deployments
+- name: Deploy EDA server VM for Capstan server deployments
   hosts: awx_eda
   gather_facts: true
   become: true

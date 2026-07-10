@@ -353,7 +353,7 @@ export function PolicyAsCodeOverview(props: {
       <PageDashboardCard
         id="policy-opa-guardrails"
         title={t('OPA guardrails')}
-        subtitle={t('Standalone policy decisions before AWX launches and AI actions')}
+        subtitle={t('Standalone policy decisions before Capstan launches and AI actions')}
         width="half"
         height="sm"
         linkText={t('Open OPA')}
@@ -407,7 +407,7 @@ export function PolicyAsCodeOverview(props: {
       <PageDashboardCard
         id="policy-gatekeeper-posture"
         title={t('Gatekeeper posture')}
-        subtitle={t('Kubernetes admission policies visible to AWX')}
+        subtitle={t('Kubernetes admission policies visible to Capstan')}
         width="half"
         height="sm"
         linkText={t('Open Gatekeeper')}
@@ -496,7 +496,9 @@ export function PolicyAsCodeOverview(props: {
             <QuickLink
               to={pageUrl(AwxRoute.PolicyAsCodeOpaProjectSync, '/policy-as-code/opa/project-sync')}
               label={t('OPA project sync')}
-              description={t('Pull Rego modules from AWX Project checkouts and sync them to OPA.')}
+              description={t(
+                'Pull Rego modules from Capstan Project checkouts and sync them to OPA.'
+              )}
             />
             <QuickLink
               to={pageUrl(AwxRoute.ActivityStream, '/activity-stream')}

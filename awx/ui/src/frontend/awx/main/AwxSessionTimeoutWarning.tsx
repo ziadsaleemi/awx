@@ -20,7 +20,7 @@ export function AwxSessionTimeoutWarning() {
   const lastActivityRef = useRef(Date.now());
   const sessionCookieAgeRef = useRef<number>(1800); // default 30 min
 
-  // Load SESSION_COOKIE_AGE from AWX authentication settings
+  // Load SESSION_COOKIE_AGE from Capstan authentication settings
   useEffect(() => {
     void requestGet<SettingsAuth>(awxAPI`/settings/authentication/`)
       .then((settings) => {

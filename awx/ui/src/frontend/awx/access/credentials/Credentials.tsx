@@ -9,7 +9,7 @@ import { ActivityStreamIcon } from '../../common/ActivityStreamIcon';
 
 export function Credentials() {
   const { t } = useTranslation();
-  const product: string = process.env.PRODUCT ?? t('AWX');
+  const product: string = process.env.PRODUCT ?? t('Capstan');
   usePersistentFilters('credentials');
   const config = useAwxConfig();
 

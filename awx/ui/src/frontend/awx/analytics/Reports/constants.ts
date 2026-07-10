@@ -42,7 +42,7 @@ export const TAGS: Tag[] = [
     key: TagName.migration,
     name: 'Migration',
     description:
-      'This report provides useful information around migrations, such as helping to identify what could be necessary to move to newer versions of the Ansible Automation Platform.',
+      'This report provides useful information around migrations, such as helping to identify what could be necessary to move to newer versions of Capstan.',
   },
   {
     key: TagName.controller,

@@ -15,7 +15,7 @@ export function useAwxQuayRoutes() {
   return useMemo<PageNavigationItem>(
     () => ({
       id: AwxRoute.Quay,
-      label: t('Project Quay'),
+      label: t('Image Registry'),
       path: 'quay',
       icon: <CubesIcon />,
       children: [

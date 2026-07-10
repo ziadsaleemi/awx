@@ -204,10 +204,11 @@ RUN dnf install -y epel-next-release && dnf install -y inotify-tools && dnf remo
 # Copy app from builder
 COPY --from=builder /var/lib/awx /var/lib/awx
 
-RUN /var/lib/awx/venv/awx/bin/pip install 'ansible-core>=2.16,<2.18' && \
+RUN /var/lib/awx/venv/awx/bin/pip install 'ansible-core>=2.16,<2.18' ansible-builder && \
     for exe in \
         awx-manage \
         ansible \
+        ansible-builder \
         ansible-config \
         ansible-console \
         ansible-doc \
@@ -238,6 +239,22 @@ RUN rpm --restore shadow-utils 2>/dev/null
 
 # chmod containers.conf and adjust storage.conf to enable Fuse storage.
 RUN sed -i -e 's|^#mount_program|mount_program|g' -e '/additionalimage.*/a "/var/lib/shared",' -e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' /etc/containers/storage.conf
+
+# Kubernetes task pods run AWX as an unprivileged user without /dev/fuse or
+# usable newuidmap. Use a rootless vfs store for in-pod EE image builds.
+RUN mkdir -p /var/lib/awx/.config/containers && \
+    mkdir -p /var/lib/awx/.local/share/containers/storage-vfs && \
+    printf '%s\n' \
+      '[storage]' \
+      'driver = "vfs"' \
+      'runroot = "/tmp/storage-run-1000/containers"' \
+      'graphroot = "/var/lib/awx/.local/share/containers/storage-vfs"' \
+      '' \
+      '[storage.options]' \
+      'ignore_chown_errors = "true"' \
+      > /var/lib/awx/.config/containers/storage.conf && \
+    chown -R 1000:0 /var/lib/awx/.config /var/lib/awx/.local && \
+    chmod -R g+rwX /var/lib/awx/.config /var/lib/awx/.local
 
 ENV _CONTAINERS_USERNS_CONFIGURED=""
 
@@ -290,7 +307,13 @@ RUN for dir in \
       /var/lib/awx/rsyslog \
       /var/lib/awx/rsyslog/conf.d \
       /var/lib/awx/.local/share/containers/storage \
+      /var/lib/containers/storage \
+      /var/lib/shared/overlay-images \
+      /var/lib/shared/overlay-layers \
+      /var/lib/shared/vfs-images \
+      /var/lib/shared/vfs-layers \
       /var/run/awx-rsyslog \
+      /run/containers/storage \
       /var/log/nginx \
       /var/lib/pgsql \
       /var/run/supervisor \
@@ -302,6 +325,10 @@ RUN for dir in \
       /etc/subgid \
       /etc/group \
       /etc/passwd \
+      /var/lib/shared/overlay-images/images.lock \
+      /var/lib/shared/overlay-layers/layers.lock \
+      /var/lib/shared/vfs-images/images.lock \
+      /var/lib/shared/vfs-layers/layers.lock \
       /var/lib/awx/rsyslog/rsyslog.conf ; \
     do touch $file ; chmod g+rw $file ; chgrp root $file ; done
 

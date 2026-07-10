@@ -178,7 +178,7 @@
 
 - name: Wait for HAProxy listener ports
   ansible.builtin.wait_for:
-    host: "{{ inventory_hostname }}"
+    host: "{{ ansible_host | default(inventory_hostname) }}"
     port: "{{ item }}"
     timeout: 120
   loop: "{{ awx_lb_http_listener_ports }}"

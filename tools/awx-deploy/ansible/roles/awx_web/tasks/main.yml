@@ -1,5 +1,5 @@
 ---
-- name: Wait for AWX dependencies
+- name: Wait for Capstan dependencies
   ansible.builtin.wait_for:
     host: "{{ item.host }}"
     port: "{{ item.port }}"
@@ -10,7 +10,7 @@
     - host: "{{ awx_redis_host }}"
       port: "{{ awx_redis_port }}"
 
-- name: Render AWX web systemd service
+- name: Render Capstan web systemd service
   ansible.builtin.template:
     src: awx-web.service.j2
     dest: /etc/systemd/system/awx-web.service
@@ -22,7 +22,7 @@
 - name: Flush systemd handlers
   ansible.builtin.meta: flush_handlers
 
-- name: Start AWX web
+- name: Start Capstan web
   ansible.builtin.systemd:
     name: awx-web
     state: restarted
@@ -35,7 +35,7 @@
   changed_when: false
   failed_when: false
 
-- name: Check AWX web firewalld port
+- name: Check Capstan web firewalld port
   ansible.builtin.command:
     cmd: "firewall-cmd --query-port={{ awx_web_http_port }}/tcp"
   register: awx_web_firewalld_port
@@ -43,7 +43,7 @@
   failed_when: false
   when: awx_web_firewalld_state.stdout == "active"
 
-- name: Open AWX web firewalld port
+- name: Open Capstan web firewalld port
   ansible.builtin.command:
     cmd: "firewall-cmd --permanent --add-port={{ awx_web_http_port }}/tcp"
   register: awx_web_firewalld_open
@@ -52,7 +52,7 @@
     - awx_web_firewalld_state.stdout == "active"
     - awx_web_firewalld_port.rc != 0
 
-- name: Reload firewalld for AWX web
+- name: Reload firewalld for Capstan web
   ansible.builtin.command:
     cmd: firewall-cmd --reload
   changed_when: true
@@ -60,7 +60,7 @@
     - awx_web_firewalld_state.stdout == "active"
     - awx_web_firewalld_open is changed
 
-- name: Wait for AWX web
+- name: Wait for Capstan web
   ansible.builtin.wait_for:
     host: "{{ ansible_host | default(inventory_hostname) }}"
     port: "{{ awx_web_http_port }}"

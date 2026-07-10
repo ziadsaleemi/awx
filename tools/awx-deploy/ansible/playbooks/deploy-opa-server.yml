@@ -1,5 +1,5 @@
 ---
-- name: Deploy standalone OPA for AWX
+- name: Deploy standalone OPA for Capstan
   hosts: awx_opa
   gather_facts: true
   become: true

@@ -253,7 +253,7 @@ function mountGatekeeper(
 }
 
 describe('GatekeeperPolicyManager', () => {
-  it('uses an AWX-oriented overview with resource workflow links', () => {
+  it('uses an Capstan-oriented overview with resource workflow links', () => {
     cy.viewport(1920, 1100);
     mountGatekeeper();
 
@@ -400,7 +400,7 @@ describe('GatekeeperPolicyManager', () => {
     cy.wrap(null).then(() => expect(calls).to.equal(1));
   });
 
-  it('syncs Gatekeeper manifests from an AWX Project checkout', () => {
+  it('syncs Gatekeeper manifests from a Capstan Project checkout', () => {
     cy.intercept('POST', awxAPI`/opa/gatekeeper/project-sync/`, (req) => {
       const body = req.body as GatekeeperRequestBody;
       expect(body.mode).to.equal('dry_run');
@@ -419,7 +419,7 @@ describe('GatekeeperPolicyManager', () => {
     cy.contains('gatekeeper/templates.yaml').should('be.visible');
   });
 
-  it('requires confirmation before applying AWX Project manifests', () => {
+  it('requires confirmation before applying Capstan Project manifests', () => {
     let calls = 0;
     cy.intercept('POST', awxAPI`/opa/gatekeeper/project-sync/`, (req) => {
       calls += 1;
