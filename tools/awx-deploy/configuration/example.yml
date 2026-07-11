@@ -1,0 +1,244 @@
+---
+version: 1
+
+# Values such as ${SCM_TOKEN} are resolved strictly from the environment.
+# Ansible Vault can also provide them to the configure.yml playbook environment.
+settings:
+  PROJECTS_ROOT: /var/lib/awx/projects
+
+# Resources are ordered. A $ref can only point to an earlier resource key.
+resources:
+  - key: organization.platform
+    endpoint: organizations
+    match:
+      name: Platform Engineering
+    data:
+      name: Platform Engineering
+      description: Managed by Capstan configuration as code.
+
+  - key: credential_type.vsphere
+    endpoint: credential_types
+    match:
+      name: VMware vSphere
+      kind: cloud
+    data:
+      name: VMware vSphere
+      description: vSphere API credentials managed as code.
+      kind: cloud
+      inputs:
+        fields:
+          - id: host
+            type: string
+            label: vCenter hostname
+          - id: username
+            type: string
+            label: Username
+          - id: password
+            type: string
+            label: Password
+            secret: true
+        required: [host, username, password]
+      injectors:
+        env:
+          VSPHERE_SERVER: "{{ host }}"
+          VSPHERE_USER: "{{ username }}"
+          VSPHERE_PASSWORD: "{{ password }}"
+
+  - key: credential.vsphere
+    endpoint: credentials
+    match:
+      name: Production vCenter
+      organization:
+        $ref: organization.platform
+    data:
+      name: Production vCenter
+      organization:
+        $ref: organization.platform
+      credential_type:
+        $ref: credential_type.vsphere
+      inputs:
+        host: ${VCENTER_HOST}
+        username: ${VCENTER_USERNAME}
+        password: ${VCENTER_PASSWORD}
+    # preserve keeps an existing encrypted value on repeat runs. Set to always
+    # only during an intentional secret rotation.
+    secret_update: preserve
+
+  - key: execution_environment.default
+    endpoint: execution_environments
+    match:
+      name: Capstan EE
+      organization:
+        $ref: organization.platform
+    data:
+      name: Capstan EE
+      organization:
+        $ref: organization.platform
+      image: quay.io/ansible/awx-ee:latest
+      pull: missing
+
+  - key: project.automation
+    endpoint: projects
+    match:
+      name: Platform Automation
+      organization:
+        $ref: organization.platform
+    data:
+      name: Platform Automation
+      organization:
+        $ref: organization.platform
+      scm_type: git
+      scm_url: ${AUTOMATION_PROJECT_URL}
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.default
+    actions:
+      - path: update
+        method: POST
+        when: created
+
+  - key: inventory.production
+    endpoint: inventories
+    match:
+      name: Production
+      organization:
+        $ref: organization.platform
+    data:
+      name: Production
+      organization:
+        $ref: organization.platform
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+      default_machine_credential: null
+      force_inventory_machine_credential: false
+
+  - key: host.web01
+    endpoint: hosts
+    match:
+      name: web01.example.com
+      inventory:
+        $ref: inventory.production
+    data:
+      name: web01.example.com
+      inventory:
+        $ref: inventory.production
+      enabled: true
+      variables: |
+        ansible_host: ${WEB01_ADDRESS}
+
+  - key: job_template.apache
+    endpoint: job_templates
+    match:
+      name: Configure Apache
+      organization:
+        $ref: organization.platform
+    data:
+      name: Configure Apache
+      organization:
+        $ref: organization.platform
+      project:
+        $ref: project.automation
+      inventory:
+        $ref: inventory.production
+      execution_environment:
+        $ref: execution_environment.default
+      playbook: playbooks/apache.yml
+      job_type: run
+      ask_limit_on_launch: true
+    associations:
+      - name: credentials
+        exact: true
+        items:
+          - $ref: credential.vsphere
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: Apache configuration
+          description: Managed by configuration as code.
+          spec:
+            - variable: apache_port
+              question_name: Apache listen port
+              type: integer
+              required: true
+              default: 80
+              min: 1
+              max: 65535
+
+  - key: terraform_template.vsphere
+    endpoint: terraform_job_templates
+    match:
+      name: Provision vSphere VM
+      organization:
+        $ref: organization.platform
+    data:
+      name: Provision vSphere VM
+      organization:
+        $ref: organization.platform
+      project:
+        $ref: project.automation
+      execution_environment:
+        $ref: execution_environment.default
+      terraform_dir: terraform/vsphere
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.production
+      target_group: provisioned
+    associations:
+      - name: credentials
+        items:
+          - $ref: credential.vsphere
+
+  - key: ee_template.platform
+    endpoint: /api/v2/quay/execution-environment-images/templates/
+    match:
+      name: Build Platform EE
+      organization:
+        $ref: organization.platform
+    data:
+      name: Build Platform EE
+      organization:
+        $ref: organization.platform
+      project:
+        $ref: project.automation
+      execution_environment:
+        $ref: execution_environment.default
+      namespace: platform
+      repository: capstan-ee
+      tag: latest
+      runtime: podman
+      definition_file: execution-environment.yml
+      context_path: .
+
+  - key: catalog.apache
+    endpoint: catalog_items
+    match:
+      name: Apache on vSphere
+      organization:
+        $ref: organization.platform
+    data:
+      name: Apache on vSphere
+      description: Provision and configure an Apache server.
+      organization:
+        $ref: organization.platform
+      terraform_job_template:
+        $ref: terraform_template.vsphere
+      browse_enabled: true
+      available_providers: [vmware]
+
+  - key: cloud.vsphere
+    endpoint: /api/v2/catalog_cloud/connections/
+    match:
+      name: Production vCenter
+      organization:
+        $ref: organization.platform
+      provider_id: vmware
+    data:
+      name: Production vCenter
+      organization:
+        $ref: organization.platform
+      provider_id: vmware
+      credential:
+        $ref: credential.vsphere

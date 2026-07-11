@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://capstan.local/schemas/configuration-v1.json",
+  "title": "Capstan configuration-as-code manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": { "const": 1 },
+    "settings": { "type": "object" },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$ref"],
+      "properties": { "$ref": { "type": "string", "minLength": 1 } }
+    },
+    "association": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "items"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "items": { "type": "array" },
+        "exact": { "type": "boolean", "default": false }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "method": { "enum": ["POST", "PUT", "PATCH", "DELETE"], "default": "POST" },
+        "when": { "enum": ["always", "changed", "created", "updated", "unchanged"], "default": "changed" },
+        "data": {}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "endpoint", "match"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string" },
+        "endpoint": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["present", "absent"], "default": "present" },
+        "match": { "type": "object", "minProperties": 1 },
+        "data": { "type": "object" },
+        "secret_update": { "enum": ["preserve", "always"], "default": "preserve" },
+        "associations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/association" }
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/action" }
+        }
+      }
+    }
+  }
+}

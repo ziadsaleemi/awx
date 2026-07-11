@@ -35,6 +35,60 @@ media, and container storage paths as Capstan.
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
 
+## Configuration As Code
+
+Capstan Deploy can reconcile controller configuration after any server, k3s,
+or Kubernetes deployment. The same ordered manifest supports native controller
+objects and Capstan extensions, including organizations, users, teams, user
+types, role definitions, credential types, credentials, execution environments,
+projects, inventories, sources, hosts, groups, job/workflow/Terraform/EE build
+templates, schedules, notifications, catalog items, cloud connections, and
+future API resources.
+
+Start from `../configuration/example.yml`. Keep non-secret desired state in Git
+and use environment variables or Ansible Vault for secret fields:
+
+```bash
+cd tools/awx-deploy/ansible
+export CAPSTAN_CONTROLLER_URL=https://capstan.example.com
+export CAPSTAN_CONTROLLER_USERNAME=admin
+read -rsp "Capstan password: " CAPSTAN_CONTROLLER_PASSWORD
+export CAPSTAN_CONTROLLER_PASSWORD
+
+export VCENTER_HOST=vcenter.example.com
+export VCENTER_USERNAME='svc-capstan@example.local'
+read -rsp "vCenter password: " VCENTER_PASSWORD
+export VCENTER_PASSWORD
+export AUTOMATION_PROJECT_URL=https://github.com/example/automation.git
+export WEB01_ADDRESS=192.0.2.10
+
+ansible-playbook -i localhost, playbooks/configure.yml \
+  -e '{"capstan_configuration_manifests":["../configuration/example.yml"]}'
+```
+
+Use `capstan_configuration_check=true` for a non-mutating drift preview. The
+reconciler reports create/update/delete/association counts as JSON and returns a
+changed Ansible result only when drift exists.
+
+Resources are applied in file and list order. Use `{"$ref": "resource.key"}`
+where the API expects the numeric ID of an earlier resource. Use an exact
+association to make relationships such as template credentials authoritative:
+
+```yaml
+associations:
+  - name: credentials
+    exact: true
+    items:
+      - $ref: credential.machine
+```
+
+Arbitrary child operations such as surveys and project updates are represented
+by `actions`. `state: absent` removes a uniquely matched object. Existing
+encrypted values are preserved by default because the API cannot return a
+comparable plaintext value; set `secret_update: always` only for an intentional
+rotation. Schema-aware editors can use
+`../configuration/schema-v1.json`.
+
 EDA is intentionally a separate workload. For k3s/k8s, EDA runs as separate
 pods in the same cluster through the upstream EDA Server Operator. For direct
 server deployments, EDA runs on hosts in the `awx_eda` inventory group as its

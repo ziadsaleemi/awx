@@ -1,0 +1,61 @@
+---
+- name: Reconcile Capstan configuration as code
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    capstan_configuration_script: "{{ playbook_dir }}/../../scripts/reconcile_configuration.py"
+    capstan_configuration_manifests: []
+    capstan_configuration_check: false
+    capstan_configuration_controller_url: "{{ lookup('env', 'CAPSTAN_CONTROLLER_URL') }}"
+    capstan_configuration_username: "{{ lookup('env', 'CAPSTAN_CONTROLLER_USERNAME') }}"
+    capstan_configuration_password: "{{ lookup('env', 'CAPSTAN_CONTROLLER_PASSWORD') }}"
+    capstan_configuration_token: "{{ lookup('env', 'CAPSTAN_CONTROLLER_TOKEN') }}"
+    capstan_configuration_verify_ssl: "{{ lookup('env', 'CAPSTAN_CONTROLLER_VERIFY_SSL') | default('true', true) | bool }}"
+
+  tasks:
+    - name: Validate configuration inputs
+      ansible.builtin.assert:
+        that:
+          - capstan_configuration_manifests | length > 0
+          - capstan_configuration_controller_url | length > 0
+          - capstan_configuration_token | length > 0 or capstan_configuration_username | length > 0
+        fail_msg: >-
+          Set capstan_configuration_manifests and controller authentication through
+          CAPSTAN_CONTROLLER_URL plus CAPSTAN_CONTROLLER_TOKEN or username/password.
+
+    - name: Verify configuration manifest files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ capstan_configuration_manifests }}"
+      register: capstan_configuration_manifest_stats
+
+    - name: Require every configuration manifest to exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Configuration manifest {{ item.item }} does not exist or is not a regular file."
+      loop: "{{ capstan_configuration_manifest_stats.results }}"
+
+    - name: Reconcile Capstan API resources
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [ansible_playbook_python, capstan_configuration_script]
+            + (['--check'] if capstan_configuration_check | bool else [])
+            + (['--insecure'] if not capstan_configuration_verify_ssl | bool else [])
+            + capstan_configuration_manifests
+          }}
+      environment:
+        CAPSTAN_CONTROLLER_URL: "{{ capstan_configuration_controller_url }}"
+        CAPSTAN_CONTROLLER_USERNAME: "{{ capstan_configuration_username }}"
+        CAPSTAN_CONTROLLER_PASSWORD: "{{ capstan_configuration_password }}"
+        CAPSTAN_CONTROLLER_TOKEN: "{{ capstan_configuration_token }}"
+      register: capstan_configuration_result
+      changed_when: (capstan_configuration_result.stdout | from_json).changed | bool
+      no_log: false
+
+    - name: Report configuration reconciliation summary
+      ansible.builtin.debug:
+        var: capstan_configuration_result.stdout | from_json
