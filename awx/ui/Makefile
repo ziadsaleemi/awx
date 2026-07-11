@@ -10,7 +10,7 @@ UI_GIT_REPO ?= https://github.com/ansible/ansible-ui.git
 UI_GIT_BRANCH ?= main
 
 ## Product name to display on the UI used in UI build process
-PRODUCT ?= AWX
+PRODUCT ?= Capstan
 
 .PHONY: ui
 ## Default build target of ui Makefile, builds ui/build
