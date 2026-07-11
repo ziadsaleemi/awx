@@ -114,7 +114,11 @@ resources:
       force_inventory_machine_credential: false
 
   - key: host.web01
-    endpoint: hosts
+    # Child resources use the parent's supported related collection endpoint.
+    endpoint:
+      $related:
+        ref: inventory.production
+        name: hosts
     match:
       name: web01.example.com
       inventory:

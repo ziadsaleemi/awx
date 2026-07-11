@@ -183,6 +183,21 @@ class ConfigurationReconciler:
             endpoint += "/"
         return endpoint
 
+    def _resource_endpoint(self, value: Any) -> str:
+        if isinstance(value, dict) and set(value) == {"$related"}:
+            related = value["$related"]
+            if not isinstance(related, dict) or set(related) != {"ref", "name"}:
+                raise ConfigurationError("$related endpoint requires exactly ref and name")
+            reference = related["ref"]
+            relation = related["name"]
+            if not isinstance(reference, str) or reference not in self.registry:
+                raise ConfigurationError(f"related endpoint reference {reference!r} is unresolved")
+            if not isinstance(relation, str) or not relation.strip("/"):
+                raise ConfigurationError("$related endpoint name must be a non-empty string")
+            parent = self.registry[reference]
+            return f"{self._detail_path(parent.endpoint, parent.object)}{relation.strip('/')}/"
+        return self._endpoint(value)
+
     def _lookup(self, endpoint: str, match: dict[str, Any], description: str) -> dict[str, Any] | None:
         results = self.client.list(endpoint, match)
         if len(results) > 1:
@@ -251,7 +266,7 @@ class ConfigurationReconciler:
 
     def _reconcile_resource(self, spec: dict[str, Any]) -> None:
         key = spec["key"]
-        endpoint = self._endpoint(spec.get("endpoint", spec.get("kind", "")))
+        endpoint = self._resource_endpoint(spec.get("endpoint", spec.get("kind", "")))
         state = spec.get("state", "present")
         if state not in {"present", "absent"}:
             raise ConfigurationError(f"{key}: state must be present or absent")

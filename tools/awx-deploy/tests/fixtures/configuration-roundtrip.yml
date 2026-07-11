@@ -1,0 +1,155 @@
+---
+version: 1
+resources:
+  - key: organization.roundtrip
+    endpoint: organizations
+    match:
+      name: Capstan Configuration Roundtrip
+    data:
+      name: Capstan Configuration Roundtrip
+      description: Temporary configuration-as-code roundtrip proof.
+
+  - key: team.roundtrip
+    endpoint: teams
+    match:
+      name: Roundtrip Operators
+      organization:
+        $ref: organization.roundtrip
+    data:
+      name: Roundtrip Operators
+      organization:
+        $ref: organization.roundtrip
+
+  - key: credential_type.roundtrip
+    endpoint: credential_types
+    match:
+      name: Roundtrip Cloud API
+      kind: cloud
+    data:
+      name: Roundtrip Cloud API
+      kind: cloud
+      inputs:
+        fields:
+          - id: endpoint
+            label: Endpoint
+            type: string
+          - id: token
+            label: API token
+            type: string
+            secret: true
+        required: [endpoint, token]
+      injectors:
+        env:
+          ROUNDTRIP_ENDPOINT: "{{ endpoint }}"
+          ROUNDTRIP_TOKEN: "{{ token }}"
+
+  - key: credential.roundtrip
+    endpoint: credentials
+    match:
+      name: Roundtrip Cloud API
+      organization:
+        $ref: organization.roundtrip
+    data:
+      name: Roundtrip Cloud API
+      organization:
+        $ref: organization.roundtrip
+      credential_type:
+        $ref: credential_type.roundtrip
+      inputs:
+        endpoint: ${CAPSTAN_ROUNDTRIP_ENDPOINT}
+        token: ${CAPSTAN_ROUNDTRIP_TOKEN}
+
+  - key: notification.roundtrip
+    endpoint: notification_templates
+    match:
+      name: Roundtrip Webhook
+      organization:
+        $ref: organization.roundtrip
+    data:
+      name: Roundtrip Webhook
+      organization:
+        $ref: organization.roundtrip
+      notification_type: webhook
+      notification_configuration:
+        url: ${CAPSTAN_ROUNDTRIP_WEBHOOK_URL}
+        headers:
+          Authorization: ${CAPSTAN_ROUNDTRIP_WEBHOOK_AUTHORIZATION}
+        disable_ssl_verification: false
+      messages: {}
+
+  - key: cloud_connection.roundtrip
+    endpoint: /api/v2/catalog_cloud/connections/
+    match:
+      provider_id: digitalocean
+      name: Roundtrip Connection
+      organization:
+        $ref: organization.roundtrip
+    data:
+      provider_id: digitalocean
+      name: Roundtrip Connection
+      credential:
+        $ref: credential.roundtrip
+      organization:
+        $ref: organization.roundtrip
+
+  - key: inventory.roundtrip
+    endpoint: inventories
+    match:
+      name: Roundtrip Inventory
+      organization:
+        $ref: organization.roundtrip
+    data:
+      name: Roundtrip Inventory
+      organization:
+        $ref: organization.roundtrip
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: host.roundtrip
+    endpoint:
+      $related:
+        ref: inventory.roundtrip
+        name: hosts
+    match:
+      name: roundtrip.example.test
+      inventory:
+        $ref: inventory.roundtrip
+    data:
+      name: roundtrip.example.test
+      inventory:
+        $ref: inventory.roundtrip
+      enabled: true
+      variables: |
+        ansible_host: 192.0.2.10
+
+  - key: workflow.roundtrip
+    endpoint: workflow_job_templates
+    match:
+      name: Roundtrip Workflow
+      organization:
+        $ref: organization.roundtrip
+    data:
+      name: Roundtrip Workflow
+      organization:
+        $ref: organization.roundtrip
+      inventory:
+        $ref: inventory.roundtrip
+      survey_enabled: true
+    associations:
+      - name: notification_templates_success
+        exact: true
+        items:
+          - $ref: notification.roundtrip
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: Roundtrip survey
+          description: Export and import proof.
+          spec:
+            - variable: message
+              question_name: Message
+              type: text
+              required: true
+              default: hello

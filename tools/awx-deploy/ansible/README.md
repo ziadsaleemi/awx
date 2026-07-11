@@ -66,6 +66,23 @@ ansible-playbook -i localhost, playbooks/configure.yml \
   -e '{"capstan_configuration_manifests":["../configuration/example.yml"]}'
 ```
 
+Export an existing controller before moving its configuration into Git:
+
+```bash
+ansible-playbook -i localhost, playbooks/export-configuration.yml \
+  -e capstan_configuration_export_force=true
+```
+
+The exporter writes `configuration/export.yml` plus a blank
+`configuration/export.env.example`. Credential secret fields, notification
+configuration, user passwords, and explicitly selected secret settings become
+environment references; plaintext secret values are never written. Managed
+credential types, control-plane execution resources, system schedules, and the
+admin account are excluded by default. Use `capstan_configuration_export_include_users`
+or `capstan_configuration_export_include_managed` only for intentional migrations.
+Limit a migration with `capstan_configuration_export_resources`, and select
+controller settings explicitly with `capstan_configuration_export_settings`.
+
 Use `capstan_configuration_check=true` for a non-mutating drift preview. The
 reconciler reports create/update/delete/association counts as JSON and returns a
 changed Ansible result only when drift exists.
@@ -80,6 +97,17 @@ associations:
     exact: true
     items:
       - $ref: credential.machine
+```
+
+Child objects use a portable related endpoint, resolved after their parent is
+created. This is how exported hosts, groups, inventory sources, and workflow
+nodes use the API collections that actually support creation:
+
+```yaml
+endpoint:
+  $related:
+    ref: inventory.production
+    name: hosts
 ```
 
 Arbitrary child operations such as surveys and project updates are represented

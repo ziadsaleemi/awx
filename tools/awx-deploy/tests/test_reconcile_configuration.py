@@ -183,6 +183,19 @@ class ReconcilerTests(unittest.TestCase):
     def test_api_trimmed_multiline_values_are_equal(self):
         self.assertFalse(MODULE.ConfigurationReconciler._different("key: value", "key: value\n"))
 
+    def test_related_endpoint_uses_prior_resource_detail_url(self):
+        reconciler = MODULE.ConfigurationReconciler(self.client)
+        reconciler.registry["inventory.demo"] = MODULE.ResourceState(
+            "inventory.demo",
+            "/api/v2/inventories/",
+            {"id": 42, "url": "/api/v2/inventories/42/"},
+            "unchanged",
+        )
+        self.assertEqual(
+            reconciler._resource_endpoint({"$related": {"ref": "inventory.demo", "name": "hosts"}}),
+            "/api/v2/inventories/42/hosts/",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

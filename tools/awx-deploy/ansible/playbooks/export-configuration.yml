@@ -1,0 +1,62 @@
+---
+- name: Export Capstan configuration as code
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    capstan_configuration_export_script: "{{ playbook_dir }}/../../scripts/export_configuration.py"
+    capstan_configuration_export_output: "{{ playbook_dir }}/../../configuration/export.yml"
+    capstan_configuration_export_env_example: "{{ playbook_dir }}/../../configuration/export.env.example"
+    capstan_configuration_export_format: yaml
+    capstan_configuration_export_include_users: false
+    capstan_configuration_export_include_managed: false
+    capstan_configuration_export_force: false
+    capstan_configuration_export_resources: []
+    capstan_configuration_export_settings: []
+    capstan_configuration_controller_url: "{{ lookup('env', 'CAPSTAN_CONTROLLER_URL') }}"
+    capstan_configuration_username: "{{ lookup('env', 'CAPSTAN_CONTROLLER_USERNAME') }}"
+    capstan_configuration_password: "{{ lookup('env', 'CAPSTAN_CONTROLLER_PASSWORD') }}"
+    capstan_configuration_token: "{{ lookup('env', 'CAPSTAN_CONTROLLER_TOKEN') }}"
+    capstan_configuration_verify_ssl: "{{ lookup('env', 'CAPSTAN_CONTROLLER_VERIFY_SSL') | default('true', true) | bool }}"
+
+  tasks:
+    - name: Validate export inputs
+      ansible.builtin.assert:
+        that:
+          - capstan_configuration_controller_url | length > 0
+          - capstan_configuration_token | length > 0 or capstan_configuration_username | length > 0
+          - capstan_configuration_export_format in ['yaml', 'json']
+        fail_msg: >-
+          Set controller authentication through CAPSTAN_CONTROLLER_URL plus
+          CAPSTAN_CONTROLLER_TOKEN or username/password.
+
+    - name: Export controller configuration
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              ansible_playbook_python,
+              capstan_configuration_export_script,
+              '--output', capstan_configuration_export_output,
+              '--env-example', capstan_configuration_export_env_example,
+              '--format', capstan_configuration_export_format
+            ]
+            + (['--insecure'] if not capstan_configuration_verify_ssl | bool else [])
+            + (['--include-users'] if capstan_configuration_export_include_users | bool else [])
+            + (['--include-managed'] if capstan_configuration_export_include_managed | bool else [])
+            + (['--force'] if capstan_configuration_export_force | bool else [])
+            + (capstan_configuration_export_resources | map('regex_replace', '^(.*)$', '--resource=\\1') | list)
+            + (capstan_configuration_export_settings | map('regex_replace', '^(.*)$', '--setting=\\1') | list)
+          }}
+      environment:
+        CAPSTAN_CONTROLLER_URL: "{{ capstan_configuration_controller_url }}"
+        CAPSTAN_CONTROLLER_USERNAME: "{{ capstan_configuration_username }}"
+        CAPSTAN_CONTROLLER_PASSWORD: "{{ capstan_configuration_password }}"
+        CAPSTAN_CONTROLLER_TOKEN: "{{ capstan_configuration_token }}"
+      register: capstan_configuration_export_result
+      changed_when: false
+      no_log: false
+
+    - name: Report configuration export summary
+      ansible.builtin.debug:
+        var: capstan_configuration_export_result.stderr | from_json
