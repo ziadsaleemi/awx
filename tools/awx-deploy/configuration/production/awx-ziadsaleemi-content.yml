@@ -247,7 +247,7 @@ resources:
         data:
           name: VMware vSphere VM
           description: Runtime values for the vSphere VM.
-          spec:
+          spec: &vsphere_vm_survey
             - variable: vm_name
               question_name: VM name
               type: text
@@ -300,6 +300,47 @@ resources:
               choices: |-
                 true
                 false
+
+  - key: workflow.vsphere_provision
+    endpoint: workflow_job_templates
+    match:
+      name: Provision VMware vSphere VM Workflow
+      organization:
+        $ref: organization.r92
+    data:
+      name: Provision VMware vSphere VM Workflow
+      description: Provision a VMware vSphere VM through Terraform for Service Catalog requests.
+      organization:
+        $ref: organization.r92
+      inventory:
+        $ref: inventory.vsphere
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: VMware vSphere VM
+          description: Runtime values for the vSphere VM.
+          spec: *vsphere_vm_survey
+
+  - key: workflow_node.vsphere_terraform
+    endpoint:
+      $related:
+        ref: workflow.vsphere_provision
+        name: workflow_nodes
+    match:
+      identifier: provision-vsphere-terraform
+      workflow_job_template:
+        $ref: workflow.vsphere_provision
+    data:
+      identifier: provision-vsphere-terraform
+      workflow_job_template:
+        $ref: workflow.vsphere_provision
+      unified_job_template:
+        $ref: terraform.vsphere_apply
+      all_parents_must_converge: false
 
   - key: terraform.azure_apply
     endpoint: terraform_job_templates
@@ -556,14 +597,16 @@ resources:
     endpoint: catalog_items
     match:
       name: VMware vSphere Linux VM
-      organization:
-        $ref: organization.r92
     data:
       name: VMware vSphere Linux VM
-      description: Request a Linux VM in the vSphere management cluster. Configure Apache with the linked job template after provisioning.
+      description: Request a Linux VM in the vSphere management cluster through the surveyed provisioning workflow.
       organization:
         $ref: organization.r92
-      terraform_job_template:
-        $ref: terraform.vsphere_apply
+      provision_workflow:
+        $ref: workflow.vsphere_provision
+      terraform_job_template: null
+      provider_workflows:
+        vmware:
+          $ref: workflow.vsphere_provision
       browse_enabled: true
       available_providers: [vmware]

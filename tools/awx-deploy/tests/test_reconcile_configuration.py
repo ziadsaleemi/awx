@@ -68,6 +68,27 @@ class FakeClient:
 
 
 class ManifestTests(unittest.TestCase):
+    def test_production_vsphere_catalog_uses_surveyed_workflow(self):
+        manifest_path = Path(__file__).parents[1] / "configuration" / "production" / "awx-ziadsaleemi-content.yml"
+        environment = {
+            "VCENTER_HOST": "vcenter.example.test",
+            "VCENTER_USERNAME": "svc-capstan@example.test",
+            "VCENTER_PASSWORD": "preserved-secret",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            manifest = MODULE.load_manifests([manifest_path])
+        resources = {resource["key"]: resource for resource in manifest["resources"]}
+
+        workflow = resources["workflow.vsphere_provision"]
+        node = resources["workflow_node.vsphere_terraform"]
+        catalog = resources["catalog.vsphere_vm"]
+        self.assertTrue(workflow["data"]["survey_enabled"])
+        self.assertEqual(len(workflow["actions"][0]["data"]["spec"]), 9)
+        self.assertEqual(node["data"]["unified_job_template"], {"$ref": "terraform.vsphere_apply"})
+        self.assertEqual(catalog["data"]["provision_workflow"], {"$ref": "workflow.vsphere_provision"})
+        self.assertEqual(catalog["data"]["provider_workflows"]["vmware"], {"$ref": "workflow.vsphere_provision"})
+        self.assertIsNone(catalog["data"]["terraform_job_template"])
+
     def test_environment_expansion_is_strict_and_supports_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
