@@ -1,0 +1,569 @@
+---
+version: 1
+
+# Resources in this file depend on synchronized SCM projects from the
+# foundation manifest. Apply foundation first and wait for successful project
+# updates before reconciling this file.
+resources:
+  - key: organization.r92
+    endpoint: organizations
+    match:
+      name: R92 Corporation
+    data:
+      name: R92 Corporation
+      description: Managed by Capstan configuration as code.
+
+  - key: execution_environment.capstan
+    endpoint: execution_environments
+    match:
+      name: R92 Capstan EE
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Capstan EE
+      description: General Ansible execution environment managed as code.
+      organization:
+        $ref: organization.r92
+      image: quay.io/ansible/awx-ee:latest
+      pull: missing
+
+  - key: execution_environment.terraform
+    endpoint: execution_environments
+    match:
+      name: Terraform EE (latest)
+      organization:
+        $ref: organization.r92
+    data:
+      name: Terraform EE (latest)
+      description: Official Terraform runtime for Capstan Terraform templates.
+      organization:
+        $ref: organization.r92
+      image: docker.io/hashicorp/terraform:latest
+      pull: missing
+
+  - key: credential.vsphere
+    endpoint: credentials
+    match:
+      name: R92 vCenter
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 vCenter
+      description: VMware vSphere API access for Terraform automation.
+      organization:
+        $ref: organization.r92
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: VMware vSphere (Terraform)
+            kind: cloud
+      inputs:
+        vsphere_server: ${VCENTER_HOST}
+        vsphere_user: ${VCENTER_USERNAME}
+        vsphere_password: ${VCENTER_PASSWORD}
+        vsphere_allow_unverified_ssl: true
+    secret_update: preserve
+
+  - key: project.terraform_demo
+    endpoint: projects
+    match:
+      name: R92 Terraform Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Terraform Demo
+      description: Multi-cloud Terraform modules managed in Git.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-terraform-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+
+  - key: project.ee_demo
+    endpoint: projects
+    match:
+      name: R92 Execution Environment Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Execution Environment Demo
+      description: Source-controlled execution environment definition and smoke playbook.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-ee-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+
+  - key: project.collections_demo
+    endpoint: projects
+    match:
+      name: R92 Collections Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Collections Demo
+      description: Demo collection, Apache role, and playbooks published through Galaxy NG.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-collections-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+
+  - key: inventory.vsphere
+    endpoint: inventories
+    match:
+      name: VMware vSphere VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: VMware vSphere VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through the VMware vSphere Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.azure
+    endpoint: inventories
+    match:
+      name: Azure VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: Azure VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through Azure Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.digitalocean
+    endpoint: inventories
+    match:
+      name: DigitalOcean VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: DigitalOcean VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through DigitalOcean Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.aws
+    endpoint: inventories
+    match:
+      name: AWS VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: AWS VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through AWS Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.gcp
+    endpoint: inventories
+    match:
+      name: GCP VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: GCP VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through GCP Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.oci
+    endpoint: inventories
+    match:
+      name: OCI VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: OCI VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through OCI Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: inventory.proxmox
+    endpoint: inventories
+    match:
+      name: Proxmox VMs
+      organization:
+        $ref: organization.r92
+    data:
+      name: Proxmox VMs
+      organization:
+        $ref: organization.r92
+      description: Hosts provisioned through Proxmox Terraform templates.
+      variables: |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+
+  - key: terraform.vsphere_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision VMware vSphere VM
+    data:
+      name: Provision VMware vSphere VM
+      description: Clone and configure a Linux VM in the vSphere management cluster.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: vmware-vsphere-vm
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.vsphere
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    associations:
+      - name: credentials
+        exact: true
+        items:
+          - $ref: credential.vsphere
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: VMware vSphere VM
+          description: Runtime values for the vSphere VM.
+          spec:
+            - variable: vm_name
+              question_name: VM name
+              type: text
+              required: true
+              default: capstan-demo-vsphere
+            - variable: datacenter
+              question_name: Datacenter
+              type: text
+              required: true
+              default: DC110
+            - variable: cluster
+              question_name: Cluster
+              type: text
+              required: true
+              default: MGMT Cluster
+            - variable: datastore
+              question_name: Datastore
+              type: text
+              required: true
+              default: truenas152-linoop-management-nodes
+            - variable: network
+              question_name: Network
+              type: text
+              required: true
+              default: VM Network
+            - variable: template_name
+              question_name: VM template
+              type: text
+              required: true
+              default: Oracle-Linux-9-Template
+            - variable: cpu
+              question_name: vCPU count
+              type: integer
+              required: true
+              default: 2
+              min: 1
+              max: 32
+            - variable: memory_mb
+              question_name: Memory in MiB
+              type: integer
+              required: true
+              default: 2048
+              min: 1024
+              max: 131072
+            - variable: enable_cloud_init
+              question_name: Enable cloud-init bootstrap
+              type: multiplechoice
+              required: true
+              default: "true"
+              choices: |-
+                true
+                false
+
+  - key: terraform.azure_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision Azure VM
+    data:
+      name: Provision Azure VM
+      description: Provision an Azure Linux virtual machine from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: azure-vm
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.azure
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: Azure VM
+          description: Azure network and VM settings.
+          spec:
+            - {variable: vm_name, question_name: VM name, type: text, required: true, default: capstan-demo-azure}
+            - {variable: resource_group_name, question_name: Resource group, type: text, required: true}
+            - {variable: vnet_name, question_name: Virtual network, type: text, required: true}
+            - {variable: subnet_name, question_name: Subnet, type: text, required: true}
+            - {variable: vm_size, question_name: VM size, type: text, required: true, default: Standard_B2ms}
+
+  - key: terraform.digitalocean_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision DigitalOcean Droplet
+    data:
+      name: Provision DigitalOcean Droplet
+      description: Provision a DigitalOcean Droplet from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: digitalocean-droplet
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.digitalocean
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: DigitalOcean Droplet
+          description: Droplet sizing and location.
+          spec:
+            - {variable: droplet_name, question_name: Droplet name, type: text, required: true, default: capstan-demo-do}
+            - {variable: do_region, question_name: Region, type: text, required: true, default: nyc3}
+            - {variable: do_droplet_size, question_name: Size, type: text, required: true, default: s-1vcpu-1gb}
+            - {variable: do_image, question_name: Image, type: text, required: true, default: ubuntu-22-04-x64}
+
+  - key: terraform.aws_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision AWS EC2 Instance
+    data:
+      name: Provision AWS EC2 Instance
+      description: Provision an AWS EC2 instance from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: aws-ec2
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.aws
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: AWS EC2 instance
+          description: EC2 sizing and region.
+          spec:
+            - {variable: instance_name, question_name: Instance name, type: text, required: true, default: capstan-demo-aws}
+            - {variable: aws_region, question_name: Region, type: text, required: true, default: us-east-1}
+            - {variable: instance_type, question_name: Instance type, type: text, required: true, default: t3.micro}
+            - {variable: assign_public_ip, question_name: Assign public IP, type: multiplechoice, required: true, default: "true", choices: "true\nfalse"}
+
+  - key: terraform.gcp_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision GCP Compute Instance
+    data:
+      name: Provision GCP Compute Instance
+      description: Provision a GCP Compute Engine instance from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: gcp-compute
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.gcp
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: GCP Compute instance
+          description: GCP project, zone, and machine settings.
+          spec:
+            - {variable: instance_name, question_name: Instance name, type: text, required: true, default: capstan-demo-gcp}
+            - {variable: gcp_project, question_name: GCP project ID, type: text, required: true}
+            - {variable: gcp_region, question_name: Region, type: text, required: true, default: us-central1}
+            - {variable: gcp_zone, question_name: Zone, type: text, required: true, default: us-central1-a}
+            - {variable: machine_type, question_name: Machine type, type: text, required: true, default: e2-micro}
+
+  - key: terraform.oci_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision OCI Instance
+    data:
+      name: Provision OCI Instance
+      description: Provision an OCI compute instance from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: oci-instance
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.oci
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: OCI compute instance
+          description: OCI placement and image settings.
+          spec:
+            - {variable: instance_name, question_name: Instance name, type: text, required: true, default: capstan-demo-oci}
+            - {variable: compartment_ocid, question_name: Compartment OCID, type: text, required: true}
+            - {variable: availability_domain, question_name: Availability domain, type: text, required: true}
+            - {variable: subnet_ocid, question_name: Subnet OCID, type: text, required: true}
+            - {variable: image_ocid, question_name: Image OCID, type: text, required: true}
+            - {variable: shape, question_name: Shape, type: text, required: true, default: VM.Standard.E2.1.Micro}
+
+  - key: terraform.proxmox_apply
+    endpoint: terraform_job_templates
+    match:
+      name: Provision Proxmox VM
+    data:
+      name: Provision Proxmox VM
+      description: Provision a Proxmox VM from the shared demo project.
+      project:
+        $ref: project.terraform_demo
+      execution_environment:
+        $ref: execution_environment.terraform
+      terraform_dir: proxmox-vm
+      terraform_operation: apply
+      target_inventory:
+        $ref: inventory.proxmox
+      target_group: provisioned
+      ask_variables_on_launch: true
+      survey_enabled: true
+    actions:
+      - path: survey_spec
+        method: POST
+        when: changed
+        data:
+          name: Proxmox VM
+          description: Proxmox template and resource settings.
+          spec:
+            - {variable: vm_name, question_name: VM name, type: text, required: true, default: capstan-demo-proxmox}
+            - {variable: proxmox_template_name, question_name: Template name, type: text, required: true}
+            - {variable: proxmox_node, question_name: Node, type: text, required: true, default: pve}
+            - {variable: cores, question_name: vCPU count, type: integer, required: true, default: 2, min: 1, max: 32}
+            - {variable: memory, question_name: Memory in MiB, type: integer, required: true, default: 2048, min: 512, max: 131072}
+            - {variable: disk_gb, question_name: Disk size in GiB, type: integer, required: true, default: 20, min: 8, max: 2048}
+
+  - key: job_template.apache
+    endpoint: job_templates
+    match:
+      name: Configure Apache
+      organization:
+        $ref: organization.r92
+    data:
+      name: Configure Apache
+      description: Configure Apache using the R92 demo collection from Galaxy NG.
+      organization:
+        $ref: organization.r92
+      project:
+        $ref: project.collections_demo
+      inventory:
+        $ref: inventory.vsphere
+      execution_environment:
+        $ref: execution_environment.capstan
+      playbook: playbooks/install_apache.yml
+      job_type: run
+      ask_inventory_on_launch: true
+      ask_limit_on_launch: true
+      ask_credential_on_launch: true
+
+  - key: job_template.ee_smoke
+    endpoint: job_templates
+    match:
+      name: Validate Demo Execution Environment
+      organization:
+        $ref: organization.r92
+    data:
+      name: Validate Demo Execution Environment
+      description: Validate the demo EE dependencies and bundled collections.
+      organization:
+        $ref: organization.r92
+      project:
+        $ref: project.ee_demo
+      execution_environment:
+        $ref: execution_environment.capstan
+      playbook: playbooks/smoke.yml
+      job_type: run
+      ask_inventory_on_launch: true
+
+  - key: ee_template.demo
+    endpoint: /api/v2/quay/execution-environment-images/templates/
+    match:
+      namespace: admin
+      repository: awx-ee-demo
+    data:
+      name: Build R92 Demo EE
+      description: Build the source-controlled demo execution environment and push it to Project Quay.
+      project:
+        $ref: project.ee_demo
+      namespace: admin
+      repository: awx-ee-demo
+      tag: latest
+      runtime: podman
+      definition_file: ee/execution-environment.yml
+      context: ee
+
+  - key: catalog.vsphere_vm
+    endpoint: catalog_items
+    match:
+      name: VMware vSphere Linux VM
+      organization:
+        $ref: organization.r92
+    data:
+      name: VMware vSphere Linux VM
+      description: Request a Linux VM in the vSphere management cluster. Configure Apache with the linked job template after provisioning.
+      organization:
+        $ref: organization.r92
+      terraform_job_template:
+        $ref: terraform.vsphere_apply
+      browse_enabled: true
+      available_providers: [vmware]

@@ -737,6 +737,13 @@ class ConfigurationExporter:
             for field_name in ("provider_workflows", "provider_deprovision_workflows"):
                 if isinstance(data.get(field_name), dict):
                     data[field_name] = {provider: self._reference("workflow_job_template", template_id) for provider, template_id in data[field_name].items()}
+        elif profile.kind == "ee_build_template":
+            # The Project Quay facade accepts both names but returns `context`.
+            # Export one canonical field so a roundtrip does not report drift.
+            context = item.get("context", item.get("context_path"))
+            data.pop("context_path", None)
+            if context is not None:
+                data["context"] = context
         elif profile.kind in {"role_user_assignment", "role_team_assignment"} and item.get("object_id"):
             role = self._find_object("role_definition", item.get("role_definition"))
             model = str((role or {}).get("content_type", "")).rsplit(".", 1)[-1]

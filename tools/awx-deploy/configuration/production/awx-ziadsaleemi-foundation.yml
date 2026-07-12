@@ -1,0 +1,327 @@
+---
+version: 1
+
+# Stable platform objects for awx.ziadsaleemi.com. Secrets are resolved from
+# the environment at reconciliation time and must never be committed here.
+resources:
+  - key: organization.r92
+    endpoint: organizations
+    match:
+      name: R92 Corporation
+    data:
+      name: R92 Corporation
+      description: Managed by Capstan configuration as code.
+
+  - key: credential.vsphere
+    endpoint: credentials
+    match:
+      name: R92 vCenter
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 vCenter
+      description: VMware vSphere API access for Terraform automation.
+      organization:
+        $ref: organization.r92
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: VMware vSphere (Terraform)
+            kind: cloud
+      inputs:
+        vsphere_server: ${VCENTER_HOST}
+        vsphere_user: ${VCENTER_USERNAME}
+        vsphere_password: ${VCENTER_PASSWORD}
+        vsphere_allow_unverified_ssl: true
+    secret_update: preserve
+
+  - key: execution_environment.capstan
+    endpoint: execution_environments
+    match:
+      name: R92 Capstan EE
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Capstan EE
+      description: General Ansible execution environment managed as code.
+      organization:
+        $ref: organization.r92
+      image: quay.io/ansible/awx-ee:latest
+      pull: missing
+
+  - key: execution_environment.terraform
+    endpoint: execution_environments
+    match:
+      name: Terraform EE (latest)
+      organization:
+        $ref: organization.r92
+    data:
+      name: Terraform EE (latest)
+      description: Official Terraform runtime for Capstan Terraform templates.
+      organization:
+        $ref: organization.r92
+      image: docker.io/hashicorp/terraform:latest
+      pull: missing
+
+  - key: project.terraform_demo
+    endpoint: projects
+    match:
+      name: R92 Terraform Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Terraform Demo
+      description: Multi-cloud Terraform modules managed in Git.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-terraform-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+    actions:
+      - path: update
+        method: POST
+        when: created
+
+  - key: project.ee_demo
+    endpoint: projects
+    match:
+      name: R92 Execution Environment Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Execution Environment Demo
+      description: Source-controlled execution environment definition and smoke playbook.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-ee-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+    actions:
+      - path: update
+        method: POST
+        when: created
+
+  - key: project.collections_demo
+    endpoint: projects
+    match:
+      name: R92 Collections Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Collections Demo
+      description: Demo collection, Apache role, and playbooks published through Galaxy NG.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/awx-collections-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+    actions:
+      - path: update
+        method: POST
+        when: created
+
+  - key: inventory.vsphere
+    endpoint: inventories
+    match: &vsphere_inventory_match
+      name: VMware vSphere VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *vsphere_inventory_match
+      description: Hosts provisioned through the VMware vSphere Terraform templates.
+      variables: &inventory_variables |
+        ansible_remote_tmp: /tmp/.ansible/tmp
+      default_machine_credential: null
+      force_inventory_machine_credential: false
+
+  - key: inventory.azure
+    endpoint: inventories
+    match: &azure_inventory_match
+      name: Azure VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *azure_inventory_match
+      description: Hosts provisioned through Azure Terraform templates.
+      variables: *inventory_variables
+
+  - key: inventory.digitalocean
+    endpoint: inventories
+    match: &digitalocean_inventory_match
+      name: DigitalOcean VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *digitalocean_inventory_match
+      description: Hosts provisioned through DigitalOcean Terraform templates.
+      variables: *inventory_variables
+
+  - key: inventory.aws
+    endpoint: inventories
+    match: &aws_inventory_match
+      name: AWS VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *aws_inventory_match
+      description: Hosts provisioned through AWS Terraform templates.
+      variables: *inventory_variables
+
+  - key: inventory.gcp
+    endpoint: inventories
+    match: &gcp_inventory_match
+      name: GCP VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *gcp_inventory_match
+      description: Hosts provisioned through GCP Terraform templates.
+      variables: *inventory_variables
+
+  - key: inventory.oci
+    endpoint: inventories
+    match: &oci_inventory_match
+      name: OCI VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *oci_inventory_match
+      description: Hosts provisioned through OCI Terraform templates.
+      variables: *inventory_variables
+
+  - key: inventory.proxmox
+    endpoint: inventories
+    match: &proxmox_inventory_match
+      name: Proxmox VMs
+      organization:
+        $ref: organization.r92
+    data:
+      <<: *proxmox_inventory_match
+      description: Hosts provisioned through Proxmox Terraform templates.
+      variables: *inventory_variables
+
+  - key: group.vsphere_provisioned
+    endpoint:
+      $related:
+        ref: inventory.vsphere
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.vsphere
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.vsphere
+
+  - key: group.azure_provisioned
+    endpoint:
+      $related:
+        ref: inventory.azure
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.azure
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.azure
+
+  - key: group.digitalocean_provisioned
+    endpoint:
+      $related:
+        ref: inventory.digitalocean
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.digitalocean
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.digitalocean
+
+  - key: group.aws_provisioned
+    endpoint:
+      $related:
+        ref: inventory.aws
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.aws
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.aws
+
+  - key: group.gcp_provisioned
+    endpoint:
+      $related:
+        ref: inventory.gcp
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.gcp
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.gcp
+
+  - key: group.oci_provisioned
+    endpoint:
+      $related:
+        ref: inventory.oci
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.oci
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.oci
+
+  - key: group.proxmox_provisioned
+    endpoint:
+      $related:
+        ref: inventory.proxmox
+        name: groups
+    match:
+      name: provisioned
+      inventory:
+        $ref: inventory.proxmox
+    data:
+      name: provisioned
+      inventory:
+        $ref: inventory.proxmox
+
+  - key: cloud_connection.vsphere
+    endpoint: /api/v2/catalog_cloud/connections/
+    match:
+      name: R92 vCenter
+      provider_id: vmware
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 vCenter
+      provider_id: vmware
+      status: connected
+      credential_name: R92 vCenter
+      error: ""
+      organization:
+        $ref: organization.r92
+      credential:
+        $ref: credential.vsphere

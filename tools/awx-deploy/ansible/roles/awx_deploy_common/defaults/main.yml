@@ -94,6 +94,7 @@ awx_k8s_ingress_host: ""
 awx_k8s_kubectl_binary: kubectl
 awx_k8s_kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
 awx_k8s_work_dir: /tmp/awx-k8s
+awx_k8s_host_aliases: []
 awx_k8s_manage_firewalld: true
 awx_k8s_firewalld_trusted_interfaces:
   - cni0

@@ -1,0 +1,6 @@
+---
+# Private services that Capstan pods must resolve in the production k8s cluster.
+awx_k8s_host_aliases:
+  - ip: 192.168.111.123
+    hostnames:
+      - vcenter.corp.linoop.us

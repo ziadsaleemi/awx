@@ -67,6 +67,31 @@ class FakeExportClient:
                     },
                 }
             ],
+            "/api/v2/projects/": [
+                {
+                    "id": 10,
+                    "name": "EE Project",
+                    "organization": 1,
+                    "scm_type": "git",
+                    "scm_url": "https://example.test/ee.git",
+                    "related": {},
+                }
+            ],
+            "/api/v2/quay/execution-environment-images/templates/": [
+                {
+                    "id": 11,
+                    "name": "Build EE",
+                    "description": "Build from Git",
+                    "project": {"id": 10, "name": "EE Project"},
+                    "namespace": "platform",
+                    "repository": "demo-ee",
+                    "tag": "latest",
+                    "runtime": "podman",
+                    "definition_file": "ee/execution-environment.yml",
+                    "context": "ee",
+                    "related": {},
+                }
+            ],
             "/api/v2/notification_templates/": [
                 {
                     "id": 8,
@@ -144,6 +169,16 @@ class ExporterTests(unittest.TestCase):
         managed = MODULE.ConfigurationExporter(self.client, include_managed=True, selected_resources={"credential_type"}).export()
         self.assertEqual(len(default["resources"]), 1)
         self.assertEqual(len(managed["resources"]), 2)
+
+    def test_ee_build_template_exports_canonical_context(self):
+        exporter = MODULE.ConfigurationExporter(self.client, selected_resources={"project", "ee_build_template"})
+        document = exporter.export()
+        resources = {resource["key"]: resource for resource in document["resources"]}
+
+        template = resources["ee_build_template.build_ee"]
+        self.assertEqual(template["data"]["project"], {"$ref": "project.ee_project"})
+        self.assertEqual(template["data"]["context"], "ee")
+        self.assertNotIn("context_path", template["data"])
 
 
 if __name__ == "__main__":

@@ -183,6 +183,10 @@ class ReconcilerTests(unittest.TestCase):
     def test_api_trimmed_multiline_values_are_equal(self):
         self.assertFalse(MODULE.ConfigurationReconciler._different("key: value", "key: value\n"))
 
+    def test_summarized_relation_object_equals_desired_id(self):
+        self.assertFalse(MODULE.ConfigurationReconciler._different({"id": 42, "name": "Project"}, 42))
+        self.assertTrue(MODULE.ConfigurationReconciler._different({"id": 42, "name": "Project"}, 43))
+
     def test_related_endpoint_uses_prior_resource_detail_url(self):
         reconciler = MODULE.ConfigurationReconciler(self.client)
         reconciler.registry["inventory.demo"] = MODULE.ResourceState(
@@ -195,6 +199,36 @@ class ReconcilerTests(unittest.TestCase):
             reconciler._resource_endpoint({"$related": {"ref": "inventory.demo", "name": "hosts"}}),
             "/api/v2/inventories/42/hosts/",
         )
+
+    def test_check_mode_does_not_query_synthetic_parent_related_endpoint(self):
+        manifest = {
+            "resources": [
+                {
+                    "key": "inventory.new",
+                    "endpoint": "inventories",
+                    "match": {"name": "New Inventory"},
+                    "data": {"name": "New Inventory"},
+                },
+                {
+                    "key": "group.new",
+                    "endpoint": {"$related": {"ref": "inventory.new", "name": "groups"}},
+                    "match": {"name": "provisioned", "inventory": {"$ref": "inventory.new"}},
+                    "data": {"name": "provisioned", "inventory": {"$ref": "inventory.new"}},
+                },
+            ]
+        }
+
+        original_list = self.client.list
+
+        def reject_synthetic_endpoint(endpoint, match=None):
+            self.assertNotRegex(endpoint, r"/-\d+/")
+            return original_list(endpoint, match)
+
+        with mock.patch.object(self.client, "list", side_effect=reject_synthetic_endpoint):
+            result = MODULE.ConfigurationReconciler(self.client, check_mode=True).reconcile(manifest)
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(result["resources"][-1], {"key": "group.new", "action": "created"})
 
 
 if __name__ == "__main__":

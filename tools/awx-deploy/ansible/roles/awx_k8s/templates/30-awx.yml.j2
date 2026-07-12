@@ -16,6 +16,10 @@ spec:
         app.kubernetes.io/name: {{ awx_k8s_name }}-web
     spec:
       serviceAccountName: {{ awx_k8s_name }}
+{% if awx_k8s_host_aliases | length > 0 %}
+      hostAliases:
+{{ awx_k8s_host_aliases | to_nice_yaml(indent=2) | indent(8, true) }}
+{% endif %}
       securityContext:
         runAsUser: 1000
         runAsGroup: 0
@@ -184,6 +188,10 @@ spec:
         app.kubernetes.io/name: {{ awx_k8s_name }}-task
     spec:
       serviceAccountName: {{ awx_k8s_name }}
+{% if awx_k8s_host_aliases | length > 0 %}
+      hostAliases:
+{{ awx_k8s_host_aliases | to_nice_yaml(indent=2) | indent(8, true) }}
+{% endif %}
       securityContext:
         runAsUser: 1000
         runAsGroup: 0

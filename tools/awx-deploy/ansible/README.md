@@ -35,6 +35,16 @@ media, and container storage paths as Capstan.
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
 
+For private service names that are not resolvable by cluster DNS, provide
+portable pod host aliases to both Capstan web and task workloads:
+
+```yaml
+awx_k8s_host_aliases:
+  - ip: 192.0.2.20
+    hostnames:
+      - vcenter.internal.example.com
+```
+
 ## Configuration As Code
 
 Capstan Deploy can reconcile controller configuration after any server, k3s,

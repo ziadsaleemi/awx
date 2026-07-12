@@ -233,6 +233,8 @@ class ConfigurationReconciler:
     def _different(existing: Any, desired: Any) -> bool:
         if isinstance(existing, str) and existing in ENCRYPTED_MARKERS and desired not in (None, ""):
             return False
+        if isinstance(existing, dict) and isinstance(existing.get("id"), int) and isinstance(desired, int):
+            return existing["id"] != desired
         if isinstance(desired, dict):
             if not isinstance(existing, dict):
                 return True
@@ -276,7 +278,12 @@ class ConfigurationReconciler:
             raise ConfigurationError(f"{key}: match must contain at least one unique field")
         if not isinstance(data, dict):
             raise ConfigurationError(f"{key}: data must be an object")
-        found = self._lookup(endpoint, match, key)
+        # A dry run gives newly planned parents negative synthetic IDs so later
+        # references can still resolve. Their related collections do not exist
+        # on the controller, so treat child lookups as empty instead of issuing
+        # impossible requests such as /inventories/-2/groups/.
+        synthetic_related_endpoint = self.check_mode and re.search(r"/-\d+/", endpoint) is not None
+        found = None if synthetic_related_endpoint else self._lookup(endpoint, match, key)
 
         if state == "absent":
             if found is None:

@@ -113,6 +113,7 @@ tower-backup-*
 tools/awx-deploy/ansible/group_vars/all.yml
 tools/awx-deploy/ansible/vars/*.yml
 !tools/awx-deploy/ansible/vars/*.yml.example
+tools/awx-deploy/configuration/production/*.env
 
 # Other
 .tower_cycle

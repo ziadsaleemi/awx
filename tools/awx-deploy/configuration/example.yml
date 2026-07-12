@@ -214,7 +214,7 @@ resources:
       tag: latest
       runtime: podman
       definition_file: execution-environment.yml
-      context_path: .
+      context: .
 
   - key: catalog.apache
     endpoint: catalog_items
