@@ -32,6 +32,11 @@ real `.env` file is ignored by the repository. Repeat reconciliation after any
 manifest change; unchanged resources are left intact and encrypted credential
 values are preserved.
 
+The vSphere Terraform module persists state in Azure Blob Storage. Supply the
+`AZURE_*` values for an identity with `Storage Blob Data Contributor` access to
+the configured state storage account. Both the apply and destroy templates
+receive this backend credential in addition to the vCenter provider credential.
+
 The production k8s deployment also needs to resolve the private vCenter name
 from both web and task pods. Pass
 `ansible/vars/awx-ziadsaleemi.yml.example` (or an environment-specific copy) to

@@ -74,6 +74,10 @@ class ManifestTests(unittest.TestCase):
             "VCENTER_HOST": "vcenter.example.test",
             "VCENTER_USERNAME": "svc-capstan@example.test",
             "VCENTER_PASSWORD": "preserved-secret",
+            "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000001",
+            "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000002",
+            "AZURE_CLIENT_SECRET": "preserved-azure-secret",
+            "AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000003",
         }
         with mock.patch.dict(os.environ, environment, clear=False):
             manifest = MODULE.load_manifests([manifest_path])
@@ -81,12 +85,27 @@ class ManifestTests(unittest.TestCase):
 
         workflow = resources["workflow.vsphere_provision"]
         node = resources["workflow_node.vsphere_terraform"]
+        destroy_template = resources["terraform.vsphere_destroy"]
+        deprovision_workflow = resources["workflow.vsphere_deprovision"]
+        deprovision_node = resources["workflow_node.vsphere_destroy"]
         catalog = resources["catalog.vsphere_vm"]
         self.assertTrue(workflow["data"]["survey_enabled"])
         self.assertEqual(len(workflow["actions"][0]["data"]["spec"]), 9)
         self.assertEqual(node["data"]["unified_job_template"], {"$ref": "terraform.vsphere_apply"})
+        self.assertEqual(destroy_template["data"]["terraform_operation"], "destroy")
+        self.assertEqual(
+            destroy_template["associations"][0]["items"],
+            [{"$ref": "credential.vsphere"}, {"$ref": "credential.azure_terraform_backend"}],
+        )
+        self.assertTrue(deprovision_workflow["data"]["survey_enabled"])
+        self.assertEqual(deprovision_node["data"]["unified_job_template"], {"$ref": "terraform.vsphere_destroy"})
         self.assertEqual(catalog["data"]["provision_workflow"], {"$ref": "workflow.vsphere_provision"})
+        self.assertEqual(catalog["data"]["deprovision_workflow"], {"$ref": "workflow.vsphere_deprovision"})
         self.assertEqual(catalog["data"]["provider_workflows"]["vmware"], {"$ref": "workflow.vsphere_provision"})
+        self.assertEqual(
+            catalog["data"]["provider_deprovision_workflows"]["vmware"],
+            {"$ref": "workflow.vsphere_deprovision"},
+        )
         self.assertIsNone(catalog["data"]["terraform_job_template"])
 
     def test_environment_expansion_is_strict_and_supports_defaults(self):

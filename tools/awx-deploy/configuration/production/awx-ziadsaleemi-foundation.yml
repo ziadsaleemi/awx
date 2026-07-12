@@ -36,6 +36,31 @@ resources:
         vsphere_allow_unverified_ssl: true
     secret_update: preserve
 
+  - key: credential.azure_terraform_backend
+    endpoint: credentials
+    match:
+      name: R92 Azure Terraform Backend
+      organization:
+        $ref: organization.r92
+    data:
+      name: R92 Azure Terraform Backend
+      description: Least-privilege Azure identity for the shared vSphere Terraform state backend.
+      organization:
+        $ref: organization.r92
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: Microsoft Azure Resource Manager (Terraform)
+            kind: cloud
+      inputs:
+        arm_subscription_id: ${AZURE_SUBSCRIPTION_ID}
+        arm_client_id: ${AZURE_CLIENT_ID}
+        arm_client_secret: ${AZURE_CLIENT_SECRET}
+        arm_tenant_id: ${AZURE_TENANT_ID}
+        arm_environment: ""
+    secret_update: preserve
+
   - key: execution_environment.capstan
     endpoint: execution_environments
     match:
