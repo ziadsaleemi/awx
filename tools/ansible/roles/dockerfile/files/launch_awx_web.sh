@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+export AWX_COMPONENT=web
+
 if [ `id -u` -ge 500 ]; then
     echo "awx:x:`id -u`:`id -g`:,,,:/var/lib/awx:/bin/bash" >> /tmp/passwd
     cat /tmp/passwd > /etc/passwd

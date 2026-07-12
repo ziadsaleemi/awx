@@ -1007,6 +1007,7 @@ def update_host_smart_inventory_memberships():
 
 @task(queue=get_task_queuename, timeout=3600 * 5)
 def delete_inventory(inventory_id, user_id, retries=5):
+    logger.info('Starting inventory deletion inventory_id=%s user_id=%s retries=%s', inventory_id, user_id, retries)
     # Delete inventory as user
     if user_id is None:
         user = None
@@ -1019,7 +1020,7 @@ def delete_inventory(inventory_id, user_id, retries=5):
         try:
             Inventory.objects.get(id=inventory_id).delete()
             emit_channel_notification('inventories-status_changed', {'group_name': 'inventories', 'inventory_id': inventory_id, 'status': 'deleted'})
-            logger.debug('Deleted inventory {} as user {}.'.format(inventory_id, user_id))
+            logger.info('Completed inventory deletion inventory_id=%s user_id=%s', inventory_id, user_id)
         except Inventory.DoesNotExist:
             logger.exception("Delete Inventory failed due to missing inventory: " + str(inventory_id))
             return

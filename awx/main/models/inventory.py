@@ -465,6 +465,7 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin, OpaQu
 
     @transaction.atomic
     def schedule_deletion(self, user_id=None):
+        from awx.main.dispatch import get_task_queuename
         from awx.main.tasks.system import delete_inventory
         from awx.main.signals import activity_stream_delete
 
@@ -475,7 +476,13 @@ class Inventory(CommonModelNameNotUnique, ResourceMixin, RelatedJobsMixin, OpaQu
         self.jobtemplates.clear()
         activity_stream_delete(Inventory, self, inventory_delete_flag=True)
         self.websocket_emit_status('pending_deletion')
-        delete_inventory.delay(self.pk, user_id)
+        queue = get_task_queuename()
+
+        def dispatch_deletion():
+            logger.info('Scheduling inventory deletion inventory_id=%s user_id=%s queue=%s', self.pk, user_id, queue)
+            delete_inventory.apply_async(args=(self.pk, user_id), queue=queue)
+
+        connection.on_commit(dispatch_deletion)
 
     def _update_host_smart_inventory_memeberships(self):
         if self.kind == 'smart' and settings.AWX_REBUILD_SMART_MEMBERSHIP:

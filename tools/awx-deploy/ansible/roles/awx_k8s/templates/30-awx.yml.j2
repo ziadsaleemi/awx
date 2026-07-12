@@ -80,6 +80,8 @@ spec:
           command:
             - /usr/bin/launch_awx_web.sh
           env:
+            - name: AWX_COMPONENT
+              value: web
             - name: AWX_CLUSTER_HOST_ID
               valueFrom:
                 fieldRef:
@@ -243,6 +245,8 @@ spec:
           command:
             - /usr/bin/launch_awx_task.sh
           env:
+            - name: AWX_COMPONENT
+              value: task
             - name: AWX_CLUSTER_HOST_ID
               valueFrom:
                 fieldRef:

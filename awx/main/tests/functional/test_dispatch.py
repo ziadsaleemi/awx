@@ -4,7 +4,7 @@ from django.utils.timezone import now as tz_now
 import pytest
 
 from awx.main.models import Job, WorkflowJob, Instance
-from awx.main.dispatch import reaper
+from awx.main.dispatch import get_task_queuename, reaper
 from awx.main.tasks import system
 from dispatcherd.publish import task
 
@@ -52,6 +52,34 @@ def multiply(a, b):
 yesterday = tz_now() - datetime.timedelta(days=1)
 minute = tz_now() - datetime.timedelta(seconds=120)
 now = tz_now()
+
+
+@pytest.mark.django_db
+def test_web_dispatch_selects_only_task_instance_with_current_heartbeat(monkeypatch, settings):
+    monkeypatch.setenv('AWX_COMPONENT', 'web')
+    settings.CLUSTER_NODE_HEARTBEAT_PERIOD = 60
+    settings.CLUSTER_NODE_MISSED_HEARTBEAT_TOLERANCE = 2
+    Instance.objects.create(hostname='stale-task', node_type=Instance.Types.CONTROL, last_seen=tz_now() - datetime.timedelta(seconds=121))
+    Instance.objects.create(hostname='unknown-task', node_type=Instance.Types.CONTROL, last_seen=None)
+    Instance.objects.create(hostname='current-task', node_type=Instance.Types.CONTROL, last_seen=tz_now())
+
+    assert get_task_queuename() == 'current-task'
+
+
+@pytest.mark.django_db
+def test_web_dispatch_fails_when_no_task_instance_has_current_heartbeat(monkeypatch):
+    monkeypatch.setenv('AWX_COMPONENT', 'web')
+    Instance.objects.create(hostname='stale-task', node_type=Instance.Types.CONTROL, last_seen=tz_now() - datetime.timedelta(days=1))
+
+    with pytest.raises(ValueError, match='reporting a current heartbeat'):
+        get_task_queuename()
+
+
+def test_task_component_dispatches_to_local_queue(monkeypatch, settings):
+    monkeypatch.setenv('AWX_COMPONENT', 'task')
+    settings.CLUSTER_HOST_ID = 'local-task'
+
+    assert get_task_queuename() == 'local-task'
 
 
 @pytest.mark.django_db

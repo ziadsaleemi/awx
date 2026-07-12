@@ -1,5 +1,6 @@
 import os
 import psycopg
+import random
 import select
 from copy import deepcopy
 
@@ -23,21 +24,20 @@ def get_task_queuename():
 
     from awx.main.models.ha import Instance
 
-    random_task_instance = (
+    task_instances = list(
         Instance.objects.filter(
             node_type__in=(Instance.Types.CONTROL, Instance.Types.HYBRID),
             node_state=Instance.States.READY,
             enabled=True,
         )
-        .only('hostname')
-        .order_by('?')
-        .first()
+        .only('hostname', 'last_seen', 'node_type')
     )
+    available_task_instances = [instance for instance in task_instances if not instance.is_lost()]
 
-    if random_task_instance is None:
-        raise ValueError('No task instances are READY and Enabled.')
+    if not available_task_instances:
+        raise ValueError('No task instances are READY, enabled, and reporting a current heartbeat.')
 
-    return random_task_instance.hostname
+    return random.choice(available_task_instances).hostname
 
 
 class PubSub(object):

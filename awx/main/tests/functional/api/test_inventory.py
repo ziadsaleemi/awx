@@ -142,6 +142,19 @@ def test_async_inventory_deletion(delete, get, inventory, alice):
 
 
 @pytest.mark.django_db
+def test_async_inventory_deletion_dispatches_after_commit_to_task_queue(delete, inventory, alice, mocker):
+    inventory.admin_role.members.add(alice)
+    get_task_queuename = mocker.patch('awx.main.dispatch.get_task_queuename', return_value='task-node')
+    apply_async = mocker.patch('awx.main.tasks.system.delete_inventory.apply_async')
+    mocker.patch('awx.main.models.inventory.connection.on_commit', side_effect=lambda callback: callback())
+
+    delete(reverse('api:inventory_detail', kwargs={'pk': inventory.id}), alice, expect=202)
+
+    get_task_queuename.assert_called_once_with()
+    apply_async.assert_called_once_with(args=(inventory.id, alice.id), queue='task-node')
+
+
+@pytest.mark.django_db
 def test_async_inventory_duplicate_deletion_prevention(delete, get, inventory, alice):
     inventory.admin_role.members.add(alice)
     resp = delete(reverse('api:inventory_detail', kwargs={'pk': inventory.id}), alice)
