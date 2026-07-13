@@ -45,6 +45,12 @@ enable_grafana: false
 enable_prometheus: false
 scrape_interval: '5s'
 
+# Standalone OPA used by local Policy Guardrails development.
+enable_opa: true
+opa_image: docker.io/openpolicyagent/opa:1.4.2
+opa_platform: linux/amd64
+opa_host_port: 8181
+
 # pgbouncer
 enable_pgbouncer: false
 pgbouncer_port: 6432

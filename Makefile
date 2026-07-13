@@ -55,6 +55,7 @@ VAULT_TLS ?= false
 OTEL ?= false
 # If set to true docker-compose will also start a Loki instance
 LOKI ?= false
+OPA_DEV_STACK ?= true
 # If set to true docker-compose will install editable dependencies
 EDITABLE_DEPENDENCIES ?= false
 # If set to true, use tls for postgres connection
@@ -557,6 +558,7 @@ docker-compose-sources:
 	    -e vault_tls=$(VAULT_TLS) \
 	    -e enable_otel=$(OTEL) \
 	    -e enable_loki=$(LOKI) \
+	    -e enable_opa=$(OPA_DEV_STACK) \
 	    -e install_editable_dependencies=$(EDITABLE_DEPENDENCIES) \
 	    -e pg_tls=$(PG_TLS) \
 	    $(EXTRA_SOURCES_ANSIBLE_OPTS)

@@ -84,6 +84,10 @@ services:
         condition: service_started
       redis_{{ container_postfix }}:
         condition: service_started
+{% if enable_opa|bool %}
+      capstan-opa:
+        condition: service_started
+{% endif %}
 {% if editable_dependencies | length > 0 %}
       init_awx:
         condition: service_completed_successfully
@@ -251,6 +255,24 @@ services:
     volumes:
       - "loki_storage:/loki:rw"
       - "../../loki/local-config.yaml:/etc/loki/local-config.yaml"
+{% endif %}
+{% if enable_opa|bool %}
+  capstan-opa:
+    image: {{ opa_image }}
+    platform: {{ opa_platform }}
+    container_name: capstan-opa
+    hostname: capstan-opa
+    command: ["run", "--server", "--addr=0.0.0.0:8181"]
+    networks:
+      - awx
+    ports:
+      - "{{ opa_host_port }}:8181"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 {% endif %}
 
 {% if execution_node_count|int > 0 %}

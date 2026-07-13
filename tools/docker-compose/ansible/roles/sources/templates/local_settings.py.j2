@@ -65,4 +65,12 @@ BROADCAST_WEBSOCKET_PORT = 8013
 BROADCAST_WEBSOCKET_VERIFY_CERT = False
 BROADCAST_WEBSOCKET_PROTOCOL = 'http'
 
+{% if enable_opa|bool %}
+# The local stack owns this endpoint so Policy Guardrails remains usable after
+# Docker Compose restarts without depending on a lab VM.
+OPA_HOST = 'capstan-opa'
+OPA_PORT = 8181
+OPA_SSL = False
+{% endif %}
+
 STATIC_URL = '{{ (ingress_path + '/static/').replace('//', '/') }}'
