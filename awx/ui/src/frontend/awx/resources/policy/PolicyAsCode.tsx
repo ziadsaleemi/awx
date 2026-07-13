@@ -12,6 +12,7 @@ import { PolicyAsCodeOverview } from './PolicyAsCodeOverview';
 import {
   GatekeeperResourceDetailPage,
   GatekeeperResourceList,
+  OPAActivityDetailPage,
   OPAActivityPage,
   OPAPolicyModuleList,
   OPAPolicyModulePage,
@@ -23,7 +24,9 @@ type PolicyAsCodeView =
   | 'opa-module-create'
   | 'opa-module-detail'
   | 'opa-decisions'
+  | 'opa-decision-detail'
   | 'opa-violations'
+  | 'opa-violation-detail'
   | 'opa-project-sync'
   | 'opa-tester'
   | 'gatekeeper-changes'
@@ -143,6 +146,12 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   }
   if (view === 'opa-module-detail') {
     return <OPAPolicyModulePage canManagePolicy={canManagePolicy} />;
+  }
+  if (view === 'opa-decision-detail') {
+    return <OPAActivityDetailPage />;
+  }
+  if (view === 'opa-violation-detail') {
+    return <OPAActivityDetailPage violationsOnly />;
   }
   if (view === 'gatekeeper-template-detail') {
     return <GatekeeperResourceDetailPage kind="templates" canManagePolicy={canManagePolicy} />;

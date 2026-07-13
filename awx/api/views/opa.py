@@ -32,7 +32,7 @@ from urllib.parse import quote
 import requests
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -1276,6 +1276,27 @@ class OPAActivityView(OPAModuleAPIView):
         )
 
 
+class OPAActivityDetailView(OPAModuleAPIView):
+    """
+    GET /api/v2/opa/activity/<pk>/
+
+    Return one OPA decision or denial from Activity Stream.
+    """
+
+    permission_classes = [PolicyAsCodeOperatePermission]
+
+    def get(self, request, pk, *args, **kwargs):
+        try:
+            entry = ActivityStream.objects.select_related('actor').get(pk=pk)
+        except ActivityStream.DoesNotExist as exc:
+            raise NotFound(_('OPA decision not found.')) from exc
+
+        if not _activity_has_opa_signal(entry, _activity_changes(entry)):
+            raise NotFound(_('OPA decision not found.'))
+
+        return Response(_public_opa_activity_entry(entry))
+
+
 class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
     """
     POST /api/v2/opa/policy-modules/project-sync/
@@ -1410,9 +1431,9 @@ class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
                 'mode': mode,
                 'project': self._project_payload(project),
                 'project_source': project_source,
-                'policy_id_prefix': policy_id_prefix.strip().strip('/')
-                if isinstance(policy_id_prefix, str) and policy_id_prefix.strip()
-                else f'awx/projects/{project.pk}',
+                'policy_id_prefix': (
+                    policy_id_prefix.strip().strip('/') if isinstance(policy_id_prefix, str) and policy_id_prefix.strip() else f'awx/projects/{project.pk}'
+                ),
                 'counts': {
                     'files': len({entry['file_path'] for entry in entries}),
                     'modules': len(results),

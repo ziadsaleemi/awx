@@ -2004,6 +2004,51 @@ def test_opa_activity_returns_recent_decisions_and_denials(get, admin_user):
 
 
 @pytest.mark.django_db
+def test_opa_activity_detail_returns_one_policy_decision(get, admin_user):
+    activity = ActivityStream.objects.create(
+        operation='update',
+        object1='gatekeeper_resource',
+        object2='namespace/default',
+        changes=json.dumps(
+            {
+                'source': 'gatekeeper_apply',
+                'policy_id': 'awx/gatekeeper_resource/allow',
+                'opa_allowed': False,
+                'error': 'Denied by OPA policy guardrail.',
+            }
+        ),
+        actor=admin_user,
+    )
+
+    response = get(
+        reverse('api:opa_activity_detail', kwargs={'pk': activity.pk}),
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['activity_stream_id'] == activity.pk
+    assert response.data['policy_id'] == 'awx/gatekeeper_resource/allow'
+    assert response.data['is_denial'] is True
+
+
+@pytest.mark.django_db
+def test_opa_activity_detail_rejects_non_policy_activity(get, admin_user):
+    activity = ActivityStream.objects.create(
+        operation='create',
+        object1='project',
+        object2='demo',
+        changes=json.dumps({'name': 'Demo'}),
+        actor=admin_user,
+    )
+
+    get(
+        reverse('api:opa_activity_detail', kwargs={'pk': activity.pk}),
+        user=admin_user,
+        expect=404,
+    )
+
+
+@pytest.mark.django_db
 @override_settings(
     OPA_HOST='opa.example.com',
     OPA_PORT=8181,

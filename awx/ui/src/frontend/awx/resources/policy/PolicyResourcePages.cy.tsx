@@ -2,6 +2,8 @@ import { awxAPI } from '../../common/api/awx-utils';
 import {
   GatekeeperResourceDetailPage,
   GatekeeperResourceList,
+  OPAActivityDetailPage,
+  OPAActivityPage,
   OPAPolicyModuleList,
 } from './PolicyResourcePages';
 
@@ -123,7 +125,82 @@ const gatekeeperResponse = {
   errors: [],
 };
 
+const opaDecision = {
+  activity_stream_id: 1105,
+  operation: 'evaluate',
+  timestamp: '2026-07-13T12:00:00Z',
+  actor: { id: 1, username: 'admin' },
+  object1: 'job_template',
+  object2: 'Deploy production',
+  source: 'job_launch',
+  summary: 'Job launch allowed by policy.',
+  policy_id: 'awx/job_launch/allow',
+  opa_allowed: true,
+  is_denial: false,
+  project_source: { file_path: 'policies/job_launch.rego' },
+  error: '',
+  before: null,
+  after: null,
+};
+
+const opaDenial = {
+  ...opaDecision,
+  activity_stream_id: 1106,
+  summary: 'Job launch denied by policy.',
+  opa_allowed: false,
+  is_denial: true,
+  error: 'Denied by OPA policy guardrail.',
+};
+
 describe('Policy resource pages', () => {
+  it('opens an OPA decision on its own policy detail route', () => {
+    cy.intercept('GET', awxAPI`/opa/activity/?limit=200`, {
+      count: 1,
+      denial_count: 0,
+      decisions: [opaDecision],
+      denials: [],
+    }).as('activity');
+    cy.mount(<OPAActivityPage />);
+    cy.wait('@activity');
+
+    cy.contains('a', 'awx/job_launch/allow').should(
+      'have.attr',
+      'href',
+      '/policy-as-code/opa/decisions/1105'
+    );
+  });
+
+  it('renders a reloadable OPA decision detail page', () => {
+    cy.intercept('GET', awxAPI`/opa/activity/1105/`, opaDecision).as('decision');
+    cy.mount(<OPAActivityDetailPage />, {
+      path: '/policy-as-code/opa/decisions/:id',
+      initialEntries: ['/policy-as-code/opa/decisions/1105'],
+    });
+    cy.wait('@decision');
+
+    cy.contains('h1', 'awx/job_launch/allow').should('be.visible');
+    cy.contains('Allowed').should('be.visible');
+    cy.contains('Job launch allowed by policy.').should('be.visible');
+    cy.contains('policies/job_launch.rego').should('be.visible');
+  });
+
+  it('opens an OPA violation on its own policy detail route', () => {
+    cy.intercept('GET', awxAPI`/opa/activity/?limit=200`, {
+      count: 1,
+      denial_count: 1,
+      decisions: [opaDenial],
+      denials: [opaDenial],
+    }).as('activity');
+    cy.mount(<OPAActivityPage violationsOnly />);
+    cy.wait('@activity');
+
+    cy.contains('a', 'awx/job_launch/allow').should(
+      'have.attr',
+      'href',
+      '/policy-as-code/opa/violations/1106'
+    );
+  });
+
   it('uses a searchable PageTable and full-page links for OPA modules', () => {
     cy.intercept('GET', awxAPI`/opa/policy-modules/`, opaModules).as('modules');
     cy.mount(<OPAPolicyModuleList canManagePolicy />);

@@ -51,10 +51,20 @@ export function useAwxPolicyRoutes() {
               element: <PolicyAsCode view="opa-decisions" />,
             },
             {
+              path: 'decisions/:id',
+              element: <PolicyAsCode view="opa-decision-detail" />,
+              hidden: true,
+            },
+            {
               id: AwxRoute.PolicyAsCodeOpaViolations,
               label: t('Violations'),
               path: 'violations',
               element: <PolicyAsCode view="opa-violations" />,
+            },
+            {
+              path: 'violations/:id',
+              element: <PolicyAsCode view="opa-violation-detail" />,
+              hidden: true,
             },
             {
               id: AwxRoute.PolicyAsCodeOpaProjectSync,

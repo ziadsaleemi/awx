@@ -25,8 +25,9 @@ import {
 } from '@patternfly/react-icons';
 import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
+  DateTimeCell,
   IFilterState,
   IPageAction,
   ITableColumn,
@@ -82,6 +83,8 @@ interface OPAActivityEntry {
   is_denial: boolean;
   project_source?: { file_path?: string } | null;
   error?: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   result?: string;
   search_text?: string;
 }
@@ -411,6 +414,9 @@ export function OPAPolicyModuleList(props: { canManagePolicy: boolean }) {
 export function OPAActivityPage(props: { violationsOnly?: boolean }) {
   const { t } = useTranslation();
   const response = useGet<OPAActivityResponse>(awxAPI`/opa/activity/?limit=200`);
+  const detailPath = props.violationsOnly
+    ? '/policy-as-code/opa/violations'
+    : '/policy-as-code/opa/decisions';
   const entries = useMemo(
     () =>
       (props.violationsOnly ? response.data?.denials ?? [] : response.data?.decisions ?? []).map(
@@ -439,7 +445,7 @@ export function OPAActivityPage(props: { violationsOnly?: boolean }) {
         header: t('Policy'),
         type: 'text',
         value: (entry) => entry.policy_id || entry.object2 || t('OPA decision'),
-        to: (entry) => `/activity-stream?id=${entry.activity_stream_id}`,
+        to: (entry) => `${detailPath}/${entry.activity_stream_id}`,
         sort: 'policy_id',
         defaultSort: true,
       },
@@ -476,7 +482,7 @@ export function OPAActivityPage(props: { violationsOnly?: boolean }) {
       },
       { header: t('Summary'), type: 'description', value: (entry) => entry.error || entry.summary },
     ],
-    [t]
+    [detailPath, t]
   );
   const filters = useMemo<IToolbarFilter[]>(
     () => [
@@ -525,6 +531,67 @@ export function OPAActivityPage(props: { violationsOnly?: boolean }) {
       defaultSubtitle={t('OPA decision')}
       {...view}
     />
+  );
+}
+
+export function OPAActivityDetailPage(props: { violationsOnly?: boolean }) {
+  const { t } = useTranslation();
+  const { id } = useParams<{ id: string }>();
+  const response = useGet<OPAActivityEntry>(awxAPI`/opa/activity/${id ?? ''}/`);
+  const listPath = props.violationsOnly
+    ? '/policy-as-code/opa/violations'
+    : '/policy-as-code/opa/decisions';
+  const listLabel = props.violationsOnly ? t('OPA Violations') : t('OPA Decisions');
+
+  if (response.error) return <AwxError error={response.error} handleRefresh={response.refresh} />;
+  if (response.isLoading || !response.data) return <LoadingPage breadcrumbs />;
+
+  const entry = response.data;
+  const title = entry.policy_id || entry.object2 || t('OPA decision');
+  const sourceFile = entry.project_source?.file_path;
+  const snapshots = entry.before || entry.after;
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={title}
+        breadcrumbs={[{ label: listLabel, to: listPath }, { label: title }]}
+      />
+      <PageDetails>
+        <PageDetail label={t('Result')}>
+          <Label
+            color={entry.is_denial ? 'red' : 'green'}
+            icon={entry.is_denial ? <TimesCircleIcon /> : <CheckCircleIcon />}
+          >
+            {entry.is_denial ? t('Denied') : t('Allowed')}
+          </Label>
+        </PageDetail>
+        <PageDetail label={t('Operation')}>{entry.operation || t('Not reported')}</PageDetail>
+        <PageDetail label={t('Source')}>
+          {entry.source || entry.object1 || t('Not reported')}
+        </PageDetail>
+        <PageDetail label={t('Actor')}>{entry.actor?.username ?? t('System')}</PageDetail>
+        <PageDetail label={t('Time')}>
+          {entry.timestamp ? <DateTimeCell value={entry.timestamp} /> : t('Not reported')}
+        </PageDetail>
+        <PageDetail label={t('Audit record')}>#{entry.activity_stream_id}</PageDetail>
+        <PageDetail label={t('Primary object')}>{entry.object1 || t('Not reported')}</PageDetail>
+        <PageDetail label={t('Secondary object')}>{entry.object2 || t('Not reported')}</PageDetail>
+        <PageDetail label={t('Project file')}>{sourceFile || t('Not project-backed')}</PageDetail>
+        <PageDetail label={t('Summary')} fullWidth>
+          {entry.error || entry.summary || t('No summary was recorded.')}
+        </PageDetail>
+      </PageDetails>
+      {snapshots ? (
+        <PageSection>
+          <CodeBlock>
+            <CodeBlockCode>
+              {JSON.stringify({ before: entry.before, after: entry.after }, null, 2)}
+            </CodeBlockCode>
+          </CodeBlock>
+        </PageSection>
+      ) : null}
+    </PageLayout>
   );
 }
 

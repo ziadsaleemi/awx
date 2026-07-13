@@ -12,6 +12,7 @@ from awx.api.views.gatekeeper import (
     GatekeeperPolicyRollbackView,
 )
 from awx.api.views.opa import (
+    OPAActivityDetailView,
     OPAActivityView,
     OPAPolicyEvaluateView,
     OPAPolicyListView,
@@ -34,6 +35,7 @@ opa_urls = [
     re_path(r'^policies/$', OPAPolicyListView.as_view(), name='opa_policies'),
     re_path(r'^policies/sync/$', OPAPolicySyncView.as_view(), name='opa_policies_sync'),
     re_path(r'^activity/$', OPAActivityView.as_view(), name='opa_activity'),
+    re_path(r'^activity/(?P<pk>[0-9]+)/$', OPAActivityDetailView.as_view(), name='opa_activity_detail'),
     re_path(r'^policy-modules/$', OPAPolicyModuleListView.as_view(), name='opa_policy_modules'),
     re_path(r'^policy-modules/project-sync/$', OPAPolicyModuleProjectSyncView.as_view(), name='opa_policy_module_project_sync'),
     re_path(r'^policy-modules/(?P<policy_id>.+)/versions/$', OPAPolicyModuleVersionsView.as_view(), name='opa_policy_module_versions'),
