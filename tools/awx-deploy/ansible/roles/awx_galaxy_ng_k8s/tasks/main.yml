@@ -156,6 +156,17 @@
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} wait --for=condition=complete job/{{ awx_galaxy_ng_name }}-migrate --timeout=900s"
   changed_when: false
 
+- name: Restart Galaxy NG services after manifest changes
+  ansible.builtin.command:
+    cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout restart deployment/{{ item }}"
+  loop:
+    - "{{ awx_galaxy_ng_name }}-api"
+    - "{{ awx_galaxy_ng_name }}-content"
+    - "{{ awx_galaxy_ng_name }}-worker"
+    - "{{ awx_galaxy_ng_name }}"
+  changed_when: true
+  when: awx_galaxy_ng_k8s_apply is changed
+
 - name: Wait for Galaxy NG API deployment
   ansible.builtin.command:
     cmd: "{{ awx_k8s_kubectl }} -n {{ awx_galaxy_ng_namespace }} rollout status deployment/{{ awx_galaxy_ng_name }}-api --timeout=300s"

@@ -68,6 +68,48 @@ class FakeClient:
 
 
 class ManifestTests(unittest.TestCase):
+    def test_production_integration_demo_wires_eda_opa_gatekeeper_and_quay(self):
+        configuration = Path(__file__).parents[1] / "configuration" / "production"
+        environment = {
+            "VCENTER_HOST": "vcenter.example.test",
+            "VCENTER_USERNAME": "svc-capstan@example.test",
+            "VCENTER_PASSWORD": "preserved-secret",
+            "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000001",
+            "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000002",
+            "AZURE_CLIENT_SECRET": "preserved-azure-secret",
+            "AZURE_TENANT_ID": "00000000-0000-0000-0000-000000000003",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            foundation = MODULE.load_manifests([configuration / "awx-ziadsaleemi-foundation.yml"])
+            content = MODULE.load_manifests([configuration / "awx-ziadsaleemi-content.yml"])
+
+        foundation_resources = {resource["key"]: resource for resource in foundation["resources"]}
+        content_resources = {resource["key"]: resource for resource in content["resources"]}
+
+        self.assertEqual(
+            foundation_resources["project.integrations_demo"]["data"]["scm_url"],
+            "https://github.com/ziadsaleemi/capstan-integrations-demo.git",
+        )
+        self.assertEqual(
+            foundation_resources["eda.project.integrations_demo"]["data"]["url"],
+            "https://github.com/ziadsaleemi/capstan-integrations-demo.git",
+        )
+        self.assertEqual(
+            foundation_resources["eda.decision_environment.demo"]["data"]["image_url"],
+            "quay.io/ansible/ansible-rulebook:latest",
+        )
+
+        actions = content_resources["project.integrations_demo"]["actions"]
+        self.assertEqual(actions[0]["path"], "/api/v2/opa/policy-modules/project-sync/")
+        self.assertEqual(actions[0]["data"]["path"], "opa/**/*.rego")
+        self.assertEqual(actions[1]["path"], "/api/v2/opa/gatekeeper/project-sync/")
+        self.assertTrue(actions[1]["data"]["human_approved"])
+        self.assertEqual(actions[1]["data"]["apply_strategy"], "server_side")
+
+        ee_template = content_resources["ee_template.integrations_demo"]
+        self.assertEqual(ee_template["data"]["project"], {"$ref": "project.integrations_demo"})
+        self.assertEqual(ee_template["data"]["definition_file"], "ee/execution-environment.yml")
+
     def test_production_vsphere_catalog_uses_surveyed_workflow(self):
         manifest_path = Path(__file__).parents[1] / "configuration" / "production" / "awx-ziadsaleemi-content.yml"
         environment = {
@@ -238,6 +280,27 @@ class ReconcilerTests(unittest.TestCase):
         self.assertEqual(
             reconciler._resource_endpoint({"$related": {"ref": "inventory.demo", "name": "hosts"}}),
             "/api/v2/inventories/42/hosts/",
+        )
+
+    def test_detail_path_does_not_treat_eda_scm_url_as_api_url(self):
+        self.assertEqual(
+            MODULE.ConfigurationReconciler._detail_path(
+                "/api/v2/eda/projects/",
+                {
+                    "id": 7,
+                    "url": "https://github.com/ziadsaleemi/capstan-integrations-demo.git",
+                },
+            ),
+            "/api/v2/eda/projects/7/",
+        )
+
+    def test_detail_path_accepts_absolute_api_url(self):
+        self.assertEqual(
+            MODULE.ConfigurationReconciler._detail_path(
+                "/api/v2/projects/",
+                {"id": 9, "url": "https://capstan.example.test/api/v2/projects/9/"},
+            ),
+            "https://capstan.example.test/api/v2/projects/9/",
         )
 
     def test_check_mode_does_not_query_synthetic_parent_related_endpoint(self):

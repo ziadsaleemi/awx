@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import re
+import time
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin, urlparse
 
@@ -274,11 +275,21 @@ class GatekeeperKubernetesClient:
                 return None
             raise
 
-    def constraint_resource_name(self, version, kind):
-        resources = self.get(f'{GATEKEEPER_CONSTRAINT_GROUP_PATH}/{version}').get('resources') or []
-        for resource in resources:
-            if resource.get('kind') == kind and resource.get('name') and '/' not in resource.get('name') and 'list' in (resource.get('verbs') or []):
-                return resource['name']
+    def constraint_resource_name(self, version, kind, attempts=1, interval=0.5):
+        attempts = max(int(attempts or 1), 1)
+        for attempt in range(attempts):
+            try:
+                resources = self.get(f'{GATEKEEPER_CONSTRAINT_GROUP_PATH}/{version}').get('resources') or []
+            except requests.HTTPError as exc:
+                response = getattr(exc, 'response', None)
+                if response is None or response.status_code != 404 or attempt == attempts - 1:
+                    raise
+                resources = []
+            for resource in resources:
+                if resource.get('kind') == kind and resource.get('name') and '/' not in resource.get('name') and 'list' in (resource.get('verbs') or []):
+                    return resource['name']
+            if attempt < attempts - 1:
+                time.sleep(max(float(interval or 0), 0))
         raise ValueError(_('Constraint kind %(kind)s was not discovered in Gatekeeper API version %(version)s.') % {'kind': kind, 'version': version})
 
     def api_resource(self, api_version, kind, required_verbs=('get', 'patch')):
@@ -747,6 +758,14 @@ def _load_project_gatekeeper_manifests(project, requested_path):
                 return None, _('Project manifest sync is limited to %(count)s Kubernetes objects.') % {'count': GATEKEEPER_PROJECT_SYNC_MAX_DOCS}
     if not entries:
         return None, _('No Kubernetes objects were found in the matched project manifests.')
+    kind_priority = {'ConstraintTemplate': 0, 'Config': 1}
+    entries.sort(
+        key=lambda entry: (
+            kind_priority.get(entry['manifest'].get('kind'), 2),
+            entry['file_path'],
+            entry['document_index'],
+        )
+    )
     return entries, None
 
 
@@ -757,14 +776,14 @@ def _split_api_version(api_version):
     return group, version
 
 
-def _gatekeeper_target_from_parts(client, api_version, kind, name, namespace='', resource=''):
+def _gatekeeper_target_from_parts(client, api_version, kind, name, namespace='', resource='', constraint_discovery_attempts=1):
     group, version = _split_api_version(api_version or '')
     if group == 'templates.gatekeeper.sh' and kind == 'ConstraintTemplate' and version in GATEKEEPER_TEMPLATE_VERSIONS:
         resource = 'constrainttemplates'
     elif group == 'config.gatekeeper.sh' and kind == 'Config' and version == 'v1alpha1':
         resource = 'configs'
     elif group == 'constraints.gatekeeper.sh' and version:
-        resource = resource or client.constraint_resource_name(version, kind)
+        resource = resource or client.constraint_resource_name(version, kind, attempts=constraint_discovery_attempts)
     else:
         raise ValueError(_('Only Gatekeeper ConstraintTemplate, Constraint, and Config resources are supported.'))
 
@@ -782,13 +801,14 @@ def _gatekeeper_target_from_parts(client, api_version, kind, name, namespace='',
     }
 
 
-def _gatekeeper_target(client, manifest):
+def _gatekeeper_target(client, manifest, constraint_discovery_attempts=1):
     return _gatekeeper_target_from_parts(
         client,
         manifest.get('apiVersion') or '',
         manifest.get('kind') or '',
         _object_name(manifest),
         _metadata(manifest).get('namespace') or '',
+        constraint_discovery_attempts=constraint_discovery_attempts,
     )
 
 
@@ -1061,10 +1081,15 @@ def _gatekeeper_write_manifest(client, target, manifest, before, mode, apply_opt
             field_manager=apply_options['field_manager'],
             force_conflicts=apply_options['force_conflicts'],
         )
+    payload = manifest
+    resource_version = ((_metadata(before).get('resourceVersion') if before else '') or '').strip()
+    if before and resource_version:
+        payload = json.loads(json.dumps(manifest))
+        payload.setdefault('metadata', {})['resourceVersion'] = resource_version
     return client.write(
         'PUT' if before else 'POST',
         target['object_path'] if before else target['collection_path'],
-        manifest,
+        payload,
         dry_run=mode == 'dry_run',
     )
 
@@ -1711,7 +1736,7 @@ class GatekeeperProjectSyncView(GatekeeperModuleAPIView):
     def _process_manifest(self, request, client, mode, apply_options, project_source, entry):
         manifest = entry['manifest']
         try:
-            target = _gatekeeper_target(client, manifest)
+            target = _gatekeeper_target(client, manifest, constraint_discovery_attempts=10 if mode == 'apply' else 1)
             before = client.get_or_none(target['object_path'])
         except ValueError as exc:
             return None, Response(

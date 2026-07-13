@@ -155,6 +155,51 @@ resources:
         method: POST
         when: created
 
+  - key: project.integrations_demo
+    endpoint: projects
+    match:
+      name: Capstan Integrations Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: Capstan Integrations Demo
+      description: Shared EDA, Galaxy NG, Gatekeeper, and Project Quay end-to-end demo content.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/capstan-integrations-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+    actions:
+      - path: update
+        method: POST
+        when: created
+
+  - key: eda.decision_environment.demo
+    endpoint: /api/v2/eda/decision-environments/
+    match:
+      name: Capstan Demo Decision Environment
+    data:
+      name: Capstan Demo Decision Environment
+      description: Runtime for deterministic Capstan EDA integration demonstrations.
+      image_url: quay.io/ansible/ansible-rulebook:latest
+
+  - key: eda.project.integrations_demo
+    endpoint: /api/v2/eda/projects/
+    match:
+      name: Capstan Integrations Demo
+    data:
+      name: Capstan Integrations Demo
+      description: Source-controlled EDA rulebooks shared with Galaxy NG, Gatekeeper, and Project Quay demos.
+      url: https://github.com/ziadsaleemi/capstan-integrations-demo.git
+      verify_ssl: true
+    actions:
+      - path: sync
+        method: POST
+        when: changed
+
   - key: inventory.vsphere
     endpoint: inventories
     match: &vsphere_inventory_match

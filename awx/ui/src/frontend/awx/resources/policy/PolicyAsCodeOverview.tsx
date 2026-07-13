@@ -294,7 +294,7 @@ export function PolicyAsCodeOverview(props: {
             style={{
               display: 'grid',
               gap: 16,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))',
               maxWidth: '100%',
             }}
           >

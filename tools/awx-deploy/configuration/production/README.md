@@ -43,3 +43,9 @@ from both web and task pods. Pass
 Capstan Deploy so the `awx_k8s_host_aliases` entry is rendered into both pod
 specifications. This keeps TLS hostname verification intact while allowing the
 provider pull to reach the private vCenter address.
+
+The same production vars file enables `awx_k8s_ee_builds_enabled` so saved EE
+templates can run Podman/buildah and push images to Project Quay. This setting
+runs the Capstan task container as privileged root and should remain disabled
+on clusters that do not build images. Place task pods on nodes with enough
+ephemeral storage for the base image, build context, and generated layers.

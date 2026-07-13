@@ -12,6 +12,7 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  Divider,
   FormGroup,
   FormSelect,
   FormSelectOption,
@@ -34,6 +35,7 @@ import {
   TimesCircleIcon,
   TrashIcon,
 } from '@patternfly/react-icons';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -516,7 +518,16 @@ export function OPAPolicyManagementPanel(props?: {
               </CardHeader>
               <CardBody>
                 {isLoading ? (
-                  <Spinner size="md" />
+                  <div
+                    style={{
+                      alignItems: 'center',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      minHeight: 240,
+                    }}
+                  >
+                    <Spinner size="md" />
+                  </div>
                 ) : error ? (
                   <Alert variant="danger" isInline title={t('Could not load OPA policy status.')} />
                 ) : (
@@ -617,11 +628,20 @@ export function OPAPolicyManagementPanel(props?: {
           <StackItem>
             <Card isFlat>
               <CardHeader>
-                <CardTitle>{t('Live OPA Policy Modules')}</CardTitle>
+                <CardTitle>{t('OPA policy modules')}</CardTitle>
               </CardHeader>
               <CardBody>
                 {modulesResponse.isLoading ? (
-                  <Spinner size="md" />
+                  <div
+                    style={{
+                      alignItems: 'center',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      minHeight: 240,
+                    }}
+                  >
+                    <Spinner size="md" />
+                  </div>
                 ) : modulesResponse.error ? (
                   <Alert
                     variant="danger"
@@ -632,46 +652,79 @@ export function OPAPolicyManagementPanel(props?: {
                   <Alert variant="warning" isInline title={t('OPA server is not configured.')} />
                 ) : (
                   <Stack hasGutter>
+                    <StackItem data-cy="opa-module-toolbar">
+                      <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button variant="primary" icon={<PlusCircleIcon />} onClick={newModule}>
+                          {t('Create module')}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          icon={<SyncAltIcon />}
+                          onClick={() => modulesResponse.refresh()}
+                          isDisabled={modulesResponse.isLoading}
+                        >
+                          {t('Refresh')}
+                        </Button>
+                      </span>
+                    </StackItem>
                     <StackItem>
-                      <Grid hasGutter data-cy="opa-module-toolbar">
-                        <GridItem sm={12} lg={8}>
-                          <FormGroup label={t('Loaded module')} fieldId="opa-module-select">
-                            <FormSelect
-                              id="opa-module-select"
-                              value={selectedModuleId}
-                              onChange={(_event, value) => {
-                                setModuleAutoSelect(false);
-                                setSelectedModuleId(String(value));
-                              }}
-                              isDisabled={moduleLoading || modules.length === 0}
-                            >
-                              {modules.length === 0 ? (
-                                <FormSelectOption value="" label={t('No live modules found')} />
-                              ) : null}
-                              {modules.map((module) => (
-                                <FormSelectOption
-                                  key={module.id}
-                                  value={module.id}
-                                  label={`${module.id}${module.package ? ` - ${module.package}` : ''}`}
-                                />
-                              ))}
-                            </FormSelect>
-                          </FormGroup>
-                        </GridItem>
-                        <GridItem sm={12} lg={4} style={{ alignSelf: 'end' }}>
-                          <Button variant="secondary" icon={<PlusCircleIcon />} onClick={newModule}>
-                            {t('New module')}
-                          </Button>{' '}
-                          <Button
-                            variant="secondary"
-                            icon={<SyncAltIcon />}
-                            onClick={() => modulesResponse.refresh()}
-                            isDisabled={modulesResponse.isLoading}
-                          >
-                            {t('Refresh modules')}
-                          </Button>
-                        </GridItem>
-                      </Grid>
+                      {modules.length === 0 ? (
+                        <Alert variant="info" isInline title={t('No live OPA modules found.')}>
+                          {t('Create a module here or sync Rego files from a Capstan Project.')}
+                        </Alert>
+                      ) : (
+                        <Table aria-label={t('Live OPA policy modules')} variant="compact">
+                          <Thead>
+                            <Tr>
+                              <Th width={35}>{t('Policy ID')}</Th>
+                              <Th width={25}>{t('Package')}</Th>
+                              <Th width={15}>{t('Rules')}</Th>
+                              <Th width={15}>{t('Decision paths')}</Th>
+                              <Th width={10}>{t('Source')}</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {modules.map((module) => (
+                              <Tr key={module.id} isRowSelected={selectedModuleId === module.id}>
+                                <Td dataLabel={t('Policy ID')}>
+                                  <Button
+                                    variant="link"
+                                    isInline
+                                    onClick={() => {
+                                      setModuleAutoSelect(false);
+                                      setSelectedModuleId(module.id);
+                                    }}
+                                  >
+                                    {module.id}
+                                  </Button>
+                                </Td>
+                                <Td dataLabel={t('Package')}>
+                                  {module.package || t('Not detected')}
+                                </Td>
+                                <Td dataLabel={t('Rules')}>{module.rules.length}</Td>
+                                <Td dataLabel={t('Decision paths')}>
+                                  {module.decision_paths.length}
+                                </Td>
+                                <Td dataLabel={t('Source')}>
+                                  <Label color={module.awx_managed ? 'green' : 'grey'}>
+                                    {module.awx_managed ? t('Capstan') : t('External')}
+                                  </Label>
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      )}
+                    </StackItem>
+                    <StackItem>
+                      <Divider />
+                    </StackItem>
+                    <StackItem>
+                      <strong>
+                        {moduleDetail
+                          ? t('Edit {{policyId}}', { policyId: moduleDetail.id })
+                          : t('Create policy module')}
+                      </strong>
                     </StackItem>
                     <StackItem>
                       <FormGroup label={t('Policy ID')} fieldId="opa-module-id">
@@ -680,6 +733,7 @@ export function OPAPolicyManagementPanel(props?: {
                           value={moduleId}
                           onChange={(_event, value) => setModuleId(value)}
                           aria-label={t('Policy ID')}
+                          isDisabled={moduleLoading}
                         />
                       </FormGroup>
                     </StackItem>
@@ -691,6 +745,7 @@ export function OPAPolicyManagementPanel(props?: {
                           rows={16}
                           onChange={(_event, value) => setModuleText(value)}
                           aria-label={t('Rego module')}
+                          isDisabled={moduleLoading}
                           style={{ fontFamily: 'monospace' }}
                         />
                       </FormGroup>
@@ -700,7 +755,9 @@ export function OPAPolicyManagementPanel(props?: {
                         variant="primary"
                         onClick={() => void handleSaveModule()}
                         isLoading={moduleSaving}
-                        isDisabled={moduleSaving || !moduleId || !moduleText.trim()}
+                        isDisabled={
+                          moduleLoading || moduleSaving || !moduleId || !moduleText.trim()
+                        }
                       >
                         {t('Save to OPA')}
                       </Button>{' '}
@@ -709,7 +766,7 @@ export function OPAPolicyManagementPanel(props?: {
                         icon={<TrashIcon />}
                         onClick={() => setShowDeleteConfirm(true)}
                         isLoading={moduleDeleting}
-                        isDisabled={moduleDeleting || !moduleDetail?.id}
+                        isDisabled={moduleLoading || moduleDeleting || !moduleDetail?.id}
                         data-cy="opa-module-delete-button"
                       >
                         {t('Delete from OPA')}

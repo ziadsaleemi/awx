@@ -144,6 +144,46 @@ resources:
       default_environment:
         $ref: execution_environment.capstan
 
+  - key: project.integrations_demo
+    endpoint: projects
+    match:
+      name: Capstan Integrations Demo
+      organization:
+        $ref: organization.r92
+    data:
+      name: Capstan Integrations Demo
+      description: Shared EDA, Galaxy NG, Gatekeeper, and Project Quay end-to-end demo content.
+      organization:
+        $ref: organization.r92
+      scm_type: git
+      scm_url: https://github.com/ziadsaleemi/capstan-integrations-demo.git
+      scm_branch: main
+      scm_update_on_launch: true
+      default_environment:
+        $ref: execution_environment.capstan
+    actions:
+      - path: /api/v2/opa/policy-modules/project-sync/
+        method: POST
+        when: always
+        data:
+          project:
+            $ref: project.integrations_demo
+          path: opa/**/*.rego
+          mode: apply
+          policy_id_prefix: capstan/integrations-demo
+      - path: /api/v2/opa/gatekeeper/project-sync/
+        method: POST
+        when: always
+        data:
+          project:
+            $ref: project.integrations_demo
+          path: gatekeeper/policies
+          mode: apply
+          apply_strategy: server_side
+          field_manager: capstan-project-sync
+          force_conflicts: false
+          human_approved: true
+
   - key: inventory.vsphere
     endpoint: inventories
     match:
@@ -685,6 +725,23 @@ resources:
         $ref: project.ee_demo
       namespace: admin
       repository: awx-ee-demo
+      tag: latest
+      runtime: podman
+      definition_file: ee/execution-environment.yml
+      context: ee
+
+  - key: ee_template.integrations_demo
+    endpoint: /api/v2/quay/execution-environment-images/templates/
+    match:
+      namespace: admin
+      repository: capstan-integrations-demo
+    data:
+      name: Build Capstan Integrations Demo EE
+      description: Build the shared integration demo execution environment and push it to Project Quay.
+      project:
+        $ref: project.integrations_demo
+      namespace: admin
+      repository: capstan-integrations-demo
       tag: latest
       runtime: podman
       definition_file: ee/execution-environment.yml

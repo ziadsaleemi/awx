@@ -295,6 +295,36 @@ def _enrich_collection_response(client, response):
     return response
 
 
+def _normalize_collection_search_response(response):
+    """Flatten Galaxy's collection-version search records into collection rows."""
+    results = response.get('results')
+    if not isinstance(results, list):
+        return response
+
+    normalized = []
+    for record in results:
+        if not isinstance(record, dict):
+            normalized.append(record)
+            continue
+        collection_version = record.get('collection_version')
+        if not isinstance(collection_version, dict):
+            normalized.append(record)
+            continue
+
+        flattened = {**record, **collection_version}
+        repository = record.get('repository')
+        if isinstance(repository, dict) and repository.get('name'):
+            flattened['repository'] = repository['name']
+        if collection_version.get('version'):
+            flattened['latest_version'] = {'version': collection_version['version']}
+        flattened['id'] = record.get('id')
+        flattened['_awx_key'] = record.get('_awx_key')
+        normalized.append(flattened)
+
+    response['results'] = normalized
+    return response
+
+
 def _galaxy_ng_error_response(exc):
     response_status = (
         http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_502_BAD_GATEWAY
@@ -622,11 +652,15 @@ class GalaxyNGResourceListView(APIView):
         page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=200)
         client = GalaxyNGClient()
         params = _galaxy_list_params(request, page, page_size)
+        resource_path = self.get_resource_path(client)
+        if self.resource == 'collections' and params.get('search'):
+            params['keywords'] = params.pop('search')
+            resource_path = f'{client.api_path_prefix.rstrip("/")}/v3/plugin/ansible/search/collection-versions/'
         if self.resource == 'collection-approvals':
             params.setdefault('repository', 'staging')
         try:
             payload = client.get(
-                self.get_resource_path(client),
+                resource_path,
                 params=params,
             )
         except GalaxyNGControllerError as exc:
@@ -645,6 +679,7 @@ class GalaxyNGResourceListView(APIView):
 
         response = normalize_list_response(payload, offset=(page - 1) * page_size)
         if self.resource == 'collections':
+            response = _normalize_collection_search_response(response)
             response = _enrich_collection_response(client, response)
         response['source'] = 'galaxy_ng'
         response['resource'] = self.resource

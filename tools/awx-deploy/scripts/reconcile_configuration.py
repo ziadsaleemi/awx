@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -247,8 +247,11 @@ class ConfigurationReconciler:
 
     @staticmethod
     def _detail_path(endpoint: str, obj: dict[str, Any]) -> str:
-        if isinstance(obj.get("url"), str):
-            return obj["url"]
+        resource_url = obj.get("url")
+        if isinstance(resource_url, str):
+            parsed = urlparse(resource_url)
+            if resource_url.startswith("/api/") or (parsed.scheme in {"http", "https"} and parsed.path.startswith("/api/")):
+                return resource_url
         return f"{endpoint.rstrip('/')}/{obj['id']}/"
 
     def _reconcile_settings(self, settings: dict[str, Any]) -> None:

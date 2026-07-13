@@ -169,6 +169,53 @@ const gatekeeperResponseWithViolation = {
   ],
 };
 
+const gatekeeperResponseWithInventory = {
+  ...gatekeeperResponseWithViolation,
+  counts: {
+    ...gatekeeperResponseWithViolation.counts,
+    constraint_templates: 1,
+    configs: 1,
+  },
+  constraint_templates: [
+    {
+      name: 'k8srequiredlabels',
+      kind: 'K8sRequiredLabels',
+      api_version: 'templates.gatekeeper.sh/v1',
+      created: true,
+      by_pod: [],
+      constraint_count: 1,
+      errors: [],
+      schema: {},
+      targets: [{ target: 'admission.k8s.gatekeeper.sh', rego: 'package test', libs: [] }],
+      constraints: [{ kind: 'K8sRequiredLabels', name: 'require-owner' }],
+    },
+  ],
+  constraints: [
+    {
+      kind: 'K8sRequiredLabels',
+      name: 'require-owner',
+      api_version: 'constraints.gatekeeper.sh/v1beta1',
+      enforcement_action: 'deny',
+      match: {},
+      parameters: {},
+      total_violations: 1,
+      audit_timestamp: '2026-06-01T12:00:00Z',
+      by_pod: [],
+      violations: [],
+    },
+  ],
+  configs: [
+    {
+      name: 'config',
+      api_version: 'config.gatekeeper.sh/v1alpha1',
+      sync_only_count: 2,
+      sync_only: [],
+      match: [],
+      readiness_stats_enabled: true,
+    },
+  ],
+};
+
 const gatekeeperRemediationResult = {
   changed: false,
   persisted: false,
@@ -253,7 +300,7 @@ function mountGatekeeper(
 }
 
 describe('GatekeeperPolicyManager', () => {
-  it('uses an Capstan-oriented overview with resource workflow links', () => {
+  it('uses a Capstan-oriented overview with resource workflow links', () => {
     cy.viewport(1920, 1100);
     mountGatekeeper();
 
@@ -261,6 +308,10 @@ describe('GatekeeperPolicyManager', () => {
       .should('exist')
       .and('not.have.class', 'pf-m-limit-width');
     cy.getByDataCy('gatekeeper-awx-workflow').should('be.visible');
+    cy.getByDataCy('gatekeeper-posture')
+      .should('contain', 'Admission policy posture')
+      .and('contain', 'ConstraintTemplates')
+      .and('contain', 'Violations');
     cy.contains('a', 'Open governed changes')
       .should('be.visible')
       .and('have.attr', 'href', '/policy-as-code/gatekeeper/changes');
@@ -271,25 +322,25 @@ describe('GatekeeperPolicyManager', () => {
       .should('be.visible')
       .and('have.attr', 'href', '/policy-as-code/gatekeeper/violations');
 
-    cy.contains('.pf-v5-c-card__title', 'Cluster')
+    cy.contains('.pf-v5-c-card__title', 'Cluster connection')
       .parents('.pf-v5-c-card')
       .then(($clusterCard) => {
-        cy.contains('.pf-v5-c-card__title', 'Inventory')
+        cy.contains('.pf-v5-c-card__title', 'API coverage')
           .parents('.pf-v5-c-card')
-          .then(($inventoryCard) => {
+          .then(($coverageCard) => {
             const clusterRect = $clusterCard[0].getBoundingClientRect();
-            const inventoryRect = $inventoryCard[0].getBoundingClientRect();
-            expect(Math.abs(clusterRect.top - inventoryRect.top)).to.be.lessThan(2);
-            expect(Math.abs(clusterRect.height - inventoryRect.height)).to.be.lessThan(2);
+            const coverageRect = $coverageCard[0].getBoundingClientRect();
+            expect(Math.abs(clusterRect.top - coverageRect.top)).to.be.lessThan(2);
+            expect(Math.abs(clusterRect.height - coverageRect.height)).to.be.lessThan(2);
             expect(clusterRect.width).to.be.greaterThan(600);
-            expect(inventoryRect.width).to.be.greaterThan(600);
+            expect(coverageRect.width).to.be.greaterThan(600);
           });
       });
   });
 
   it('uses full-width policy layout with aligned violation filters', () => {
     cy.viewport(1920, 1100);
-    mountGatekeeper(gatekeeperResponse, 'violations');
+    mountGatekeeper(gatekeeperResponseWithViolation, 'violations');
 
     cy.get('[data-cy="gatekeeper-policy-manager"]')
       .should('exist')
@@ -298,7 +349,29 @@ describe('GatekeeperPolicyManager', () => {
     cy.get('#gatekeeper-violation-search').should('exist');
     cy.contains('label', 'Sort').should('exist');
     cy.contains('label', 'Per page').should('exist');
+    cy.get('table[aria-label="Gatekeeper violations"]')
+      .should('contain', 'Resource')
+      .and('contain', 'Constraint')
+      .and('contain', 'missing owner label');
     cy.contains('.pf-v5-c-card__title', 'Governed changes').should('not.exist');
+  });
+
+  it('presents Gatekeeper resources as compact operational inventories', () => {
+    mountGatekeeper(gatekeeperResponseWithInventory, 'templates');
+    cy.get('table[aria-label="Gatekeeper ConstraintTemplates"]')
+      .should('contain', 'k8srequiredlabels')
+      .and('contain', 'admission.k8s.gatekeeper.sh');
+
+    mountGatekeeper(gatekeeperResponseWithInventory, 'constraints');
+    cy.get('table[aria-label="Gatekeeper constraints"]')
+      .should('contain', 'K8sRequiredLabels/require-owner')
+      .and('contain', 'deny');
+
+    mountGatekeeper(gatekeeperResponseWithInventory, 'configs');
+    cy.get('table[aria-label="Gatekeeper configurations"]')
+      .should('contain', 'config')
+      .and('contain', '2')
+      .and('contain', 'Enabled');
   });
 
   it('links the unconfigured Gatekeeper state to Gatekeeper settings', () => {

@@ -7,6 +7,7 @@ import requests
 from django.test import override_settings
 
 from awx.api.versioning import reverse
+from awx.api.views.gatekeeper import GatekeeperKubernetesClient, _load_project_gatekeeper_manifests
 from awx.api.views.opa import OPAPolicyEngine, check_opa_policy, opa_response_allows
 from awx.main.models import ActivityStream, CatalogDeployment, CatalogItem, Job, Project, SystemJob, TerraformJob, WorkflowJob
 from awx.main.tasks.policy import OPA_AUTH_TYPES
@@ -1030,6 +1031,56 @@ def _gatekeeper_namespace_remediation_get(url, **kwargs):
     raise AssertionError(f'unexpected Kubernetes API GET {url}')
 
 
+@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+def test_gatekeeper_constraint_discovery_retries_while_template_crd_registers():
+    client = GatekeeperKubernetesClient()
+    discovery = {
+        'resources': [
+            {
+                'name': 'k8scapstanrequiredlabels',
+                'kind': 'K8sCapstanRequiredLabels',
+                'verbs': ['get', 'list'],
+            }
+        ]
+    }
+    with mock.patch(
+        'awx.api.views.gatekeeper.requests.get',
+        side_effect=[
+            _json_error_response({'message': 'not found'}, status_code=404),
+            _json_response(discovery),
+        ],
+    ) as requests_get, mock.patch('awx.api.views.gatekeeper.time.sleep') as sleep:
+        resource = client.constraint_resource_name('v1beta1', 'K8sCapstanRequiredLabels', attempts=2)
+
+    assert resource == 'k8scapstanrequiredlabels'
+    assert requests_get.call_count == 2
+    sleep.assert_called_once_with(0.5)
+
+
+@pytest.mark.django_db
+def test_gatekeeper_project_manifests_order_templates_before_constraints(organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='Policy Repo',
+        organization=organization,
+        scm_type='git',
+        local_path='_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'gatekeeper'
+    project_dir.mkdir(parents=True)
+    (project_dir / 'a-constraint.yml').write_text(
+        'apiVersion: constraints.gatekeeper.sh/v1beta1\nkind: K8sCapstanRequiredLabels\nmetadata:\n  name: demo\n',
+        encoding='utf-8',
+    )
+    (project_dir / 'z-template.yml').write_text(GATEKEEPER_TEMPLATE_MANIFEST, encoding='utf-8')
+
+    entries, error = _load_project_gatekeeper_manifests(project, 'gatekeeper')
+
+    assert error is None
+    assert [entry['manifest']['kind'] for entry in entries] == ['ConstraintTemplate', 'K8sCapstanRequiredLabels']
+
+
 @pytest.mark.django_db
 def test_gatekeeper_apply_requires_system_admin(post, rando):
     post(reverse('api:opa_gatekeeper_apply'), data={'mode': 'preview', 'manifest': GATEKEEPER_TEMPLATE_MANIFEST}, user=rando, expect=403)
@@ -1332,7 +1383,7 @@ def test_gatekeeper_apply_dry_run_uses_kubernetes_dry_run_and_audits(post, admin
     existing = {
         'apiVersion': 'templates.gatekeeper.sh/v1',
         'kind': 'ConstraintTemplate',
-        'metadata': {'name': 'k8srequiredlabels'},
+        'metadata': {'name': 'k8srequiredlabels', 'resourceVersion': '42'},
         'spec': {'crd': {'spec': {'names': {'kind': 'K8sRequiredLabels'}}}},
     }
     dry_run_response = {
@@ -1367,6 +1418,7 @@ def test_gatekeeper_apply_dry_run_uses_kubernetes_dry_run_and_audits(post, admin
         verify=False,
         timeout=7.0,
     )
+    assert requests_request.call_args.kwargs['json']['metadata']['resourceVersion'] == '42'
     audit = ActivityStream.objects.get(pk=response.data['audit']['activity_stream_id'])
     assert audit.object1 == 'gatekeeper_resource'
     assert audit.object2 == 'ConstraintTemplate/k8srequiredlabels'

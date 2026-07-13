@@ -666,6 +666,55 @@ def test_galaxy_ng_resource_list_normalizes_galaxy_v3_payload(get, admin_user, m
 
 
 @pytest.mark.django_db
+@override_settings(MODULE_GALAXY_NG_ENABLED=True, GALAXY_NG_SERVER_URL='https://hub.example.test')
+def test_galaxy_ng_collection_search_uses_supported_endpoint_and_flattens_results(get, admin_user, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        side_effect=[
+            galaxy_response(
+                mocker,
+                {
+                    'meta': {'count': 1},
+                    'data': [
+                        {
+                            'repository': {'name': 'published'},
+                            'collection_version': {
+                                'namespace': 'r92',
+                                'name': 'capstan_demo',
+                                'version': '1.0.0',
+                            },
+                        }
+                    ],
+                },
+            ),
+            galaxy_response(
+                mocker,
+                {
+                    'version': '1.0.0',
+                    'namespace': {'name': 'r92'},
+                    'metadata': {'description': 'Capstan integration demos'},
+                    'signatures': [],
+                },
+            ),
+        ],
+    )
+
+    response = get(reverse('api:galaxy_ng_collections_list') + '?search=capstan&page_size=10', user=admin_user, expect=200)
+
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['namespace'] == 'r92'
+    assert response.data['results'][0]['name'] == 'capstan_demo'
+    assert response.data['results'][0]['repository'] == 'published'
+    assert response.data['results'][0]['version'] == '1.0.0'
+    assert request_mock.call_args_list[0].args[0] == ('https://hub.example.test/api/galaxy/v3/plugin/ansible/search/collection-versions/')
+    assert request_mock.call_args_list[0].kwargs['params'] == {
+        'limit': 10,
+        'offset': 0,
+        'keywords': 'capstan',
+    }
+
+
+@pytest.mark.django_db
 @override_settings(
     MODULE_GALAXY_NG_ENABLED=True,
     GALAXY_NG_SERVER_URL='https://hub.example.test',

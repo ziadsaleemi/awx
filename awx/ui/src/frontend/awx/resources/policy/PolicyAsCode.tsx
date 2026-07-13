@@ -61,6 +61,50 @@ function policyTitle(view: PolicyAsCodeView, t: ReturnType<typeof useTranslation
   return t('Policy as Code');
 }
 
+function policyDescription(view: PolicyAsCodeView, t: ReturnType<typeof useTranslation>['t']) {
+  if (view === 'opa-overview') {
+    return t('Monitor standalone policy enforcement, decision coverage, and recent evidence.');
+  }
+  if (view === 'opa-modules') {
+    return t('Manage live Rego modules, validation, version history, and rollback.');
+  }
+  if (view === 'opa-decisions') {
+    return t('Review allowed and denied policy checks recorded in Activity Stream.');
+  }
+  if (view === 'opa-violations') {
+    return t('Investigate denied policy checks that blocked protected Capstan actions.');
+  }
+  if (view === 'opa-project-sync') {
+    return t('Preview or apply Rego modules from an existing synced Capstan Project.');
+  }
+  if (view === 'opa-tester') {
+    return t('Evaluate sample input against live OPA decision paths before rollout.');
+  }
+  if (view === 'gatekeeper-overview') {
+    return t('Monitor Kubernetes admission policy coverage, violations, and cluster health.');
+  }
+  if (view === 'gatekeeper-changes') {
+    return t(
+      'Preview, apply, delete, and roll back Kubernetes policy resources with audit evidence.'
+    );
+  }
+  if (view === 'gatekeeper-templates') {
+    return t('Review the policy templates that define available Kubernetes constraints.');
+  }
+  if (view === 'gatekeeper-constraints') {
+    return t('Inspect active admission constraints, enforcement modes, and violation counts.');
+  }
+  if (view === 'gatekeeper-violations') {
+    return t('Triage out-of-policy resources and prepare governed remediation.');
+  }
+  if (view === 'gatekeeper-configs') {
+    return t('Review Gatekeeper data-sync and readiness configuration resources.');
+  }
+  return t(
+    'Operate OPA guardrails and Kubernetes admission policy from one audited control plane.'
+  );
+}
+
 export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   const { t } = useTranslation();
   const { activeAwxUser } = useAwxActiveUser();
@@ -96,7 +140,7 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   const gatekeeperPolicyView = gatekeeperView(view);
   return (
     <PageLayout>
-      <PageHeader title={title} />
+      <PageHeader title={title} description={policyDescription(view, t)} />
       {view === 'overview' ? (
         <PolicyAsCodeOverview
           canManagePolicy={canManagePolicy}

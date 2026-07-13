@@ -22,6 +22,7 @@ import {
   GridItem,
   Label,
   PageSection,
+  SearchInput,
   Spinner,
   Stack,
   StackItem,
@@ -39,6 +40,7 @@ import {
   SyncAltIcon,
   TimesCircleIcon,
 } from '@patternfly/react-icons';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -380,7 +382,7 @@ function OPAOverview() {
             style={{
               display: 'grid',
               gap: 16,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))',
               maxWidth: '100%',
             }}
           >
@@ -604,6 +606,28 @@ function OPAActivityList(props: {
   emptyText: string;
 }) {
   const { t } = useTranslation();
+  const [search, setSearch] = useState('');
+  const [resultFilter, setResultFilter] = useState('all');
+  const filteredEntries = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return props.entries.filter((entry) => {
+      if (resultFilter === 'allowed' && entry.is_denial) return false;
+      if (resultFilter === 'denied' && !entry.is_denial) return false;
+      if (!normalizedSearch) return true;
+      return [
+        entry.policy_id,
+        entry.object1,
+        entry.object2,
+        entry.source,
+        entry.summary,
+        entry.error,
+        entry.actor?.username,
+        entry.project_source?.file_path,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+    });
+  }, [props.entries, resultFilter, search]);
   return (
     <Card isFlat data-cy="opa-activity-list">
       <CardHeader>
@@ -618,55 +642,114 @@ function OPAActivityList(props: {
           <span>{props.emptyText}</span>
         ) : (
           <Stack hasGutter>
-            {props.entries.map((entry) => (
-              <StackItem key={entry.activity_stream_id}>
-                <Card isFlat isCompact>
-                  <CardBody>
-                    <Grid hasGutter>
-                      <GridItem sm={12} lg={3}>
-                        <Label
-                          color={
-                            entry.is_denial ? 'red' : entry.opa_allowed === true ? 'green' : 'blue'
-                          }
-                          icon={entry.is_denial ? <TimesCircleIcon /> : <CheckCircleIcon />}
-                        >
-                          {entry.is_denial
-                            ? t('Denied')
-                            : entry.opa_allowed === true
-                              ? t('Allowed')
-                              : entry.operation}
-                        </Label>
-                      </GridItem>
-                      <GridItem sm={12} lg={3}>
-                        <strong>{entry.policy_id || entry.object2 || t('OPA decision')}</strong>
-                        <br />
-                        <span>{entry.source || entry.object1}</span>
-                      </GridItem>
-                      <GridItem sm={12} lg={3}>
-                        <span>{dateLabel(entry.timestamp)}</span>
-                        <br />
-                        <span>{entry.actor?.username ?? t('System')}</span>
-                      </GridItem>
-                      <GridItem sm={12} lg={3}>
-                        <ActivityStreamLink id={entry.activity_stream_id} />
-                      </GridItem>
-                      {entry.project_source?.file_path ? (
-                        <GridItem sm={12}>
-                          <span>
-                            {t('Project file')}: {entry.project_source.file_path}
-                          </span>
-                        </GridItem>
-                      ) : null}
-                      {entry.summary || entry.error ? (
-                        <GridItem sm={12}>
-                          <span>{entry.error || entry.summary}</span>
-                        </GridItem>
-                      ) : null}
-                    </Grid>
-                  </CardBody>
-                </Card>
-              </StackItem>
-            ))}
+            <StackItem>
+              <Grid hasGutter>
+                <GridItem sm={12} lg={8}>
+                  <FormGroup label={t('Search')} fieldId="opa-activity-search">
+                    <SearchInput
+                      id="opa-activity-search"
+                      value={search}
+                      placeholder={t('Search policy, source, user, or project file')}
+                      onChange={(_event, value) => setSearch(value)}
+                      onClear={() => setSearch('')}
+                    />
+                  </FormGroup>
+                </GridItem>
+                <GridItem sm={12} lg={4}>
+                  <FormGroup label={t('Result')} fieldId="opa-activity-result">
+                    <FormSelect
+                      id="opa-activity-result"
+                      value={resultFilter}
+                      onChange={(_event, value) => setResultFilter(String(value))}
+                    >
+                      <FormSelectOption value="all" label={t('All results')} />
+                      <FormSelectOption value="allowed" label={t('Allowed')} />
+                      <FormSelectOption value="denied" label={t('Denied')} />
+                    </FormSelect>
+                  </FormGroup>
+                </GridItem>
+              </Grid>
+            </StackItem>
+            <StackItem>
+              <TextContent>
+                <Text component={TextVariants.small}>
+                  {t('{{count}} of {{total}} decisions', {
+                    count: filteredEntries.length,
+                    total: props.entries.length,
+                  })}
+                </Text>
+              </TextContent>
+            </StackItem>
+            <StackItem>
+              <div style={{ overflowX: 'auto' }}>
+                <Table aria-label={props.title} variant="compact">
+                  <Thead>
+                    <Tr>
+                      <Th width={10}>{t('Result')}</Th>
+                      <Th width={25}>{t('Policy')}</Th>
+                      <Th width={20}>{t('Source')}</Th>
+                      <Th width={15}>{t('Actor')}</Th>
+                      <Th width={20}>{t('Time')}</Th>
+                      <Th width={10}>{t('Audit')}</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {filteredEntries.length === 0 ? (
+                      <Tr>
+                        <Td colSpan={6}>{t('No decisions match the current filters.')}</Td>
+                      </Tr>
+                    ) : null}
+                    {filteredEntries.map((entry) => (
+                      <Tr key={entry.activity_stream_id}>
+                        <Td dataLabel={t('Result')}>
+                          <Label
+                            color={
+                              entry.is_denial
+                                ? 'red'
+                                : entry.opa_allowed === true
+                                  ? 'green'
+                                  : 'blue'
+                            }
+                            icon={entry.is_denial ? <TimesCircleIcon /> : <CheckCircleIcon />}
+                          >
+                            {entry.is_denial
+                              ? t('Denied')
+                              : entry.opa_allowed === true
+                                ? t('Allowed')
+                                : entry.operation}
+                          </Label>
+                        </Td>
+                        <Td dataLabel={t('Policy')}>
+                          <strong style={{ overflowWrap: 'anywhere' }}>
+                            {entry.policy_id || entry.object2 || t('OPA decision')}
+                          </strong>
+                          {entry.summary || entry.error ? (
+                            <div style={{ marginTop: 4, opacity: 0.75, overflowWrap: 'anywhere' }}>
+                              {entry.error || entry.summary}
+                            </div>
+                          ) : null}
+                        </Td>
+                        <Td dataLabel={t('Source')}>
+                          <div style={{ overflowWrap: 'anywhere' }}>
+                            {entry.source || entry.object1 || t('Unknown')}
+                          </div>
+                          {entry.project_source?.file_path ? (
+                            <div style={{ marginTop: 4, opacity: 0.75, overflowWrap: 'anywhere' }}>
+                              {entry.project_source.file_path}
+                            </div>
+                          ) : null}
+                        </Td>
+                        <Td dataLabel={t('Actor')}>{entry.actor?.username ?? t('System')}</Td>
+                        <Td dataLabel={t('Time')}>{dateLabel(entry.timestamp)}</Td>
+                        <Td dataLabel={t('Audit')}>
+                          <ActivityStreamLink id={entry.activity_stream_id} label={t('View')} />
+                        </Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </div>
+            </StackItem>
           </Stack>
         )}
       </CardBody>

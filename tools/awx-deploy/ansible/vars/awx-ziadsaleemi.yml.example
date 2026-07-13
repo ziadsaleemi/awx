@@ -4,3 +4,8 @@ awx_k8s_host_aliases:
   - ip: 192.168.111.123
     hostnames:
       - vcenter.corp.linoop.us
+
+# EE image builds run Podman/buildah in the task pod. Keep this disabled on
+# clusters that do not build images because it grants the task container
+# privileged root access. Size the task node for image layer storage.
+awx_k8s_ee_builds_enabled: true

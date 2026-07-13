@@ -91,6 +91,10 @@ describe('OPAPolicyManagementPanel', () => {
       .should('be.visible')
       .and('not.have.class', 'pf-m-limit-width');
     cy.getByDataCy('opa-module-toolbar').should('be.visible');
+    cy.get('table[aria-label="Live OPA policy modules"]')
+      .should('contain', 'awx/managed')
+      .and('contain', 'awx.job_launch')
+      .and('contain', 'Capstan');
     cy.getByDataCy('opa-module-metadata-grid').should('be.visible');
     cy.getByDataCy('opa-module-selected-version-audit-link')
       .should('be.visible')
