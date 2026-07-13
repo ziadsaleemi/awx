@@ -357,7 +357,7 @@ export function PolicyAsCodeOverview(props: {
         width="half"
         height="sm"
         linkText={t('Open OPA')}
-        to={pageUrl(AwxRoute.PolicyAsCodeOpaOverview, '/policy-as-code/opa/overview')}
+        to={pageUrl(AwxRoute.PolicyAsCodeOpaModules, '/policy-as-code/opa/modules')}
       >
         <CardBody>
           {opaStatus.isLoading ? (
@@ -411,7 +411,10 @@ export function PolicyAsCodeOverview(props: {
         width="half"
         height="sm"
         linkText={t('Open Gatekeeper')}
-        to={pageUrl(AwxRoute.PolicyAsCodeGatekeeperOverview, '/policy-as-code/gatekeeper/overview')}
+        to={pageUrl(
+          AwxRoute.PolicyAsCodeGatekeeperTemplates,
+          '/policy-as-code/gatekeeper/templates'
+        )}
       >
         <CardBody>
           {gatekeeperStatus.isLoading ? (
@@ -548,16 +551,6 @@ export function PolicyAsCodeOverview(props: {
               label={t('Configurations')}
               description={t(
                 'Check synced data and Gatekeeper config resources used by constraints.'
-              )}
-            />
-            <QuickLink
-              to={pageUrl(
-                AwxRoute.PolicyAsCodeGatekeeperOverview,
-                '/policy-as-code/gatekeeper/overview'
-              )}
-              label={t('Gatekeeper overview')}
-              description={t(
-                'Refresh cluster status, download a JSON report, and see API version coverage.'
               )}
             />
           </Gallery>

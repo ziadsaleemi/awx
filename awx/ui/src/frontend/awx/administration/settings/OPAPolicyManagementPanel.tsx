@@ -209,6 +209,10 @@ type OPAPolicyManagementSection = 'status' | 'modules' | 'tester';
 export function OPAPolicyManagementPanel(props?: {
   sections?: OPAPolicyManagementSection[];
   canManagePolicy?: boolean;
+  moduleId?: string;
+  showModuleInventory?: boolean;
+  onModuleSaved?: (policyId: string) => void;
+  onModuleDeleted?: () => void;
 }) {
   const { t } = useTranslation();
   const getPageUrl = useGetPageUrl();
@@ -217,6 +221,7 @@ export function OPAPolicyManagementPanel(props?: {
   const showStatus = sections.includes('status');
   const showModules = sections.includes('modules');
   const showTester = sections.includes('tester');
+  const showModuleInventory = props?.showModuleInventory ?? true;
   const { data, isLoading, error } = useGet<OPAStatusResponse>(awxAPI`/opa/policies/`);
   const modulesResponse = useGet<OPAPolicyModulesResponse>(
     showModules ? awxAPI`/opa/policy-modules/` : undefined
@@ -234,8 +239,8 @@ export function OPAPolicyManagementPanel(props?: {
   const [syncResult, setSyncResult] = useState<OPASyncResponse | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [selectedModuleId, setSelectedModuleId] = useState('');
-  const [moduleAutoSelect, setModuleAutoSelect] = useState(true);
+  const [selectedModuleId, setSelectedModuleId] = useState(props?.moduleId ?? '');
+  const [moduleAutoSelect, setModuleAutoSelect] = useState(showModuleInventory && !props?.moduleId);
   const [moduleId, setModuleId] = useState('awx/managed');
   const [moduleText, setModuleText] = useState(defaultModuleText);
   const [moduleDetail, setModuleDetail] = useState<OPAPolicyModuleDetail | null>(null);
@@ -277,6 +282,12 @@ export function OPAPolicyManagementPanel(props?: {
     setSelectedModuleId(modules[0].id);
     setModuleAutoSelect(false);
   }, [moduleAutoSelect, modules, selectedModuleId]);
+
+  useEffect(() => {
+    if (props?.moduleId === undefined || props.moduleId === selectedModuleId) return;
+    setModuleAutoSelect(false);
+    setSelectedModuleId(props.moduleId);
+  }, [props?.moduleId, selectedModuleId]);
 
   useEffect(() => {
     if (!selectedModuleId) return;
@@ -386,6 +397,7 @@ export function OPAPolicyManagementPanel(props?: {
       setModuleAudit(response.audit ?? null);
       modulesResponse.refresh();
       void loadModuleVersions(response.module.id);
+      props?.onModuleSaved?.(response.module.id);
     } catch (err) {
       setModuleError(
         err instanceof Error
@@ -416,6 +428,7 @@ export function OPAPolicyManagementPanel(props?: {
       setModuleAudit(response.audit ?? null);
       setShowDeleteConfirm(false);
       modulesResponse.refresh();
+      props?.onModuleDeleted?.();
     } catch (err) {
       setModuleError(
         err instanceof Error
@@ -652,73 +665,80 @@ export function OPAPolicyManagementPanel(props?: {
                   <Alert variant="warning" isInline title={t('OPA server is not configured.')} />
                 ) : (
                   <Stack hasGutter>
-                    <StackItem data-cy="opa-module-toolbar">
-                      <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
-                        <Button variant="primary" icon={<PlusCircleIcon />} onClick={newModule}>
-                          {t('Create module')}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          icon={<SyncAltIcon />}
-                          onClick={() => modulesResponse.refresh()}
-                          isDisabled={modulesResponse.isLoading}
-                        >
-                          {t('Refresh')}
-                        </Button>
-                      </span>
-                    </StackItem>
-                    <StackItem>
-                      {modules.length === 0 ? (
-                        <Alert variant="info" isInline title={t('No live OPA modules found.')}>
-                          {t('Create a module here or sync Rego files from a Capstan Project.')}
-                        </Alert>
-                      ) : (
-                        <Table aria-label={t('Live OPA policy modules')} variant="compact">
-                          <Thead>
-                            <Tr>
-                              <Th width={35}>{t('Policy ID')}</Th>
-                              <Th width={25}>{t('Package')}</Th>
-                              <Th width={15}>{t('Rules')}</Th>
-                              <Th width={15}>{t('Decision paths')}</Th>
-                              <Th width={10}>{t('Source')}</Th>
-                            </Tr>
-                          </Thead>
-                          <Tbody>
-                            {modules.map((module) => (
-                              <Tr key={module.id} isRowSelected={selectedModuleId === module.id}>
-                                <Td dataLabel={t('Policy ID')}>
-                                  <Button
-                                    variant="link"
-                                    isInline
-                                    onClick={() => {
-                                      setModuleAutoSelect(false);
-                                      setSelectedModuleId(module.id);
-                                    }}
+                    {showModuleInventory ? (
+                      <>
+                        <StackItem data-cy="opa-module-toolbar">
+                          <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
+                            <Button variant="primary" icon={<PlusCircleIcon />} onClick={newModule}>
+                              {t('Create module')}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              icon={<SyncAltIcon />}
+                              onClick={() => modulesResponse.refresh()}
+                              isDisabled={modulesResponse.isLoading}
+                            >
+                              {t('Refresh')}
+                            </Button>
+                          </span>
+                        </StackItem>
+                        <StackItem>
+                          {modules.length === 0 ? (
+                            <Alert variant="info" isInline title={t('No live OPA modules found.')}>
+                              {t('Create a module here or sync Rego files from a Capstan Project.')}
+                            </Alert>
+                          ) : (
+                            <Table aria-label={t('Live OPA policy modules')} variant="compact">
+                              <Thead>
+                                <Tr>
+                                  <Th width={35}>{t('Policy ID')}</Th>
+                                  <Th width={25}>{t('Package')}</Th>
+                                  <Th width={15}>{t('Rules')}</Th>
+                                  <Th width={15}>{t('Decision paths')}</Th>
+                                  <Th width={10}>{t('Source')}</Th>
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {modules.map((module) => (
+                                  <Tr
+                                    key={module.id}
+                                    isRowSelected={selectedModuleId === module.id}
                                   >
-                                    {module.id}
-                                  </Button>
-                                </Td>
-                                <Td dataLabel={t('Package')}>
-                                  {module.package || t('Not detected')}
-                                </Td>
-                                <Td dataLabel={t('Rules')}>{module.rules.length}</Td>
-                                <Td dataLabel={t('Decision paths')}>
-                                  {module.decision_paths.length}
-                                </Td>
-                                <Td dataLabel={t('Source')}>
-                                  <Label color={module.awx_managed ? 'green' : 'grey'}>
-                                    {module.awx_managed ? t('Capstan') : t('External')}
-                                  </Label>
-                                </Td>
-                              </Tr>
-                            ))}
-                          </Tbody>
-                        </Table>
-                      )}
-                    </StackItem>
-                    <StackItem>
-                      <Divider />
-                    </StackItem>
+                                    <Td dataLabel={t('Policy ID')}>
+                                      <Button
+                                        variant="link"
+                                        isInline
+                                        onClick={() => {
+                                          setModuleAutoSelect(false);
+                                          setSelectedModuleId(module.id);
+                                        }}
+                                      >
+                                        {module.id}
+                                      </Button>
+                                    </Td>
+                                    <Td dataLabel={t('Package')}>
+                                      {module.package || t('Not detected')}
+                                    </Td>
+                                    <Td dataLabel={t('Rules')}>{module.rules.length}</Td>
+                                    <Td dataLabel={t('Decision paths')}>
+                                      {module.decision_paths.length}
+                                    </Td>
+                                    <Td dataLabel={t('Source')}>
+                                      <Label color={module.awx_managed ? 'green' : 'grey'}>
+                                        {module.awx_managed ? t('Capstan') : t('External')}
+                                      </Label>
+                                    </Td>
+                                  </Tr>
+                                ))}
+                              </Tbody>
+                            </Table>
+                          )}
+                        </StackItem>
+                        <StackItem>
+                          <Divider />
+                        </StackItem>
+                      </>
+                    ) : null}
                     <StackItem>
                       <strong>
                         {moduleDetail

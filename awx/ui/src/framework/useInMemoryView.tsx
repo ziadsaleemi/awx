@@ -64,7 +64,17 @@ export function useInMemoryView<T extends object>(options: {
             if (typeof value === 'string') {
               const filterValues = filterState[key];
               if (filterValues && filterValues.length !== 0) {
-                if (!filterValues.includes(value)) {
+                const itemValue = value.toLocaleLowerCase();
+                const comparison =
+                  'comparison' in toolbarFilter ? toolbarFilter.comparison : 'equals';
+                const matches = filterValues.some((filterValue) => {
+                  const normalizedFilter = filterValue.toLocaleLowerCase();
+                  if (comparison === 'contains') return itemValue.includes(normalizedFilter);
+                  if (comparison === 'startsWith') return itemValue.startsWith(normalizedFilter);
+                  if (comparison === 'endsWith') return itemValue.endsWith(normalizedFilter);
+                  return itemValue === normalizedFilter;
+                });
+                if (!matches) {
                   return false;
                 }
               }

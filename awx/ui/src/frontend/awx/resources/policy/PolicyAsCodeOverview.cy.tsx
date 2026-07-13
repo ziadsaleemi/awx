@@ -25,8 +25,8 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       },
       {
-        id: AwxRoute.PolicyAsCodeOpaOverview,
-        path: 'policy-as-code/opa/overview',
+        id: AwxRoute.PolicyAsCodeOpaModules,
+        path: 'policy-as-code/opa/modules',
         element: <div />,
       },
       {
@@ -40,8 +40,8 @@ function SeedNavigation(props: { children: ReactNode }) {
         element: <div />,
       },
       {
-        id: AwxRoute.PolicyAsCodeGatekeeperOverview,
-        path: 'policy-as-code/gatekeeper/overview',
+        id: AwxRoute.PolicyAsCodeGatekeeperTemplates,
+        path: 'policy-as-code/gatekeeper/templates',
         element: <div />,
       },
       {

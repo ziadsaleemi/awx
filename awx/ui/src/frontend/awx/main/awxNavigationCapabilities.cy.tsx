@@ -204,7 +204,6 @@ describe('Capstan navigation capabilities', () => {
           label: 'OPA',
           path: 'opa',
           children: [
-            { id: AwxRoute.PolicyAsCodeOpaOverview, path: 'overview', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaModules, path: 'modules', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaDecisions, path: 'decisions', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaViolations, path: 'violations', element: <div /> },
@@ -228,7 +227,6 @@ describe('Capstan navigation capabilities', () => {
       undefined,
     ]);
     expect(nestedChildIds(filteredRoutes, AwxRoute.PolicyAsCodeOpa)).to.deep.equal([
-      AwxRoute.PolicyAsCodeOpaOverview,
       AwxRoute.PolicyAsCodeOpaDecisions,
       AwxRoute.PolicyAsCodeOpaViolations,
       AwxRoute.PolicyAsCodeOpaTester,

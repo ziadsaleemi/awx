@@ -123,7 +123,6 @@ export function filterPolicyRoutesByPermissions(
         ? filterRouteChildrenById(
             child,
             new Set([
-              AwxRoute.PolicyAsCodeOpaOverview,
               AwxRoute.PolicyAsCodeOpaDecisions,
               AwxRoute.PolicyAsCodeOpaViolations,
               AwxRoute.PolicyAsCodeOpaTester,

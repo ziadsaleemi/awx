@@ -29,16 +29,20 @@ export function useAwxPolicyRoutes() {
           path: 'opa',
           children: [
             {
-              id: AwxRoute.PolicyAsCodeOpaOverview,
-              label: t('Overview'),
-              path: 'overview',
-              element: <PolicyAsCode view="opa-overview" />,
-            },
-            {
               id: AwxRoute.PolicyAsCodeOpaModules,
               label: t('Policy Modules'),
               path: 'modules',
               element: <PolicyAsCode view="opa-modules" />,
+            },
+            {
+              path: 'modules/new',
+              element: <PolicyAsCode view="opa-module-create" />,
+              hidden: true,
+            },
+            {
+              path: 'modules/detail',
+              element: <PolicyAsCode view="opa-module-detail" />,
+              hidden: true,
             },
             {
               id: AwxRoute.PolicyAsCodeOpaDecisions,
@@ -65,8 +69,13 @@ export function useAwxPolicyRoutes() {
               element: <PolicyAsCode view="opa-tester" />,
             },
             {
+              path: 'overview',
+              element: <Navigate to="/policy-as-code/opa/modules" replace />,
+              hidden: true,
+            },
+            {
               path: '',
-              element: <Navigate to="overview" replace />,
+              element: <Navigate to="modules" replace />,
               hidden: true,
             },
           ],
@@ -77,12 +86,6 @@ export function useAwxPolicyRoutes() {
           subtitle: t('Kubernetes admission'),
           path: 'gatekeeper',
           children: [
-            {
-              id: AwxRoute.PolicyAsCodeGatekeeperOverview,
-              label: t('Overview'),
-              path: 'overview',
-              element: <PolicyAsCode view="gatekeeper-overview" />,
-            },
             {
               id: AwxRoute.PolicyAsCodeGatekeeperChanges,
               label: t('Governed Changes'),
@@ -96,10 +99,20 @@ export function useAwxPolicyRoutes() {
               element: <PolicyAsCode view="gatekeeper-templates" />,
             },
             {
+              path: 'templates/detail',
+              element: <PolicyAsCode view="gatekeeper-template-detail" />,
+              hidden: true,
+            },
+            {
               id: AwxRoute.PolicyAsCodeGatekeeperConstraints,
               label: t('Constraints'),
               path: 'constraints',
               element: <PolicyAsCode view="gatekeeper-constraints" />,
+            },
+            {
+              path: 'constraints/detail',
+              element: <PolicyAsCode view="gatekeeper-constraint-detail" />,
+              hidden: true,
             },
             {
               id: AwxRoute.PolicyAsCodeGatekeeperViolations,
@@ -108,14 +121,29 @@ export function useAwxPolicyRoutes() {
               element: <PolicyAsCode view="gatekeeper-violations" />,
             },
             {
+              path: 'violations/detail',
+              element: <PolicyAsCode view="gatekeeper-violation-detail" />,
+              hidden: true,
+            },
+            {
               id: AwxRoute.PolicyAsCodeGatekeeperConfigs,
               label: t('Configurations'),
               path: 'configurations',
               element: <PolicyAsCode view="gatekeeper-configs" />,
             },
             {
+              path: 'configurations/detail',
+              element: <PolicyAsCode view="gatekeeper-config-detail" />,
+              hidden: true,
+            },
+            {
+              path: 'overview',
+              element: <Navigate to="/policy-as-code/gatekeeper/templates" replace />,
+              hidden: true,
+            },
+            {
               path: '',
-              element: <Navigate to="overview" replace />,
+              element: <Navigate to="templates" replace />,
               hidden: true,
             },
           ],
