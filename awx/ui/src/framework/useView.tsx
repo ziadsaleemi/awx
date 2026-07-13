@@ -6,6 +6,9 @@ import { useWindowLocation } from './components/useWindowLocation';
 
 import { ITableColumn, IToolbarFilter } from '../framework';
 
+const manualPageSizeModeKey = 'perPageMode';
+const manualPageSizeModeValue = 'manual';
+
 /**
  * The IView interface defines the state for a table.
  *
@@ -57,8 +60,8 @@ export interface ViewOptions {
   defaultValues?: Partial<Pick<IView, 'filterState' | 'sort' | 'sortDirection'>> | undefined;
 
   /**
-   * Override the default items-per-page when no URL param or localStorage value is present.
-   * Useful for auto-sizing a table to the current viewport height.
+   * Override the automatic items-per-page value. Changes to this value update
+   * the view until the user explicitly selects a page size.
    */
   defaultPerPage?: number;
 
@@ -117,6 +120,13 @@ export function useView(options: ViewOptions): IView {
 
   const [searchParams, setSearchParams] = useURLSearchParams();
 
+  const queryPageSizeIsManual = searchParams.get(manualPageSizeModeKey) === manualPageSizeModeValue;
+  const storedPageSizeIsManual =
+    localStorage.getItem(manualPageSizeModeKey) === manualPageSizeModeValue;
+  const initiallyUseAutomaticPageSize =
+    defaultPerPage !== undefined && !queryPageSizeIsManual && !storedPageSizeIsManual;
+  const [useAutomaticPageSize, setUseAutomaticPageSize] = useState(initiallyUseAutomaticPageSize);
+
   const [page, setPage] = useState(() => {
     if (!disableQueryString) {
       const queryPage = searchParams.get('page');
@@ -130,8 +140,11 @@ export function useView(options: ViewOptions): IView {
     return 1;
   });
 
-  const [perPage, setPerPage] = useState(() => {
-    if (!disableQueryString) {
+  const [perPage, setPerPageState] = useState(() => {
+    if (initiallyUseAutomaticPageSize && defaultPerPage !== undefined) {
+      return defaultPerPage;
+    }
+    if (!disableQueryString && (defaultPerPage === undefined || queryPageSizeIsManual)) {
       const queryPerPage = searchParams.get('perPage');
       if (queryPerPage) {
         const perPage = Number(queryPerPage);
@@ -149,6 +162,25 @@ export function useView(options: ViewOptions): IView {
     }
     return defaultPerPage ?? 10;
   });
+
+  const setPerPage = useCallback(
+    (nextPerPage: number) => {
+      if (defaultPerPage !== undefined) {
+        localStorage.setItem(manualPageSizeModeKey, manualPageSizeModeValue);
+        setUseAutomaticPageSize(false);
+      }
+      setPerPageState(nextPerPage);
+    },
+    [defaultPerPage]
+  );
+
+  useEffect(() => {
+    if (!useAutomaticPageSize || defaultPerPage === undefined || perPage === defaultPerPage) {
+      return;
+    }
+    setPerPageState(defaultPerPage);
+    setPage(1);
+  }, [defaultPerPage, perPage, useAutomaticPageSize]);
 
   const [sort, setSort] = useState(() => {
     if (!disableQueryString) {
@@ -202,6 +234,11 @@ export function useView(options: ViewOptions): IView {
     newSearchParams.set('page', page.toString());
     newSearchParams.set('perPage', perPage.toString());
     newSearchParams.set('sort', sortDirection === 'asc' ? sort : `-${sort}`);
+    if (defaultPerPage !== undefined && !useAutomaticPageSize) {
+      newSearchParams.set(manualPageSizeModeKey, manualPageSizeModeValue);
+    } else {
+      newSearchParams.delete(manualPageSizeModeKey);
+    }
 
     // Remove all query string keys that are for filters
     for (const key of searchParams.keys()) {
@@ -236,11 +273,15 @@ export function useView(options: ViewOptions): IView {
     mountedRef,
     searchParams,
     location.location?.search,
+    defaultPerPage,
+    useAutomaticPageSize,
   ]);
 
   useEffect(() => {
-    localStorage.setItem('perPage', perPage.toString());
-  }, [perPage]);
+    if (!useAutomaticPageSize) {
+      localStorage.setItem('perPage', perPage.toString());
+    }
+  }, [perPage, useAutomaticPageSize]);
 
   return useMemo(
     () => ({
@@ -256,9 +297,9 @@ export function useView(options: ViewOptions): IView {
       setFilterState,
       clearAllFilters,
     }),
-    [clearAllFilters, filterState, page, perPage, sort, sortDirection]
+    [clearAllFilters, filterState, page, perPage, setPerPage, sort, sortDirection]
   );
 }
 
 /** Ignore these query string keys when updating the query string for filters */
-const defaultIgnoreQueryStringKeys = ['page', 'perPage', 'sort'];
+const defaultIgnoreQueryStringKeys = ['page', 'perPage', 'perPageMode', 'sort'];

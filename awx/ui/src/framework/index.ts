@@ -67,4 +67,5 @@ export * from './components/useBreakPoint';
 export * from './useFrameworkTranslations';
 export * from './useInMemoryView';
 export * from './useView';
+export * from './useViewportPageSize';
 export * from './utils/compare';

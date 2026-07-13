@@ -8,7 +8,6 @@ import { UnifiedJob } from '../../interfaces/UnifiedJob';
 import { useJobRowActions } from '../../views/jobs/hooks/useJobRowActions';
 import { useJobToolbarActions } from '../../views/jobs/hooks/useJobToolbarActions';
 import { useJobsFilters } from '../../views/jobs/hooks/useJobsFilters';
-import { useViewportPageSize } from '../../views/jobs/hooks/useViewportPageSize';
 
 type QueryParams = { [key: string]: string };
 
@@ -19,14 +18,11 @@ export function JobsList(props: {
   const { t } = useTranslation();
   const toolbarFilters = useJobsFilters(props.queryParams ?? {});
   const tableColumns = props.columns;
-  // Auto-size the page to fill the viewport when no user preference is stored
-  const defaultPerPage = useViewportPageSize();
   const view = useAwxView<UnifiedJob>({
     url: awxAPI`/unified_jobs/`,
     toolbarFilters,
     tableColumns,
     queryParams: props?.queryParams ?? {},
-    defaultPerPage,
   });
   const rowActions = useJobRowActions(view.unselectItemsAndRefresh);
   const toolbarActions = useJobToolbarActions(view.unselectItemsAndRefresh);

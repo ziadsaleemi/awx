@@ -6,6 +6,7 @@ import {
   IToolbarFilter,
   ToolbarFilterType,
   useSelected,
+  useViewportPageSize,
 } from '../../../framework';
 import { DateRangeFilterPresets } from '../../../framework/PageToolbar/PageToolbarFilters/ToolbarDateRangeFilter';
 import { IView, useView } from '../../../framework/useView';
@@ -67,9 +68,14 @@ export function useAwxView<T extends { id: number }>(options: {
   defaultSortDirection?: 'asc' | 'desc' | undefined;
   /** Override the initial items-per-page when no user preference is stored. */
   defaultPerPage?: number;
+
+  /** Fill a standard full-page table based on the current viewport height. */
+  autoFitPageSize?: boolean;
 }): IAwxView<T> {
   let { url } = options;
   const { toolbarFilters, tableColumns, disableQueryString } = options;
+  const viewportPageSize = useViewportPageSize();
+  const autoFitPageSize = options.autoFitPageSize ?? !disableQueryString;
 
   let defaultSort: string | undefined = options.defaultSort;
   let defaultSortDirection: 'asc' | 'desc' | undefined = options.defaultSortDirection;
@@ -84,7 +90,7 @@ export function useAwxView<T extends { id: number }>(options: {
   const view = useView({
     defaultValues: { sort: defaultSort, sortDirection: defaultSortDirection },
     disableQueryString,
-    defaultPerPage: options.defaultPerPage,
+    defaultPerPage: options.defaultPerPage ?? (autoFitPageSize ? viewportPageSize : undefined),
   });
   const itemCountRef = useRef<{ itemCount: number | undefined }>({ itemCount: undefined });
 
