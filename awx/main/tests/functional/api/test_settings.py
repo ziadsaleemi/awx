@@ -70,8 +70,13 @@ def test_ui_settings(get, put, patch, delete, admin):
     url = reverse('api:setting_singleton_detail', kwargs={'category_slug': 'ui'})
     response = get(url, user=admin, expect=200)
     assert not response.data['CUSTOM_LOGO']
+    assert response.data['CUSTOM_LOGO_SIZE'] == 48
     assert not response.data['CUSTOM_LOGIN_INFO']
     put(url, user=admin, data=response.data, expect=200)
+    patch(url, user=admin, data={'CUSTOM_LOGO_SIZE': 50}, expect=400)
+    patch(url, user=admin, data={'CUSTOM_LOGO_SIZE': 64}, expect=200)
+    response = get(url, user=admin, expect=200)
+    assert response.data['CUSTOM_LOGO_SIZE'] == 64
     patch(url, user=admin, data={'CUSTOM_LOGO': 'data:text/plain;base64,'}, expect=400)
     patch(url, user=admin, data={'CUSTOM_LOGO': 'data:image/png;base64,00'}, expect=400)
     patch(url, user=admin, data={'CUSTOM_LOGO': TEST_GIF_LOGO}, expect=200)
@@ -95,7 +100,39 @@ def test_ui_settings(get, put, patch, delete, admin):
     delete(url, user=admin, expect=204)
     response = get(url, user=admin, expect=200)
     assert not response.data['CUSTOM_LOGO']
+    assert response.data['CUSTOM_LOGO_SIZE'] == 48
     assert not response.data['CUSTOM_LOGIN_INFO']
+
+
+@pytest.mark.django_db
+def test_entra_tenant_settings_are_exposed_and_require_complete_credentials(get, options, patch, admin):
+    url = reverse('api:setting_singleton_detail', kwargs={'category_slug': 'azuread-tenant-oauth2'})
+
+    response = get(url, user=admin, expect=200)
+    assert response.data['SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_CALLBACK_URL'].endswith('/sso/complete/azuread-tenant-oauth2/')
+
+    response = options(url, user=admin, expect=200)
+    fields = response.data['actions']['PUT']
+    assert 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY' in fields
+    assert 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET' in fields
+    assert 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID' in fields
+
+    patch(
+        url,
+        user=admin,
+        data={'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY': 'client-id'},
+        expect=400,
+    )
+    patch(
+        url,
+        user=admin,
+        data={
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY': 'client-id',
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET': 'client-secret',
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID': 'tenant-id',
+        },
+        expect=200,
+    )
 
 
 @pytest.mark.django_db

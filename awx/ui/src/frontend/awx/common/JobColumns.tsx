@@ -67,7 +67,7 @@ export function useJobTypeColumn<T extends UnifiedJob>(
       header: t('Type'),
       cell: (job: UnifiedJob) => {
         const jobTypes: { [key: string]: string } = {
-          project_update: t`Source control update`,
+          project_update: job.eda_sync ? t`Event Engine project sync` : t`Source control update`,
           inventory_update: t`Inventory sync`,
           job: job.job_type === 'check' ? t`Playbook check` : t`Playbook run`,
           ad_hoc_command: t`Command`,

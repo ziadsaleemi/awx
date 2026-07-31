@@ -1,4 +1,11 @@
-import { ChartLegendEntry, ChartSchemaElement } from '@ansible/react-json-chart-builder';
+import { ChartLegendEntry } from '@ansible/react-json-chart-builder';
+import {
+  Chart,
+  ChartAxis,
+  ChartBar,
+  ChartThemeColor,
+  ChartVoronoiContainer,
+} from '@patternfly/react-charts';
 import {
   Card,
   CardBody,
@@ -18,6 +25,7 @@ import useSWR from 'swr';
 import {
   IFilterState,
   IToolbarFilter,
+  PageChartContainer,
   PageToolbar,
   Scrollable,
   ToolbarFilterType,
@@ -28,8 +36,6 @@ import { LoadingState } from '../../../../framework/components/LoadingState';
 import { useURLSearchParams } from '../../../../framework/components/useURLSearchParams';
 import { postRequest as requestPost } from '../../../common/crud/Data';
 import { awxAPI } from '../../common/api/awx-utils';
-import { Chart } from '../components/Chart';
-import { hydrateSchema } from '../components/Chart/hydrateSchema';
 import { ApiOptionsType } from '../components/Toolbar/types';
 import { currencyFormatter } from '../utilities/currencyFormatter';
 import { AutomationFormula } from './AutomationFormula';
@@ -72,11 +78,9 @@ export interface ParamsType {
   group_by_time: boolean;
 }
 
-export function AutomationCalculator(props: { schema: ChartSchemaElement[] }) {
+export function AutomationCalculator() {
   const { t } = useTranslation();
   const [searchParams] = useURLSearchParams();
-
-  const { schema } = props;
 
   const {
     data: options,
@@ -91,7 +95,9 @@ export function AutomationCalculator(props: { schema: ChartSchemaElement[] }) {
   }, []);
 
   const [filterState, setFilterState] = useState<IFilterState>(() => {
-    const filterState: IFilterState = {};
+    const filterState: IFilterState = {
+      quick_date_range: ['roi_last_year'],
+    };
     const filterKeys = [
       { key: 'cluster_id', searchParam: 'clusters' },
       { key: 'org_id', searchParam: 'orgs' },
@@ -174,6 +180,7 @@ export function AutomationCalculator(props: { schema: ChartSchemaElement[] }) {
             value: option.key.toString(),
             isCustom: option.key === 'roi_custom',
           })),
+          defaultValue: 'roi_last_year',
           isRequired: true,
           isPinned: true,
         });
@@ -241,7 +248,6 @@ export function AutomationCalculator(props: { schema: ChartSchemaElement[] }) {
         disablePagination
       />
       <AutomationCalculatorInternal
-        schema={schema}
         filterState={filterState}
         setFilterState={setFilterState}
         sortOption={sortOption}
@@ -253,7 +259,6 @@ export function AutomationCalculator(props: { schema: ChartSchemaElement[] }) {
 }
 
 export function AutomationCalculatorInternal(props: {
-  schema: ChartSchemaElement[];
   filterState: IFilterState;
   setFilterState: Dispatch<SetStateAction<IFilterState>>;
   sortOption: SortOption;
@@ -262,7 +267,6 @@ export function AutomationCalculatorInternal(props: {
 }) {
   const { t } = useTranslation();
   const {
-    schema,
     filterState,
     setFilterState,
     sortOption,
@@ -404,16 +408,6 @@ export function AutomationCalculatorInternal(props: {
     return val;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const customTooltipFormatting = ({ datum }: { datum: Record<string, any> }) => {
-    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-    const tooltip = `${sortOption.label} for ${datum.name || ''}: ${
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      formattedValue(sortOption.value, datum.y) || ''
-    }`;
-    return tooltip;
-  };
-
   const renderLeft = () => (
     <Card isPlain>
       <CardHeader>
@@ -424,16 +418,43 @@ export function AutomationCalculatorInternal(props: {
           clearAllFilters={() => setFilterState(() => ({ quick_date_range: ['roi_last_year'] }))}
         />
       ) : (
-        <Chart
-          schema={hydrateSchema(schema)({
-            y: sortOption.value,
-            tooltip: 'Savings for',
-            field: sortOption.value,
-            label: sortOption.label,
-          })}
-          data={{ items: data?.meta?.legend }}
-          specificFunctions={{ labelFormat: { customTooltipFormatting } }}
-        />
+        <PageChartContainer height={320}>
+          {({ width, height }) =>
+            width > 0 && height > 0 ? (
+              <Chart
+                ariaDesc={t('Automation value grouped by job template')}
+                ariaTitle={t('Automation savings')}
+                containerComponent={
+                  <ChartVoronoiContainer
+                    labels={({ datum }: { datum: { x: string | number; y: string | number } }) =>
+                      `${datum.x}: ${formattedValue(sortOption.value, Number(datum.y))}`
+                    }
+                  />
+                }
+                domainPadding={{ x: [24, 24] }}
+                height={height}
+                padding={{ bottom: 80, left: 72, right: 24, top: 24 }}
+                themeColor={ChartThemeColor.blue}
+                width={width}
+              >
+                <ChartAxis
+                  fixLabelOverlap
+                  tickFormat={(value: string | number) => {
+                    const label = value.toString();
+                    return label.length > 18 ? `${label.slice(0, 17)}…` : label;
+                  }}
+                />
+                <ChartAxis dependentAxis showGrid />
+                <ChartBar
+                  data={data.meta.legend.map((item) => ({
+                    x: item.name,
+                    y: Number(item[sortOption.value] ?? 0),
+                  }))}
+                />
+              </Chart>
+            ) : null
+          }
+        </PageChartContainer>
       )}
     </Card>
   );
@@ -466,7 +487,7 @@ export function AutomationCalculatorInternal(props: {
   // If page out of range, set to first page
   useEffect(() => {
     const totalCount = data?.meta.count ?? 0;
-    const pageCount = Math.min(1, Math.ceil(totalCount / perPage));
+    const pageCount = Math.max(1, Math.ceil(totalCount / perPage));
     if (page > pageCount || page < 1) {
       setPage(1);
     }

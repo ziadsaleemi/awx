@@ -10,7 +10,16 @@ from django.db.models.signals import post_save
 from awx.conf import settings_registry
 from awx.conf.models import Setting
 from awx.conf.signals import on_post_save_setting
-from awx.main.models import UnifiedJob, Credential, NotificationTemplate, Job, JobTemplate, WorkflowJob, WorkflowJobTemplate
+from awx.main.models import (
+    UnifiedJob,
+    Credential,
+    NotificationTemplate,
+    Job,
+    JobTemplate,
+    TerraformJobTemplate,
+    WorkflowJob,
+    WorkflowJobTemplate,
+)
 from awx.main.utils.encryption import encrypt_field, decrypt_field, encrypt_value, decrypt_value, get_encryption_key
 
 
@@ -47,6 +56,7 @@ class Command(BaseCommand):
         self._unified_jobs()
         self._settings()
         self._survey_passwords()
+        self._terraform_state_keys()
         return self.new_key
 
     def _notification_templates(self):
@@ -109,3 +119,17 @@ class Command(BaseCommand):
                         changed = True
                 if changed:
                     job.save(update_fields=["extra_vars"])
+
+    def _terraform_state_keys(self):
+        for template in TerraformJobTemplate.objects.exclude(state_encryption_key='').iterator():
+            template.state_encryption_key = decrypt_field(
+                template,
+                'state_encryption_key',
+                secret_key=self.old_key,
+            )
+            template.state_encryption_key = encrypt_field(
+                template,
+                'state_encryption_key',
+                secret_key=self.new_key,
+            )
+            template.save(update_fields=['state_encryption_key'])

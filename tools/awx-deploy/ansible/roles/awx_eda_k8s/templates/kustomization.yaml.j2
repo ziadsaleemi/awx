@@ -8,3 +8,10 @@ images:
   - name: {{ awx_eda_k8s_operator_image }}
     newTag: {{ awx_eda_k8s_operator_image_tag }}
 {% endif %}
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: {{ awx_eda_k8s_operator_deployment }}
+    path: operator-patch.yml

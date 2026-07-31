@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Alert, ButtonVariant } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons';
 import {
@@ -30,18 +31,17 @@ import {
 } from '../../interfaces/EdaActivation';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 import { AwxRoute } from '../../main/AwxRoutes';
-import { EdaActivationStartModal } from './EdaActivationStartModal';
 
 export function EdaActivations() {
   const { t } = useTranslation();
   const alertToaster = usePageAlertToaster();
+  const navigate = useNavigate();
   const pageNavigate = usePageNavigate();
   const postRequest = usePostRequest<unknown, EdaActivationActionResponse>();
   const { activeAwxUser } = useAwxActiveUser();
   const capabilities = useAwxNavigationCapabilities(activeAwxUser);
   const canOperateEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canOperateEda);
   const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const tableColumns = useEdaActivationColumns();
   const {
     data: status,
@@ -113,10 +113,10 @@ export function EdaActivations() {
         isDisabled: !canOperateEda
           ? t('You need EDA operator or administrator permissions to start activations.')
           : undefined,
-        onClick: () => setShowCreateModal(true),
+        onClick: () => navigate('/eda/activations/create'),
       },
     ],
-    [canOperateEda, t]
+    [canOperateEda, navigate, t]
   );
 
   const rowActions = useMemo<IPageAction<EdaActivation>[]>(
@@ -201,19 +201,11 @@ export function EdaActivations() {
         emptyStateDescription={t('Create an activation or configure the EDA Controller settings.')}
         emptyStateButtonIcon={canOperateEda ? <PlusCircleIcon /> : undefined}
         emptyStateButtonText={canOperateEda ? t('Create/start activation') : undefined}
-        emptyStateButtonClick={canOperateEda ? () => setShowCreateModal(true) : undefined}
+        emptyStateButtonClick={
+          canOperateEda ? () => navigate('/eda/activations/create') : undefined
+        }
         {...view}
       />
-      {showCreateModal && (
-        <EdaActivationStartModal
-          canCreateActivation={canManageEda}
-          onClose={() => setShowCreateModal(false)}
-          onStarted={async () => {
-            setShowCreateModal(false);
-            await view.refresh();
-          }}
-        />
-      )}
     </PageLayout>
   );
 }

@@ -53,10 +53,11 @@ export function AwxSettingsCategoryForm(props: {
   if (all.isLoading || !all.data) return <LoadingPage />;
 
   const title = titleOverride ?? groupsBase.find((group) => group.id === categoryId)?.name;
+  const description = groupsBase.find((group) => group.id === categoryId)?.description;
 
   return (
     <PageLayout>
-      <PageHeader title={title ?? category.name} />
+      <PageHeader title={title ?? category.name} description={description} />
       <AwxSettingsForm options={categoryOptions} data={all.data} />
     </PageLayout>
   );

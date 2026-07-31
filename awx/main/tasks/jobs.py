@@ -1712,6 +1712,31 @@ class RunProjectUpdate(BaseTask):
             p.inventory_files = p.inventories
             p.save(update_fields=['scm_revision', 'playbook_files', 'inventory_files'])
 
+        self.reconcile_eda_project(instance, status)
+
+    @staticmethod
+    def reconcile_eda_project(instance, status):
+        if status != 'successful' or not instance.eda_sync:
+            return None
+
+        from awx.main.utils.eda import EDAControllerClient, EDAControllerError
+
+        try:
+            result = EDAControllerClient().reconcile_managed_project(instance.project)
+        except EDAControllerError as exc:
+            raise PostRunError(
+                _('Event Engine project synchronization failed: %(error)s') % {'error': str(exc)},
+                status='failed',
+            ) from exc
+
+        logger.info(
+            '%s reconciled project %s with Event Engine: %s',
+            instance.log_format,
+            instance.project_id,
+            ', '.join(result.get('actions') or ('no changes',)),
+        )
+        return result
+
     def build_execution_environment_params(self, instance, private_data_dir):
         if settings.IS_K8S:
             return {}

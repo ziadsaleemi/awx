@@ -28,7 +28,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
-import { QuayStatus } from './QuayOverview';
+import { QuayStatus } from './QuayStatus';
 
 type QuayRobotNamespaceKind = 'user' | 'organization';
 

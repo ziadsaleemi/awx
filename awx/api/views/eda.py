@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import status as http_status
 from rest_framework.response import Response
 
+from awx.api import serializers
 from awx.api.generics import APIView
 from awx.api.views.eda_permissions import (
     EDAActivationAdminPermission,
@@ -26,12 +27,38 @@ from awx.main.utils.eda import (
     UPSTREAM_ACTIVATION_FIELDS,
     configured_url,
     connection_status,
+    managed_project_index,
     module_enabled,
 )
 from awx.main.utils.eda_rbac import build_eda_rbac_sync_report
+from awx.main.utils.eda_credentials import build_eda_credential_import_report, build_eda_credential_sync_report
 
 _EDA_JOB_MATCH_FIELDS = ('name', 'description')
-_EDA_READ_ONLY_RESOURCES = {'rule-audit', 'rulebooks'}
+_EDA_RBAC_MANAGED_RESOURCES = {
+    'organizations',
+    'teams',
+    'users',
+    'role-definitions',
+    'user-role-assignments',
+    'team-role-assignments',
+}
+_EDA_CREDENTIAL_MANAGED_RESOURCES = {'credentials', 'credential-types'}
+_EDA_CAPSTAN_MANAGED_RESOURCES = _EDA_RBAC_MANAGED_RESOURCES | _EDA_CREDENTIAL_MANAGED_RESOURCES
+_EDA_READ_ONLY_RESOURCES = {'rule-audit', 'rulebooks'} | _EDA_CAPSTAN_MANAGED_RESOURCES
+
+
+def _eda_read_only_response(resource):
+    if resource in _EDA_CREDENTIAL_MANAGED_RESOURCES:
+        return Response(
+            {'detail': _('Event Engine credential types and credentials are managed through Capstan Credentials and are read only in the Event Engine API.')},
+            status=http_status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+    if resource in _EDA_RBAC_MANAGED_RESOURCES:
+        return Response(
+            {'detail': _('EDA identities and role assignments are managed through Capstan Access Management and are read only in the Event Engine API.')},
+            status=http_status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+    return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 def _parse_positive_int(value, default, maximum=None):
@@ -167,12 +194,37 @@ def _eda_version_summary(payload):
 
 
 def _eda_live_version_summary(client):
-    summary = {'version': '', 'version_detail': {}, 'version_error': ''}
+    summary = {
+        'version': '',
+        'version_detail': {},
+        'version_error': '',
+        'api_contract': {},
+        'compatibility': 'unknown',
+        'compatible': None,
+        'missing_capabilities': [],
+    }
     if not client.is_configured:
         return summary
+    try:
+        contract = client.api_contract()
+        return {
+            **summary,
+            'version': contract['api_version'],
+            'version_detail': {
+                'title': contract['openapi_title'],
+                'tested_api_version_spec': contract['tested_api_version_spec'],
+            },
+            'api_contract': contract,
+            'compatibility': contract['compatibility'],
+            'compatible': contract['compatible'],
+            'missing_capabilities': contract['missing_capabilities'],
+        }
+    except EDAControllerError as exc:
+        summary['version_error'] = str(exc)
     for path in ('/api/eda/v1/status/', '/api/eda/v1/ping/'):
         try:
-            return _eda_version_summary(client.get_json(path))
+            legacy = _eda_version_summary(client.get_json(path))
+            return {**summary, **legacy}
         except EDAControllerError as exc:
             summary['version_error'] = str(exc)
             continue
@@ -195,7 +247,19 @@ class EDAStatusView(APIView):
             'invalid': _('EDA Controller URL is invalid.'),
             'not_configured': _('EDA Controller URL is not configured.'),
         }
-        version_summary = _eda_live_version_summary(client) if include_version else {'version': '', 'version_detail': {}, 'version_error': ''}
+        version_summary = (
+            _eda_live_version_summary(client)
+            if include_version
+            else {
+                'version': '',
+                'version_detail': {},
+                'version_error': '',
+                'api_contract': {},
+                'compatibility': 'unknown',
+                'compatible': None,
+                'missing_capabilities': [],
+            }
+        )
         return Response(
             {
                 'configured': status == 'configured',
@@ -304,6 +368,223 @@ def _eda_error_response(exc):
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
 
 
+def _project_source_queryset(request):
+    queryset = get_user_queryset(request.user, models.Project).filter(scm_type='git').select_related('credential', 'organization')
+    search = str(request.query_params.get('name__icontains') or request.query_params.get('search') or '').strip()
+    if search:
+        queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(scm_url__icontains=search))
+    order_by = str(request.query_params.get('order_by') or 'name').strip()
+    allowed_ordering = {
+        'id',
+        '-id',
+        'name',
+        '-name',
+        'created',
+        '-created',
+        'modified',
+        '-modified',
+        'last_updated',
+        '-last_updated',
+    }
+    return queryset.order_by(order_by if order_by in allowed_ordering else 'name', 'id')
+
+
+def _project_source_mirror_context(client):
+    if not module_enabled():
+        return {}, 'module_disabled', ''
+    if not configured_url():
+        return {}, 'not_configured', ''
+    try:
+        payload = client.list_resource_all('projects', page_size=200)
+        return managed_project_index(payload.get('results') or []), 'configured', ''
+    except EDAControllerError as exc:
+        return {}, exc.status, str(exc)
+
+
+def _project_source_record(
+    request,
+    project,
+    mirror=None,
+    controller_status='configured',
+    controller_error='',
+    include_user_capabilities=False,
+):
+    mirror = mirror or {}
+    mismatched_fields = []
+    expected = {
+        'url': str(project.scm_url or '').strip(),
+        'scm_branch': str(project.scm_branch or '').strip(),
+        'scm_refspec': str(project.scm_refspec or '').strip(),
+        'update_revision_on_launch': bool(project.scm_update_on_launch),
+        'scm_update_cache_timeout': int(project.scm_update_cache_timeout or 0),
+    }
+    if mirror:
+        for field, value in expected.items():
+            if mirror.get(field) != value:
+                mismatched_fields.append(field)
+
+    import_state = str(mirror.get('import_state') or mirror.get('status') or '').strip().lower()
+    if controller_status != 'configured':
+        integration_status = controller_status
+    elif not mirror:
+        integration_status = 'not_synced'
+    elif mismatched_fields:
+        integration_status = 'out_of_sync'
+    elif import_state in ('completed', 'complete', 'successful', 'success'):
+        integration_status = 'synced'
+    else:
+        integration_status = import_state or 'linked'
+
+    credential_name = str(getattr(project.credential, 'name', '') or '')
+    record = {
+        'id': project.pk,
+        'name': project.name,
+        'description': project.description,
+        'scm_type': project.scm_type,
+        'scm_url': project.scm_url,
+        'scm_branch': project.scm_branch,
+        'scm_refspec': project.scm_refspec,
+        'scm_revision': project.scm_revision,
+        'source_status': project.status,
+        'source_last_updated': _date_to_iso(project.last_updated),
+        'credential_id': project.credential_id,
+        'credential_name': credential_name,
+        'credential_mapping': 'matching_name_required' if credential_name else 'not_required',
+        'organization_id': project.organization_id,
+        'organization_name': getattr(project.organization, 'name', ''),
+        'created': _date_to_iso(project.created),
+        'modified': _date_to_iso(project.modified),
+        'integration_status': integration_status,
+        'mismatched_fields': mismatched_fields,
+        'controller_status': controller_status,
+        'controller_error': controller_error,
+        'eda_project_id': mirror.get('id'),
+        'eda_project_name': mirror.get('name') or '',
+        'eda_status': import_state or ('not_synced' if not mirror else 'linked'),
+        'eda_last_synced_at': mirror.get('last_synced_at'),
+        'eda_git_hash': mirror.get('git_hash') or '',
+        'eda_import_error': mirror.get('import_error') or '',
+        'related': {
+            'project': reverse('api:project_detail', kwargs={'pk': project.pk}, request=request),
+            'project_update': reverse('api:project_update_view', kwargs={'pk': project.pk}, request=request),
+        },
+    }
+    if include_user_capabilities:
+        record['user_capabilities'] = {
+            'edit': request.user.can_access(models.Project, 'change', project),
+            'sync': request.user.can_access(models.Project, 'start', project),
+        }
+    return record
+
+
+class EDAProjectSourceListView(APIView):
+    name = _('Event Engine Project Sources')
+    resource_purpose = 'Capstan projects used as Event Engine source control'
+    permission_classes = [EDAActivationViewPermission]
+
+    def get(self, request, format=None):
+        page = _parse_positive_int(request.query_params.get('page'), 1)
+        page_size = _parse_positive_int(request.query_params.get('page_size'), 20, maximum=200)
+        queryset = _project_source_queryset(request)
+        count = queryset.count()
+        start = (page - 1) * page_size
+        projects = list(queryset[start : start + page_size])
+        client = EDAControllerClient()
+        mirrors, controller_status, controller_error = _project_source_mirror_context(client)
+        return Response(
+            {
+                'count': count,
+                'next': _page_link(request, page + 1) if start + page_size < count else None,
+                'previous': _page_link(request, page - 1) if page > 1 else None,
+                'source': 'capstan_projects',
+                'resource': 'project-sources',
+                'controller_status': controller_status,
+                'controller_error': controller_error,
+                'results': [
+                    _project_source_record(
+                        request,
+                        project,
+                        mirrors.get(project.pk),
+                        controller_status,
+                        controller_error,
+                        include_user_capabilities=True,
+                    )
+                    for project in projects
+                ],
+            }
+        )
+
+
+class EDAProjectSourceDetailView(APIView):
+    name = _('Event Engine Project Source Detail')
+    resource_purpose = 'Capstan project and managed Event Engine mirror detail'
+    permission_classes = [EDAActivationViewPermission]
+
+    def get(self, request, pk, format=None):
+        project = _project_source_queryset(request).filter(pk=pk).first()
+        if project is None:
+            return Response({'detail': _('Not found.')}, status=http_status.HTTP_404_NOT_FOUND)
+        client = EDAControllerClient()
+        mirrors, controller_status, controller_error = _project_source_mirror_context(client)
+        return Response(
+            _project_source_record(
+                request,
+                project,
+                mirrors.get(project.pk),
+                controller_status,
+                controller_error,
+                include_user_capabilities=True,
+            )
+        )
+
+
+class EDAProjectSourceSyncView(APIView):
+    name = _('Event Engine Project Source Sync')
+    resource_purpose = 'reconcile a Capstan project into Event Engine'
+    permission_classes = [EDAActivationAdminPermission]
+
+    def post(self, request, pk, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
+        project = _project_source_queryset(request).filter(pk=pk).first()
+        if project is None:
+            return Response({'detail': _('Not found.')}, status=http_status.HTTP_404_NOT_FOUND)
+        if not request.user.can_access(models.Project, 'start', project):
+            return Response(
+                {'detail': _('You do not have permission to synchronize this project.')},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+        project_update = project.create_project_update(
+            _eager_fields={
+                'launch_type': 'manual',
+                'eda_sync': True,
+            }
+        )
+        if not project_update.signal_start():
+            return Response(
+                {'detail': _('The Event Engine project synchronization job could not be started.')},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = {
+            'source': 'capstan_project',
+            'capstan_project_id': project.pk,
+            'project_update': project_update.pk,
+            'eda_sync': project_update.eda_sync,
+        }
+        data.update(
+            serializers.ProjectUpdateSerializer(
+                project_update,
+                context={'request': request, 'view': self},
+            ).to_representation(project_update)
+        )
+        return Response(
+            data,
+            headers={'Location': project_update.get_absolute_url(request=request)},
+            status=http_status.HTTP_202_ACCEPTED,
+        )
+
+
 class EDAResourceListView(APIView):
     name = _('EDA Resources')
     resource_purpose = 'event-driven ansible resource list'
@@ -336,7 +617,7 @@ class EDAResourceListView(APIView):
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to create EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
-            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+            return _eda_read_only_response(resource)
         if not _is_known_resource(resource):
             return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
 
@@ -378,7 +659,7 @@ class EDAResourceDetailView(APIView):
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to update EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
-            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+            return _eda_read_only_response(resource)
         if not _is_known_resource(resource):
             return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
 
@@ -395,7 +676,7 @@ class EDAResourceDetailView(APIView):
         if not EDAActivationAdminPermission().has_permission(request, self):
             return Response({'detail': _('You do not have permission to delete EDA resources.')}, status=http_status.HTTP_403_FORBIDDEN)
         if resource in _EDA_READ_ONLY_RESOURCES:
-            return Response({'detail': _('This EDA resource is read only.')}, status=http_status.HTTP_405_METHOD_NOT_ALLOWED)
+            return _eda_read_only_response(resource)
         if not _is_known_resource(resource):
             return Response({'detail': _('EDA resource is invalid.')}, status=http_status.HTTP_404_NOT_FOUND)
 
@@ -445,6 +726,73 @@ class EDARBACSyncView(APIView):
         create_missing_identities = _parse_bool(data.get('create_missing_identities'), True)
         try:
             report = build_eda_rbac_sync_report(request.user, mode=mode, create_missing_identities=create_missing_identities)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
+
+
+class EDACredentialSyncView(APIView):
+    name = _('EDA Credential Sync')
+    resource_purpose = 'event-driven ansible credential sync'
+    permission_classes = [EDAActivationAdminPermission]
+
+    def get(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
+        try:
+            report = build_eda_credential_sync_report(request.user, mode='observe')
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
+
+    def post(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
+        data = request.data if isinstance(request.data, dict) else {}
+        mode = data.get('mode') or 'enforce'
+        refresh_secrets = _parse_bool(data.get('refresh_secrets'), True)
+        try:
+            report = build_eda_credential_sync_report(
+                request.user,
+                mode=mode,
+                refresh_secrets=refresh_secrets,
+            )
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
+
+
+class EDACredentialImportView(APIView):
+    name = _('EDA Credential Import')
+    resource_purpose = 'event-driven ansible credential import'
+    permission_classes = [EDAActivationAdminPermission]
+
+    def _forbidden(self, request):
+        if request.user.is_superuser:
+            return None
+        return Response(
+            {'detail': _('Only a system administrator can import Event Engine credential types and credentials.')},
+            status=http_status.HTTP_403_FORBIDDEN,
+        )
+
+    def get(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
+        if forbidden := self._forbidden(request):
+            return forbidden
+        try:
+            report = build_eda_credential_import_report(request.user, apply=False)
+        except EDAControllerError as exc:
+            return _eda_error_response(exc)
+        return Response(report)
+
+    def post(self, request, format=None):
+        if not module_enabled():
+            return _eda_module_disabled_response()
+        if forbidden := self._forbidden(request):
+            return forbidden
+        try:
+            report = build_eda_credential_import_report(request.user, apply=True)
         except EDAControllerError as exc:
             return _eda_error_response(exc)
         return Response(report)

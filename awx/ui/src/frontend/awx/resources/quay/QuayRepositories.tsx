@@ -68,7 +68,7 @@ import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { useAwxBulkConfirmation } from '../../common/useAwxBulkConfirmation';
 import { useAwxView } from '../../common/useAwxView';
-import { QuayStatus } from './QuayOverview';
+import { QuayStatus } from './QuayStatus';
 
 interface QuayRepository {
   id: number;

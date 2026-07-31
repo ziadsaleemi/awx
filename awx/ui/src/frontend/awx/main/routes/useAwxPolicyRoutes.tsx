@@ -17,10 +17,9 @@ export function useAwxPolicyRoutes() {
       icon: <SecurityIcon />,
       children: [
         {
-          id: AwxRoute.PolicyAsCodeOverview,
-          label: t('Overview'),
           path: 'overview',
-          element: <PolicyAsCode view="overview" />,
+          element: <Navigate to="../opa/modules" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.PolicyAsCodeOpa,
@@ -42,6 +41,11 @@ export function useAwxPolicyRoutes() {
             {
               path: 'modules/detail',
               element: <PolicyAsCode view="opa-module-detail" />,
+              hidden: true,
+            },
+            {
+              path: 'modules/edit',
+              element: <PolicyAsCode view="opa-module-edit" />,
               hidden: true,
             },
             {
@@ -67,10 +71,9 @@ export function useAwxPolicyRoutes() {
               hidden: true,
             },
             {
-              id: AwxRoute.PolicyAsCodeOpaProjectSync,
-              label: t('Project Sync'),
               path: 'project-sync',
-              element: <PolicyAsCode view="opa-project-sync" />,
+              element: <Navigate to="/policy-as-code/opa/modules/new" replace />,
+              hidden: true,
             },
             {
               id: AwxRoute.PolicyAsCodeOpaTester,
@@ -179,7 +182,7 @@ export function useAwxPolicyRoutes() {
         },
         {
           path: '',
-          element: <Navigate to="overview" replace />,
+          element: <Navigate to="opa/modules" replace />,
         },
       ],
     }),

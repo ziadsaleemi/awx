@@ -29,6 +29,19 @@ export interface EdaStatus {
   activations_url: string;
   settings_url: string;
   message: string;
+  version?: string;
+  compatibility?: 'compatible' | 'compatible_untested' | 'incompatible' | 'unknown';
+  compatible?: boolean | null;
+  missing_capabilities?: string[];
+  api_contract?: {
+    api_version?: string;
+    tested_api_version_spec?: string;
+    compatibility?: 'compatible' | 'compatible_untested' | 'incompatible';
+    compatible?: boolean;
+    capabilities?: Record<string, boolean>;
+    missing_capabilities?: string[];
+    openapi_title?: string;
+  };
 }
 
 export interface EdaActivationActionResponse {

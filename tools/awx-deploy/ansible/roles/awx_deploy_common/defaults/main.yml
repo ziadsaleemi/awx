@@ -2,7 +2,7 @@
 awx_deploy_method: server
 
 awx_image: docker.io/ziadsaleemi/awx
-awx_image_tag: "25.1.10"
+awx_image_tag: "25.1.11"
 awx_skip_image_pull: false
 awx_ee_image: quay.io/ansible/awx-ee:latest
 
@@ -34,6 +34,39 @@ awx_remote_host_headers:
 awx_tower_url_base: ""
 awx_session_cookie_secure: ""
 awx_csrf_cookie_secure: ""
+
+awx_ldap_enabled: false
+awx_ldap_server_uri: "{{ lookup('env', 'AUTH_LDAP_SERVER_URI') }}"
+awx_ldap_bind_dn: "{{ lookup('env', 'AUTH_LDAP_BIND_DN') }}"
+awx_ldap_bind_password: "{{ lookup('env', 'AUTH_LDAP_BIND_PASSWORD') }}"
+awx_ldap_start_tls: false
+awx_ldap_connection_options:
+  OPT_REFERRALS: 0
+  OPT_NETWORK_TIMEOUT: 30
+awx_ldap_user_search: []
+awx_ldap_user_dn_template: null
+awx_ldap_user_attr_map:
+  first_name: givenName
+  last_name: sn
+  email: mail
+awx_ldap_group_search: []
+awx_ldap_group_type: MemberDNGroupType
+awx_ldap_group_type_params:
+  member_attr: member
+  name_attr: cn
+awx_ldap_require_group: null
+awx_ldap_deny_group: null
+awx_ldap_user_flags_by_group: {}
+awx_ldap_organization_map: {}
+awx_ldap_team_map: {}
+
+awx_entra_enabled: false
+awx_entra_client_id: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY') }}"
+awx_entra_client_secret: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET') }}"
+awx_entra_tenant_id: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID') }}"
+awx_entra_authority_host: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_AUTHORITY_HOST') | default('login.microsoftonline.com', true) }}"
+awx_entra_organization_map: {}
+awx_entra_team_map: {}
 
 awx_postgres_inventory_host: "{{ groups.get('awx_database', ['127.0.0.1']) | first }}"
 awx_postgres_host: "{{ hostvars.get(awx_postgres_inventory_host, {}).get('ansible_host', awx_postgres_inventory_host) }}"
@@ -162,6 +195,11 @@ awx_eda_k8s_operator_image_tag: "1.0.2"
 awx_eda_k8s_kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
 awx_eda_k8s_kube_rbac_proxy_image_tag: v0.15.0
 awx_eda_k8s_operator_deployment: eda-server-operator-controller-manager
+awx_eda_k8s_operator_leader_election_enabled: false
+awx_eda_k8s_operator_liveness_timeout_seconds: 5
+awx_eda_k8s_operator_liveness_failure_threshold: 6
+awx_eda_k8s_operator_readiness_timeout_seconds: 5
+awx_eda_k8s_operator_readiness_failure_threshold: 6
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
 awx_eda_k8s_api_service_name: "{{ awx_eda_name }}-api"

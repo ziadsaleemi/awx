@@ -24,7 +24,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { ModuleAIAssistantAction } from '../../common/ModuleAIAssistantAction';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
-import { QuayStatus } from './QuayOverview';
+import { QuayStatus } from './QuayStatus';
 
 interface QuayTokenPlan {
   source: string;

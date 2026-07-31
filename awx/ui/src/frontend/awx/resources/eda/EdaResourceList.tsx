@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Button,
   ButtonVariant,
   Checkbox,
-  Form,
   FormGroup,
   FormHelperText,
   FormSelect,
@@ -14,17 +14,33 @@ import {
   HelperTextItem,
   Modal,
   Spinner,
+  Tab,
+  Tabs,
+  TabTitleText,
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
-import { PlusCircleIcon, TrashIcon } from '@patternfly/react-icons';
 import {
+  CaretLeftIcon,
+  ExternalLinkAltIcon,
+  PencilAltIcon,
+  PlusCircleIcon,
+  SyncIcon,
+  TrashIcon,
+} from '@patternfly/react-icons';
+import {
+  CopyCell,
   IPageAction,
   ITableColumn,
   DataEditorActions,
+  LoadingPage,
   objectToString,
   PageActionSelection,
   PageActionType,
+  PageActions,
+  PageDetail,
+  PageDetails,
+  PageForm,
   PageHeader,
   PageLayout,
   PageTable,
@@ -36,14 +52,15 @@ import {
 import { DataEditor, DataEditorLanguages } from '../../../../framework/components/DataEditor';
 import { postRequest, requestDelete, requestPatch } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
+import { ScmType } from '../../../common/scm';
 import { StatusCell } from '../../../common/Status';
 import { AwxError } from '../../common/AwxError';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxView } from '../../common/useAwxView';
+import { useAwxWebSocketSubscription } from '../../common/useAwxWebSocket';
 import { EdaStatus } from '../../interfaces/EdaActivation';
 import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
-import { EdaActivationStartModal } from './EdaActivationStartModal';
 
 export interface EdaResourceRecord {
   id: number;
@@ -64,7 +81,9 @@ interface EdaResourceField {
 
 export interface EdaResourceConfig {
   resource: string;
+  basePath: string;
   title: string;
+  singularTitle?: string;
   description: string;
   emptyStateTitle: string;
   emptyStateDescription: string;
@@ -73,6 +92,7 @@ export interface EdaResourceConfig {
   createSample?: Record<string, unknown>;
   readOnly?: boolean;
   form?: EdaResourceFormType;
+  projectBacked?: boolean;
 }
 
 type EdaResourceFormType =
@@ -154,29 +174,15 @@ interface EdaItemsResponse<T> {
   results: T[];
 }
 
-const SERVER_MANAGED_FIELDS = new Set([
-  'id',
-  'related',
-  'summary_fields',
-  'created',
-  'modified',
-  'created_by',
-  'modified_by',
-]);
-
 export function EdaResourceList(props: { config: EdaResourceConfig }) {
   const { config } = props;
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const alertToaster = usePageAlertToaster();
   const { activeAwxUser } = useAwxActiveUser();
   const capabilities = useAwxNavigationCapabilities(activeAwxUser);
   const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
-  const [modalState, setModalState] = useState<{
-    mode: 'create' | 'edit' | 'view';
-    record?: EdaResourceRecord;
-  } | null>(null);
   const [deleteRecord, setDeleteRecord] = useState<EdaResourceRecord | null>(null);
-  const [startRulebookRecord, setStartRulebookRecord] = useState<EdaResourceRecord | null>(null);
   const [eventStreamActivationsRecord, setEventStreamActivationsRecord] =
     useState<EdaResourceRecord | null>(null);
   const {
@@ -189,6 +195,24 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     url: awxAPI`/eda/${config.resource}/`,
     tableColumns,
   });
+  const { refresh } = view;
+
+  const handleWebSocketMessage = useCallback(
+    (message?: { group_name?: string; type?: string }) => {
+      if (
+        config.projectBacked &&
+        message?.group_name === 'jobs' &&
+        message.type === 'project_update'
+      ) {
+        void refresh();
+      }
+    },
+    [config.projectBacked, refresh]
+  );
+  useAwxWebSocketSubscription(
+    { control: ['limit_reached_1'], jobs: ['status_changed'] },
+    handleWebSocketMessage as (data: unknown) => void
+  );
 
   const deleteResource = useCallback(
     async (record: EdaResourceRecord) => {
@@ -220,10 +244,19 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
     async (record: EdaResourceRecord) => {
       if (record.id === undefined || record.id === null) return;
       try {
-        await postRequest(awxAPI`/eda/projects/${String(record.id)}/sync/`, {});
+        const result = await postRequest<{ project_update?: number }>(
+          config.projectBacked
+            ? awxAPI`/eda/project-sources/${String(record.id)}/sync/`
+            : awxAPI`/eda/projects/${String(record.id)}/sync/`,
+          {}
+        );
         alertToaster.addAlert({
           variant: 'success',
-          title: t('EDA project sync requested'),
+          title: result.project_update
+            ? t('Event Engine project sync job {{id}} started', {
+                id: result.project_update,
+              })
+            : t('Event Engine project sync requested'),
           timeout: 4000,
         });
         await view.refresh();
@@ -235,7 +268,7 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         });
       }
     },
-    [alertToaster, t, view]
+    [alertToaster, config.projectBacked, t, view]
   );
 
   const toolbarActions = useMemo<IPageAction<EdaResourceRecord>[]>(
@@ -249,14 +282,16 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
               variant: ButtonVariant.primary,
               isPinned: true,
               icon: PlusCircleIcon,
-              label: t('Create'),
-              isDisabled: !canManageEda
-                ? t('You need EDA administrator permissions to create this resource.')
-                : undefined,
-              onClick: () => setModalState({ mode: 'create' }),
+              label: config.projectBacked ? t('Create project') : t('Create'),
+              isDisabled:
+                !config.projectBacked && !canManageEda
+                  ? t('You need EDA administrator permissions to create this resource.')
+                  : undefined,
+              onClick: () =>
+                navigate(config.projectBacked ? '/projects/create' : `${config.basePath}/create`),
             },
           ],
-    [canManageEda, config.readOnly, t]
+    [canManageEda, config.basePath, config.projectBacked, config.readOnly, navigate, t]
   );
 
   const rowActions = useMemo<IPageAction<EdaResourceRecord>[]>(() => {
@@ -264,19 +299,32 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       {
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: t('View data'),
-        onClick: (record) => setModalState({ mode: 'view', record }),
+        label: t('View details'),
+        onClick: (record) => navigate(`${config.basePath}/${String(record.id)}`),
       },
     ];
 
-    if (config.resource === 'projects') {
+    if (config.resource === 'projects' || config.projectBacked) {
       actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: t('Sync'),
-        isDisabled: !canManageEda
-          ? t('You need EDA administrator permissions to sync this project.')
-          : undefined,
+        isPinned: true,
+        variant: ButtonVariant.primary,
+        icon: SyncIcon,
+        label: t('Sync with Event Engine'),
+        isDisabled: (record) => {
+          if (config.projectBacked) {
+            if (!projectCapability(record, 'sync', canManageEda)) {
+              return t('You do not have permission to sync this project.');
+            }
+          } else if (!canManageEda) {
+            return t('You need EDA administrator permissions to sync this project.');
+          }
+          if (isProjectSourceSyncRunning(record)) {
+            return t('This project synchronization is already running.');
+          }
+          return undefined;
+        },
         onClick: (record) => void syncProject(record),
       });
     }
@@ -289,7 +337,8 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         isDisabled: !canManageEda
           ? t('You need EDA administrator permissions to create activations from rulebooks.')
           : undefined,
-        onClick: (record) => setStartRulebookRecord(record),
+        onClick: (record) =>
+          navigate(`/eda/activations/create?rulebook=${encodeURIComponent(String(record.id))}`),
       });
     }
 
@@ -306,26 +355,44 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
       actions.push({
         type: PageActionType.Button,
         selection: PageActionSelection.Single,
-        label: config.form ? t('Edit') : t('Edit data'),
-        isDisabled: !canManageEda
-          ? t('You need EDA administrator permissions to edit this resource.')
-          : undefined,
-        onClick: (record) => setModalState({ mode: 'edit', record }),
+        label: config.form || config.projectBacked ? t('Edit') : t('Edit data'),
+        isDisabled:
+          !config.projectBacked && !canManageEda
+            ? t('You need EDA administrator permissions to edit this resource.')
+            : undefined,
+        onClick: (record) =>
+          navigate(
+            config.projectBacked
+              ? `/projects/${String(record.id)}/edit`
+              : `${config.basePath}/${String(record.id)}/edit`
+          ),
       });
-      actions.push({
-        type: PageActionType.Button,
-        selection: PageActionSelection.Single,
-        label: t('Delete'),
-        isDanger: true,
-        isDisabled: !canManageEda
-          ? t('You need EDA administrator permissions to delete this resource.')
-          : undefined,
-        onClick: (record) => setDeleteRecord(record),
-      });
+      if (!config.projectBacked) {
+        actions.push({
+          type: PageActionType.Button,
+          selection: PageActionSelection.Single,
+          label: t('Delete'),
+          isDanger: true,
+          isDisabled: !canManageEda
+            ? t('You need EDA administrator permissions to delete this resource.')
+            : undefined,
+          onClick: (record) => setDeleteRecord(record),
+        });
+      }
     }
 
     return actions;
-  }, [canManageEda, config.form, config.readOnly, config.resource, syncProject, t]);
+  }, [
+    canManageEda,
+    config.basePath,
+    config.form,
+    config.projectBacked,
+    config.readOnly,
+    config.resource,
+    navigate,
+    syncProject,
+    t,
+  ]);
 
   if (statusError) return <AwxError error={statusError} handleRefresh={refreshStatus} />;
 
@@ -350,25 +417,26 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
         errorStateTitle={t('Error loading EDA resources')}
         emptyStateTitle={config.emptyStateTitle}
         emptyStateDescription={config.emptyStateDescription}
-        emptyStateButtonIcon={!config.readOnly && canManageEda ? <PlusCircleIcon /> : undefined}
-        emptyStateButtonText={!config.readOnly && canManageEda ? t('Create') : undefined}
+        emptyStateButtonIcon={
+          !config.readOnly && (config.projectBacked || canManageEda) ? (
+            <PlusCircleIcon />
+          ) : undefined
+        }
+        emptyStateButtonText={
+          !config.readOnly && (config.projectBacked || canManageEda)
+            ? config.projectBacked
+              ? t('Create project')
+              : t('Create')
+            : undefined
+        }
         emptyStateButtonClick={
-          !config.readOnly && canManageEda ? () => setModalState({ mode: 'create' }) : undefined
+          !config.readOnly && (config.projectBacked || canManageEda)
+            ? () =>
+                navigate(config.projectBacked ? '/projects/create' : `${config.basePath}/create`)
+            : undefined
         }
         {...view}
       />
-      {modalState && (
-        <EdaResourceModal
-          config={config}
-          mode={modalState.mode}
-          record={modalState.record}
-          onClose={() => setModalState(null)}
-          onSaved={async () => {
-            setModalState(null);
-            await view.refresh();
-          }}
-        />
-      )}
       {deleteRecord && (
         <Modal
           title={t('Delete EDA resource')}
@@ -387,17 +455,6 @@ export function EdaResourceList(props: { config: EdaResourceConfig }) {
           {t('Delete "{{name}}"?', { name: recordName(deleteRecord) })}
         </Modal>
       )}
-      {startRulebookRecord && (
-        <EdaActivationStartModal
-          canCreateActivation={canManageEda}
-          initialRulebook={startRulebookRecord}
-          onClose={() => setStartRulebookRecord(null)}
-          onStarted={async () => {
-            setStartRulebookRecord(null);
-            await view.refresh();
-          }}
-        />
-      )}
       {eventStreamActivationsRecord && (
         <EdaEventStreamActivationsModal
           record={eventStreamActivationsRecord}
@@ -414,7 +471,9 @@ function useEdaResourceColumns(config: EdaResourceConfig): ITableColumn<EdaResou
     () => [
       {
         header: t('Name'),
-        cell: (record) => <TextCell text={recordName(record)} />,
+        cell: (record) => (
+          <TextCell text={recordName(record)} to={`${config.basePath}/${String(record.id)}`} />
+        ),
         sort: config.nameSort ?? 'name',
         card: 'name',
         list: 'name',
@@ -428,39 +487,82 @@ function useEdaResourceColumns(config: EdaResourceConfig): ITableColumn<EdaResou
         },
       })),
     ],
-    [config.fields, config.nameSort, t]
+    [config.basePath, config.fields, config.nameSort, t]
   );
 }
 
-function EdaResourceModal(props: {
-  config: EdaResourceConfig;
-  mode: 'create' | 'edit' | 'view';
-  record?: EdaResourceRecord;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  if (props.config.form && (props.mode === 'create' || props.mode === 'edit')) {
+export function EdaResourceFormPage(props: { config: EdaResourceConfig; mode: 'create' | 'edit' }) {
+  const { config, mode } = props;
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ id: string }>();
+  const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
+  const {
+    data: record,
+    error,
+    refresh,
+  } = useGet<EdaResourceRecord>(
+    mode === 'edit' && params.id
+      ? awxAPI`/eda/${config.resource}/${encodeURIComponent(params.id)}/`
+      : undefined
+  );
+
+  if (error) return <AwxError error={error} handleRefresh={refresh} />;
+  if (mode === 'edit' && !record) return <LoadingPage breadcrumbs />;
+
+  const title =
+    mode === 'create'
+      ? t('Create {{resource}}', { resource: config.singularTitle ?? config.title })
+      : t('Edit {{resource}}', { resource: recordName(record) });
+
+  if (!config.form || !canManageEda) {
     return (
-      <EdaResourceFormModal
-        config={props.config}
-        form={props.config.form}
-        mode={props.mode}
-        record={props.record}
-        onClose={props.onClose}
-        onSaved={props.onSaved}
-      />
+      <PageLayout>
+        <PageHeader
+          title={title}
+          breadcrumbs={[{ label: config.title, to: config.basePath }, { label: title }]}
+        />
+        <Alert
+          isInline
+          variant="warning"
+          title={
+            !config.form
+              ? t('This EDA resource is read-only.')
+              : t('You need EDA administrator permissions to manage this resource.')
+          }
+          style={{ margin: 24 }}
+        >
+          <Button variant="link" isInline onClick={() => navigate(config.basePath)}>
+            {t('Back to {{resource}}', { resource: config.title })}
+          </Button>
+        </Alert>
+      </PageLayout>
     );
   }
-  return <EdaResourceJsonModal {...props} />;
+
+  return (
+    <EdaResourceForm
+      config={config}
+      form={config.form}
+      mode={mode}
+      record={record}
+      onCancel={() => navigate(config.basePath)}
+      onSaved={(savedRecord) =>
+        navigate(`${config.basePath}/${String(savedRecord?.id ?? record?.id ?? '')}`)
+      }
+    />
+  );
 }
 
-function EdaResourceFormModal(props: {
+function EdaResourceForm(props: {
   config: EdaResourceConfig;
   form: EdaResourceFormType;
   mode: 'create' | 'edit';
   record?: EdaResourceRecord;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
+  onCancel: () => void;
+  onSaved: (record?: EdaResourceRecord) => void;
 }) {
   const { config, form, mode, record } = props;
   const { t } = useTranslation();
@@ -556,7 +658,6 @@ function EdaResourceFormModal(props: {
   const [roleAssignmentObjectId, setRoleAssignmentObjectId] = useState(() =>
     stringValue(record?.object_id)
   );
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const { data: credentials, isLoading: credentialsLoading } = useGet<
     EdaItemsResponse<EdaCredentialRecord>
   >(
@@ -749,56 +850,56 @@ function EdaResourceFormModal(props: {
       return;
     }
 
-    setIsSubmitting(true);
     try {
+      let savedRecord = record;
       if (mode === 'create') {
-        await postRequest(awxAPI`/eda/${config.resource}/`, payload);
+        savedRecord = await postRequest<EdaResourceRecord>(
+          awxAPI`/eda/${config.resource}/`,
+          payload
+        );
       } else if (record?.id !== undefined && record.id !== null) {
-        await requestPatch(awxAPI`/eda/${config.resource}/${String(record.id)}/`, payload);
+        savedRecord = await requestPatch<EdaResourceRecord>(
+          awxAPI`/eda/${config.resource}/${String(record.id)}/`,
+          payload
+        );
       }
       alertToaster.addAlert({
         variant: 'success',
         title: t('EDA resource saved'),
         timeout: 4000,
       });
-      await props.onSaved();
+      props.onSaved(savedRecord);
     } catch (err) {
       alertToaster.addAlert({
         variant: 'danger',
         title: t('Failed to save EDA resource'),
         children: err instanceof Error ? err.message : String(err),
       });
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
+  const title =
+    mode === 'create'
+      ? t('Create {{resource}}', { resource: config.singularTitle ?? config.title })
+      : t('Edit {{resource}}', { resource: recordName(record) });
+
   return (
-    <Modal
-      title={
-        mode === 'create'
-          ? t('Create {{resource}}', { resource: config.title })
-          : t('Edit {{resource}}', { resource: recordName(record) })
-      }
-      isOpen
-      onClose={props.onClose}
-      variant="medium"
-      actions={[
-        <Button
-          key="save"
-          variant="primary"
-          isLoading={isSubmitting}
-          isDisabled={isSubmitting || isManagedCredentialType || isManagedRoleDefinition}
-          onClick={() => void submit()}
-        >
-          {t('Save')}
-        </Button>,
-        <Button key="cancel" variant="link" onClick={props.onClose}>
-          {t('Cancel')}
-        </Button>,
-      ]}
-    >
-      <Form>
+    <PageLayout>
+      <PageHeader
+        title={title}
+        breadcrumbs={[
+          { label: config.title, to: config.basePath },
+          ...(mode === 'edit'
+            ? [{ label: recordName(record), to: `${config.basePath}/${String(record?.id)}` }]
+            : []),
+          { label: mode === 'create' ? t('Create') : t('Edit') },
+        ]}
+      />
+      <PageForm<Record<string, never>>
+        submitText={mode === 'create' ? t('Create') : t('Save')}
+        onSubmit={submit}
+        onCancel={props.onCancel}
+      >
         {isManagedCredentialType && (
           <Alert
             isInline
@@ -1205,8 +1306,399 @@ function EdaResourceFormModal(props: {
             onObjectIdChange={setRoleAssignmentObjectId}
           />
         )}
-      </Form>
-    </Modal>
+      </PageForm>
+    </PageLayout>
+  );
+}
+
+export function EdaResourceDetailsPage(props: { config: EdaResourceConfig }) {
+  if (props.config.projectBacked) {
+    return <EdaProjectSourceDetailsPage config={props.config} />;
+  }
+  return <EdaGenericResourceDetailsPage config={props.config} />;
+}
+
+function EdaProjectSourceDetailsPage(props: { config: EdaResourceConfig }) {
+  const { config } = props;
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ id: string }>();
+  const alertToaster = usePageAlertToaster();
+  const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
+  const [activeTab, setActiveTab] = useState<'details' | 'event-engine'>('details');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const {
+    data: record,
+    error,
+    refresh,
+  } = useGet<EdaResourceRecord>(
+    params.id ? awxAPI`/eda/project-sources/${encodeURIComponent(params.id)}/` : undefined
+  );
+
+  const canEditProject = projectCapability(record, 'edit', true);
+  const canSyncProject = canManageEda && projectCapability(record, 'sync', canManageEda);
+  const sourceSyncRunning = isProjectSourceSyncRunning(record);
+
+  const handleWebSocketMessage = useCallback(
+    (message?: { group_name?: string; type?: string }) => {
+      if (message?.group_name === 'jobs' && message.type === 'project_update') {
+        void refresh();
+      }
+    },
+    [refresh]
+  );
+  useAwxWebSocketSubscription(
+    { control: ['limit_reached_1'], jobs: ['status_changed'] },
+    handleWebSocketMessage as (data: unknown) => void
+  );
+
+  const syncProject = useCallback(async () => {
+    if (!record || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const result = await postRequest<{ project_update?: number }>(
+        awxAPI`/eda/project-sources/${String(record.id)}/sync/`,
+        {}
+      );
+      alertToaster.addAlert({
+        variant: 'success',
+        title: result.project_update
+          ? t('Event Engine project sync job {{id}} started', {
+              id: result.project_update,
+            })
+          : t('Synchronizing {{name}} with Event Engine.', { name: recordName(record) }),
+        timeout: 4000,
+      });
+      refresh();
+      setActiveTab('event-engine');
+    } catch (err) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Failed to synchronize Event Engine project'),
+        children: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [alertToaster, isSyncing, record, refresh, t]);
+
+  const projectActions = useMemo<IPageAction<EdaResourceRecord>[]>(
+    () => [
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        isPinned: true,
+        variant: ButtonVariant.primary,
+        icon: SyncIcon,
+        label: isSyncing ? t('Synchronizing') : t('Sync with Event Engine'),
+        isDisabled: !canSyncProject
+          ? t('You need Event Engine administrator and project sync permissions.')
+          : isSyncing || sourceSyncRunning
+            ? t('Project synchronization is already in progress.')
+            : undefined,
+        onClick: () => void syncProject(),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        isPinned: true,
+        variant: ButtonVariant.secondary,
+        icon: PencilAltIcon,
+        label: t('Edit project'),
+        isDisabled: !canEditProject
+          ? t('You do not have permission to edit this project.')
+          : undefined,
+        onClick: (project) => navigate(`/projects/${String(project.id)}/edit`),
+      },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        icon: ExternalLinkAltIcon,
+        label: t('View source project'),
+        onClick: (project) => navigate(`/projects/${String(project.id)}/details`),
+      },
+    ],
+    [canEditProject, canSyncProject, isSyncing, navigate, sourceSyncRunning, syncProject, t]
+  );
+
+  if (error) return <AwxError error={error} handleRefresh={refresh} />;
+  if (!record) return <LoadingPage breadcrumbs tabs />;
+
+  const sourceStatus = stringValue(record.source_status);
+  const integrationStatus = stringValue(record.integration_status);
+  const controllerStatus = stringValue(record.controller_status);
+  const edaStatus = stringValue(record.eda_status);
+  const controllerError = stringValue(record.controller_error);
+  const importError = stringValue(record.eda_import_error);
+  const integrationAlerts = [controllerError, importError].filter(Boolean);
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={recordName(record)}
+        breadcrumbs={[{ label: config.title, to: config.basePath }, { label: recordName(record) }]}
+        headerActions={<PageActions actions={projectActions} selectedItem={record} />}
+      />
+      <Tabs
+        activeKey={activeTab}
+        onSelect={(event, key) => {
+          event.preventDefault();
+          if (key === 'back') {
+            navigate(config.basePath);
+            return;
+          }
+          setActiveTab(key as 'details' | 'event-engine');
+        }}
+        inset={{ default: 'insetSm' }}
+        isBox
+        style={{
+          backgroundColor: 'var(--pf-v5-c-tabs__link--BackgroundColor)',
+          flexShrink: 0,
+        }}
+      >
+        <Tab
+          eventKey="back"
+          title={
+            <TabTitleText>
+              <CaretLeftIcon />
+              <span style={{ marginLeft: 6 }}>{t('Back to Event Engine Projects')}</span>
+            </TabTitleText>
+          }
+        />
+        <Tab eventKey="details" title={t('Details')} />
+        <Tab eventKey="event-engine" title={t('Event Engine')} />
+      </Tabs>
+      {activeTab === 'details' ? (
+        <PageDetails>
+          <PageDetail label={t('Name')}>
+            <TextCell text={recordName(record)} to={`/projects/${String(record.id)}/details`} />
+          </PageDetail>
+          <PageDetail label={t('Description')}>{stringValue(record.description) || '-'}</PageDetail>
+          <PageDetail label={t('Organization')}>
+            {record.organization_id ? (
+              <TextCell
+                text={stringValue(record.organization_name) || String(record.organization_id)}
+                to={`/access/organizations/${String(record.organization_id)}/details`}
+              />
+            ) : (
+              stringValue(record.organization_name) || '-'
+            )}
+          </PageDetail>
+          <PageDetail label={t('Source project status')}>
+            {sourceStatus ? <StatusCell status={sourceStatus} /> : '-'}
+          </PageDetail>
+          <PageDetail label={t('Source control type')}>
+            <ScmType scmType={stringValue(record.scm_type)} />
+          </PageDetail>
+          <PageDetail label={t('Source control URL')}>
+            {stringValue(record.scm_url) || '-'}
+          </PageDetail>
+          <PageDetail label={t('Source control branch')}>
+            {stringValue(record.scm_branch) || '-'}
+          </PageDetail>
+          {record.scm_refspec ? (
+            <PageDetail label={t('Source control refspec')}>
+              {stringValue(record.scm_refspec)}
+            </PageDetail>
+          ) : null}
+          {record.scm_revision ? (
+            <PageDetail label={t('Source control revision')}>
+              <CopyCell text={stringValue(record.scm_revision)} />
+            </PageDetail>
+          ) : null}
+          <PageDetail label={t('Credential')}>
+            {stringValue(record.credential_name) || t('None')}
+          </PageDetail>
+          <PageDetail label={t('Credential mapping')}>
+            {humanizeIdentifier(record.credential_mapping)}
+          </PageDetail>
+          <PageDetail label={t('Source last updated')}>
+            {formatDateValue(record.source_last_updated)}
+          </PageDetail>
+          <PageDetail label={t('Created')}>{formatDateValue(record.created)}</PageDetail>
+          <PageDetail label={t('Last modified')}>{formatDateValue(record.modified)}</PageDetail>
+        </PageDetails>
+      ) : (
+        <PageDetails alertPrompts={integrationAlerts}>
+          <PageDetail label={t('Integration status')}>
+            {integrationStatus ? <StatusCell status={integrationStatus} /> : '-'}
+          </PageDetail>
+          <PageDetail label={t('Controller status')}>
+            {controllerStatus ? <StatusCell status={controllerStatus} /> : '-'}
+          </PageDetail>
+          <PageDetail label={t('Managed Event Engine project')}>
+            {stringValue(record.eda_project_name) || '-'}
+          </PageDetail>
+          <PageDetail label={t('Event Engine project ID')}>
+            {stringValue(record.eda_project_id) || '-'}
+          </PageDetail>
+          <PageDetail label={t('Import status')}>
+            {edaStatus ? <StatusCell status={edaStatus} /> : '-'}
+          </PageDetail>
+          <PageDetail label={t('Last synchronized')}>
+            {formatDateValue(record.eda_last_synced_at)}
+          </PageDetail>
+          {record.eda_git_hash ? (
+            <PageDetail label={t('Imported revision')}>
+              <CopyCell text={stringValue(record.eda_git_hash)} />
+            </PageDetail>
+          ) : null}
+          <PageDetail label={t('Configuration drift')}>
+            {Array.isArray(record.mismatched_fields) && record.mismatched_fields.length
+              ? record.mismatched_fields.map(String).join(', ')
+              : t('None')}
+          </PageDetail>
+        </PageDetails>
+      )}
+    </PageLayout>
+  );
+}
+
+function EdaGenericResourceDetailsPage(props: { config: EdaResourceConfig }) {
+  const { config } = props;
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const params = useParams<{ id: string }>();
+  const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canManageEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
+  const {
+    data: record,
+    error,
+    refresh,
+  } = useGet<EdaResourceRecord>(
+    params.id ? awxAPI`/eda/${config.resource}/${encodeURIComponent(params.id)}/` : undefined
+  );
+
+  if (error) return <AwxError error={error} handleRefresh={refresh} />;
+  if (!record) return <LoadingPage breadcrumbs />;
+
+  return (
+    <PageLayout>
+      <PageHeader
+        title={recordName(record)}
+        breadcrumbs={[{ label: config.title, to: config.basePath }, { label: recordName(record) }]}
+        headerActions={
+          !config.readOnly && (config.projectBacked || canManageEda) ? (
+            <Button
+              variant="primary"
+              onClick={() =>
+                navigate(
+                  config.projectBacked
+                    ? `/projects/${String(record.id)}/edit`
+                    : `${config.basePath}/${String(record.id)}/edit`
+                )
+              }
+            >
+              {t('Edit')}
+            </Button>
+          ) : undefined
+        }
+      />
+      <PageDetails>
+        <PageDetail label={t('Name')}>{recordName(record)}</PageDetail>
+        <PageDetail label={t('Description')}>{stringValue(record.description) || '-'}</PageDetail>
+        <PageDetail label={t('ID')}>{String(record.id)}</PageDetail>
+        {config.fields
+          .filter((field) => !isCanonicalDetailField(field))
+          .map((field) => (
+            <PageDetail key={field.label} label={field.label}>
+              {renderDetailValue(record, field)}
+            </PageDetail>
+          ))}
+        <PageDetail label={t('Created')}>
+          {formatDateValue(record.created ?? record.created_at)}
+        </PageDetail>
+        <PageDetail label={t('Modified')}>
+          {formatDateValue(record.modified ?? record.modified_at)}
+        </PageDetail>
+        <PageDetail label={t('Resource data')} fullWidth>
+          <EdaResourceDataViewer record={record} />
+        </PageDetail>
+      </PageDetails>
+    </PageLayout>
+  );
+}
+
+function projectCapability(
+  record: EdaResourceRecord | undefined,
+  capability: string,
+  defaultValue: boolean
+) {
+  if (!record || typeof record.user_capabilities !== 'object' || !record.user_capabilities) {
+    return defaultValue;
+  }
+  const value = (record.user_capabilities as Record<string, unknown>)[capability];
+  return typeof value === 'boolean' ? value : defaultValue;
+}
+
+function isProjectSourceSyncRunning(record: EdaResourceRecord | undefined) {
+  return ['pending', 'waiting', 'running'].includes(stringValue(record?.source_status));
+}
+
+function humanizeIdentifier(value: unknown) {
+  const text = stringValue(value);
+  if (!text) return '-';
+  return text
+    .split('_')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function renderDetailValue(record: EdaResourceRecord, field: EdaResourceField): ReactNode {
+  const value = pickValue(record, field.keys);
+  if (field.type === 'status') return <StatusCell status={String(value || '-')} />;
+  return formatValue(value, field.type);
+}
+
+function isCanonicalDetailField(field: EdaResourceField) {
+  const canonicalKeys = new Set([
+    'id',
+    'name',
+    'description',
+    'created',
+    'created_at',
+    'modified',
+    'modified_at',
+  ]);
+  return field.keys.some((key) => canonicalKeys.has(key));
+}
+
+function EdaResourceDataViewer(props: { record: EdaResourceRecord }) {
+  const settings = usePageSettings();
+  const [language, setLanguage] = useState<StructuredDataEditorLanguage>(() =>
+    structuredDataEditorLanguage(settings.dataEditorFormat)
+  );
+  const value = useMemo(
+    () => structuredDataEditorText(props.record, language),
+    [language, props.record]
+  );
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <DataEditorActions
+          handleCopy={false}
+          handleDownload={false}
+          handleUpload={false}
+          language={language}
+          setLanguage={(nextLanguage) => setLanguage(structuredDataEditorLanguage(nextLanguage))}
+        />
+      </div>
+      <DataEditor
+        id={`eda-resource-${String(props.record.id)}-data`}
+        name={`eda-resource-${String(props.record.id)}-data`}
+        language={language}
+        value={value}
+        onChange={() => undefined}
+        setError={() => undefined}
+        isReadOnly
+        minHeight={280}
+      />
+    </div>
   );
 }
 
@@ -1623,131 +2115,6 @@ function CredentialTypeFieldEditor(props: {
         </>
       )}
     </div>
-  );
-}
-
-function EdaResourceJsonModal(props: {
-  config: EdaResourceConfig;
-  mode: 'create' | 'edit' | 'view';
-  record?: EdaResourceRecord;
-  onClose: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const { config, mode, record } = props;
-  const { t } = useTranslation();
-  const alertToaster = usePageAlertToaster();
-  const settings = usePageSettings();
-  const defaultStructuredLanguage = structuredDataEditorLanguage(settings.dataEditorFormat);
-  const [resourceDataLanguage, setResourceDataLanguage] = useState<StructuredDataEditorLanguage>(
-    () => defaultStructuredLanguage
-  );
-  const [resourceDataText, setResourceDataText] = useState(() =>
-    structuredDataEditorText(initialPayload(config, mode, record), defaultStructuredLanguage)
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const isReadOnly = mode === 'view';
-
-  const submit = async () => {
-    if (isReadOnly) return;
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = parseStructuredDataObject(resourceDataText, 'Resource data');
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Resource data is invalid'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      if (mode === 'create') {
-        await postRequest(awxAPI`/eda/${config.resource}/`, parsed);
-      } else if (record?.id !== undefined && record.id !== null) {
-        await requestPatch(awxAPI`/eda/${config.resource}/${String(record.id)}/`, parsed);
-      }
-      alertToaster.addAlert({
-        variant: 'success',
-        title: t('EDA resource saved'),
-        timeout: 4000,
-      });
-      await props.onSaved();
-    } catch (err) {
-      alertToaster.addAlert({
-        variant: 'danger',
-        title: t('Failed to save EDA resource'),
-        children: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={
-        mode === 'create'
-          ? t('Create {{resource}}', { resource: config.title })
-          : mode === 'edit'
-            ? t('Edit {{resource}}', { resource: recordName(record) })
-            : t('View {{resource}}', { resource: recordName(record) })
-      }
-      isOpen
-      onClose={props.onClose}
-      variant="large"
-      actions={[
-        !isReadOnly && (
-          <Button
-            key="save"
-            variant="primary"
-            isLoading={isSubmitting}
-            isDisabled={isSubmitting}
-            onClick={() => void submit()}
-          >
-            {t('Save')}
-          </Button>
-        ),
-        <Button key="cancel" variant="link" onClick={props.onClose}>
-          {isReadOnly ? t('Close') : t('Cancel')}
-        </Button>,
-      ].filter(Boolean)}
-    >
-      <Form>
-        <EdaStructuredDataEditor
-          id="eda-resource-data"
-          label={t('Resource data')}
-          helperText={
-            isReadOnly
-              ? t('View this resource as YAML or JSON.')
-              : t('Edit this resource as YAML or JSON. Server-managed fields are excluded.')
-          }
-          value={resourceDataText}
-          language={resourceDataLanguage}
-          isReadOnly={isReadOnly}
-          minHeight={360}
-          onChange={setResourceDataText}
-          onLanguageChange={setResourceDataLanguage}
-        />
-      </Form>
-    </Modal>
-  );
-}
-
-function initialPayload(
-  config: EdaResourceConfig,
-  mode: 'create' | 'edit' | 'view',
-  record?: EdaResourceRecord
-) {
-  if (mode === 'create') return config.createSample ?? { name: '' };
-  if (mode === 'view') return record ?? {};
-  return sanitizeEditablePayload(record ?? {});
-}
-
-function sanitizeEditablePayload(record: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !SERVER_MANAGED_FIELDS.has(key))
   );
 }
 

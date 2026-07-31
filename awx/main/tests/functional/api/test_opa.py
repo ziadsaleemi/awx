@@ -934,7 +934,7 @@ spec:
     assert response.data['audit']['activity_stream_id']
     requests_get.assert_called()
     system_prompt = call_provider.call_args.args[4]
-    assert 'Visible AWX context' in system_prompt
+    assert 'Visible Capstan context' in system_prompt
     assert 'Visible Gatekeeper context' in system_prompt
     assert 'k8srequiredlabels' in system_prompt
     assert 'require-owner' in system_prompt
@@ -1031,7 +1031,15 @@ def _gatekeeper_namespace_remediation_get(url, **kwargs):
     raise AssertionError(f'unexpected Kubernetes API GET {url}')
 
 
-@override_settings(GATEKEEPER_K8S_API_URL='https://kube.example.test')
+@pytest.mark.django_db
+@override_settings(
+    GATEKEEPER_K8S_API_URL='https://kube.example.test',
+    GATEKEEPER_K8S_AUTH_TOKEN='',
+    GATEKEEPER_K8S_CONTEXT='default',
+    GATEKEEPER_K8S_CONTEXTS={},
+    GATEKEEPER_K8S_REQUEST_TIMEOUT=5,
+    GATEKEEPER_K8S_VERIFY_SSL=True,
+)
 def test_gatekeeper_constraint_discovery_retries_while_template_crd_registers():
     client = GatekeeperKubernetesClient()
     discovery = {
@@ -1909,6 +1917,51 @@ def test_opa_policy_module_project_sync_reads_awx_project_checkout_and_dry_runs(
 
 
 @pytest.mark.django_db
+@override_settings(OPA_HOST='')
+def test_opa_policy_module_project_files_lists_authorized_rego_sources(get, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='OPA Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/opa.git',
+        local_path='_opa_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'policies'
+    project_dir.mkdir(parents=True)
+    rego = 'package capstan.catalog\n\nallow := true\n'
+    (project_dir / 'catalog.rego').write_text(rego, encoding='utf-8')
+
+    response = get(
+        reverse('api:opa_policy_module_project_sync'),
+        data={'project_id': project.pk},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['count'] == 1
+    assert response.data['project']['id'] == project.pk
+    assert response.data['results'] == [
+        {
+            'file_path': 'policies/catalog.rego',
+            'policy_id': f'awx/projects/{project.pk}/policies/catalog',
+            'policy_text': rego,
+            'module': {
+                'id': f'awx/projects/{project.pk}/policies/catalog',
+                'package': 'capstan.catalog',
+                'rules': ['allow'],
+                'decision_paths': ['capstan/catalog/allow'],
+                'size': len(rego),
+                'line_count': 4,
+                'sha256': hashlib.sha256(rego.encode()).hexdigest(),
+                'awx_managed': True,
+            },
+        }
+    ]
+
+
+@pytest.mark.django_db
 @override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
 def test_opa_policy_module_project_sync_applies_rego_modules_to_opa(post, admin_user, organization, tmp_path, settings):
     settings.PROJECTS_ROOT = str(tmp_path)
@@ -1953,6 +2006,49 @@ def test_opa_policy_module_project_sync_applies_rego_modules_to_opa(post, admin_
     audit = ActivityStream.objects.get(pk=result['audit']['activity_stream_id'])
     assert audit.object2 == 'awx/project-sync/opa/job_launch'
     assert '"source": "opa_project_sync"' in audit.changes
+
+
+@pytest.mark.django_db
+@override_settings(OPA_HOST='opa.example.com', OPA_PORT=8181, OPA_SSL=False, OPA_REQUEST_TIMEOUT=2.5)
+def test_opa_policy_module_project_sync_applies_one_file_to_explicit_policy_id(post, admin_user, organization, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(
+        name='OPA Policy Repo',
+        organization=organization,
+        scm_type='git',
+        scm_url='https://git.example.test/opa.git',
+        local_path='_opa_policy_repo',
+    )
+    project.save(skip_update=True)
+    project_dir = tmp_path / project.local_path / 'policies'
+    project_dir.mkdir(parents=True)
+    rego = 'package capstan.catalog\n\nallow := true\n'
+    (project_dir / 'catalog.rego').write_text(rego, encoding='utf-8')
+
+    get_response = _json_error_response({'message': 'not found'}, status_code=404)
+    put_response = _json_response({'result': {}})
+    with mock.patch('awx.api.views.opa.requests.get', return_value=get_response), mock.patch(
+        'awx.api.views.opa.requests.put', return_value=put_response
+    ) as requests_put:
+        response = post(
+            reverse('api:opa_policy_module_project_sync'),
+            data={
+                'mode': 'apply',
+                'project': project.pk,
+                'path': 'policies/catalog.rego',
+                'policy_id': 'capstan/catalog',
+            },
+            user=admin_user,
+            expect=200,
+        )
+
+    assert response.data['results'][0]['policy_id'] == 'capstan/catalog'
+    requests_put.assert_called_once()
+    assert requests_put.call_args.args[0] == 'http://opa.example.com:8181/v1/policies/capstan/catalog'
+    audit = ActivityStream.objects.get(pk=response.data['results'][0]['audit']['activity_stream_id'])
+    changes = json.loads(audit.changes)
+    assert changes['project_source']['project_id'] == project.pk
+    assert changes['project_source']['file_path'] == 'policies/catalog.rego'
 
 
 @pytest.mark.django_db

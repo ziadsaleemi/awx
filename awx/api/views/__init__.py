@@ -5347,6 +5347,15 @@ class TerraformJobTemplateJobsList(SubListAPIView):
     resource_purpose = 'terraform jobs of a terraform job template'
 
 
+class TerraformJobTemplateStateRevisionsList(SubListAPIView):
+    model = models.TerraformStateRevision
+    serializer_class = serializers.TerraformStateRevisionSerializer
+    parent_model = models.TerraformJobTemplate
+    relationship = 'state_revisions'
+    parent_key = 'terraform_job_template'
+    resource_purpose = 'managed state revisions of a terraform job template'
+
+
 class TerraformJobTemplateSchedulesList(SubListCreateAPIView):
     name = _("Terraform Job Template Schedules")
     model = models.Schedule

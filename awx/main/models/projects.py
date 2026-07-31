@@ -567,6 +567,11 @@ class ProjectUpdate(UnifiedJob, ProjectOptions, JobNotificationMixin, TaskManage
         verbose_name=_('SCM Revision'),
         help_text=_('The SCM Revision discovered by this update for the given project and branch.'),
     )
+    eda_sync = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text=_('Whether this project update should reconcile the project with Event Engine after a successful source update.'),
+    )
 
     def _set_default_dependencies_processed(self):
         self.dependencies_processed = True

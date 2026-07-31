@@ -65,6 +65,7 @@ export interface UnifiedJob
   name: string;
   id: number;
   type: string;
+  eda_sync?: boolean;
   related: {
     created_by?: string;
     labels?: string;

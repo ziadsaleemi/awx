@@ -132,6 +132,12 @@ pods in the same cluster through the upstream EDA Server Operator. For direct
 server deployments, EDA runs on hosts in the `awx_eda` inventory group as its
 own Docker Compose/systemd stack. See
 `docs/eda_deployment_topology.md` for the non-native Capstan topology contract.
+The Kubernetes role runs one EDA operator replica and disables leader election
+by default so a temporary API/storage stall does not terminate the only operator.
+Set `awx_eda_k8s_operator_leader_election_enabled=true` only when independently
+scaling the operator beyond one replica. The role also uses five-second probe
+timeouts and six-failure thresholds. These settings reduce restart churn; they
+do not make an unhealthy Kubernetes datastore or VM storage path reliable.
 
 Policy services are intentionally split. OPA is a standalone policy engine and
 can run on hosts in the `awx_opa` inventory group or any external OPA endpoint.
@@ -170,6 +176,59 @@ full clone capacity tests. The govc path also retries transient vCenter SDK
 gateway failures through `awx_vcenter_govc_retries` and
 `awx_vcenter_govc_delay`; persistent `502 Bad Gateway` responses still require
 vCenter service recovery before lifecycle drills can continue.
+
+## LDAP and Microsoft Entra ID
+
+Capstan keeps local administrator login available while adding directory
+authentication. LDAP users use the normal username/password form. Microsoft
+Entra ID users use the dedicated redirect button shown when the tenant app is
+fully configured.
+
+For LDAP, set `awx_ldap_enabled=true` and provide either
+`awx_ldap_user_search` or `awx_ldap_user_dn_template`. Bind credentials should
+come from `AUTH_LDAP_BIND_DN` and `AUTH_LDAP_BIND_PASSWORD` environment
+variables, Ansible Vault, or an external secret manager. Production deployments
+should prefer LDAPS or StartTLS and install the directory CA in the Capstan
+web/task trust store.
+
+```yaml
+awx_ldap_enabled: true
+awx_ldap_server_uri: ldaps://ldap.example.com:636
+awx_ldap_connection_options:
+  OPT_REFERRALS: 0
+  OPT_NETWORK_TIMEOUT: 30
+awx_ldap_user_search:
+  - dc=example,dc=com
+  - SCOPE_SUBTREE
+  - (uid=%(user)s)
+awx_ldap_group_search:
+  - ou=groups,dc=example,dc=com
+  - SCOPE_SUBTREE
+  - (objectClass=groupOfNames)
+```
+
+Named connection options are converted to the integer constants expected by
+`python-ldap`. Values may also name constants, for example
+`OPT_X_TLS_REQUIRE_CERT: OPT_X_TLS_DEMAND`. Do not disable certificate
+verification in production; install the directory CA instead.
+
+For a tenant-restricted Microsoft Entra app, add the callback URL shown under
+**Settings > Authentication Providers > Microsoft Entra ID** as a Web redirect
+URI in the app registration. The URL resolves from `awx_tower_url_base` and
+ends in `/sso/complete/azuread-tenant-oauth2/`. Then enable the provider:
+
+```yaml
+awx_tower_url_base: https://capstan.example.com
+awx_entra_enabled: true
+awx_entra_client_id: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY') }}"
+awx_entra_client_secret: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET') }}"
+awx_entra_tenant_id: "{{ lookup('env', 'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID') }}"
+```
+
+The client ID, secret, and tenant ID are an all-or-nothing configuration.
+Organization and team maps are available through `awx_ldap_*_map` and
+`awx_entra_*_map`. These variables are rendered for direct-server, k3s, and
+Kubernetes deployments.
 
 ## Quick Start: Server
 

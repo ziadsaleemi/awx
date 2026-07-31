@@ -95,6 +95,7 @@ from awx.main.models import (
     TerraformJob,
     TerraformJobEvent,
     TerraformJobTemplate,
+    TerraformStateRevision,
     CatalogItem,
     CatalogDeployment,
     CloudProviderConnection,
@@ -114,6 +115,12 @@ from awx.main.models.base import VERBOSITY_CHOICES, NEW_JOB_TYPE_CHOICES
 from awx.main.models.rbac import role_summary_fields_generator, give_creator_permissions, get_role_codenames, to_permissions, get_role_from_object_role
 from awx.main.models.workflow import WORKFLOW_NODE_TYPE_AI_TASK, WORKFLOW_NODE_TYPE_EDA_RULEBOOK, WORKFLOW_NODE_TYPE_TEMPLATE
 from awx.main.fields import ImplicitRoleField
+from awx.main.utils.terraform_state import (
+    sanitize_terraform_state_summary,
+    TerraformStateError,
+    validate_state_branch,
+    validate_state_key,
+)
 from awx.main.utils import (
     get_model_for_type,
     camelcase_to_underscore,
@@ -1615,7 +1622,7 @@ class ProjectUpdateViewSerializer(ProjectSerializer):
 class ProjectUpdateSerializer(UnifiedJobSerializer, ProjectOptionsSerializer):
     class Meta:
         model = ProjectUpdate
-        fields = ('*', 'project', 'job_type', 'job_tags', '-controller_node')
+        fields = ('*', 'project', 'job_type', 'job_tags', 'eda_sync', '-controller_node')
 
     def get_related(self, obj):
         res = super(ProjectUpdateSerializer, self).get_related(obj)
@@ -4003,6 +4010,10 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
             'extra_vars',
             'verbosity',
             'terraform_operation',
+            'state_backend',
+            'state_project',
+            'state_branch',
+            'state_key',
             'target_inventory',
             'target_group',
             'allow_simultaneous',
@@ -4034,7 +4045,48 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
                 'name': obj.target_inventory.name,
                 'kind': obj.target_inventory.kind,
             }
+        if obj.state_project_id:
+            summary_fields['state_project'] = {
+                'id': obj.state_project_id,
+                'name': obj.state_project.name,
+                'scm_type': obj.state_project.scm_type,
+            }
         return summary_fields
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = self.instance
+        state_backend = attrs.get(
+            'state_backend',
+            getattr(instance, 'state_backend', 'terraform'),
+        )
+        if state_backend != 'git':
+            return attrs
+
+        project = attrs.get('project', getattr(instance, 'project', None))
+        state_project = (
+            attrs.get(
+                'state_project',
+                getattr(instance, 'state_project', None),
+            )
+            or project
+        )
+        if state_project is None or state_project.scm_type != 'git':
+            raise ValidationError({'state_project': _('Capstan managed Git state requires a project with Git source control.')})
+
+        branch = attrs.get(
+            'state_branch',
+            getattr(instance, 'state_branch', 'capstan-terraform-state'),
+        )
+        key = attrs.get('state_key', getattr(instance, 'state_key', ''))
+        try:
+            validate_state_branch(branch)
+            if key:
+                validate_state_key(key)
+        except TerraformStateError as exc:
+            field = 'state_key' if 'key' in str(exc).lower() else 'state_branch'
+            raise ValidationError({field: str(exc)}) from exc
+        return attrs
 
     def get_related(self, obj):
         res = super().get_related(obj)
@@ -4042,9 +4094,18 @@ class TerraformJobTemplateSerializer(UnifiedJobTemplateSerializer):
             jobs=self.reverse('api:terraform_job_template_jobs_list', kwargs={'pk': obj.pk}),
             launch=self.reverse('api:terraform_job_template_launch', kwargs={'pk': obj.pk}),
             credentials=self.reverse('api:terraform_job_template_credentials_list', kwargs={'pk': obj.pk}),
+            state_revisions=self.reverse(
+                'api:terraform_job_template_state_revisions_list',
+                kwargs={'pk': obj.pk},
+            ),
         )
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        if obj.state_project_id:
+            res['state_project'] = self.reverse(
+                'api:project_detail',
+                kwargs={'pk': obj.state_project_id},
+            )
         if obj.target_inventory_id:
             res['target_inventory'] = self.reverse('api:inventory_detail', kwargs={'pk': obj.target_inventory_id})
         if obj.execution_environment_id:
@@ -4065,6 +4126,12 @@ class TerraformJobSerializer(UnifiedJobSerializer):
             'extra_vars',
             'verbosity',
             'terraform_operation',
+            'state_backend',
+            'state_project',
+            'state_branch',
+            'state_key',
+            'state_revision_read',
+            'state_revision_written',
             'target_inventory',
             'target_group',
             'scm_revision',
@@ -4079,6 +4146,22 @@ class TerraformJobSerializer(UnifiedJobSerializer):
                 'name': obj.target_inventory.name,
                 'kind': obj.target_inventory.kind,
             }
+        if obj.state_project_id:
+            summary_fields['state_project'] = {
+                'id': obj.state_project_id,
+                'name': obj.state_project.name,
+                'scm_type': obj.state_project.scm_type,
+            }
+        for field_name in ('state_revision_read', 'state_revision_written'):
+            revision = getattr(obj, field_name, None)
+            if revision:
+                summary_fields[field_name] = {
+                    'id': revision.id,
+                    'git_commit': revision.git_commit,
+                    'checksum': revision.checksum,
+                    'serial': revision.serial,
+                    'created': revision.created,
+                }
         return summary_fields
 
     def get_related(self, obj):
@@ -4087,6 +4170,11 @@ class TerraformJobSerializer(UnifiedJobSerializer):
             res['terraform_job_template'] = self.reverse('api:terraform_job_template_detail', kwargs={'pk': obj.terraform_job_template_id})
         if obj.project_id:
             res['project'] = self.reverse('api:project_detail', kwargs={'pk': obj.project_id})
+        if obj.state_project_id:
+            res['state_project'] = self.reverse(
+                'api:project_detail',
+                kwargs={'pk': obj.state_project_id},
+            )
         res['cancel'] = self.reverse('api:terraform_job_cancel', kwargs={'pk': obj.pk})
         return res
 
@@ -4108,6 +4196,77 @@ class TerraformJobCancelSerializer(TerraformJobSerializer):
 
     class Meta:
         fields = ('can_cancel',)
+
+
+class TerraformStateRevisionSerializer(BaseSerializer):
+    name = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TerraformStateRevision
+        fields = (
+            '*',
+            'terraform_job_template',
+            'terraform_job',
+            'state_project',
+            'state_key',
+            'state_branch',
+            'state_path',
+            'git_commit',
+            'checksum',
+            'serial',
+            'lineage',
+            'terraform_version',
+            'resource_count',
+            'output_count',
+            'operation',
+            'job_status',
+            'summary',
+        )
+
+    def get_summary_fields(self, obj):
+        summary_fields = super().get_summary_fields(obj)
+        if obj.terraform_job_id:
+            summary_fields['terraform_job'] = {
+                'id': obj.terraform_job_id,
+                'name': obj.terraform_job.name,
+                'status': obj.terraform_job.status,
+            }
+        if obj.state_project_id:
+            summary_fields['state_project'] = {
+                'id': obj.state_project_id,
+                'name': obj.state_project.name,
+            }
+        return summary_fields
+
+    def get_name(self, obj):
+        revision = obj.git_commit[:12] if obj.git_commit else str(obj.pk)
+        return f'{obj.state_key}@{revision}'
+
+    def get_description(self, obj):
+        return _('Encrypted Terraform state revision published by Capstan.')
+
+    def get_summary(self, obj):
+        return sanitize_terraform_state_summary(obj.summary)
+
+    def get_related(self, obj):
+        related = super().get_related(obj)
+        related['terraform_job_template'] = self.reverse(
+            'api:terraform_job_template_detail',
+            kwargs={'pk': obj.terraform_job_template_id},
+        )
+        if obj.terraform_job_id:
+            related['terraform_job'] = self.reverse(
+                'api:terraform_job_detail',
+                kwargs={'pk': obj.terraform_job_id},
+            )
+        if obj.state_project_id:
+            related['state_project'] = self.reverse(
+                'api:project_detail',
+                kwargs={'pk': obj.state_project_id},
+            )
+        return related
 
 
 class QuayImageBuildTemplateSerializer(UnifiedJobTemplateSerializer):

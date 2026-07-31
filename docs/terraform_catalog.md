@@ -110,6 +110,17 @@ sidebar. Each template points to a **Project** (git or manual SCM) and a
 | Extra Variables | JSON / YAML key-value pairs written as `terraform.tfvars.json` |
 | Verbosity | 0–4 (controls `-v` flags passed to Terraform) |
 | Execution Environment | Container image with `terraform` binary (see §3.1) |
+| State Management | Keep the backend declared by Terraform, or use encrypted Capstan-managed Git state |
+| State Project | Git-backed Project used to fetch and publish managed state; defaults to the Terraform source Project |
+| State Branch | Dedicated managed-state branch; defaults to `capstan-terraform-state` |
+| State Key | Stable state identity shared by apply/destroy templates that manage the same infrastructure |
+
+Capstan-managed Git state is encrypted before it is committed and is restored
+before `terraform init`. The template **State** tab exposes immutable revision
+history and redacted resource/output structure. Raw state and output values are
+never returned because Terraform state commonly contains secrets. See
+[Capstan-managed Terraform state in Git](terraform_git_state.md) for setup,
+locking, recovery, migration, and backup requirements.
 
 ### 3.1 Execution environments
 

@@ -211,6 +211,7 @@ export function OPAPolicyManagementPanel(props?: {
   canManagePolicy?: boolean;
   moduleId?: string;
   showModuleInventory?: boolean;
+  moduleReadOnly?: boolean;
   onModuleSaved?: (policyId: string) => void;
   onModuleDeleted?: () => void;
 }) {
@@ -222,6 +223,7 @@ export function OPAPolicyManagementPanel(props?: {
   const showModules = sections.includes('modules');
   const showTester = sections.includes('tester');
   const showModuleInventory = props?.showModuleInventory ?? true;
+  const moduleReadOnly = props?.moduleReadOnly ?? false;
   const { data, isLoading, error } = useGet<OPAStatusResponse>(awxAPI`/opa/policies/`);
   const modulesResponse = useGet<OPAPolicyModulesResponse>(
     showModules ? awxAPI`/opa/policy-modules/` : undefined
@@ -641,7 +643,9 @@ export function OPAPolicyManagementPanel(props?: {
           <StackItem>
             <Card isFlat>
               <CardHeader>
-                <CardTitle>{t('OPA policy modules')}</CardTitle>
+                <CardTitle>
+                  {moduleReadOnly ? t('Policy module') : t('OPA policy modules')}
+                </CardTitle>
               </CardHeader>
               <CardBody>
                 {modulesResponse.isLoading ? (
@@ -739,59 +743,89 @@ export function OPAPolicyManagementPanel(props?: {
                         </StackItem>
                       </>
                     ) : null}
-                    <StackItem>
-                      <strong>
-                        {moduleDetail
-                          ? t('Edit {{policyId}}', { policyId: moduleDetail.id })
-                          : t('Create policy module')}
-                      </strong>
-                    </StackItem>
-                    <StackItem>
-                      <FormGroup label={t('Policy ID')} fieldId="opa-module-id">
-                        <TextInput
-                          id="opa-module-id"
-                          value={moduleId}
-                          onChange={(_event, value) => setModuleId(value)}
-                          aria-label={t('Policy ID')}
-                          isDisabled={moduleLoading}
-                        />
-                      </FormGroup>
-                    </StackItem>
-                    <StackItem>
-                      <FormGroup label={t('Rego module')} fieldId="opa-module-text">
-                        <TextArea
-                          id="opa-module-text"
-                          value={moduleText}
-                          rows={16}
-                          onChange={(_event, value) => setModuleText(value)}
-                          aria-label={t('Rego module')}
-                          isDisabled={moduleLoading}
-                          style={{ fontFamily: 'monospace' }}
-                        />
-                      </FormGroup>
-                    </StackItem>
-                    <StackItem>
-                      <Button
-                        variant="primary"
-                        onClick={() => void handleSaveModule()}
-                        isLoading={moduleSaving}
-                        isDisabled={
-                          moduleLoading || moduleSaving || !moduleId || !moduleText.trim()
-                        }
-                      >
-                        {t('Save to OPA')}
-                      </Button>{' '}
-                      <Button
-                        variant="danger"
-                        icon={<TrashIcon />}
-                        onClick={() => setShowDeleteConfirm(true)}
-                        isLoading={moduleDeleting}
-                        isDisabled={moduleLoading || moduleDeleting || !moduleDetail?.id}
-                        data-cy="opa-module-delete-button"
-                      >
-                        {t('Delete from OPA')}
-                      </Button>
-                    </StackItem>
+                    {moduleReadOnly ? (
+                      <>
+                        {moduleLoading ? (
+                          <StackItem>
+                            <Spinner size="md" />
+                          </StackItem>
+                        ) : moduleDetail ? (
+                          <StackItem>
+                            <CodeBlock data-cy="opa-module-rego-source">
+                              <CodeBlockCode>{moduleDetail.raw}</CodeBlockCode>
+                            </CodeBlock>
+                          </StackItem>
+                        ) : null}
+                        <StackItem>
+                          <Button
+                            variant="danger"
+                            icon={<TrashIcon />}
+                            onClick={() => setShowDeleteConfirm(true)}
+                            isLoading={moduleDeleting}
+                            isDisabled={moduleLoading || moduleDeleting || !moduleDetail?.id}
+                            data-cy="opa-module-delete-button"
+                          >
+                            {t('Delete from OPA')}
+                          </Button>
+                        </StackItem>
+                      </>
+                    ) : (
+                      <>
+                        <StackItem>
+                          <strong>
+                            {moduleDetail
+                              ? t('Edit {{policyId}}', { policyId: moduleDetail.id })
+                              : t('Create policy module')}
+                          </strong>
+                        </StackItem>
+                        <StackItem>
+                          <FormGroup label={t('Policy ID')} fieldId="opa-module-id">
+                            <TextInput
+                              id="opa-module-id"
+                              value={moduleId}
+                              onChange={(_event, value) => setModuleId(value)}
+                              aria-label={t('Policy ID')}
+                              isDisabled={moduleLoading}
+                            />
+                          </FormGroup>
+                        </StackItem>
+                        <StackItem>
+                          <FormGroup label={t('Rego module')} fieldId="opa-module-text">
+                            <TextArea
+                              id="opa-module-text"
+                              value={moduleText}
+                              rows={16}
+                              onChange={(_event, value) => setModuleText(value)}
+                              aria-label={t('Rego module')}
+                              isDisabled={moduleLoading}
+                              style={{ fontFamily: 'monospace' }}
+                            />
+                          </FormGroup>
+                        </StackItem>
+                        <StackItem>
+                          <Button
+                            variant="primary"
+                            onClick={() => void handleSaveModule()}
+                            isLoading={moduleSaving}
+                            isDisabled={
+                              moduleLoading || moduleSaving || !moduleId || !moduleText.trim()
+                            }
+                          >
+                            {t('Save to OPA')}
+                          </Button>{' '}
+                          <Button
+                            variant="danger"
+                            icon={<TrashIcon />}
+                            onClick={() => setShowDeleteConfirm(true)}
+                            isLoading={moduleDeleting}
+                            isDisabled={moduleLoading || moduleDeleting || !moduleDetail?.id}
+                            data-cy="opa-module-delete-button"
+                          >
+                            {t('Delete from OPA')}
+                          </Button>
+                        </StackItem>
+                      </>
+                    )}
                     {moduleError ? (
                       <StackItem>
                         <Alert variant="danger" isInline title={moduleError} />
@@ -828,6 +862,12 @@ export function OPAPolicyManagementPanel(props?: {
                         <Grid hasGutter data-cy="opa-module-metadata-grid">
                           <GridItem sm={12} xl={6}>
                             <DescriptionList isHorizontal isCompact>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>{t('Policy ID')}</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {moduleDetail.id}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
                               <DescriptionListGroup>
                                 <DescriptionListTerm>{t('Package')}</DescriptionListTerm>
                                 <DescriptionListDescription>

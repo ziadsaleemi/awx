@@ -39,6 +39,8 @@ from awx.main.utils.safe_yaml import SafeLoader
 
 from awx.main.utils.licensing import Licenser
 from awx.main.constants import JOB_VARIABLE_PREFIXES
+from awx.main.exceptions import PostRunError
+from awx.main.utils.eda import EDAControllerError
 
 from receptorctl.socket_interface import ReceptorControl
 
@@ -470,7 +472,11 @@ class TestGenericRun:
         task.model.objects.get = mock.Mock(return_value=job)
         task.build_private_data_files = mock.Mock(side_effect=OSError())
 
-        with mock.patch('awx.main.tasks.jobs.shutil.copytree'), mock.patch('awx.main.tasks.jobs.evaluate_policy'):
+        with (
+            mock.patch('awx.main.tasks.jobs.shutil.copytree'),
+            mock.patch('awx.main.tasks.jobs.os.path.isdir', return_value=True),
+            mock.patch('awx.main.tasks.jobs.evaluate_policy'),
+        ):
             with pytest.raises(Exception):
                 task.run(1)
 
@@ -1269,6 +1275,51 @@ class TestProjectUpdateGalaxyCredentials(TestJobExecution):
             ('ANSIBLE_GALAXY_SERVER_SERVER1_TOKEN', 'secret123'),
             ('ANSIBLE_GALAXY_SERVER_SERVER1_URL', 'https://cloud.redhat.com/api/automation-hub/'),
         ]
+
+
+class TestProjectUpdateEdaSync:
+    def test_reconciles_project_after_successful_source_update(self):
+        project = Project(pk=42)
+        project_update = ProjectUpdate(pk=7, project=project, eda_sync=True)
+        client = mock.Mock()
+        client.reconcile_managed_project.return_value = {'actions': ['updated', 'sync']}
+
+        with mock.patch('awx.main.utils.eda.EDAControllerClient', return_value=client):
+            result = jobs.RunProjectUpdate.reconcile_eda_project(project_update, 'successful')
+
+        assert result == {'actions': ['updated', 'sync']}
+        client.reconcile_managed_project.assert_called_once_with(project)
+
+    @pytest.mark.parametrize(
+        ('status', 'eda_sync'),
+        [
+            ('failed', True),
+            ('canceled', True),
+            ('successful', False),
+        ],
+    )
+    def test_skips_reconciliation_when_not_required(self, status, eda_sync):
+        project_update = ProjectUpdate(pk=7, project=Project(pk=42), eda_sync=eda_sync)
+
+        with mock.patch('awx.main.utils.eda.EDAControllerClient') as client:
+            result = jobs.RunProjectUpdate.reconcile_eda_project(project_update, status)
+
+        assert result is None
+        client.assert_not_called()
+
+    def test_surfaces_controller_failure_as_project_update_failure(self):
+        project_update = ProjectUpdate(pk=7, project=Project(pk=42), eda_sync=True)
+        client = mock.Mock()
+        client.reconcile_managed_project.side_effect = EDAControllerError(
+            'projects.sync is not supported',
+            status='incompatible',
+        )
+
+        with mock.patch('awx.main.utils.eda.EDAControllerClient', return_value=client):
+            with pytest.raises(PostRunError, match='Event Engine project synchronization failed') as exc:
+                jobs.RunProjectUpdate.reconcile_eda_project(project_update, 'successful')
+
+        assert exc.value.status == 'failed'
 
 
 @pytest.mark.usefixtures("patch_Organization")

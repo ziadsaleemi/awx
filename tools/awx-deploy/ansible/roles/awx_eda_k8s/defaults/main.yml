@@ -26,6 +26,11 @@ awx_eda_k8s_operator_image_tag: "1.0.2"
 awx_eda_k8s_kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
 awx_eda_k8s_kube_rbac_proxy_image_tag: v0.15.0
 awx_eda_k8s_operator_deployment: eda-server-operator-controller-manager
+awx_eda_k8s_operator_leader_election_enabled: false
+awx_eda_k8s_operator_liveness_timeout_seconds: 5
+awx_eda_k8s_operator_liveness_failure_threshold: 6
+awx_eda_k8s_operator_readiness_timeout_seconds: 5
+awx_eda_k8s_operator_readiness_failure_threshold: 6
 awx_eda_k8s_service_type: ClusterIP
 awx_eda_k8s_node_port: 30855
 awx_eda_k8s_api_service_name: "{{ awx_eda_name }}-api"

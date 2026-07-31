@@ -15,9 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
-
 
 ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 SECRET_ENV_PATTERN = re.compile(r"(PASSWORD|PASS|TOKEN|SECRET|PRIVATE|API_KEY|SSH_KEY)", re.IGNORECASE)
@@ -380,7 +379,10 @@ class ConfigurationReconciler:
             self.summary["actions"] += 1
             if self.check_mode:
                 continue
-            action_path = action["path"]
+            resource_id = resource.object.get("id")
+            if "{id}" in action["path"] and resource_id is None:
+                raise ConfigurationError(f"{resource.key}: action path requires a resource id")
+            action_path = action["path"].replace("{id}", quote(str(resource_id), safe=""))
             if action_path.startswith("/"):
                 path = action_path
             else:

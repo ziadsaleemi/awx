@@ -39,14 +39,18 @@ import { AwxSystemUsageBar } from './AwxSystemUsageBar';
 import { useAwxNavigationCapabilities } from './awxNavigationCapabilities';
 import { getWorkflowApprovalNotificationUrl } from './workflowApprovalNotification';
 
-const LOGO_SIZE_KEY = 'awx-navbar-logo-size';
 const CUSTOM_LOGO_KEY = 'awx-custom-logo';
-const STATIC_BRAND_LOGO = '/static/media/brand-logo.png';
+const STATIC_BRAND_LOGO = '/assets/brand-fallback.png';
+const DEFAULT_LOGO_HEIGHT = 48;
+const LOGO_HEIGHTS = new Set([36, 48, 64]);
+
+function getLogoHeight(value: unknown) {
+  const height = Number(value);
+  return LOGO_HEIGHTS.has(height) ? height : DEFAULT_LOGO_HEIGHT;
+}
 
 function imageType(logo: string) {
-  return logo.startsWith('data:image/png') || logo.endsWith('.png')
-    ? 'image/png'
-    : 'image/svg+xml';
+  return logo.startsWith('data:image/png') || logo.endsWith('.png') ? 'image/png' : 'image/svg+xml';
 }
 
 function getCachedCustomLogo() {
@@ -131,14 +135,7 @@ export function AwxMasthead() {
   const { enabled: aiEnabled } = useAIAssistantEnabled();
   const [aiOpen, setAiOpen] = useState(false);
 
-  const [logoHeight] = useState<number>(() => {
-    try {
-      const stored = window.localStorage.getItem(LOGO_SIZE_KEY);
-      return stored ? parseInt(stored, 10) : 48;
-    } catch {
-      return 48;
-    }
-  });
+  const logoHeight = getLogoHeight(config?.custom_logo_size);
   const [cachedCustomLogo, setCachedCustomLogo] = useState<string | undefined>(getCachedCustomLogo);
   const logout = useCallback(async () => {
     await fetch('/api/logout/');
@@ -186,7 +183,7 @@ export function AwxMasthead() {
           <ContextualAIAssistantButton isEnabled={aiEnabled} />
         </>
       )}
-      <PageMasthead brand={brandElement}>
+      <PageMasthead brand={brandElement} brandHref="/overview">
         <ToolbarGroup variant="icon-button-group" style={{ flexGrow: 1 }}>
           <ToolbarItem style={{ marginLeft: 'auto' }}>
             <PageRefreshIcon />

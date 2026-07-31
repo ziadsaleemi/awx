@@ -5,6 +5,7 @@ import { PageNavigationItem } from '../../../../framework';
 import { TerraformTemplates } from '../../resources/terraform/TerraformTemplates';
 import { TerraformTemplatePage } from '../../resources/terraform/TerraformTemplatePage';
 import { TerraformTemplateDetails } from '../../resources/terraform/TerraformTemplateDetails';
+import { TerraformTemplateState } from '../../resources/terraform/TerraformTemplateState';
 import { TerraformTemplateJobs } from '../../resources/terraform/TerraformTemplateJobs';
 import {
   CreateTerraformTemplate,
@@ -134,6 +135,11 @@ export function useAwxTerraformRoutes() {
               id: AwxRoute.TerraformTemplateJobs,
               path: 'jobs',
               element: <TerraformTemplateJobs />,
+            },
+            {
+              id: AwxRoute.TerraformTemplateState,
+              path: 'state',
+              element: <TerraformTemplateState />,
             },
             {
               id: AwxRoute.TerraformTemplateSchedules,

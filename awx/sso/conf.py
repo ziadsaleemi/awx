@@ -49,14 +49,12 @@ class SocialAuthCallbackURL(object):
         return urlparse.urljoin(settings.TOWER_URL_BASE, path)
 
 
-SOCIAL_AUTH_ORGANIZATION_MAP_HELP_TEXT = _(
-    '''\
+SOCIAL_AUTH_ORGANIZATION_MAP_HELP_TEXT = _('''\
 Mapping to organization admins/users from social auth accounts. This setting
 controls which users are placed into which organizations based on their
 username and email address. Configuration details are available in the
 documentation.\
-'''
-)
+''')
 
 # FIXME: /regex/gim (flags)
 
@@ -78,12 +76,10 @@ SOCIAL_AUTH_ORGANIZATION_MAP_PLACEHOLDER = collections.OrderedDict(
     ]
 )
 
-SOCIAL_AUTH_TEAM_MAP_HELP_TEXT = _(
-    '''\
+SOCIAL_AUTH_TEAM_MAP_HELP_TEXT = _('''\
 Mapping of team members (users) from social auth accounts. Configuration
 details are available in the documentation.\
-'''
-)
+''')
 
 SOCIAL_AUTH_TEAM_MAP_PLACEHOLDER = collections.OrderedDict(
     [
@@ -1170,7 +1166,7 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
     )
 
     ###############################################################################
-    # MICROSOFT AZURE ACTIVE DIRECTORY SETTINGS
+    # MICROSOFT ENTRA ID MULTI-TENANT COMPATIBILITY SETTINGS
     ###############################################################################
 
     register(
@@ -1178,11 +1174,11 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
         field_class=fields.CharField,
         read_only=True,
         default=SocialAuthCallbackURL('azuread-oauth2'),
-        label=_('Azure AD OAuth2 Callback URL'),
+        label=_('Microsoft Entra ID Multi-Tenant Callback URL'),
         help_text=_(
             'Provide this URL as the callback URL for your application as part of your registration process. Refer to the documentation for more detail. '
         ),
-        category=_('Azure AD OAuth2'),
+        category=_('Microsoft Entra ID (Multi-Tenant)'),
         category_slug='azuread-oauth2',
         depends_on=['TOWER_URL_BASE'],
     )
@@ -1192,9 +1188,9 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
         field_class=fields.CharField,
         allow_blank=True,
         default='',
-        label=_('Azure AD OAuth2 Key'),
-        help_text=_('The OAuth2 key (Client ID) from your Azure AD application.'),
-        category=_('Azure AD OAuth2'),
+        label=_('Microsoft Entra ID Multi-Tenant Client ID'),
+        help_text=_('The Application (client) ID from your multi-tenant Microsoft Entra app registration.'),
+        category=_('Microsoft Entra ID (Multi-Tenant)'),
         category_slug='azuread-oauth2',
     )
 
@@ -1203,9 +1199,9 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
         field_class=fields.CharField,
         allow_blank=True,
         default='',
-        label=_('Azure AD OAuth2 Secret'),
-        help_text=_('The OAuth2 secret (Client Secret) from your Azure AD application.'),
-        category=_('Azure AD OAuth2'),
+        label=_('Microsoft Entra ID Multi-Tenant Client Secret'),
+        help_text=_('The client secret value from your multi-tenant Microsoft Entra app registration.'),
+        category=_('Microsoft Entra ID (Multi-Tenant)'),
         category_slug='azuread-oauth2',
         encrypted=True,
     )
@@ -1215,9 +1211,9 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
         field_class=SocialOrganizationMapField,
         allow_null=True,
         default=None,
-        label=_('Azure AD OAuth2 Organization Map'),
+        label=_('Microsoft Entra ID Multi-Tenant Organization Map'),
         help_text=SOCIAL_AUTH_ORGANIZATION_MAP_HELP_TEXT,
-        category=_('Azure AD OAuth2'),
+        category=_('Microsoft Entra ID (Multi-Tenant)'),
         category_slug='azuread-oauth2',
         placeholder=SOCIAL_AUTH_ORGANIZATION_MAP_PLACEHOLDER,
     )
@@ -1227,12 +1223,113 @@ if settings.ALLOW_LOCAL_RESOURCE_MANAGEMENT:
         field_class=SocialTeamMapField,
         allow_null=True,
         default=None,
-        label=_('Azure AD OAuth2 Team Map'),
+        label=_('Microsoft Entra ID Multi-Tenant Team Map'),
         help_text=SOCIAL_AUTH_TEAM_MAP_HELP_TEXT,
-        category=_('Azure AD OAuth2'),
+        category=_('Microsoft Entra ID (Multi-Tenant)'),
         category_slug='azuread-oauth2',
         placeholder=SOCIAL_AUTH_TEAM_MAP_PLACEHOLDER,
     )
+
+    ###############################################################################
+    # MICROSOFT ENTRA ID TENANT AUTHENTICATION SETTINGS
+    ###############################################################################
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_CALLBACK_URL',
+        field_class=fields.CharField,
+        read_only=True,
+        default=SocialAuthCallbackURL('azuread-tenant-oauth2'),
+        label=_('Microsoft Entra ID Callback URL'),
+        help_text=_('Add this exact URL as a Web redirect URI in the Microsoft Entra app registration.'),
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+        depends_on=['TOWER_URL_BASE'],
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY',
+        field_class=fields.CharField,
+        allow_blank=True,
+        default='',
+        label=_('Application (client) ID'),
+        help_text=_('The Application (client) ID from the Microsoft Entra app registration.'),
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET',
+        field_class=fields.CharField,
+        allow_blank=True,
+        default='',
+        label=_('Client secret'),
+        help_text=_('The client secret value from the Microsoft Entra app registration.'),
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+        encrypted=True,
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID',
+        field_class=fields.CharField,
+        allow_blank=True,
+        default='',
+        label=_('Directory (tenant) ID'),
+        help_text=_('The Directory (tenant) ID whose workforce identities are allowed to sign in.'),
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_AUTHORITY_HOST',
+        field_class=fields.CharField,
+        allow_blank=False,
+        default='login.microsoftonline.com',
+        label=_('Authority host'),
+        help_text=_('Microsoft identity authority host. Use the default unless the tenant is in a sovereign cloud.'),
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_ORGANIZATION_MAP',
+        field_class=SocialOrganizationMapField,
+        allow_null=True,
+        default=None,
+        label=_('Microsoft Entra ID Organization Map'),
+        help_text=SOCIAL_AUTH_ORGANIZATION_MAP_HELP_TEXT,
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+        placeholder=SOCIAL_AUTH_ORGANIZATION_MAP_PLACEHOLDER,
+    )
+
+    register(
+        'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TEAM_MAP',
+        field_class=SocialTeamMapField,
+        allow_null=True,
+        default=None,
+        label=_('Microsoft Entra ID Team Map'),
+        help_text=SOCIAL_AUTH_TEAM_MAP_HELP_TEXT,
+        category=_('Microsoft Entra ID'),
+        category_slug='azuread-tenant-oauth2',
+        placeholder=SOCIAL_AUTH_TEAM_MAP_PLACEHOLDER,
+    )
+
+    def entra_tenant_validate(serializer, attrs):
+        required_settings = (
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_KEY',
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_SECRET',
+            'SOCIAL_AUTH_AZUREAD_TENANT_OAUTH2_TENANT_ID',
+        )
+        values = {setting_name: attrs.get(setting_name, getattr(serializer.instance, setting_name, '')) for setting_name in required_settings}
+        if any(values.values()) and not all(values.values()):
+            missing = [setting_name for setting_name, value in values.items() if not value]
+            raise serializers.ValidationError(
+                _('Microsoft Entra ID requires the client ID, client secret, and tenant ID together. Missing: {}.').format(', '.join(missing))
+            )
+        return attrs
+
+    register_validate('azuread-tenant-oauth2', entra_tenant_validate)
 
     ###############################################################################
     # Generic OIDC AUTHENTICATION SETTINGS

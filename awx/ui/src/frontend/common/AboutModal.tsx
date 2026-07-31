@@ -16,7 +16,7 @@ export interface AnsibleAboutModalProps {
   onClose?: () => void;
 }
 
-export const ABOUT_MODAL_VERSION = '25.1.10';
+export const ABOUT_MODAL_VERSION = '25.1.11';
 
 interface AnsibleAboutModuleVersion {
   label: string;
@@ -116,9 +116,16 @@ function AnsibleAboutModal(props: AnsibleAboutModalProps) {
         return;
       }
       setModuleVersions(
-        results
-          .map((result) => (result.status === 'fulfilled' ? result.value : undefined))
-          .filter((result): result is AnsibleAboutModuleVersion => Boolean(result))
+        results.map((result, index) => {
+          const endpoint = props.moduleVersionEndpoints?.[index];
+          if (result.status === 'fulfilled' && result.value) {
+            return result.value;
+          }
+          return {
+            label: endpoint?.label ?? t('Unknown module'),
+            version: t('Unavailable or disabled'),
+          };
+        })
       );
     });
 
@@ -149,7 +156,7 @@ function AnsibleAboutModal(props: AnsibleAboutModalProps) {
           </TextListItem>
           {moduleVersions.length > 0 && (
             <>
-              <TextListItem component="dt">{t('Connected module versions')}</TextListItem>
+              <TextListItem component="dt">{t('Module versions')}</TextListItem>
               <TextListItem component="dd">
                 <TextList component="dl">
                   {moduleVersions.map((moduleVersion) => (

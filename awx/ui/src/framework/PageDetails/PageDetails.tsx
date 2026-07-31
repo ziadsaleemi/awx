@@ -34,6 +34,7 @@ export function PageDetails(props: {
           ></Alert>
         ))}
       <DescriptionList
+        data-cy="page-details"
         orientation={{
           sm: orientation,
           md: orientation,
@@ -62,7 +63,7 @@ export function PageDetails(props: {
                 }
               : undefined
         }
-        style={{ maxWidth: 1200, padding: disablePadding ? undefined : 24 }}
+        style={{ minWidth: 0, width: '100%', padding: disablePadding ? undefined : 24 }}
         isCompact={isCompact}
       >
         {props.children}

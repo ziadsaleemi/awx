@@ -1,0 +1,23 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ awx_eda_k8s_operator_deployment }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: eda-manager
+          args:
+            - --health-probe-bind-address=:6789
+            - --metrics-bind-address=127.0.0.1:8080
+{% if awx_eda_k8s_operator_leader_election_enabled | bool %}
+            - --leader-elect
+            - --leader-election-id=eda-server-operator
+{% endif %}
+          livenessProbe:
+            timeoutSeconds: {{ awx_eda_k8s_operator_liveness_timeout_seconds | int }}
+            failureThreshold: {{ awx_eda_k8s_operator_liveness_failure_threshold | int }}
+          readinessProbe:
+            timeoutSeconds: {{ awx_eda_k8s_operator_readiness_timeout_seconds | int }}
+            failureThreshold: {{ awx_eda_k8s_operator_readiness_failure_threshold | int }}

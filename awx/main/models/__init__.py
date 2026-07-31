@@ -94,7 +94,12 @@ from awx.main.models.workflow import (  # noqa
     WorkflowApproval,
     WorkflowApprovalTemplate,
 )
-from awx.main.models.terraform import TerraformJobTemplate, TerraformJob  # noqa
+from awx.main.models.terraform import (  # noqa
+    TerraformJobTemplate,
+    TerraformJob,
+    TerraformStateLock,
+    TerraformStateRevision,
+)
 from awx.main.models.events import TerraformJobEvent  # noqa
 from awx.main.models.catalog import CatalogItem, CatalogDeployment, CloudProviderConnection, CloudProviderState  # noqa
 from awx.main.models.quay import QuayImageBuild, QuayImageBuildJob, QuayImageBuildTemplate  # noqa

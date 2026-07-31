@@ -90,10 +90,9 @@ class ManifestTests(unittest.TestCase):
             foundation_resources["project.integrations_demo"]["data"]["scm_url"],
             "https://github.com/ziadsaleemi/capstan-integrations-demo.git",
         )
-        self.assertEqual(
-            foundation_resources["eda.project.integrations_demo"]["data"]["url"],
-            "https://github.com/ziadsaleemi/capstan-integrations-demo.git",
-        )
+        project_actions = foundation_resources["project.integrations_demo"]["actions"]
+        self.assertEqual(project_actions[1]["path"], "/api/v2/eda/project-sources/{id}/sync/")
+        self.assertEqual(project_actions[1]["when"], "always")
         self.assertEqual(
             foundation_resources["eda.decision_environment.demo"]["data"]["image_url"],
             "quay.io/ansible/ansible-rulebook:latest",
@@ -302,6 +301,29 @@ class ReconcilerTests(unittest.TestCase):
             ),
             "https://capstan.example.test/api/v2/projects/9/",
         )
+
+    def test_action_path_interpolates_managed_resource_id(self):
+        reconciler = MODULE.ConfigurationReconciler(self.client)
+        resource = MODULE.ResourceState(
+            "project.demo",
+            "/api/v2/projects/",
+            {"id": 42, "url": "/api/v2/projects/42/"},
+            "unchanged",
+        )
+        spec = {
+            "actions": [
+                {
+                    "path": "/api/v2/eda/project-sources/{id}/sync/",
+                    "method": "POST",
+                    "when": "always",
+                }
+            ]
+        }
+
+        with mock.patch.object(self.client, "request", return_value={}) as request:
+            reconciler._run_actions(spec, resource)
+
+        request.assert_called_once_with("POST", "/api/v2/eda/project-sources/42/sync/", {})
 
     def test_check_mode_does_not_query_synthetic_parent_related_endpoint(self):
         manifest = {

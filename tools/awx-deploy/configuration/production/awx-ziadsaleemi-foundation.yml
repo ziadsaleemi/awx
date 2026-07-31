@@ -176,6 +176,9 @@ resources:
       - path: update
         method: POST
         when: created
+      - path: /api/v2/eda/project-sources/{id}/sync/
+        method: POST
+        when: always
 
   - key: eda.decision_environment.demo
     endpoint: /api/v2/eda/decision-environments/
@@ -185,20 +188,6 @@ resources:
       name: Capstan Demo Decision Environment
       description: Runtime for deterministic Capstan EDA integration demonstrations.
       image_url: quay.io/ansible/ansible-rulebook:latest
-
-  - key: eda.project.integrations_demo
-    endpoint: /api/v2/eda/projects/
-    match:
-      name: Capstan Integrations Demo
-    data:
-      name: Capstan Integrations Demo
-      description: Source-controlled EDA rulebooks shared with Galaxy NG, Gatekeeper, and Project Quay demos.
-      url: https://github.com/ziadsaleemi/capstan-integrations-demo.git
-      verify_ssl: true
-    actions:
-      - path: sync
-        method: POST
-        when: changed
 
   - key: inventory.vsphere
     endpoint: inventories

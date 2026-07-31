@@ -98,8 +98,8 @@ interface IOptionCertificateAction extends IOptionActionBase {
 
 interface IOptionChoiceAction extends IOptionActionBase {
   type: 'choice';
-  default: string;
-  choices: [value: string, display_name: string][];
+  default: string | number;
+  choices: [value: string | number, display_name: string][];
 }
 
 interface IOptionDateTimeAction extends IOptionActionBase {
@@ -178,6 +178,14 @@ export function AwxSettingsForm(props: {
       acc[key] = option;
       return acc;
     }, {});
+  const isUiSettings = 'CUSTOM_LOGO' in options || 'CUSTOM_LOGIN_BACKGROUND' in options;
+  const uiSettingKeys = new Set([
+    'CUSTOM_LOGO',
+    'CUSTOM_LOGO_SIZE',
+    'CUSTOM_LOGIN_INFO',
+    'CUSTOM_LOGIN_BACKGROUND',
+  ]);
+  const interfaceOptions = Object.entries(otherOptions).filter(([key]) => !uiSettingKeys.has(key));
 
   function getCategorySlugs(config: Record<string, AwxSettingsOptionsAction>): string[] {
     const slugs = new Set<string>();
@@ -216,11 +224,44 @@ export function AwxSettingsForm(props: {
       {Object.values(props.options).some((option) => option.category_slug === 'ai-assistant') && (
         <OpenAICodexDeviceLogin />
       )}
-      {Object.entries(otherOptions).map(([key, option]) => (
-        <React.Fragment key={key}>
-          <OptionActionsFormInput name={key} option={option} />
-        </React.Fragment>
-      ))}
+      {isUiSettings ? (
+        <>
+          {options.CUSTOM_LOGO && (
+            <PageFormSection title={t('Application header')} singleColumn>
+              <OptionActionsFormInput name="CUSTOM_LOGO" option={options.CUSTOM_LOGO} />
+            </PageFormSection>
+          )}
+          {(options.CUSTOM_LOGIN_INFO || options.CUSTOM_LOGIN_BACKGROUND) && (
+            <PageFormSection title={t('Login screen')} singleColumn>
+              {options.CUSTOM_LOGIN_INFO && (
+                <OptionActionsFormInput
+                  name="CUSTOM_LOGIN_INFO"
+                  option={options.CUSTOM_LOGIN_INFO}
+                />
+              )}
+              {options.CUSTOM_LOGIN_BACKGROUND && (
+                <OptionActionsFormInput
+                  name="CUSTOM_LOGIN_BACKGROUND"
+                  option={options.CUSTOM_LOGIN_BACKGROUND}
+                />
+              )}
+            </PageFormSection>
+          )}
+          {interfaceOptions.length > 0 && (
+            <PageFormSection title={t('Interface behavior')}>
+              {interfaceOptions.map(([key, option]) => (
+                <OptionActionsFormInput key={key} name={key} option={option} />
+              ))}
+            </PageFormSection>
+          )}
+        </>
+      ) : (
+        Object.entries(otherOptions).map(([key, option]) => (
+          <React.Fragment key={key}>
+            <OptionActionsFormInput name={key} option={option} />
+          </React.Fragment>
+        ))
+      )}
       {Object.keys(booleanOptions).length > 0 && (
         <FormGroup label={t('Options')} isStack role="group">
           {Object.entries(booleanOptions).map(([key, option]) => {
@@ -289,17 +330,33 @@ export function OptionActionsFormInput(props: { name: string; option: AwxSetting
 
   if (props.name === 'CUSTOM_LOGO') {
     return (
-      <PageFormSection singleColumn>
-        <AwxLogoUpload name={props.name} label={option.label} helpText={option.help_text} />
-      </PageFormSection>
+      <AwxLogoUpload
+        name={props.name}
+        sizeName="CUSTOM_LOGO_SIZE"
+        label={option.label}
+        helpText={option.help_text}
+      />
     );
   }
 
+  if (props.name === 'CUSTOM_LOGO_SIZE') return null;
+
   if (props.name === 'CUSTOM_LOGIN_BACKGROUND') {
+    return <AwxBgImageUpload name={props.name} label={option.label} helpText={option.help_text} />;
+  }
+
+  if (props.name === 'CUSTOM_LOGIN_INFO') {
     return (
-      <PageFormSection singleColumn>
-        <AwxBgImageUpload name={props.name} label={option.label} helpText={option.help_text} />
-      </PageFormSection>
+      <PageFormTextArea
+        label={option.label}
+        name={props.name}
+        labelHelpTitle={option.label}
+        labelHelp={option.help_text}
+        defaultValue={option.default as string | undefined}
+        enableUndo={!isReadOnly}
+        enableReset={!isReadOnly}
+        isReadOnly={isReadOnly}
+      />
     );
   }
 

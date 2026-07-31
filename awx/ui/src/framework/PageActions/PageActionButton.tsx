@@ -1,5 +1,5 @@
 import { Button, ButtonVariant, Tooltip } from '@patternfly/react-core';
-import { ComponentClass, Fragment, FunctionComponent } from 'react';
+import { ComponentClass, Fragment, FunctionComponent, ReactElement, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useID } from '../hooks/useID';
 import {
@@ -75,7 +75,7 @@ export function PageActionButton<T extends object>(props: {
     variant = ButtonVariant.plain;
   }
 
-  let to: string;
+  let to = '';
   if (action.type === PageActionType.Link) {
     switch (action.selection) {
       case PageActionSelection.None:
@@ -94,41 +94,55 @@ export function PageActionButton<T extends object>(props: {
 
   const id = useID(action);
   const content = iconOnly && Icon ? <Icon /> : action.label;
+  const tooltipTriggerRef = useRef<HTMLElement>(null);
+  const linkProps =
+    action.type === PageActionType.Link
+      ? {
+          component: Link,
+          to,
+        }
+      : {};
 
-  return (
-    <Wrapper>
-      <Tooltip content={tooltip} trigger={tooltip ? undefined : 'manual'}>
-        <Button
-          id={id}
-          data-cy={id}
-          variant={variant}
-          isDanger={action.isDanger}
-          icon={Icon ? <Icon /> : undefined}
-          isAriaDisabled={isButtonDisabled}
-          onClick={() => {
-            if (action.type !== PageActionType.Link) {
-              switch (action.selection) {
-                case PageActionSelection.None:
-                  action.onClick();
-                  break;
-                case PageActionSelection.Single:
-                  if (selectedItem) action.onClick(selectedItem);
-                  break;
-                case PageActionSelection.Multiple:
-                  if (selectedItems) action.onClick(selectedItems);
-                  break;
-              }
-            }
-          }}
-          aria-label={iconOnly ? action.label : ''}
-          ouiaId={id}
-          component={
-            action.type === PageActionType.Link ? (p) => <Link {...p} to={to} /> : undefined
+  const button = (
+    <Button
+      ref={tooltip ? tooltipTriggerRef : undefined}
+      {...linkProps}
+      id={id}
+      data-cy={id}
+      variant={variant}
+      isDanger={action.isDanger}
+      icon={Icon ? <Icon /> : undefined}
+      isAriaDisabled={isButtonDisabled}
+      onClick={() => {
+        if (action.type !== PageActionType.Link) {
+          switch (action.selection) {
+            case PageActionSelection.None:
+              action.onClick();
+              break;
+            case PageActionSelection.Single:
+              if (selectedItem) action.onClick(selectedItem);
+              break;
+            case PageActionSelection.Multiple:
+              if (selectedItems) action.onClick(selectedItems);
+              break;
           }
-        >
-          {content}
-        </Button>
-      </Tooltip>
-    </Wrapper>
+        }
+      }}
+      aria-label={iconOnly ? action.label : ''}
+      ouiaId={id}
+    >
+      {content}
+    </Button>
   );
+
+  let actionContent: ReactElement = button;
+  if (tooltip) {
+    actionContent = (
+      <Tooltip content={tooltip} triggerRef={tooltipTriggerRef}>
+        {button}
+      </Tooltip>
+    );
+  }
+
+  return <Wrapper>{actionContent}</Wrapper>;
 }

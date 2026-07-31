@@ -1,14 +1,20 @@
 import requests
 import logging
 import urllib.parse as urlparse
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
+from django.db.models import Count, Q, Sum
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.translation import gettext_lazy as _
 from django.utils import translation
 
 from awx.api.generics import APIView, Response
 from awx.api.permissions import AnalyticsPermission
 from awx.api.versioning import reverse
+from awx.main import models
+from awx.main.access import get_user_queryset
 from awx.main.utils import get_awx_version, set_environ
 from awx.main.utils.analytics_proxy import OIDCClient
 from rest_framework import status
@@ -31,6 +37,10 @@ ERROR_UNKNOWN = "unknown"
 ERROR_UNSUPPORTED_METHOD = "unsupported-method"
 
 logger = logging.getLogger('awx.api.views.analytics')
+
+ROI_MANUAL_HOURLY_COST = 75.0
+ROI_AUTOMATION_HOURLY_COST = 10.0
+ROI_MANUAL_EFFORT_MINUTES = 60.0
 
 
 class MissingSettings(Exception):
@@ -349,6 +359,208 @@ class AnalyticsProbeTemplateForHostsList(GetNotAllowedMixin, AnalyticsGenericLis
     resource_purpose = 'automation analytics probe templates for hosts'
 
 
-class AnalyticsRoiTemplatesList(GetNotAllowedMixin, AnalyticsGenericListView):
+def _integer_list(value):
+    if not isinstance(value, (list, tuple)):
+        return []
+    parsed = []
+    for item in value:
+        try:
+            parsed.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
+def _apply_roi_date_filter(queryset, data):
+    quick_date_range = data.get('quick_date_range', 'roi_last_year')
+    now = timezone.now()
+    ranges = {
+        'roi_last_30_days': timedelta(days=30),
+        'roi_last_90_days': timedelta(days=90),
+        'roi_last_year': timedelta(days=365),
+    }
+    if quick_date_range in ranges:
+        return queryset.filter(finished__gte=now - ranges[quick_date_range])
+    if quick_date_range == 'roi_custom':
+        start_date = _parse_roi_datetime(data.get('start_date'), end_of_day=False)
+        end_date = _parse_roi_datetime(data.get('end_date'), end_of_day=True)
+        if start_date:
+            queryset = queryset.filter(finished__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(finished__lte=end_date)
+    return queryset
+
+
+def _parse_roi_datetime(value, *, end_of_day):
+    if not value:
+        return None
+    parsed_date = parse_date(value)
+    if parsed_date and len(value) == 10:
+        parsed = datetime.combine(parsed_date, time.max if end_of_day else time.min)
+    else:
+        parsed = parse_datetime(value)
+    if parsed is not None and timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed)
+    return parsed
+
+
+def _roi_job_queryset(request, data=None):
+    data = data or {}
+    queryset = (
+        get_user_queryset(request.user, models.Job)
+        .filter(job_template__isnull=False, finished__isnull=False)
+        .exclude(status__in=('new', 'pending', 'waiting', 'running'))
+    )
+    queryset = _apply_roi_date_filter(queryset, data)
+    filters = {
+        'organization_id__in': _integer_list(data.get('org_id')),
+        'inventory_id__in': _integer_list(data.get('inventory_id')),
+        'job_template_id__in': _integer_list(data.get('template_id')),
+        'instance_group_id__in': _integer_list(data.get('cluster_id')),
+    }
+    for field, values in filters.items():
+        if values:
+            queryset = queryset.filter(**{field: values})
+    return queryset
+
+
+class AnalyticsRoiTemplatesOptionsList(APIView):
+    permission_classes = (AnalyticsPermission,)
+    name = _("ROI Template Options")
+    resource_purpose = 'local automation calculator filter and sort options'
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Get local automation calculator filter and sort options"})
+    def post(self, request, format=None):
+        queryset = _roi_job_queryset(request, {'quick_date_range': 'roi_all_time'})
+
+        def options(*fields):
+            id_field, name_field = fields
+            return [
+                {'key': str(item[id_field]), 'value': item[name_field]}
+                for item in queryset.exclude(**{f'{id_field}__isnull': True}).values(id_field, name_field).distinct().order_by(name_field, id_field)
+            ]
+
+        return Response(
+            {
+                'org_id': options('organization_id', 'organization__name'),
+                'cluster_id': options('instance_group_id', 'instance_group__name'),
+                'template_id': options('job_template_id', 'job_template__name'),
+                'inventory_id': options('inventory_id', 'inventory__name'),
+                'quick_date_range': [
+                    {'key': 'roi_last_30_days', 'value': _('Last 30 days')},
+                    {'key': 'roi_last_90_days', 'value': _('Last 90 days')},
+                    {'key': 'roi_last_year', 'value': _('Last 12 months')},
+                    {'key': 'roi_all_time', 'value': _('All time')},
+                    {'key': 'roi_custom', 'value': _('Custom date range')},
+                ],
+                'sort_options': [
+                    {'key': 'monetary_gain', 'value': _('Estimated savings')},
+                    {'key': 'successful_hosts_savings', 'value': _('Successful host savings')},
+                    {'key': 'failed_hosts_costs', 'value': _('Failed host costs')},
+                    {'key': 'host_count', 'value': _('Host runs')},
+                    {'key': 'total_count', 'value': _('Job runs')},
+                    {'key': 'elapsed', 'value': _('Elapsed time')},
+                    {'key': 'template_success_rate', 'value': _('Success rate')},
+                ],
+            }
+        )
+
+
+class AnalyticsRoiTemplatesList(GetNotAllowedMixin, APIView):
+    permission_classes = (AnalyticsPermission,)
     name = _("ROI Templates")
-    resource_purpose = 'automation analytics roi templates'
+    resource_purpose = 'local automation calculator data'
+
+    @extend_schema_if_available(extensions={"x-ai-description": "Calculate automation ROI from locally visible job runs"})
+    def post(self, request, format=None):
+        queryset = _roi_job_queryset(request, request.data)
+        rows = list(
+            queryset.values('job_template_id', 'job_template__name')
+            .annotate(
+                elapsed_total=Sum('elapsed'),
+                host_count_total=Sum('task_impact'),
+                total_count=Count('id'),
+                total_org_count=Count('organization_id', distinct=True),
+                total_cluster_count=Count('instance_group_id', distinct=True),
+                total_inventory_count=Count('inventory_id', distinct=True),
+                successful_count=Count('id', filter=Q(status='successful')),
+                successful_hosts_total=Sum('task_impact', filter=Q(status='successful')),
+                successful_elapsed_total=Sum('elapsed', filter=Q(status='successful')),
+                failed_elapsed_total=Sum('elapsed', filter=Q(status__in=('failed', 'error'))),
+            )
+            .order_by()
+        )
+
+        results = []
+        for row in rows:
+            total_count = row['total_count'] or 0
+            successful_count = row['successful_count'] or 0
+            successful_hosts_total = row['successful_hosts_total'] or successful_count
+            successful_elapsed_total = float(row['successful_elapsed_total'] or 0)
+            failed_elapsed_total = float(row['failed_elapsed_total'] or 0)
+            manual_hours = successful_hosts_total * ROI_MANUAL_EFFORT_MINUTES / 60
+            successful_hosts_savings = max(
+                0,
+                manual_hours * ROI_MANUAL_HOURLY_COST - successful_elapsed_total / 3600 * ROI_AUTOMATION_HOURLY_COST,
+            )
+            failed_hosts_costs = failed_elapsed_total / 3600 * ROI_AUTOMATION_HOURLY_COST
+            results.append(
+                {
+                    'id': row['job_template_id'],
+                    'name': row['job_template__name'],
+                    'elapsed': float(row['elapsed_total'] or 0),
+                    'host_count': row['host_count_total'] or total_count,
+                    'total_count': total_count,
+                    'total_org_count': row['total_org_count'] or 0,
+                    'total_cluster_count': row['total_cluster_count'] or 0,
+                    'total_inventory_count': row['total_inventory_count'] or 0,
+                    'successful_hosts_total': successful_hosts_total,
+                    'successful_elapsed_total': successful_elapsed_total,
+                    'template_success_rate': successful_count / total_count * 100 if total_count else 0,
+                    'successful_hosts_savings': successful_hosts_savings,
+                    'failed_hosts_costs': failed_hosts_costs,
+                    'manual_effort_minutes': ROI_MANUAL_EFFORT_MINUTES,
+                    'monetary_gain': successful_hosts_savings - failed_hosts_costs,
+                    'enabled': True,
+                }
+            )
+
+        allowed_sort_fields = {
+            'elapsed',
+            'host_count',
+            'total_count',
+            'successful_hosts_savings',
+            'failed_hosts_costs',
+            'monetary_gain',
+            'template_success_rate',
+        }
+        sort_field = request.data.get('sort_options', 'monetary_gain')
+        if sort_field not in allowed_sort_fields:
+            sort_field = 'monetary_gain'
+        reverse_sort = request.data.get('sort_order', 'desc') == 'desc'
+        results.sort(key=lambda item: item['name'].lower())
+        results.sort(key=lambda item: item[sort_field], reverse=reverse_sort)
+
+        try:
+            limit = max(1, min(int(request.data.get('limit', 10)), 200))
+        except (TypeError, ValueError):
+            limit = 10
+        try:
+            offset = max(0, int(request.data.get('offset', 0)))
+        except (TypeError, ValueError):
+            offset = 0
+
+        page = results[offset : offset + limit]
+        current_page_savings = sum(item['monetary_gain'] for item in page)
+        total_savings = sum(item['monetary_gain'] for item in results)
+        return Response(
+            {
+                'meta': {'count': len(results), 'legend': page},
+                'monetary_gain_current_page': current_page_savings,
+                'monetary_gain_other_pages': total_savings - current_page_savings,
+                'cost': {
+                    'hourly_manual_labor_cost': ROI_MANUAL_HOURLY_COST,
+                    'hourly_automation_cost': ROI_AUTOMATION_HOURLY_COST,
+                },
+            }
+        )

@@ -22,6 +22,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 import requests
+from social_core.backends.utils import load_backends
 
 from ansible_base.lib.utils.schema import extend_schema_if_available
 
@@ -59,9 +60,14 @@ class ApiRootView(APIView):
         data['current_version'] = v2
         data['available_versions'] = dict(v2=v2)
         data['custom_logo'] = settings.CUSTOM_LOGO
+        data['custom_logo_size'] = settings.CUSTOM_LOGO_SIZE
         data['custom_login_info'] = settings.CUSTOM_LOGIN_INFO
         data['custom_login_background'] = settings.CUSTOM_LOGIN_BACKGROUND
         data['login_redirect_override'] = settings.LOGIN_REDIRECT_OVERRIDE
+        password_auth_methods = ['local']
+        if any(backend.startswith('awx.sso.backends.LDAPBackend') for backend in settings.AUTHENTICATION_BACKENDS):
+            password_auth_methods.append('ldap')
+        data['password_auth_methods'] = password_auth_methods
         return Response(data)
 
 
@@ -149,14 +155,16 @@ class ApiV2AuthView(APIView):
 
     def get(self, request, format=None):
         data = OrderedDict()
-        for backend in getattr(settings, 'AUTHENTICATION_BACKENDS', []):
-            # Only include social-auth backends
-            if not ('social_core.backends' in backend):
-                continue
-            # Derive backend name from class path (last segment, lowercase)
-            backend_name = backend.rsplit('.', 1)[-1].lower()
+        backend_labels = {
+            'azuread-oauth2': _('Microsoft Entra ID (multi-tenant)'),
+            'azuread-tenant-oauth2': _('Microsoft Entra ID'),
+        }
+        for backend_name in load_backends(getattr(settings, 'AUTHENTICATION_BACKENDS', []), force_load=True):
             login_url = '/sso/login/{}/'.format(backend_name)
-            data[backend_name] = {'login_url': login_url}
+            data[backend_name] = {
+                'login_url': login_url,
+                'name': backend_labels.get(backend_name, ''),
+            }
         return Response(data)
 
 
@@ -371,6 +379,7 @@ class ApiV2ConfigView(APIView):
             analytics_collectors=all_collectors(),
             become_methods=PRIVILEGE_ESCALATION_METHODS,
             custom_logo=settings.CUSTOM_LOGO,
+            custom_logo_size=settings.CUSTOM_LOGO_SIZE,
             custom_login_info=settings.CUSTOM_LOGIN_INFO,
             modules={
                 'eda': {

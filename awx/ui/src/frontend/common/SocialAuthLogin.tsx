@@ -40,6 +40,7 @@ export function SocialAuthLogin(props: SocialAuthLoginProps) {
 
 const icons: { [key: string]: typeof GithubIcon } = {
   'azuread-oauth2': AzureIcon,
+  'azuread-tenant-oauth2': AzureIcon,
   github: GithubIcon,
   'github-org': GithubIcon,
   'github-team': GithubIcon,
@@ -56,7 +57,8 @@ function SocialAuthLink(props: { option: AuthOption }) {
   const { t } = useTranslation();
 
   const labels: { [key: string]: string } = {
-    'azuread-oauth2': t('Azure AD'),
+    'azuread-oauth2': t('Microsoft Entra ID (multi-tenant)'),
+    'azuread-tenant-oauth2': t('Microsoft Entra ID'),
     github: t('GitHub'),
     'github-org': t('GitHub Organizations'),
     'github-team': t('Github Teams'),

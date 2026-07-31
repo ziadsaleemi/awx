@@ -1,23 +1,23 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
-  Button,
   Checkbox,
-  Form,
   FormGroup,
   FormSelect,
   FormSelectOption,
-  Modal,
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
-import { usePageAlertToaster } from '../../../../framework';
+import { PageForm, PageHeader, PageLayout, usePageAlertToaster } from '../../../../framework';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useGet } from '../../../common/crud/useGet';
 import { usePostRequest } from '../../../common/crud/usePostRequest';
 import { EdaActivationActionResponse } from '../../interfaces/EdaActivation';
+import { useAwxActiveUser } from '../../common/useAwxActiveUser';
+import { useAwxNavigationCapabilities } from '../../main/awxNavigationCapabilities';
 
 export interface EdaActivationStartRulebook {
   id?: number | string;
@@ -42,21 +42,19 @@ interface EdaActivationStartResource {
   kind?: string;
 }
 
-export function EdaActivationStartModal(props: {
-  canCreateActivation: boolean;
-  initialRulebook?: EdaActivationStartRulebook;
-  onClose: () => void;
-  onStarted: () => Promise<void>;
-}) {
+export function EdaActivationStartPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const alertToaster = usePageAlertToaster();
   const postRequest = usePostRequest<Record<string, unknown>, EdaActivationActionResponse>();
-  const initialRulebookId =
-    props.initialRulebook?.id !== undefined && props.initialRulebook?.id !== null
-      ? String(props.initialRulebook.id)
-      : '';
-  const initialRulebookName = resourceName(props.initialRulebook);
-  const [rulebookName, setRulebookName] = useState(initialRulebookName);
+  const { activeAwxUser } = useAwxActiveUser();
+  const capabilities = useAwxNavigationCapabilities(activeAwxUser);
+  const canOperateEda = Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canOperateEda);
+  const canCreateActivation =
+    Boolean(activeAwxUser?.is_superuser) || Boolean(capabilities.canManageEda);
+  const initialRulebookId = searchParams.get('rulebook') ?? '';
+  const [rulebookName, setRulebookName] = useState('');
   const [rulebookId, setRulebookId] = useState(initialRulebookId);
   const [activationName, setActivationName] = useState('');
   const [activationId, setActivationId] = useState('');
@@ -74,39 +72,34 @@ export function EdaActivationStartModal(props: {
   const { data: rulebooks, isLoading: rulebooksLoading } = useGet<
     AwxItemsResponse<EdaActivationStartResource>
   >(
-    props.canCreateActivation ? awxAPI`/eda/rulebooks/` : undefined,
+    canCreateActivation ? awxAPI`/eda/rulebooks/` : undefined,
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
   const { data: decisionEnvironments, isLoading: decisionEnvironmentsLoading } = useGet<
     AwxItemsResponse<EdaActivationStartResource>
   >(
-    props.canCreateActivation ? awxAPI`/eda/decision-environments/` : undefined,
+    canCreateActivation ? awxAPI`/eda/decision-environments/` : undefined,
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
   const { data: credentials, isLoading: credentialsLoading } = useGet<
     AwxItemsResponse<EdaActivationStartResource>
   >(
-    props.canCreateActivation ? awxAPI`/eda/credentials/` : undefined,
+    canCreateActivation ? awxAPI`/eda/credentials/` : undefined,
     { page_size: 200, order_by: 'name' },
     { revalidateOnFocus: false }
   );
 
   const rulebookOptions = useMemo(() => {
-    const options = [...(rulebooks?.results ?? [])];
-    if (
-      props.initialRulebook &&
-      initialRulebookId &&
-      !options.some((option) => String(option.id) === initialRulebookId)
-    ) {
-      options.unshift({
-        id: initialRulebookId,
-        name: initialRulebookName,
-      });
-    }
-    return options;
-  }, [initialRulebookId, initialRulebookName, props.initialRulebook, rulebooks?.results]);
+    return [...(rulebooks?.results ?? [])];
+  }, [rulebooks?.results]);
+
+  useEffect(() => {
+    if (!initialRulebookId || rulebookName) return;
+    const selected = rulebookOptions.find((option) => String(option.id) === initialRulebookId);
+    if (selected) setRulebookName(resourceName(selected));
+  }, [initialRulebookId, rulebookName, rulebookOptions]);
 
   const credentialOptions = credentials?.results ?? [];
   const regularCredentials = credentialOptions.filter(
@@ -115,6 +108,21 @@ export function EdaActivationStartModal(props: {
   const ruleEngineCredentials = credentialOptions.filter(isRuleEngineCredential);
 
   const submit = async () => {
+    if (!canOperateEda) return;
+    if (!canCreateActivation && !activationId.trim()) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Activation ID is required'),
+      });
+      return;
+    }
+    if (canCreateActivation && !rulebookName.trim() && !activationId.trim() && !rulebookId) {
+      alertToaster.addAlert({
+        variant: 'danger',
+        title: t('Select a rulebook or enter an activation ID'),
+      });
+      return;
+    }
     let parsedExtraData: Record<string, unknown> = {};
     try {
       parsedExtraData = extraData.trim() ? (JSON.parse(extraData) as Record<string, unknown>) : {};
@@ -149,13 +157,17 @@ export function EdaActivationStartModal(props: {
 
     setIsSubmitting(true);
     try {
-      await postRequest(awxAPI`/eda/activations/start/`, payload);
+      const response = await postRequest(awxAPI`/eda/activations/start/`, payload);
       alertToaster.addAlert({
         variant: 'success',
         title: t('EDA activation start requested'),
         timeout: 4000,
       });
-      await props.onStarted();
+      if (response.activation?.id) {
+        navigate(`/eda/activations/${String(response.activation.id)}`);
+      } else {
+        navigate('/eda/activations');
+      }
     } catch (err) {
       alertToaster.addAlert({
         variant: 'danger',
@@ -167,37 +179,44 @@ export function EdaActivationStartModal(props: {
     }
   };
 
-  const createDisabledReason = !props.canCreateActivation
+  const createDisabledReason = !canCreateActivation
     ? t('You need EDA administrator permissions to create activations.')
     : undefined;
-  const startDisabled =
-    isSubmitting ||
-    (!props.canCreateActivation && !activationId.trim()) ||
-    (props.canCreateActivation && !rulebookName.trim() && !activationId.trim() && !rulebookId);
+  if (!canOperateEda) {
+    return (
+      <PageLayout>
+        <PageHeader
+          title={t('Create/start EDA activation')}
+          breadcrumbs={[
+            { label: t('Rulebook Activations'), to: '/eda/activations' },
+            { label: t('Create') },
+          ]}
+        />
+        <Alert
+          isInline
+          variant="warning"
+          title={t('You need EDA operator or administrator permissions to start activations.')}
+          style={{ margin: 24 }}
+        />
+      </PageLayout>
+    );
+  }
 
   return (
-    <Modal
-      title={t('Create/start EDA activation')}
-      isOpen
-      onClose={props.onClose}
-      variant="medium"
-      actions={[
-        <Button
-          key="start"
-          variant="primary"
-          isLoading={isSubmitting}
-          isDisabled={startDisabled}
-          onClick={() => void submit()}
-        >
-          {t('Start')}
-        </Button>,
-        <Button key="cancel" variant="link" onClick={props.onClose}>
-          {t('Cancel')}
-        </Button>,
-      ]}
-    >
-      <Form>
-        {!props.canCreateActivation && (
+    <PageLayout>
+      <PageHeader
+        title={t('Create/start EDA activation')}
+        breadcrumbs={[
+          { label: t('Rulebook Activations'), to: '/eda/activations' },
+          { label: t('Create') },
+        ]}
+      />
+      <PageForm<Record<string, never>>
+        submitText={isSubmitting ? t('Starting...') : t('Start')}
+        onSubmit={submit}
+        onCancel={() => navigate('/eda/activations')}
+      >
+        {!canCreateActivation && (
           <Alert
             isInline
             variant="info"
@@ -208,7 +227,7 @@ export function EdaActivationStartModal(props: {
           <FormSelect
             id="eda-rulebook-select"
             value={rulebookId}
-            isDisabled={!props.canCreateActivation}
+            isDisabled={!canCreateActivation}
             onChange={(_, value) => {
               setRulebookId(value);
               const selected = rulebookOptions.find((option) => String(option.id) === value);
@@ -232,7 +251,7 @@ export function EdaActivationStartModal(props: {
           <TextInput
             id="eda-rulebook-name"
             value={rulebookName}
-            isDisabled={!props.canCreateActivation}
+            isDisabled={!canCreateActivation}
             onChange={(_, value) => setRulebookName(value)}
           />
         </FormGroup>
@@ -240,7 +259,7 @@ export function EdaActivationStartModal(props: {
           <TextInput
             id="eda-activation-name"
             value={activationName}
-            isDisabled={!props.canCreateActivation}
+            isDisabled={!canCreateActivation}
             onChange={(_, value) => setActivationName(value)}
           />
         </FormGroup>
@@ -255,7 +274,7 @@ export function EdaActivationStartModal(props: {
           <FormSelect
             id="eda-decision-environment"
             value={decisionEnvironmentId}
-            isDisabled={!props.canCreateActivation}
+            isDisabled={!canCreateActivation}
             onChange={(_, value) => setDecisionEnvironmentId(value)}
           >
             <FormSelectOption
@@ -285,7 +304,7 @@ export function EdaActivationStartModal(props: {
                 id={`eda-credential-${String(credential.id)}`}
                 label={resourceLabel(credential, credentialTypeName(credential))}
                 isChecked={edaCredentialIds.includes(Number(credential.id))}
-                isDisabled={!props.canCreateActivation}
+                isDisabled={!canCreateActivation}
                 onChange={(_, checked) =>
                   setEdaCredentialIds((current) =>
                     checked
@@ -303,7 +322,7 @@ export function EdaActivationStartModal(props: {
           <FormSelect
             id="eda-log-level"
             value={logLevel}
-            isDisabled={!props.canCreateActivation}
+            isDisabled={!canCreateActivation}
             onChange={(_, value) => setLogLevel(value)}
           >
             <FormSelectOption value="" label={t('Use controller default')} />
@@ -343,7 +362,7 @@ export function EdaActivationStartModal(props: {
           id="eda-enable-persistence"
           label={t('Enable event persistence')}
           isChecked={enablePersistence}
-          isDisabled={!props.canCreateActivation}
+          isDisabled={!canCreateActivation}
           onChange={(_, checked) => setEnablePersistence(checked)}
         />
         {enablePersistence && (
@@ -351,7 +370,7 @@ export function EdaActivationStartModal(props: {
             <FormSelect
               id="eda-rule-engine-credential"
               value={ruleEngineCredentialId}
-              isDisabled={!props.canCreateActivation}
+              isDisabled={!canCreateActivation}
               onChange={(_, value) => setRuleEngineCredentialId(value)}
             >
               <FormSelectOption value="" label={t('Use controller default')} />
@@ -366,8 +385,8 @@ export function EdaActivationStartModal(props: {
           </FormGroup>
         )}
         {createDisabledReason && <Alert isInline variant="warning" title={createDisabledReason} />}
-      </Form>
-    </Modal>
+      </PageForm>
+    </PageLayout>
   );
 }
 

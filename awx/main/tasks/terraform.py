@@ -42,6 +42,7 @@ from awx.main.models.terraform import TerraformJob
 from awx.main.tasks.jobs import AWX_DEFAULT_REMOTE_TMP, RunProjectUpdate, SourceControlMixin, with_path_cleanup
 from awx.main.tasks.signals import signal_callback, with_signal_handling
 from awx.main.tasks.terraform_credentials import TerraformProviderInjector
+from awx.main.utils.terraform_state import TerraformGitStateStore, TerraformStateError
 
 logger = logging.getLogger('awx.main.tasks.terraform')
 
@@ -547,6 +548,23 @@ class RunTerraformJob(SourceControlMixin):
             raise
         return proc.returncode, ''.join(output_lines)
 
+    def _resolve_terraform_ee(self, instance, private_data_dir=None):
+        if not private_data_dir:
+            return None
+
+        # Docker Compose development deliberately runs jobs without execution
+        # environments. Nested rootless Podman cannot reliably exec containers
+        # under Docker Desktop, so use the Terraform CLI baked into the dev
+        # image when the same AWX_DISABLE_EE escape hatch used by Ansible jobs
+        # is active. Production deployments continue to honor configured EEs.
+        if os.environ.get('AWX_DISABLE_EE') and shutil.which('terraform'):
+            return None
+
+        ee = instance.resolve_execution_environment()
+        if ee is None and shutil.which('terraform') is None:
+            return _DefaultTerraformEE()
+        return ee
+
     def _run_terraform(self, instance, working_dir, env, private_data_dir=None):
         """
         Execute the full Terraform sequence for the requested operation.
@@ -562,17 +580,7 @@ class RunTerraformJob(SourceControlMixin):
         timeout = self.get_instance_timeout(instance)
         prefix = instance.log_format
         output_parts = []
-        # Use the explicitly-configured EE when one is set.  When none is
-        # configured, fall back to the containerised hashicorp/terraform image
-        # only if ``terraform`` is not already available on PATH — this avoids
-        # podman-in-Docker issues on environments (e.g. Docker Desktop on
-        # Apple Silicon) where the nested container runtime cannot exec processes.
-        if private_data_dir:
-            ee = instance.resolve_execution_environment()
-            if ee is None and shutil.which('terraform') is None:
-                ee = _DefaultTerraformEE()
-        else:
-            ee = None
+        ee = self._resolve_terraform_ee(instance, private_data_dir=private_data_dir)
 
         # Plan binary lives in a temp dir on the HOST (or inside the container
         # via the /runner mount when EE is active).
@@ -653,12 +661,7 @@ class RunTerraformJob(SourceControlMixin):
     # ------------------------------------------------------------------
 
     def _resolve_output_ee(self, instance, private_data_dir=None):
-        if not private_data_dir:
-            return None
-        ee = instance.resolve_execution_environment()
-        if ee is None and shutil.which('terraform') is None:
-            ee = _DefaultTerraformEE()
-        return ee
+        return self._resolve_terraform_ee(instance, private_data_dir=private_data_dir)
 
     def _parse_terraform_output_json(self, text):
         try:
@@ -955,6 +958,12 @@ class RunTerraformJob(SourceControlMixin):
         private_data_dir = None
         plan_tmpdir = None
         combined_output = ''
+        state_output = []
+        state_store = None
+
+        def emit_state(message):
+            state_output.append(message)
+            self._write_event(message)
 
         try:
             # 3. Private data dir + project sync
@@ -981,15 +990,32 @@ class RunTerraformJob(SourceControlMixin):
             if not os.path.isdir(working_dir):
                 raise RuntimeError(f'Terraform directory does not exist: {working_dir}')
 
-            local_state_warning = self._local_state_warning_message(
-                working_dir,
-                self.instance.terraform_operation,
-            )
-            if local_state_warning:
-                warning_text = local_state_warning + '\n'
-                combined_output += warning_text + '\n'
-                logger.warning('%s %s', self.instance.log_format, local_state_warning)
-                self._write_event(warning_text)
+            backend_kind = self._root_terraform_backend_kind(working_dir)
+            if self.instance.state_backend == 'git':
+                if backend_kind != 'local':
+                    raise TerraformStateError(
+                        'Capstan managed Git state can only be used when the Terraform '
+                        'root module uses the local backend. Remove the remote backend '
+                        'block or select "Terraform configuration" state management.'
+                    )
+                state_store = TerraformGitStateStore(
+                    self.instance,
+                    private_data_dir,
+                    working_dir,
+                    emit=emit_state,
+                )
+                state_store.acquire()
+                state_store.prepare()
+            else:
+                local_state_warning = self._local_state_warning_message(
+                    working_dir,
+                    self.instance.terraform_operation,
+                )
+                if local_state_warning:
+                    warning_text = local_state_warning + '\n'
+                    combined_output += warning_text + '\n'
+                    logger.warning('%s %s', self.instance.log_format, local_state_warning)
+                    self._write_event(warning_text)
 
             # 5. Write tfvars
             self._write_tfvars(self.instance, working_dir)
@@ -1003,12 +1029,21 @@ class RunTerraformJob(SourceControlMixin):
             )
 
             # 7. Run Terraform
-            rc, combined_output, plan_tmpdir = self._run_terraform(self.instance, working_dir, env, private_data_dir=private_data_dir)
+            rc, terraform_output, plan_tmpdir = self._run_terraform(
+                self.instance,
+                working_dir,
+                env,
+                private_data_dir=private_data_dir,
+            )
+            combined_output += terraform_output
             if plan_tmpdir:
                 self.cleanup_paths.append(plan_tmpdir)
                 plan_tmpdir = None  # ownership transferred to cleanup_paths
 
             status = 'successful' if rc == 0 else 'failed'
+
+            if state_store:
+                state_store.publish(status)
 
             # 8. Capture artifacts + inventory population (apply only)
             if status == 'successful' and self.instance.terraform_operation == 'apply':
@@ -1018,11 +1053,30 @@ class RunTerraformJob(SourceControlMixin):
 
         except Exception:
             tb = traceback.format_exc()
+            if state_store and os.path.exists(state_store.plaintext_path) and not self.instance.state_revision_written_id:
+                try:
+                    state_store.publish('error')
+                except Exception:
+                    logger.exception(
+                        '%s could not publish managed Terraform state after execution error',
+                        self.instance.log_format,
+                    )
+                    recovery_path = state_store.preserve_recovery_copy()
+                    state_output.append(
+                        'ERROR: Managed Terraform state could not be published after the '
+                        'Terraform error. An encrypted administrator recovery copy was saved' + (f' at {recovery_path}.' if recovery_path else '.') + '\n'
+                    )
             logger.exception(
                 '%s Exception during TerraformJob execution',
                 self.instance.log_format,
             )
             combined_output += '\n\nTraceback:\n' + tb
+        finally:
+            if state_store:
+                state_store.release()
+
+        if state_output:
+            combined_output = ''.join(state_output) + '\n' + combined_output
 
         # 9. Persist status + stdout
         try:

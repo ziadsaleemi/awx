@@ -3,8 +3,6 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
-import { GalaxyNgApiToken } from '../../resources/galaxy/GalaxyNgApiToken';
-import { GalaxyNgOverview } from '../../resources/galaxy/GalaxyNgOverview';
 import { GalaxyNgProjectImports } from '../../resources/galaxy/GalaxyNgProjectImports';
 import { GalaxyNgResourceDetails } from '../../resources/galaxy/GalaxyNgResourceDetails';
 import { GalaxyNgResourceList } from '../../resources/galaxy/GalaxyNgResourceList';
@@ -21,10 +19,9 @@ export function useAwxGalaxyRoutes() {
       icon: <CubesIcon />,
       children: [
         {
-          id: AwxRoute.GalaxyNGOverview,
-          label: t('Overview'),
           path: 'overview',
-          element: <GalaxyNgOverview />,
+          element: <Navigate to="../collections" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.GalaxyNGNamespaces,
@@ -82,9 +79,9 @@ export function useAwxGalaxyRoutes() {
         },
         {
           id: AwxRoute.GalaxyNGApiToken,
-          label: t('API Token'),
           path: 'api-token',
-          element: <GalaxyNgApiToken />,
+          element: <Navigate to="/settings/galaxy-ng" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.GalaxyNGResourceDetails,
@@ -94,7 +91,7 @@ export function useAwxGalaxyRoutes() {
         },
         {
           path: '',
-          element: <Navigate to="overview" replace />,
+          element: <Navigate to="collections" replace />,
         },
       ],
     }),

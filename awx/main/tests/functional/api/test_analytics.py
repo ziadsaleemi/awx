@@ -1,12 +1,16 @@
 import os
 import pytest
 import requests
+from datetime import timedelta
 from unittest import mock
 from awx.api.views.analytics import AnalyticsGenericView, MissingSettings, AUTOMATION_ANALYTICS_API_URL_PATH, ERROR_MISSING_USER, ERROR_MISSING_PASSWORD
+from awx.api.versioning import reverse
 from django.test.utils import override_settings
 from django.test import RequestFactory
+from django.utils import timezone
 from rest_framework import status
 
+from awx.main import models
 from awx.main.utils import get_awx_version
 from django.utils import translation
 
@@ -258,6 +262,73 @@ class TestAnalyticsGenericView:
                 else:
                     # assert mock_base_auth_request not called
                     mock_base_auth_request.assert_not_called()
+
+
+@pytest.mark.django_db
+class TestLocalAutomationCalculator:
+    def test_options_are_local_and_include_visible_resources(self, post, admin, job_factory):
+        job = job_factory(initial_state='successful')
+        models.Job.objects.filter(pk=job.pk).update(finished=timezone.now(), elapsed=120, task_impact=2)
+
+        response = post(reverse('api:analytics_roi_templates_options'), {}, user=admin, expect=200)
+
+        assert response.data['template_id'] == [{'key': str(job.job_template_id), 'value': job.job_template.name}]
+        assert response.data['org_id'] == [{'key': str(job.organization_id), 'value': job.organization.name}]
+        assert any(option['key'] == 'roi_all_time' for option in response.data['quick_date_range'])
+
+    def test_calculates_roi_from_local_jobs(self, post, admin, job_factory):
+        successful_job = job_factory(initial_state='successful')
+        failed_job = job_factory(initial_state='failed')
+        finished = timezone.now()
+        models.Job.objects.filter(pk=successful_job.pk).update(finished=finished, elapsed=120, task_impact=2)
+        models.Job.objects.filter(pk=failed_job.pk).update(finished=finished, elapsed=60, task_impact=1)
+
+        response = post(
+            reverse('api:analytics_roi_templates_explorer'),
+            {
+                'quick_date_range': 'roi_all_time',
+                'sort_options': 'monetary_gain',
+                'sort_order': 'desc',
+                'limit': 10,
+                'offset': 0,
+            },
+            user=admin,
+            expect=200,
+        )
+
+        assert response.data['meta']['count'] == 1
+        result = response.data['meta']['legend'][0]
+        assert result['id'] == successful_job.job_template_id
+        assert result['elapsed'] == 180
+        assert result['host_count'] == 3
+        assert result['total_count'] == 2
+        assert result['template_success_rate'] == 50
+        assert result['monetary_gain'] == pytest.approx(149.5)
+
+    def test_custom_date_range_accepts_date_only_values(self, post, admin, job_factory):
+        included_job = job_factory(initial_state='successful')
+        excluded_job = job_factory(initial_state='successful')
+        now = timezone.now()
+        models.Job.objects.filter(pk=included_job.pk).update(finished=now, elapsed=60, task_impact=1)
+        models.Job.objects.filter(pk=excluded_job.pk).update(finished=now - timedelta(days=10), elapsed=60, task_impact=1)
+
+        response = post(
+            reverse('api:analytics_roi_templates_explorer'),
+            {
+                'quick_date_range': 'roi_custom',
+                'start_date': (now - timedelta(days=1)).date().isoformat(),
+                'end_date': now.date().isoformat(),
+            },
+            user=admin,
+            expect=200,
+        )
+
+        assert response.data['meta']['count'] == 1
+        assert response.data['meta']['legend'][0]['total_count'] == 1
+
+    def test_rejects_users_without_analytics_permission(self, post, rando):
+        post(reverse('api:analytics_roi_templates_options'), {}, user=rando, expect=403)
+        post(reverse('api:analytics_roi_templates_explorer'), {}, user=rando, expect=403)
 
     @pytest.mark.django_db
     def test__send_to_analytics_respects_proxy_env_oidc(self):

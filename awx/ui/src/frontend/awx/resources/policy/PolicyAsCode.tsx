@@ -8,7 +8,6 @@ import { GatekeeperPolicyManager } from './GatekeeperPolicyManager';
 import type { GatekeeperPolicyManagerView } from './GatekeeperPolicyManager';
 import { OPAPolicyManager } from './OPAPolicyManager';
 import type { OPAPolicyManagerView } from './OPAPolicyManager';
-import { PolicyAsCodeOverview } from './PolicyAsCodeOverview';
 import {
   GatekeeperResourceDetailPage,
   GatekeeperResourceList,
@@ -19,15 +18,14 @@ import {
 } from './PolicyResourcePages';
 
 type PolicyAsCodeView =
-  | 'overview'
   | 'opa-modules'
   | 'opa-module-create'
+  | 'opa-module-edit'
   | 'opa-module-detail'
   | 'opa-decisions'
   | 'opa-decision-detail'
   | 'opa-violations'
   | 'opa-violation-detail'
-  | 'opa-project-sync'
   | 'opa-tester'
   | 'gatekeeper-changes'
   | 'gatekeeper-templates'
@@ -45,7 +43,6 @@ function gatekeeperView(view: PolicyAsCodeView): GatekeeperPolicyManagerView | u
 }
 
 function opaView(view: PolicyAsCodeView): OPAPolicyManagerView | undefined {
-  if (view === 'opa-project-sync') return 'project-sync';
   if (view === 'opa-tester') return 'tester';
   return undefined;
 }
@@ -54,7 +51,6 @@ function policyTitle(view: PolicyAsCodeView, t: ReturnType<typeof useTranslation
   if (view === 'opa-modules') return t('Policy Modules');
   if (view === 'opa-decisions') return t('OPA Decisions');
   if (view === 'opa-violations') return t('OPA Violations');
-  if (view === 'opa-project-sync') return t('OPA Project Sync');
   if (view === 'opa-tester') return t('Policy Tester');
   if (view === 'gatekeeper-changes') return t('Gatekeeper Governed Changes');
   if (view === 'gatekeeper-templates') return t('Gatekeeper ConstraintTemplates');
@@ -74,9 +70,6 @@ function policyDescription(view: PolicyAsCodeView, t: ReturnType<typeof useTrans
   }
   if (view === 'opa-violations') {
     return t('Investigate denied policy checks that blocked protected Capstan actions.');
-  }
-  if (view === 'opa-project-sync') {
-    return t('Preview or apply Rego modules from an existing synced Capstan Project.');
   }
   if (view === 'opa-tester') {
     return t('Evaluate sample input against live OPA decision paths before rollout.');
@@ -121,15 +114,15 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   if (
     (view === 'opa-modules' ||
       view === 'opa-module-create' ||
-      view === 'opa-module-detail' ||
-      view === 'opa-project-sync') &&
+      view === 'opa-module-edit' ||
+      view === 'opa-module-detail') &&
     activeAwxUser &&
     !capabilities.isLoading &&
     !canManagePolicy
   ) {
-    return <Navigate to="/policy-as-code/overview" replace />;
+    return <Navigate to="/policy-as-code/opa/decisions" replace />;
   }
-  if ((view === 'overview' || isOpaView) && !moduleOpaEnabled) {
+  if (isOpaView && !moduleOpaEnabled) {
     return (
       <Navigate
         to={moduleGatekeeperEnabled ? '/policy-as-code/gatekeeper/templates' : '/overview'}
@@ -138,14 +131,28 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
     );
   }
   if (isGatekeeperView && !moduleGatekeeperEnabled) {
-    return <Navigate to={moduleOpaEnabled ? '/policy-as-code/overview' : '/overview'} replace />;
+    return (
+      <Navigate
+        to={
+          moduleOpaEnabled
+            ? canManagePolicy
+              ? '/policy-as-code/opa/modules'
+              : '/policy-as-code/opa/decisions'
+            : '/overview'
+        }
+        replace
+      />
+    );
   }
 
   if (view === 'opa-module-create') {
-    return <OPAPolicyModulePage create canManagePolicy={canManagePolicy} />;
+    return <OPAPolicyModulePage mode="create" canManagePolicy={canManagePolicy} />;
+  }
+  if (view === 'opa-module-edit') {
+    return <OPAPolicyModulePage mode="edit" canManagePolicy={canManagePolicy} />;
   }
   if (view === 'opa-module-detail') {
-    return <OPAPolicyModulePage canManagePolicy={canManagePolicy} />;
+    return <OPAPolicyModulePage mode="detail" canManagePolicy={canManagePolicy} />;
   }
   if (view === 'opa-decision-detail') {
     return <OPAActivityDetailPage />;
@@ -170,13 +177,6 @@ export function PolicyAsCode(props: { view: PolicyAsCodeView }) {
   return (
     <PageLayout>
       <PageHeader title={title} description={policyDescription(view, t)} />
-      {view === 'overview' ? (
-        <PolicyAsCodeOverview
-          canManagePolicy={canManagePolicy}
-          opaEnabled={moduleOpaEnabled}
-          gatekeeperEnabled={moduleGatekeeperEnabled}
-        />
-      ) : null}
       {gatekeeperPolicyView ? (
         <GatekeeperPolicyManager view={gatekeeperPolicyView} canManagePolicy={canManagePolicy} />
       ) : null}

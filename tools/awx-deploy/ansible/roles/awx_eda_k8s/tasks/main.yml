@@ -44,6 +44,7 @@
     mode: "0600"
   loop:
     - kustomization.yaml
+    - operator-patch.yml
     - eda.yml
   no_log: true
 

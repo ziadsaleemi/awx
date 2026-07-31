@@ -61,7 +61,7 @@ import { useAwxView } from '../../common/useAwxView';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { ResourceNotifications } from '../notifications/ResourceNotifications';
 import { SchedulesList } from '../../views/schedules/SchedulesList';
-import { QuayStatus } from './QuayOverview';
+import { QuayStatus } from './QuayStatus';
 
 type ContainerRuntime = 'podman' | 'docker';
 type PageMode = 'list' | 'form' | 'details';

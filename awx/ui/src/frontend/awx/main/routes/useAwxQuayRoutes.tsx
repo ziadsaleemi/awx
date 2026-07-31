@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { PageNavigationItem } from '../../../../framework';
 import { QuayApiToken } from '../../resources/quay/QuayApiToken';
-import { QuayOverview } from '../../resources/quay/QuayOverview';
 import { QuayRepositories, QuayRepositoryDetails } from '../../resources/quay/QuayRepositories';
 import { QuayRobots } from '../../resources/quay/QuayRobots';
 import { AwxRoute } from '../AwxRoutes';
@@ -20,10 +19,9 @@ export function useAwxQuayRoutes() {
       icon: <CubesIcon />,
       children: [
         {
-          id: AwxRoute.QuayOverview,
-          label: t('Overview'),
           path: 'overview',
-          element: <QuayOverview />,
+          element: <Navigate to="../repositories" replace />,
+          hidden: true,
         },
         {
           id: AwxRoute.QuayRepositories,
@@ -63,7 +61,7 @@ export function useAwxQuayRoutes() {
         },
         {
           path: '',
-          element: <Navigate to="overview" replace />,
+          element: <Navigate to="repositories" replace />,
         },
       ],
     }),

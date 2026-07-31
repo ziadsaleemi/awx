@@ -44,10 +44,13 @@ export function ToolbarDateRangeFilter(props: IToolbarDateRangeFilterProps) {
 
   const selectedValue = filterValues && filterValues.length > 0 ? filterValues[0] : undefined;
   const selectedOption = props.options.find((option) => option.value === selectedValue);
+  const requiredFallback = defaultValue ?? props.options[0]?.value;
 
-  if (isRequired && !selectedOption) {
-    setFilterValues(() => [defaultValue ?? props.options[0].value]);
-  }
+  useEffect(() => {
+    if (isRequired && !selectedOption && requiredFallback) {
+      setFilterValues(() => [requiredFallback]);
+    }
+  }, [isRequired, requiredFallback, selectedOption, setFilterValues]);
 
   function onSelectChange(value: string | null) {
     if (value === null) return;

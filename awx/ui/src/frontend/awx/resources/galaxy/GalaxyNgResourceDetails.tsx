@@ -31,7 +31,6 @@ import {
   GalaxyNgResourceKind,
   decodeGalaxyNgRouteKey,
   galaxyNgRecordMatchesKey,
-  galaxyNgResourceNativeRoutes,
   galaxyNgResourceTitles,
   getGalaxyNgContentItems,
   getGalaxyNgDependencies,
@@ -45,7 +44,7 @@ import {
   getGalaxyNgSignatureState,
 } from './GalaxyNgResourceList';
 import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
-import { GalaxyNgStatus } from './GalaxyNgOverview';
+import { GalaxyNgStatus } from './GalaxyNgStatus';
 
 const galaxyNgResourceKinds: GalaxyNgResourceKind[] = [
   'namespaces',
@@ -562,14 +561,12 @@ function GalaxyNgCollectionDetails(props: {
         title={title}
         description={resourceTitle}
         breadcrumbs={[
-          { label: t('Automation Hub'), to: '/galaxy-ng/overview' },
+          { label: t('Automation Hub'), to: '/galaxy-ng/collections' },
           { label: resourceTitle, to: `/galaxy-ng/${resource}` },
           { label: title },
         ]}
         headerActions={
           <GalaxyNgHeaderActions
-            status={status}
-            uiRoute={galaxyNgResourceNativeRoutes[resource]}
             page={title}
             prompt={t(
               'Help me review this Galaxy NG collection in Capstan. Explain install steps, contents, dependencies, signatures, and follow-up actions.'
@@ -619,7 +616,7 @@ export function GalaxyNgResourceDetails() {
       <PageLayout>
         <PageHeader
           title={t('Galaxy NG resource not found')}
-          breadcrumbs={[{ label: t('Automation Hub'), to: '/galaxy-ng/overview' }]}
+          breadcrumbs={[{ label: t('Automation Hub'), to: '/galaxy-ng/collections' }]}
         />
         <Alert
           isInline
@@ -646,7 +643,7 @@ export function GalaxyNgResourceDetails() {
         <PageHeader
           title={title}
           breadcrumbs={[
-            { label: t('Automation Hub'), to: '/galaxy-ng/overview' },
+            { label: t('Automation Hub'), to: '/galaxy-ng/collections' },
             { label: resourceTitle, to: `/galaxy-ng/${resource}` },
             { label: title },
           ]}
@@ -695,14 +692,12 @@ export function GalaxyNgResourceDetails() {
         title={title}
         description={resourceTitle}
         breadcrumbs={[
-          { label: t('Automation Hub'), to: '/galaxy-ng/overview' },
+          { label: t('Automation Hub'), to: '/galaxy-ng/collections' },
           { label: resourceTitle, to: `/galaxy-ng/${resource}` },
           { label: title },
         ]}
         headerActions={
           <GalaxyNgHeaderActions
-            status={status.data}
-            uiRoute={galaxyNgResourceNativeRoutes[resource]}
             page={title}
             prompt={t(
               'Help me review this Galaxy NG resource in Capstan. Explain what it is, what metadata matters, and what follow-up actions make sense.'

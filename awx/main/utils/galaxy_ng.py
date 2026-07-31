@@ -1,11 +1,82 @@
 # Copyright (c) 2026 Red Hat, Inc.
 # All Rights Reserved.
 
+import hashlib
 import zlib
 from urllib.parse import urljoin
 
 import requests
+from django.core.cache import cache
 from django.conf import settings
+
+GALAXY_NG_ADAPTER_CONTRACT_VERSION = 1
+GALAXY_NG_CAPABILITY_CACHE_TIMEOUT = 60
+GALAXY_NG_MUTATION_CAPABILITIES = (
+    'approve_collections',
+    'publish_collections',
+    'sync_repositories',
+)
+
+
+def galaxy_ng_capability_contracts(api_path_prefix):
+    api_prefix = api_path_prefix.rstrip('/')
+    return {
+        'read_namespaces': (('get', f'{api_prefix}/v3/namespaces/'),),
+        'read_collections': (('get', f'{api_prefix}/v3/collections/'),),
+        'search_collections': (('get', f'{api_prefix}/v3/plugin/ansible/search/collection-versions/'),),
+        'read_repositories': (('get', f'{api_prefix}/pulp/api/v3/repositories/ansible/ansible/'),),
+        'read_remotes': (('get', f'{api_prefix}/pulp/api/v3/remotes/ansible/collection/'),),
+        'read_remote_registries': (('get', f'{api_prefix}/_ui/v1/execution-environments/registries/'),),
+        'read_signature_keys': (('get', f'{api_prefix}/pulp/api/v3/signing-services/'),),
+        'read_collection_approvals': (('get', f'{api_prefix}/_ui/v1/collection-versions/'),),
+        'read_tasks': (
+            ('get', f'{api_prefix}/v3/tasks/'),
+            ('get', f'{api_prefix}/pulp/api/v3/tasks/'),
+        ),
+        'approve_collections': (
+            (
+                'post',
+                f'{api_prefix}/v3/collections/{{namespace}}/{{name}}/versions/{{version}}/move/{{source_path}}/{{dest_path}}/',
+            ),
+        ),
+        'publish_collections': (('post', f'{api_prefix}/v3/artifacts/collections/'),),
+        'sync_repositories': (('post', f'{api_prefix}/content/{{path}}/v3/sync/'),),
+    }
+
+
+def galaxy_ng_capability_report(schema, api_path_prefix):
+    contracts = galaxy_ng_capability_contracts(api_path_prefix)
+    paths = schema.get('paths') if isinstance(schema, dict) else None
+    schema_available = isinstance(paths, dict)
+    capabilities = {}
+    for capability, alternatives in contracts.items():
+        capabilities[capability] = bool(schema_available and any(isinstance(paths.get(path), dict) and method in paths[path] for method, path in alternatives))
+
+    missing_capabilities = [name for name, supported in capabilities.items() if not supported]
+    missing_mutation_capabilities = [name for name in GALAXY_NG_MUTATION_CAPABILITIES if not capabilities.get(name)]
+    if not schema_available:
+        state = 'unknown'
+        message = 'Galaxy NG OpenAPI capabilities could not be verified. Mutations are blocked until compatibility can be confirmed.'
+    elif missing_capabilities:
+        state = 'degraded'
+        message = 'The connected Galaxy NG API is missing capabilities used by Capstan. Unsupported operations are blocked.'
+    else:
+        state = 'compatible'
+        message = 'The connected Galaxy NG API advertises every capability required by this Capstan adapter.'
+
+    info = schema.get('info') if isinstance(schema, dict) and isinstance(schema.get('info'), dict) else {}
+    return {
+        'adapter_contract_version': GALAXY_NG_ADAPTER_CONTRACT_VERSION,
+        'state': state,
+        'schema_available': schema_available,
+        'schema_version': str(info.get('version') or ''),
+        'openapi_version': str(schema.get('openapi') or '') if isinstance(schema, dict) else '',
+        'capabilities': capabilities,
+        'missing_capabilities': missing_capabilities,
+        'missing_mutation_capabilities': missing_mutation_capabilities,
+        'mutation_safe': not missing_mutation_capabilities,
+        'message': message,
+    }
 
 
 def module_enabled():
@@ -54,10 +125,20 @@ class GalaxyNGClient:
     def auth_configured(self):
         return bool(self.token or (self.username and self.password))
 
+    def _authorization_value(self):
+        token = self.token.strip()
+        if not token:
+            return ''
+        if token.lower().startswith(('bearer ', 'token ')):
+            return token
+        if token.count('.') == 2:
+            return f'Bearer {token}'
+        return f'Token {token}'
+
     def _headers(self):
         headers = {'Accept': 'application/json'}
         if self.token:
-            headers['Authorization'] = f'Bearer {self.token}'
+            headers['Authorization'] = self._authorization_value()
         return headers
 
     def _auth(self):
@@ -106,6 +187,41 @@ class GalaxyNGClient:
 
     def pulp_status(self):
         return self.get(f'{self.api_path_prefix.rstrip("/")}/pulp/api/v3/status/')
+
+    def openapi_schema(self):
+        return self.get(f'{self.api_path_prefix.rstrip("/")}/v3/openapi.json')
+
+    def capability_report(self, refresh=False):
+        cache_fingerprint = '|'.join(
+            [
+                str(GALAXY_NG_ADAPTER_CONTRACT_VERSION),
+                self.server_url,
+                self.api_path_prefix,
+                str(self.verify_ssl),
+                str(self.timeout),
+                str(self.auth_configured),
+            ]
+        )
+        cache_key = f'awx:galaxy-ng:capabilities:{hashlib.sha256(cache_fingerprint.encode()).hexdigest()}'
+        if not refresh:
+            cached_report = cache.get(cache_key)
+            if cached_report is not None:
+                return cached_report
+        report = galaxy_ng_capability_report(self.openapi_schema(), self.api_path_prefix)
+        cache.set(cache_key, report, GALAXY_NG_CAPABILITY_CACHE_TIMEOUT)
+        return report
+
+    def require_capability(self, capability):
+        report = self.capability_report(refresh=True)
+        if report['capabilities'].get(capability):
+            return report
+        raise GalaxyNGControllerError(
+            (
+                f'The connected Galaxy NG API does not advertise the required "{capability}" capability. '
+                'Capstan blocked this operation before changing Galaxy state. Review the Galaxy compatibility status before upgrading.'
+            ),
+            status='incompatible',
+        )
 
     def count(self, path, params=None):
         count_params = {'limit': 1}

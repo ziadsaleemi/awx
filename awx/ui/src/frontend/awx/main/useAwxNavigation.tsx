@@ -107,11 +107,7 @@ export function filterPolicyRoutesByPermissions(
   }
   const filteredRoutes = filterRouteChildrenById(
     policyRoutes,
-    new Set([
-      AwxRoute.PolicyAsCodeOverview,
-      AwxRoute.PolicyAsCodeOpa,
-      AwxRoute.PolicyAsCodeGatekeeper,
-    ])
+    new Set([AwxRoute.PolicyAsCodeOpa, AwxRoute.PolicyAsCodeGatekeeper])
   );
   if (!hasChildren(filteredRoutes)) {
     return filteredRoutes;
@@ -144,7 +140,6 @@ export function filterGalaxyRoutesByPermissions(
   permissions: GalaxyRoutePermissions
 ) {
   const allowedIds = new Set<string>([
-    AwxRoute.GalaxyNGOverview,
     AwxRoute.GalaxyNGNamespaces,
     AwxRoute.GalaxyNGCollections,
     AwxRoute.GalaxyNGRepositories,
@@ -158,7 +153,6 @@ export function filterGalaxyRoutesByPermissions(
   if (permissions.canAdminGalaxy) {
     allowedIds.add(AwxRoute.GalaxyNGCollectionApprovals);
     allowedIds.add(AwxRoute.GalaxyNGTasks);
-    allowedIds.add(AwxRoute.GalaxyNGApiToken);
   }
   return filterRouteChildrenById(galaxyRoutes, allowedIds);
 }
@@ -172,7 +166,7 @@ export function filterQuayRoutesByPermissions(
   }
   return filterRouteChildrenById(
     quayRoutes,
-    new Set([AwxRoute.QuayOverview, AwxRoute.QuayRepositories, AwxRoute.QuayRepositoryDetails])
+    new Set([AwxRoute.QuayRepositories, AwxRoute.QuayRepositoryDetails])
   );
 }
 
@@ -185,14 +179,12 @@ export function filterPolicyRoutesByModules(
     return policyRoutes;
   }
 
-  const allowedIds = new Set<string>([AwxRoute.PolicyAsCodeOverview]);
+  const allowedIds = new Set<string>();
   if (gatekeeperEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeGatekeeper);
   }
   if (opaEnabled) {
     allowedIds.add(AwxRoute.PolicyAsCodeOpa);
-  } else {
-    allowedIds.delete(AwxRoute.PolicyAsCodeOverview);
   }
 
   return filterRouteChildrenById(policyRoutes, allowedIds);

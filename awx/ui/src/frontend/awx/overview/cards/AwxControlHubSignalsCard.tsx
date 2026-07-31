@@ -227,7 +227,7 @@ export function AwxControlHubSignalsCard(props: { data: IAwxDashboardData }) {
       }),
       inventory: quay.data?.push_configured ? t('Quay push ready') : t('Quay push not configured'),
       action: (
-        <Link to={routeUrl(AwxRoute.GalaxyNGOverview, '/galaxy-ng/overview')}>
+        <Link to={routeUrl(AwxRoute.GalaxyNGCollections, '/galaxy-ng/collections')}>
           {t('Open content')}
         </Link>
       ),
@@ -251,7 +251,7 @@ export function AwxControlHubSignalsCard(props: { data: IAwxDashboardData }) {
         constraints: gatekeeper.data?.counts?.constraints ?? 0,
       }),
       action: (
-        <Link to={routeUrl(AwxRoute.PolicyAsCodeOverview, '/policy-as-code')}>
+        <Link to={routeUrl(AwxRoute.PolicyAsCodeOpaModules, '/policy-as-code/opa/modules')}>
           {t('Review policy')}
         </Link>
       ),

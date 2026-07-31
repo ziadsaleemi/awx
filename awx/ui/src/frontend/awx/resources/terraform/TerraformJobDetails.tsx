@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { LoadingPage, PageDetail, PageDetails } from '../../../../framework';
 import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
 import { useGetItem } from '../../../common/crud/useGet';
@@ -45,6 +45,36 @@ export function TerraformJobDetails() {
         {job.summary_fields?.terraform_job_template?.name ?? '-'}
       </PageDetail>
       <PageDetail label={t('Operation')}>{job.terraform_operation}</PageDetail>
+      <PageDetail label={t('State Management')}>
+        {job.state_backend === 'git' ? t('Capstan managed Git') : t('Terraform configuration')}
+      </PageDetail>
+      {job.state_backend === 'git' && (
+        <>
+          <PageDetail label={t('State Project')}>
+            {job.summary_fields?.state_project?.name ?? job.summary_fields?.project?.name ?? '-'}
+          </PageDetail>
+          <PageDetail label={t('State Branch')}>{job.state_branch}</PageDetail>
+          <PageDetail label={t('State Key')}>{job.state_key}</PageDetail>
+          <PageDetail label={t('State Revision Restored')}>
+            {job.summary_fields?.state_revision_read && job.terraform_job_template ? (
+              <Link to={`/terraform-templates/${job.terraform_job_template}/state`}>
+                {job.summary_fields.state_revision_read.git_commit.slice(0, 12)}
+              </Link>
+            ) : (
+              t('No prior revision')
+            )}
+          </PageDetail>
+          <PageDetail label={t('State Revision Published')}>
+            {job.summary_fields?.state_revision_written && job.terraform_job_template ? (
+              <Link to={`/terraform-templates/${job.terraform_job_template}/state`}>
+                {job.summary_fields.state_revision_written.git_commit.slice(0, 12)}
+              </Link>
+            ) : (
+              t('No revision published')
+            )}
+          </PageDetail>
+        </>
+      )}
       <PageDetail label={t('Project')}>{job.summary_fields?.project?.name ?? '-'}</PageDetail>
       <PageDetail label={t('Terraform Directory')}>{job.terraform_dir || '.'}</PageDetail>
       <PageDetail label={t('Target Inventory')}>

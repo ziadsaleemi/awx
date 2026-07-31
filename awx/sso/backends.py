@@ -107,7 +107,9 @@ class LDAPBackend(BaseLDAPBackend):
             return None
         try:
             user = User.objects.get(username=username)
-            if user and (not user.profile or not user.profile.ldap_dn):
+            is_ldap_user = user.enterprise_auth.filter(provider='ldap').exists()
+            is_unowned_legacy_external_user = not user.has_usable_password() and not user.enterprise_auth.exists() and not user.social_auth.exists()
+            if not is_ldap_user and not is_unowned_legacy_external_user:
                 return None
         except User.DoesNotExist:
             pass
@@ -444,19 +446,8 @@ def on_populate_user(sender, **kwargs):
                 desired_team_states[organization] = {}
             desired_team_states[organization][team_name] = {'member_role': state}
 
-    # Check if user.profile is available, otherwise force user.save()
-    try:
-        _ = user.profile
-    except ValueError:
-        force_user_update = True
-    finally:
-        if force_user_update:
-            user.save()
-
-    # Update user profile to store LDAP DN.
-    profile = user.profile
-    if profile.ldap_dn != ldap_user.dn:
-        profile.ldap_dn = ldap_user.dn
-        profile.save()
+    if force_user_update or not user.pk:
+        user.save()
+    _decorate_enterprise_user(user, 'ldap')
 
     reconcile_users_org_team_mappings(user, desired_org_states, desired_team_states, 'LDAP')

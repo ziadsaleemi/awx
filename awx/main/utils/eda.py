@@ -7,6 +7,8 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from django.conf import settings
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 EDA_SUCCESS_STATUSES = {'active', 'completed', 'complete', 'enabled', 'ok', 'running', 'started', 'success', 'successful'}
 EDA_FAILURE_STATUSES = {'canceled', 'cancelled', 'deleted', 'disabled', 'error', 'failed', 'failure', 'missing', 'not_found', 'stopped', 'unreachable'}
@@ -17,6 +19,16 @@ DEFAULT_ACTIVATION_INSTANCE_LOGS_PATH = '/api/eda/v1/activation-instances/{activ
 DEFAULT_RULEBOOKS_PATH = '/api/eda/v1/rulebooks/'
 DEFAULT_DECISION_ENVIRONMENTS_PATH = '/api/eda/v1/decision-environments/'
 DEFAULT_ORGANIZATIONS_PATH = '/api/eda/v1/organizations/'
+DEFAULT_OPENAPI_PATH = '/api/eda/v1/openapi.json'
+EDA_TESTED_API_VERSION_SPEC = '>=0.2.0,<0.3.0'
+EDA_MANAGED_PROJECT_CAPABILITIES = {
+    'projects.list': ('get', '/projects/'),
+    'projects.create': ('post', '/projects/'),
+    'projects.read': ('get', '/projects/{id}/'),
+    'projects.update': ('patch', '/projects/{id}/'),
+    'projects.delete': ('delete', '/projects/{id}/'),
+    'projects.sync': ('post', '/projects/{id}/sync/'),
+}
 EDA_RESOURCE_API_PATHS = {
     'projects': '/api/eda/v1/projects/',
     'rule-audit': '/api/eda/v1/audit-rules/',
@@ -166,6 +178,49 @@ def _normalize_instance(item):
     }
 
 
+def managed_project_marker(project_id):
+    return f'[capstan-project:{project_id}]'
+
+
+def managed_project_description(project):
+    description = str(getattr(project, 'description', '') or '').strip()
+    marker = managed_project_marker(project.pk)
+    return f'{marker}\n{description}' if description else marker
+
+
+def managed_project_index(items):
+    index = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        description = str(item.get('description') or '')
+        if '[capstan-project:' not in description:
+            continue
+        marker = description.split('[capstan-project:', 1)[1].split(']', 1)[0]
+        try:
+            index[int(marker)] = item
+        except (TypeError, ValueError):
+            continue
+    return index
+
+
+def _normalized_openapi_path(path):
+    path = '/' + str(path or '').strip().lstrip('/')
+    prefix = '/api/eda/v1'
+    if path.startswith(prefix):
+        path = path[len(prefix) :] or '/'
+    return path if path.endswith('/') or '.' in path.rsplit('/', 1)[-1] else f'{path}/'
+
+
+def _api_version_compatibility(version):
+    if not version:
+        return False
+    try:
+        return Version(str(version)) in SpecifierSet(EDA_TESTED_API_VERSION_SPEC)
+    except (InvalidSpecifier, InvalidVersion):
+        return False
+
+
 class EDAControllerClient:
     def __init__(self):
         self.controller_url = configured_url()
@@ -264,6 +319,39 @@ class EDAControllerClient:
 
     def delete_json(self, path):
         return self._request_json('DELETE', path)
+
+    def api_contract(self):
+        payload = self.get_json(DEFAULT_OPENAPI_PATH)
+        paths = {_normalized_openapi_path(path): value for path, value in (payload.get('paths') or {}).items() if isinstance(value, dict)}
+        version = str((payload.get('info') or {}).get('version') or '')
+        capabilities = {name: method in paths.get(_normalized_openapi_path(path), {}) for name, (method, path) in EDA_MANAGED_PROJECT_CAPABILITIES.items()}
+        missing = sorted(name for name, available in capabilities.items() if not available)
+        tested_version = _api_version_compatibility(version)
+        if missing:
+            compatibility = 'incompatible'
+        elif tested_version:
+            compatibility = 'compatible'
+        else:
+            compatibility = 'compatible_untested'
+        return {
+            'api_version': version,
+            'tested_api_version_spec': EDA_TESTED_API_VERSION_SPEC,
+            'capabilities': capabilities,
+            'missing_capabilities': missing,
+            'compatibility': compatibility,
+            'compatible': not missing,
+            'openapi_title': str((payload.get('info') or {}).get('title') or ''),
+        }
+
+    def require_capabilities(self, names):
+        contract = self.api_contract()
+        missing = sorted(name for name in names if not contract['capabilities'].get(name))
+        if missing:
+            raise EDAControllerError(
+                f'EDA Controller API is missing required capabilities: {", ".join(missing)}.',
+                'incompatible',
+            )
+        return contract
 
     def _resource_path(self, resource, resource_id=None, base_path=None):
         base_path = (base_path or resource_path(resource)).rstrip('/')
@@ -391,6 +479,73 @@ class EDAControllerClient:
         if project_id in (None, ''):
             raise EDAControllerError('EDA project id is required.', 'missing')
         return self.post_json(f'{self._resource_path("projects", project_id)}sync/', payload or {})
+
+    def managed_project_credentials(self):
+        return _coerce_items(self.list_resource_all('credentials', page_size=200))
+
+    def managed_project_payload(self, project, credentials=None):
+        credential_id = None
+        credential_name = str(getattr(getattr(project, 'credential', None), 'name', '') or '').strip()
+        if credential_name:
+            matches = [
+                item
+                for item in (credentials if credentials is not None else self.managed_project_credentials())
+                if isinstance(item, dict) and str(item.get('name') or '').strip() == credential_name
+            ]
+            if len(matches) != 1:
+                raise EDAControllerError(
+                    f'Capstan Project credential "{credential_name}" must have one matching EDA credential before this project can be synchronized.',
+                    'bad_request',
+                )
+            credential_id = _pick_first(matches[0], ('id', 'pk', 'uuid'))
+
+        payload = {
+            'name': f'Capstan Project {project.pk} - {project.name}'[:250],
+            'description': managed_project_description(project),
+            'url': str(project.scm_url or '').strip(),
+            'scm_type': 'git',
+            'scm_branch': str(project.scm_branch or '').strip(),
+            'scm_refspec': str(project.scm_refspec or '').strip(),
+            'verify_ssl': True,
+            'update_revision_on_launch': bool(project.scm_update_on_launch),
+            'scm_update_cache_timeout': int(project.scm_update_cache_timeout or 0),
+            'eda_credential_id': credential_id,
+        }
+        organization_id = self.default_organization_id()
+        if organization_id:
+            payload['organization_id'] = organization_id
+        return payload
+
+    def reconcile_managed_project(self, project):
+        contract = self.require_capabilities(EDA_MANAGED_PROJECT_CAPABILITIES)
+        remote_projects = _coerce_items(self.list_resource_all('projects', page_size=200))
+        remote_project = managed_project_index(remote_projects).get(project.pk)
+        payload = self.managed_project_payload(project)
+        actions = []
+
+        if remote_project and str(remote_project.get('url') or '').strip() != payload['url']:
+            self.delete_resource('projects', remote_project.get('id'))
+            remote_project = self.create_resource('projects', payload)
+            actions.append('recreated')
+        elif not remote_project:
+            remote_project = self.create_resource('projects', payload)
+            actions.append('created')
+        else:
+            mutable_payload = {key: value for key, value in payload.items() if key not in ('url', 'organization_id')}
+            changed_payload = {key: value for key, value in mutable_payload.items() if remote_project.get(key) != value}
+            if changed_payload:
+                remote_project = self.update_resource('projects', remote_project.get('id'), changed_payload)
+                actions.append('updated')
+
+        if 'created' not in actions and 'recreated' not in actions:
+            remote_project = self.sync_project(remote_project.get('id'))
+            actions.append('sync')
+
+        return {
+            'project': remote_project,
+            'actions': actions,
+            'contract': contract,
+        }
 
     def list_event_stream_activations(self, event_stream_id, params=None):
         if event_stream_id in (None, ''):

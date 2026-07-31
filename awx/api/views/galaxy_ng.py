@@ -23,10 +23,12 @@ from awx.api.views.content_permissions import (
 )
 from awx.main.models import Project
 from awx.main.utils.galaxy_ng import (
+    GALAXY_NG_ADAPTER_CONTRACT_VERSION,
     GalaxyNGClient,
     GalaxyNGControllerError,
     configured_url,
     connection_status,
+    galaxy_ng_capability_report,
     module_enabled,
     normalize_list_response,
 )
@@ -39,7 +41,7 @@ GALAXY_NG_RESOURCE_PATHS = {
     'remote-registries': '_ui/v1/execution-environments/registries/',
     'signature-keys': 'pulp/api/v3/signing-services/',
     'collection-approvals': '_ui/v1/collection-versions/',
-    'tasks': 'pulp/api/v3/tasks/',
+    'tasks': 'v3/tasks/',
     'execution-environment-images': 'pulp/api/v3/content/container/tags/',
 }
 
@@ -56,6 +58,7 @@ GALAXY_NG_COLLECTION_DETAIL_CACHE_TIMEOUT = 60
 def _galaxy_ng_status_cache_key(client, server_url):
     fingerprint = '|'.join(
         [
+            str(GALAXY_NG_ADAPTER_CONTRACT_VERSION),
             server_url or '',
             client.api_path_prefix or '',
             client.content_path_prefix or '',
@@ -95,7 +98,7 @@ def _galaxy_ng_version_summary(pulp_status):
             versions[str(component)] = str(version)
 
     summary['component_versions'] = versions
-    for component in ('galaxy_ng', 'galaxy-ng', 'pulp_ansible', 'pulp-container', 'pulpcore'):
+    for component in ('galaxy', 'galaxy_ng', 'galaxy-ng', 'pulp_ansible', 'pulp-container', 'pulpcore'):
         if versions.get(component):
             summary['version'] = versions[component]
             return summary
@@ -326,9 +329,12 @@ def _normalize_collection_search_response(response):
 
 
 def _galaxy_ng_error_response(exc):
-    response_status = (
-        http_status.HTTP_400_BAD_REQUEST if exc.status in ('bad_request', 'invalid', 'not_configured', 'missing') else http_status.HTTP_502_BAD_GATEWAY
-    )
+    if exc.status == 'incompatible':
+        response_status = http_status.HTTP_409_CONFLICT
+    elif exc.status in ('bad_request', 'invalid', 'not_configured', 'missing'):
+        response_status = http_status.HTTP_400_BAD_REQUEST
+    else:
+        response_status = http_status.HTTP_502_BAD_GATEWAY
     return Response({'detail': str(exc), 'status': exc.status}, status=response_status)
 
 
@@ -569,6 +575,7 @@ class GalaxyNGStatusView(APIView):
             'pulp_status': {},
             'version': '',
             'component_versions': {},
+            'compatibility': galaxy_ng_capability_report({}, client.api_path_prefix),
             'controller_error': '',
         }
 
@@ -577,14 +584,14 @@ class GalaxyNGStatusView(APIView):
 
         api_prefix = client.api_path_prefix.rstrip('/')
         count_paths = {
-            'namespaces': f'{api_prefix}/v3/namespaces/',
-            'collections': f'{api_prefix}/v3/collections/',
-            'repositories': f'{api_prefix}/pulp/api/v3/repositories/ansible/ansible/',
-            'remotes': f'{api_prefix}/pulp/api/v3/remotes/ansible/collection/',
-            'remote_registries': f'{api_prefix}/_ui/v1/execution-environments/registries/',
-            'signature_keys': f'{api_prefix}/pulp/api/v3/signing-services/',
-            'collection_approvals': f'{api_prefix}/_ui/v1/collection-versions/',
-            'tasks': f'{api_prefix}/pulp/api/v3/tasks/',
+            'namespaces': ('read_namespaces', f'{api_prefix}/v3/namespaces/'),
+            'collections': ('read_collections', f'{api_prefix}/v3/collections/'),
+            'repositories': ('read_repositories', f'{api_prefix}/pulp/api/v3/repositories/ansible/ansible/'),
+            'remotes': ('read_remotes', f'{api_prefix}/pulp/api/v3/remotes/ansible/collection/'),
+            'remote_registries': ('read_remote_registries', f'{api_prefix}/_ui/v1/execution-environments/registries/'),
+            'signature_keys': ('read_signature_keys', f'{api_prefix}/pulp/api/v3/signing-services/'),
+            'collection_approvals': ('read_collection_approvals', f'{api_prefix}/_ui/v1/collection-versions/'),
+            'tasks': ('read_tasks', f'{api_prefix}/v3/tasks/'),
         }
         cache_key = _galaxy_ng_status_cache_key(client, server_url)
         live_status = None if request.query_params.get('refresh') else cache.get(cache_key)
@@ -603,12 +610,20 @@ class GalaxyNGStatusView(APIView):
                 'pulp_status': {},
                 'version': '',
                 'component_versions': {},
+                'compatibility': galaxy_ng_capability_report({}, client.api_path_prefix),
                 'controller_error': '',
             }
             try:
                 live_status['pulp_status'] = client.pulp_status()
                 live_status.update(_galaxy_ng_version_summary(live_status['pulp_status']))
-                for key, path in count_paths.items():
+                try:
+                    live_status['compatibility'] = client.capability_report(refresh=bool(request.query_params.get('refresh')))
+                except GalaxyNGControllerError as exc:
+                    live_status['compatibility']['error'] = str(exc)
+                for key, (capability, path) in count_paths.items():
+                    compatibility = live_status['compatibility']
+                    if compatibility.get('schema_available') and not compatibility.get('capabilities', {}).get(capability):
+                        continue
                     try:
                         params = {'repository': 'staging'} if key == 'collection_approvals' else None
                         live_status['counts'][key] = client.count(path, params=params)
@@ -622,6 +637,7 @@ class GalaxyNGStatusView(APIView):
         response['pulp_status'] = live_status.get('pulp_status') or {}
         response['version'] = live_status.get('version') or ''
         response['component_versions'] = live_status.get('component_versions') or {}
+        response['compatibility'] = live_status.get('compatibility') or response['compatibility']
         response['controller_error'] = live_status.get('controller_error') or ''
 
         return Response(response)
@@ -769,6 +785,7 @@ class GalaxyNGCollectionApprovalActionView(APIView):
             f'{quote(version, safe="")}/move/{source}/{destination}/'
         )
         try:
+            client.require_capability('approve_collections')
             payload = client.post(move_path)
         except GalaxyNGControllerError as exc:
             return _galaxy_ng_error_response(exc)
@@ -981,6 +998,7 @@ class GalaxyNGRepositorySyncView(APIView):
 
         client = GalaxyNGClient()
         try:
+            client.require_capability('sync_repositories')
             base_path = client.ansible_distribution_base_path(repository)
             base_path, error = _validate_distribution_path(base_path)
             if error:

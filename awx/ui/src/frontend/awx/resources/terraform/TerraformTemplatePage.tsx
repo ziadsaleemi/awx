@@ -65,6 +65,7 @@ export function TerraformTemplatePage() {
           { label: t('User Access'), page: AwxRoute.TerraformTemplateUserAccess },
           { label: t('Notifications'), page: AwxRoute.TerraformTemplateNotifications },
           { label: t('Jobs'), page: AwxRoute.TerraformTemplateJobs },
+          { label: t('State'), page: AwxRoute.TerraformTemplateState },
           { label: t('Schedules'), page: AwxRoute.TerraformTemplateSchedules },
           { label: t('Survey'), page: AwxRoute.TerraformTemplateSurvey },
         ]}

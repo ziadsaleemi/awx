@@ -34,7 +34,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { AwxItemsResponse } from '../../common/AwxItemsResponse';
 import { awxAPI } from '../../common/api/awx-utils';
 import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
-import { GalaxyNgStatus } from './GalaxyNgOverview';
+import { GalaxyNgStatus } from './GalaxyNgStatus';
 
 interface AwxProject {
   id: number;
@@ -117,7 +117,10 @@ export function GalaxyNgProjectImports() {
   const [plan, setPlan] = useState<GalaxyNgImportPlan>();
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const configured = Boolean(status.data?.configured && !status.data.controller_error);
+  const publishCompatible = Boolean(status.data?.compatibility?.capabilities.publish_collections);
+  const configured = Boolean(
+    status.data?.configured && !status.data.controller_error && publishCompatible
+  );
   const projectOptions = projects.data?.results ?? [];
 
   const generatePlan = async () => {
@@ -164,8 +167,6 @@ export function GalaxyNgProjectImports() {
         )}
         headerActions={
           <GalaxyNgHeaderActions
-            status={status.data}
-            uiRoute="collections/"
             page={t('Galaxy NG project imports')}
             prompt={t(
               'Help with Galaxy NG project imports in Capstan. Use the selected Capstan Project, collection path, generated commands, Galaxy NG settings, and approval workflow. Explain how to build, publish, approve, and install this collection.'
@@ -190,6 +191,14 @@ export function GalaxyNgProjectImports() {
           ) : status.data && (!status.data.configured || status.data.controller_error) ? (
             <Alert isInline variant="warning" title={t('Galaxy NG is not ready')}>
               {status.data.controller_error || status.data.message}
+            </Alert>
+          ) : status.data?.compatibility && !publishCompatible ? (
+            <Alert
+              isInline
+              variant="warning"
+              title={t('Galaxy NG collection publishing is not compatible')}
+            >
+              {status.data.compatibility.error || status.data.compatibility.message}
             </Alert>
           ) : null}
 

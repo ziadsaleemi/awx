@@ -159,7 +159,7 @@ def create_org_and_teams(org_list, team_map, adapter, can_create=True):
 def get_or_create_org_with_default_galaxy_cred(**kwargs):
     from awx.main.models import Organization, Credential
 
-    (org, org_created) = Organization.objects.get_or_create(**kwargs)
+    org, org_created = Organization.objects.get_or_create(**kwargs)
     if org_created:
         logger.debug("Created org {} (id {}) from {}".format(org.name, org.id, kwargs))
         public_galaxy_credential = Credential.objects.filter(managed=True, name='Ansible Galaxy').first()
@@ -180,16 +180,13 @@ def get_external_account(user):
     #    But it had a limitation that the user would have to have an active session (or an admin would have to go set a temp password).
     #    It also lead to the side affect that if LDAP was ever reconfigured the user would convert back to LDAP but still have a local password.
     #    That local password could then be used to bypass LDAP authentication.
-    try:
-        if user.pk and user.profile.ldap_dn and not user.has_usable_password():
-            account_type = "ldap"
-    except AttributeError:
-        pass
+    if user.pk and user.enterprise_auth.filter(provider='ldap').exists() and not user.has_usable_password():
+        account_type = "ldap"
 
     if user.social_auth.all():
         account_type = "social"
 
-    if user.enterprise_auth.all():
+    if user.enterprise_auth.exclude(provider='ldap').exists():
         account_type = "enterprise"
 
     return account_type

@@ -283,7 +283,7 @@ register(
     allow_blank=True,
     encrypted=True,
     label=_('Galaxy NG API token'),
-    help_text=_('Bearer token used to read Galaxy NG APIs.'),
+    help_text=_('API token used to access Galaxy NG. Opaque Galaxy keys use Token authentication; JWTs use Bearer authentication.'),
     category=_('Galaxy NG'),
     category_slug='galaxy-ng',
 )

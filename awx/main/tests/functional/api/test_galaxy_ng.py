@@ -4,6 +4,7 @@ from django.test import override_settings
 
 from awx.api.versioning import reverse
 from awx.main.models import Project
+from awx.main.utils.galaxy_ng import GalaxyNGClient, galaxy_ng_capability_report
 
 
 def galaxy_response(mocker, payload):
@@ -12,6 +13,68 @@ def galaxy_response(mocker, payload):
     response.raise_for_status.return_value = None
     response.json.return_value = payload
     return response
+
+
+def galaxy_openapi_schema(*, include_approval=True, include_publish=True, include_sync=True):
+    paths = {
+        '/api/galaxy/v3/namespaces/': {'get': {}},
+        '/api/galaxy/v3/collections/': {'get': {}},
+        '/api/galaxy/v3/plugin/ansible/search/collection-versions/': {'get': {}},
+        '/api/galaxy/pulp/api/v3/repositories/ansible/ansible/': {'get': {}, 'post': {}},
+        '/api/galaxy/pulp/api/v3/remotes/ansible/collection/': {'get': {}, 'post': {}},
+        '/api/galaxy/_ui/v1/execution-environments/registries/': {'get': {}, 'post': {}},
+        '/api/galaxy/pulp/api/v3/signing-services/': {'get': {}},
+        '/api/galaxy/_ui/v1/collection-versions/': {'get': {}},
+        '/api/galaxy/v3/tasks/': {'get': {}},
+    }
+    if include_approval:
+        paths['/api/galaxy/v3/collections/{namespace}/{name}/versions/{version}/move/{source_path}/{dest_path}/'] = {'post': {}}
+    if include_publish:
+        paths['/api/galaxy/v3/artifacts/collections/'] = {'post': {}}
+    if include_sync:
+        paths['/api/galaxy/content/{path}/v3/sync/'] = {'post': {}}
+    return {
+        'openapi': '3.0.3',
+        'info': {'title': 'Galaxy API', 'version': '4.12.0dev'},
+        'paths': paths,
+    }
+
+
+def test_galaxy_ng_capability_report_detects_supported_contract():
+    report = galaxy_ng_capability_report(galaxy_openapi_schema(), '/api/galaxy/')
+
+    assert report['state'] == 'compatible'
+    assert report['schema_version'] == '4.12.0dev'
+    assert report['openapi_version'] == '3.0.3'
+    assert report['mutation_safe'] is True
+    assert report['missing_capabilities'] == []
+
+
+def test_galaxy_ng_capability_report_detects_missing_mutation():
+    report = galaxy_ng_capability_report(
+        galaxy_openapi_schema(include_sync=False),
+        '/api/galaxy/',
+    )
+
+    assert report['state'] == 'degraded'
+    assert report['mutation_safe'] is False
+    assert report['missing_mutation_capabilities'] == ['sync_repositories']
+
+
+@pytest.mark.parametrize(
+    ('token', 'authorization'),
+    (
+        ('opaque-key', 'Token opaque-key'),
+        ('Token explicit-key', 'Token explicit-key'),
+        ('Bearer explicit-jwt', 'Bearer explicit-jwt'),
+        ('header.payload.signature', 'Bearer header.payload.signature'),
+    ),
+)
+def test_galaxy_ng_client_selects_token_authentication_scheme(token, authorization):
+    client = GalaxyNGClient()
+    client.token = token
+
+    assert client._headers()['Authorization'] == authorization
 
 
 @pytest.mark.django_db
@@ -61,6 +124,7 @@ def test_galaxy_ng_status_reads_live_counts(get, admin_user, mocker):
         'awx.main.utils.galaxy_ng.requests.get',
         side_effect=[
             galaxy_response(mocker, {'database_connection': {'connected': True}}),
+            galaxy_response(mocker, galaxy_openapi_schema()),
             galaxy_response(mocker, {'count': 2, 'results': []}),
             galaxy_response(mocker, {'count': 5, 'results': []}),
             galaxy_response(mocker, {'count': 3, 'results': []}),
@@ -97,11 +161,13 @@ def test_galaxy_ng_status_reads_live_counts(get, admin_user, mocker):
     }
     assert response.data['version'] == ''
     assert response.data['component_versions'] == {}
+    assert response.data['compatibility']['state'] == 'compatible'
+    assert response.data['compatibility']['mutation_safe'] is True
     assert response.data['controller_error'] == ''
-    assert request_mock.call_count == 9
+    assert request_mock.call_count == 10
     first_call = request_mock.call_args_list[0]
     assert first_call.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/status/'
-    assert first_call.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert first_call.kwargs['headers']['Authorization'] == 'Token hub-token'
     assert first_call.kwargs['verify'] is False
     assert first_call.kwargs['timeout'] == 3
 
@@ -117,6 +183,7 @@ def test_galaxy_ng_status_caches_live_counts(get, admin_user, mocker):
         'awx.main.utils.galaxy_ng.requests.get',
         side_effect=[
             galaxy_response(mocker, {'database_connection': {'connected': True}}),
+            galaxy_response(mocker, galaxy_openapi_schema()),
             galaxy_response(mocker, {'count': 2, 'results': []}),
             galaxy_response(mocker, {'count': 5, 'results': []}),
             galaxy_response(mocker, {'count': 3, 'results': []}),
@@ -133,7 +200,7 @@ def test_galaxy_ng_status_caches_live_counts(get, admin_user, mocker):
 
     assert first_response.data['counts']['collections'] == 5
     assert second_response.data['counts']['collections'] == 5
-    assert request_mock.call_count == 9
+    assert request_mock.call_count == 10
 
 
 @pytest.mark.django_db
@@ -152,10 +219,11 @@ def test_galaxy_ng_status_exposes_component_versions_for_about_modal(get, admin_
                     'database_connection': {'connected': True},
                     'versions': [
                         {'component': 'pulpcore', 'version': '3.63.0'},
-                        {'component': 'galaxy_ng', 'version': '4.10.0'},
+                        {'component': 'galaxy', 'version': '4.12.0dev'},
                     ],
                 },
             ),
+            galaxy_response(mocker, galaxy_openapi_schema()),
             galaxy_response(mocker, {'count': 0, 'results': []}),
             galaxy_response(mocker, {'count': 0, 'results': []}),
             galaxy_response(mocker, {'count': 0, 'results': []}),
@@ -170,12 +238,12 @@ def test_galaxy_ng_status_exposes_component_versions_for_about_modal(get, admin_
     response = get(reverse('api:galaxy_ng_status') + '?refresh=1', user=admin_user, expect=200)
 
     assert response.data['configured'] is True
-    assert response.data['version'] == '4.10.0'
+    assert response.data['version'] == '4.12.0dev'
     assert response.data['component_versions'] == {
         'pulpcore': '3.63.0',
-        'galaxy_ng': '4.10.0',
+        'galaxy': '4.12.0dev',
     }
-    assert request_mock.call_count == 9
+    assert request_mock.call_count == 10
 
 
 @pytest.mark.django_db
@@ -249,7 +317,7 @@ def test_galaxy_ng_resource_list_normalizes_pulp_payload(get, admin_user, mocker
     assert response.data['controller_error'] == ''
     assert response.data['results'][0]['name'] == 'import-one'
     assert isinstance(response.data['results'][0]['id'], int)
-    assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/tasks/'
+    assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/v3/tasks/'
     assert request_mock.call_args.kwargs['params'] == {
         'limit': 10,
         'offset': 10,
@@ -307,7 +375,7 @@ def test_galaxy_ng_remotes_list_uses_pulp_ansible_remotes_endpoint(get, admin_us
     assert response.data['resource'] == 'remotes'
     assert response.data['results'][0]['name'] == 'community'
     assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/remotes/ansible/collection/'
-    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Token hub-token'
 
 
 @pytest.mark.django_db
@@ -340,7 +408,7 @@ def test_galaxy_ng_remote_registries_list_uses_ui_registry_endpoint(get, admin_u
     assert response.data['resource'] == 'remote-registries'
     assert response.data['results'][0]['name'] == 'quay-remote'
     assert request_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/_ui/v1/execution-environments/registries/'
-    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Token hub-token'
 
 
 @pytest.mark.django_db
@@ -388,6 +456,10 @@ def test_galaxy_ng_collection_approvals_list_scopes_to_staging(get, admin_user, 
     GALAXY_NG_AUTH_TOKEN='hub-token',
 )
 def test_galaxy_ng_collection_approval_approve_moves_to_published(post, admin_user, mocker):
+    schema_mock = mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(mocker, galaxy_openapi_schema()),
+    )
     post_mock = mocker.patch(
         'awx.main.utils.galaxy_ng.requests.post',
         return_value=galaxy_response(mocker, {'copy_task_id': 42, 'remove_task_id': 42}),
@@ -407,7 +479,8 @@ def test_galaxy_ng_collection_approval_approve_moves_to_published(post, admin_us
     assert response.data['remove_task'] == 42
     assert post_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/v3/collections/infra/network/versions/1.0.0/move/staging/published/'
     assert post_mock.call_args.kwargs['json'] == {}
-    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Token hub-token'
+    assert schema_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/v3/openapi.json'
 
 
 @pytest.mark.django_db
@@ -417,6 +490,10 @@ def test_galaxy_ng_collection_approval_approve_moves_to_published(post, admin_us
     GALAXY_NG_AUTH_TOKEN='hub-token',
 )
 def test_galaxy_ng_collection_approval_reject_moves_to_rejected(post, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(mocker, galaxy_openapi_schema()),
+    )
     post_mock = mocker.patch(
         'awx.main.utils.galaxy_ng.requests.post',
         return_value=galaxy_response(mocker, {'copy_task_id': 'reject-task', 'remove_task_id': 'reject-task'}),
@@ -434,6 +511,34 @@ def test_galaxy_ng_collection_approval_reject_moves_to_rejected(post, admin_user
     assert response.data['destination_repository'] == 'rejected'
     assert response.data['task'] == 'reject-task'
     assert post_mock.call_args.args[0] == ('https://hub.example.test/api/galaxy/v3/collections/infra/network/versions/1.0.0%2Bbuild.1/move/staging/rejected/')
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_collection_approval_blocks_incompatible_api(post, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(
+            mocker,
+            galaxy_openapi_schema(include_approval=False),
+        ),
+    )
+    post_mock = mocker.patch('awx.main.utils.galaxy_ng.requests.post')
+
+    response = post(
+        reverse('api:galaxy_ng_collection_approval_approve'),
+        data={'namespace': 'infra', 'name': 'network', 'version': '1.0.0'},
+        user=admin_user,
+        expect=409,
+    )
+
+    assert response.data['status'] == 'incompatible'
+    assert 'approve_collections' in response.data['detail']
+    assert post_mock.call_count == 0
 
 
 @pytest.mark.django_db
@@ -593,7 +698,7 @@ def test_galaxy_ng_collection_import_plan_rejects_path_traversal(post, admin_use
         )
 
     assert response.data['status'] == 'bad_request'
-    assert 'relative to the selected AWX project' in response.data['detail']
+    assert 'relative to the selected Capstan project' in response.data['detail']
 
 
 @pytest.mark.django_db
@@ -723,18 +828,21 @@ def test_galaxy_ng_collection_search_uses_supported_endpoint_and_flattens_result
 def test_galaxy_ng_repository_sync_resolves_distribution_and_launches_task(post, admin_user, mocker):
     get_mock = mocker.patch(
         'awx.main.utils.galaxy_ng.requests.get',
-        return_value=galaxy_response(
-            mocker,
-            {
-                'count': 1,
-                'results': [
-                    {
-                        'name': 'published',
-                        'base_path': 'published',
-                    }
-                ],
-            },
-        ),
+        side_effect=[
+            galaxy_response(mocker, galaxy_openapi_schema()),
+            galaxy_response(
+                mocker,
+                {
+                    'count': 1,
+                    'results': [
+                        {
+                            'name': 'published',
+                            'base_path': 'published',
+                        }
+                    ],
+                },
+            ),
+        ],
     )
     post_mock = mocker.patch(
         'awx.main.utils.galaxy_ng.requests.post',
@@ -752,11 +860,40 @@ def test_galaxy_ng_repository_sync_resolves_distribution_and_launches_task(post,
     assert response.data['repository'] == 'published'
     assert response.data['base_path'] == 'published'
     assert response.data['task'] == 'sync-task-1'
-    assert get_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/distributions/ansible/ansible/'
-    assert get_mock.call_args.kwargs['params'] == {'base_path': 'published', 'limit': 1}
+    assert get_mock.call_args_list[0].args[0] == 'https://hub.example.test/api/galaxy/v3/openapi.json'
+    assert get_mock.call_args_list[1].args[0] == 'https://hub.example.test/api/galaxy/pulp/api/v3/distributions/ansible/ansible/'
+    assert get_mock.call_args_list[1].kwargs['params'] == {'base_path': 'published', 'limit': 1}
     assert post_mock.call_args.args[0] == 'https://hub.example.test/api/galaxy/content/published/v3/sync/'
     assert post_mock.call_args.kwargs['json'] == {}
-    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer hub-token'
+    assert post_mock.call_args.kwargs['headers']['Authorization'] == 'Token hub-token'
+
+
+@pytest.mark.django_db
+@override_settings(
+    MODULE_GALAXY_NG_ENABLED=True,
+    GALAXY_NG_SERVER_URL='https://hub.example.test',
+    GALAXY_NG_AUTH_TOKEN='hub-token',
+)
+def test_galaxy_ng_repository_sync_blocks_incompatible_api(post, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.galaxy_ng.requests.get',
+        return_value=galaxy_response(
+            mocker,
+            galaxy_openapi_schema(include_sync=False),
+        ),
+    )
+    post_mock = mocker.patch('awx.main.utils.galaxy_ng.requests.post')
+
+    response = post(
+        reverse('api:galaxy_ng_repository_sync'),
+        data={'repository': 'published'},
+        user=admin_user,
+        expect=409,
+    )
+
+    assert response.data['status'] == 'incompatible'
+    assert 'sync_repositories' in response.data['detail']
+    assert post_mock.call_count == 0
 
 
 @pytest.mark.django_db

@@ -320,6 +320,10 @@ describe('Policy resource pages', () => {
     cy.getByDataCy('gatekeeper-remediation-suggest-button').click();
     cy.wait('@remediate');
     cy.contains('Add the required owner label.').should('be.visible');
-    cy.contains('a', 'Activity Stream #91').should('have.attr', 'href', '/activity-stream?id=91');
+    cy.contains('a', 'Activity Stream #91').should(
+      'have.attr',
+      'href',
+      '/administration/activity-stream?id=91'
+    );
   });
 });

@@ -84,7 +84,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 fail() {
-  echo "release-awx: $*" >&2
+  echo "release-capstan: $*" >&2
   exit 1
 }
 
@@ -154,7 +154,7 @@ build_image() {
 }
 
 push_tag() {
-  git tag -a "$version" -m "AWX $version"
+  git tag -a "$version" -m "Capstan $version"
   git push origin "$version"
 }
 
@@ -170,5 +170,5 @@ if [[ "$skip_tag" -eq 0 ]]; then
   push_tag
 fi
 
-echo "Release complete: $version"
+echo "Capstan release complete: $version"
 echo "Image: $image:$version"

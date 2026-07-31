@@ -156,6 +156,7 @@ export enum AwxRoute {
   EditTerraformTemplate = 'awx-edit-terraform-template',
   TerraformTemplatePage = 'awx-terraform-template-page',
   TerraformTemplateDetails = 'awx-terraform-template-details',
+  TerraformTemplateState = 'awx-terraform-template-state',
   TerraformTemplateJobs = 'awx-terraform-template-jobs',
   TerraformTemplateLaunch = 'awx-terraform-template-launch',
   TerraformTemplateTeamAccess = 'awx-terraform-template-team-access',
@@ -195,7 +196,6 @@ export enum AwxRoute {
 
   // Galaxy NG
   GalaxyNG = 'awx-galaxy-ng',
-  GalaxyNGOverview = 'awx-galaxy-ng-overview',
   GalaxyNGNamespaces = 'awx-galaxy-ng-namespaces',
   GalaxyNGCollections = 'awx-galaxy-ng-collections',
   GalaxyNGProjectImports = 'awx-galaxy-ng-project-imports',
@@ -210,7 +210,6 @@ export enum AwxRoute {
 
   // Project Quay
   Quay = 'awx-quay',
-  QuayOverview = 'awx-quay-overview',
   QuayRepositories = 'awx-quay-repositories',
   QuayRepositoryDetails = 'awx-quay-repository-details',
   QuayRepositoryPermissions = 'awx-quay-repository-permissions',
@@ -241,12 +240,10 @@ export enum AwxRoute {
 
   // Policy as Code
   PolicyAsCode = 'awx-policy-as-code',
-  PolicyAsCodeOverview = 'awx-policy-as-code-overview',
   PolicyAsCodeOpa = 'awx-policy-as-code-opa',
   PolicyAsCodeOpaModules = 'awx-policy-as-code-opa-modules',
   PolicyAsCodeOpaDecisions = 'awx-policy-as-code-opa-decisions',
   PolicyAsCodeOpaViolations = 'awx-policy-as-code-opa-violations',
-  PolicyAsCodeOpaProjectSync = 'awx-policy-as-code-opa-project-sync',
   PolicyAsCodeOpaTester = 'awx-policy-as-code-opa-tester',
   PolicyAsCodeGatekeeper = 'awx-policy-as-code-gatekeeper',
   PolicyAsCodeGatekeeperChanges = 'awx-policy-as-code-gatekeeper-changes',
@@ -265,18 +262,7 @@ export enum AwxRoute {
   EdaProjects = 'awx-eda-projects',
   EdaDecisionEnvironments = 'awx-eda-decision-environments',
   EdaEventStreams = 'awx-eda-event-streams',
-  EdaInfrastructure = 'awx-eda-infrastructure',
-  EdaCredentials = 'awx-eda-credentials',
-  EdaCredentialTypes = 'awx-eda-credential-types',
   EdaRulebooks = 'awx-eda-rulebooks',
-  EdaAccess = 'awx-eda-access',
-  EdaOrganizations = 'awx-eda-organizations',
-  EdaTeams = 'awx-eda-teams',
-  EdaUsers = 'awx-eda-users',
-  EdaRoles = 'awx-eda-roles',
-  EdaRbacSync = 'awx-eda-rbac-sync',
-  EdaUserRoleAssignments = 'awx-eda-user-role-assignments',
-  EdaTeamRoleAssignments = 'awx-eda-team-role-assignments',
 
   // Access
   Access = 'awx-access',

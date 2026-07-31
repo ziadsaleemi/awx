@@ -287,7 +287,7 @@ function SeedNavigation(props: { children: ReactNode }) {
 
 function mountGatekeeper(
   response: object = gatekeeperResponse,
-  view: GatekeeperPolicyManagerView = 'overview'
+  view: GatekeeperPolicyManagerView = 'changes'
 ) {
   cy.intercept('GET', '/api/v2/opa/gatekeeper/**', response).as('gatekeeper');
   cy.intercept('GET', '/api/v2/projects/**', awxProjectsResponse).as('projects');
@@ -300,44 +300,6 @@ function mountGatekeeper(
 }
 
 describe('GatekeeperPolicyManager', () => {
-  it('uses a Capstan-oriented overview with resource workflow links', () => {
-    cy.viewport(1920, 1100);
-    mountGatekeeper();
-
-    cy.get('[data-cy="gatekeeper-policy-manager"]')
-      .should('exist')
-      .and('not.have.class', 'pf-m-limit-width');
-    cy.getByDataCy('gatekeeper-awx-workflow').should('be.visible');
-    cy.getByDataCy('gatekeeper-posture')
-      .should('contain', 'Admission policy posture')
-      .and('contain', 'ConstraintTemplates')
-      .and('contain', 'Violations');
-    cy.contains('a', 'Open governed changes')
-      .should('be.visible')
-      .and('have.attr', 'href', '/policy-as-code/gatekeeper/changes');
-    cy.contains('a', 'Review templates')
-      .should('be.visible')
-      .and('have.attr', 'href', '/policy-as-code/gatekeeper/templates');
-    cy.contains('a', 'Triage violations')
-      .should('be.visible')
-      .and('have.attr', 'href', '/policy-as-code/gatekeeper/violations');
-
-    cy.contains('.pf-v5-c-card__title', 'Cluster connection')
-      .parents('.pf-v5-c-card')
-      .then(($clusterCard) => {
-        cy.contains('.pf-v5-c-card__title', 'API coverage')
-          .parents('.pf-v5-c-card')
-          .then(($coverageCard) => {
-            const clusterRect = $clusterCard[0].getBoundingClientRect();
-            const coverageRect = $coverageCard[0].getBoundingClientRect();
-            expect(Math.abs(clusterRect.top - coverageRect.top)).to.be.lessThan(2);
-            expect(Math.abs(clusterRect.height - coverageRect.height)).to.be.lessThan(2);
-            expect(clusterRect.width).to.be.greaterThan(600);
-            expect(coverageRect.width).to.be.greaterThan(600);
-          });
-      });
-  });
-
   it('uses full-width policy layout with aligned violation filters', () => {
     cy.viewport(1920, 1100);
     mountGatekeeper(gatekeeperResponseWithViolation, 'violations');

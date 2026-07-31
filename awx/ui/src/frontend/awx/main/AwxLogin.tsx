@@ -1,5 +1,6 @@
 import { Page } from '@patternfly/react-core';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import useSWR, { mutate } from 'swr';
 import { LoadingState } from '../../../framework/components/LoadingState';
 import { AnsibleLogin } from '../../common/AnsibleLogin/AnsibleLogin';
@@ -14,11 +15,12 @@ import { DocsVersionProvider } from '../common/useDocsVersion';
 type AwxAuthOptions = {
   [key: string]: {
     login_url: string;
+    name?: string;
   };
 };
 
 const CUSTOM_LOGO_KEY = 'awx-custom-logo';
-const STATIC_BRAND_LOGO = '/static/media/brand-logo.png';
+const STATIC_BRAND_LOGO = '/assets/brand-fallback.png';
 
 function getCachedCustomLogo() {
   if (typeof window === 'undefined') {
@@ -32,6 +34,7 @@ function getCachedCustomLogo() {
 }
 
 export function AwxLogin(props: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const { data: options } = useSWR<AwxAuthOptions>(awxAPI`/auth/`, requestGet);
   // Fetch from the AllowAny root endpoint so custom_logo/custom_login_info are
   // available on the login page before the user authenticates.
@@ -39,11 +42,16 @@ export function AwxLogin(props: { children: React.ReactNode }) {
     custom_logo?: string;
     custom_login_info?: string;
     custom_login_background?: string;
+    password_auth_methods?: string[];
   }>('/api/', requestGet);
   const authOptions: AuthOption[] = [];
   if (options && typeof options === 'object') {
     Object.keys(options).forEach((key) => {
-      authOptions.push({ login_url: options[key].login_url, type: key });
+      authOptions.push({
+        login_url: options[key].login_url,
+        name: options[key].name,
+        type: key,
+      });
     });
   }
 
@@ -88,6 +96,11 @@ export function AwxLogin(props: { children: React.ReactNode }) {
       <AnsibleLogin
         authOptions={authOptions}
         loginApiUrl="/api/login/"
+        loginSubtitle={
+          rootInfo?.password_auth_methods?.includes('ldap')
+            ? t('Use your local or LDAP directory credentials.')
+            : undefined
+        }
         onSuccess={() => {
           refreshActiveAwxUser?.();
           void mutate(() => true);

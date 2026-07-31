@@ -22,7 +22,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 import { AwxRoute } from '../../main/AwxRoutes';
 import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
-import { GalaxyNgStatus } from './GalaxyNgOverview';
+import { GalaxyNgStatus } from './GalaxyNgStatus';
 
 export function GalaxyNgApiToken() {
   const { t } = useTranslation();
@@ -37,8 +37,6 @@ export function GalaxyNgApiToken() {
         description={t('Galaxy NG credentials Capstan uses to read Automation Hub content APIs.')}
         headerActions={
           <GalaxyNgHeaderActions
-            status={status.data}
-            uiRoute="token/"
             page={t('Galaxy NG API token')}
             prompt={t(
               'Help me configure Galaxy NG API token access for Capstan. Explain what is configured, what is missing, and how this affects namespaces, collections, repositories, remotes, and tasks.'

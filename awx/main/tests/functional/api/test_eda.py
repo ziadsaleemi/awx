@@ -24,6 +24,17 @@ def eda_error_response(mocker, status_code, text):
     return response
 
 
+def eda_openapi_payload(version='0.2.0'):
+    return {
+        'info': {'title': 'Event Driven Ansible API', 'version': version},
+        'paths': {
+            '/projects/': {'get': {}, 'post': {}},
+            '/projects/{id}/': {'get': {}, 'patch': {}, 'delete': {}},
+            '/projects/{id}/sync/': {'post': {}},
+        },
+    }
+
+
 def eda_rbac_resource_payloads(organization, user=None, *, assignments=None, teams=None, users=None):
     if users is None:
         users = []
@@ -45,6 +56,86 @@ def eda_rbac_resource_payloads(organization, user=None, *, assignments=None, tea
 
 def patch_eda_rbac_resources(mocker, payloads):
     return mocker.patch('awx.main.utils.eda_rbac.EDAControllerClient.list_resource_all', side_effect=lambda resource, **kwargs: payloads[resource])
+
+
+def eda_credential_resource_payloads(organization, *, credential_types=None, credentials=None, users=None, teams=None, assignments=None):
+    return {
+        'credential-types': credential_types or [],
+        'credentials': credentials or [],
+        'organizations': [{'id': 10, 'name': organization.name}, {'id': 11, 'name': 'Default'}],
+        'users': users or [],
+        'teams': teams or [],
+        'role-definitions': [
+            {'id': 16, 'name': 'EDA Credential Admin', 'content_type': 'eda.edacredential'},
+            {'id': 17, 'name': 'EDA Credential Use', 'content_type': 'eda.edacredential'},
+        ],
+        'user-role-assignments': assignments or [],
+        'team-role-assignments': [],
+    }
+
+
+def patch_eda_credential_resources(mocker, payloads):
+    return mocker.patch(
+        'awx.main.utils.eda_credentials.EDAControllerClient.list_resource_all',
+        side_effect=lambda resource, **kwargs: payloads[resource],
+    )
+
+
+def eda_native_credential_payloads(organization):
+    credential_type = {
+        'id': 21,
+        'name': 'Event Engine webhook',
+        'description': 'Receives signed events.',
+        'managed': False,
+        'inputs': {
+            'required': ['endpoint', 'token', 'event-name'],
+            'fields': [
+                {
+                    'id': 'endpoint',
+                    'label': 'Endpoint',
+                    'type': 'string',
+                    'hidden': True,
+                },
+                {
+                    'id': 'token',
+                    'label': 'Token',
+                    'type': 'string',
+                    'secret': True,
+                    'format': 'aes_key',
+                },
+            ],
+            'metadata': [
+                {
+                    'id': 'event-name',
+                    'label': 'Event name',
+                    'type': 'string',
+                }
+            ],
+        },
+        'injectors': {
+            'file': {'template.token': '{{ token }}'},
+            'env': {
+                'EDA_ENDPOINT': '{{ endpoint }}',
+                'EDA_TOKEN_FILE': '{{ eda.filename.token }}',
+            },
+        },
+    }
+    credential = {
+        'id': 31,
+        'name': 'Operations webhook',
+        'description': 'Imported Event Engine credential.',
+        'credential_type_id': 21,
+        'organization_id': 10,
+        'inputs': {
+            'endpoint': 'https://events.example.test',
+            'token': '$encrypted$',
+        },
+    }
+    return eda_credential_resource_payloads(
+        organization,
+        credential_types=[credential_type],
+        credentials=[credential],
+    )
 
 
 @pytest.mark.django_db
@@ -87,17 +178,20 @@ def test_eda_status_reports_configured_controller(get, admin_user):
 def test_eda_status_can_include_version_for_about_modal(get, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.eda.requests.request',
-        return_value=eda_response(mocker, {'version': '2.6.1', 'build': {'sha': 'abc123'}}),
+        return_value=eda_response(mocker, eda_openapi_payload()),
     )
 
     response = get(reverse('api:eda_status') + '?include_version=1', user=admin_user, expect=200)
 
     assert response.data['configured'] is True
-    assert response.data['version'] == '2.6.1'
-    assert response.data['version_detail']['build']['sha'] == 'abc123'
+    assert response.data['version'] == '0.2.0'
+    assert response.data['compatibility'] == 'compatible'
+    assert response.data['compatible'] is True
+    assert response.data['missing_capabilities'] == []
+    assert response.data['api_contract']['capabilities']['projects.sync'] is True
     assert response.data['version_error'] == ''
     request_mock.assert_called_once()
-    assert request_mock.call_args.args[:2] == ('GET', 'https://eda.example.test/api/eda/v1/status/')
+    assert request_mock.call_args.args[:2] == ('GET', 'https://eda.example.test/api/eda/v1/openapi.json')
     assert request_mock.call_args.kwargs['headers']['Authorization'] == 'Bearer eda-token'
 
 
@@ -809,34 +903,6 @@ def test_eda_decision_environment_create_defaults_organization(post, admin_user,
 
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
-def test_eda_team_create_defaults_organization(post, admin_user, mocker):
-    request_mock = mocker.patch(
-        'awx.main.utils.eda.requests.request',
-        side_effect=[
-            eda_response(mocker, {'count': 1, 'results': [{'id': 1, 'name': 'Default'}]}),
-            eda_response(mocker, {'id': 8, 'name': 'EDA operators'}),
-        ],
-    )
-
-    response = post(
-        reverse('api:eda_resource_list', kwargs={'resource': 'teams'}),
-        {'name': 'EDA operators'},
-        user=admin_user,
-        expect=201,
-    )
-
-    assert response.data['id'] == 8
-    assert [call.args[0] for call in request_mock.call_args_list] == ['GET', 'POST']
-    assert request_mock.call_args_list[0].args[1] == 'https://eda.example.test/api/eda/v1/organizations/'
-    assert request_mock.call_args_list[1].args[1] == 'https://eda.example.test/api/eda/v1/teams/'
-    assert request_mock.call_args_list[1].kwargs['json'] == {
-        'name': 'EDA operators',
-        'organization_id': 1,
-    }
-
-
-@pytest.mark.django_db
-@override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_project_sync_proxies_to_controller(post, admin_user, mocker):
     request_mock = mocker.patch(
         'awx.main.utils.eda.requests.request',
@@ -851,6 +917,94 @@ def test_eda_project_sync_proxies_to_controller(post, admin_user, mocker):
     assert request_mock.call_args.args[0] == 'POST'
     assert request_mock.call_args.args[1] == 'https://eda.example.test/api/eda/v1/projects/7/sync/'
     assert request_mock.call_args.kwargs['json'] == {}
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_project_sources_list_uses_rbac_filtered_capstan_projects(get, admin_user, project, mocker):
+    request_mock = mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(
+            mocker,
+            {
+                'count': 1,
+                'next': None,
+                'previous': None,
+                'results': [
+                    {
+                        'id': 77,
+                        'name': f'Capstan Project {project.pk} - {project.name}',
+                        'description': f'[capstan-project:{project.pk}]',
+                        'url': project.scm_url,
+                        'scm_branch': project.scm_branch,
+                        'scm_refspec': project.scm_refspec,
+                        'update_revision_on_launch': project.scm_update_on_launch,
+                        'scm_update_cache_timeout': project.scm_update_cache_timeout,
+                        'import_state': 'completed',
+                        'last_synced_at': '2026-07-30T12:00:00Z',
+                    }
+                ],
+            },
+        ),
+    )
+
+    response = get(reverse('api:eda_project_source_list'), user=admin_user, expect=200)
+
+    assert response.data['source'] == 'capstan_projects'
+    assert response.data['count'] == 1
+    assert response.data['results'][0]['id'] == project.pk
+    assert response.data['results'][0]['eda_project_id'] == 77
+    assert response.data['results'][0]['integration_status'] == 'synced'
+    assert response.data['results'][0]['scm_url'] == project.scm_url
+    assert response.data['results'][0]['user_capabilities'] == {'edit': True, 'sync': True}
+    assert request_mock.call_args.args[:2] == ('GET', 'https://eda.example.test/api/eda/v1/projects/')
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_project_source_sync_launches_durable_project_update(post, admin_user, project, mocker):
+    signal_start = mocker.patch.object(models.ProjectUpdate, 'signal_start', return_value=True)
+    request_mock = mocker.patch('awx.main.utils.eda.requests.request')
+
+    response = post(reverse('api:eda_project_source_sync', kwargs={'pk': project.pk}), {}, user=admin_user, expect=202)
+
+    project_update = models.ProjectUpdate.objects.get(pk=response.data['project_update'])
+    assert response.data['source'] == 'capstan_project'
+    assert response.data['capstan_project_id'] == project.pk
+    assert response.data['id'] == project_update.pk
+    assert response.data['type'] == 'project_update'
+    assert response.data['eda_sync'] is True
+    assert response.headers['Location'].endswith(f'/api/v2/project_updates/{project_update.pk}/')
+    assert project_update.project == project
+    assert project_update.launch_type == 'manual'
+    assert project_update.eda_sync is True
+    signal_start.assert_called_once_with()
+    request_mock.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_project_source_sync_reports_job_start_failure(post, admin_user, project, mocker):
+    mocker.patch.object(models.ProjectUpdate, 'signal_start', return_value=False)
+
+    response = post(reverse('api:eda_project_source_sync', kwargs={'pk': project.pk}), {}, user=admin_user, expect=400)
+
+    assert response.data['detail'] == 'The Event Engine project synchronization job could not be started.'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_status_reports_capability_compatible_untested_version(get, admin_user, mocker):
+    mocker.patch(
+        'awx.main.utils.eda.requests.request',
+        return_value=eda_response(mocker, eda_openapi_payload(version='0.3.0')),
+    )
+
+    response = get(reverse('api:eda_status') + '?include_version=1', user=admin_user, expect=200)
+
+    assert response.data['compatible'] is True
+    assert response.data['compatibility'] == 'compatible_untested'
+    assert response.data['api_contract']['tested_api_version_spec'] == '>=0.2.0,<0.3.0'
 
 
 @pytest.mark.django_db
@@ -885,11 +1039,26 @@ def test_eda_operator_can_read_but_not_mutate_access_resources(get, post, organi
 
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
-def test_eda_controller_discovered_resources_are_read_only(post, patch, delete, admin_user):
-    for resource in ('rule-audit', 'rulebooks'):
-        post(reverse('api:eda_resource_list', kwargs={'resource': resource}), {'name': 'audit'}, user=admin_user, expect=405)
+def test_eda_controller_managed_resources_are_read_only(post, patch, delete, admin_user):
+    for resource in (
+        'rule-audit',
+        'rulebooks',
+        'organizations',
+        'teams',
+        'users',
+        'role-definitions',
+        'user-role-assignments',
+        'team-role-assignments',
+        'credentials',
+        'credential-types',
+    ):
+        response = post(reverse('api:eda_resource_list', kwargs={'resource': resource}), {'name': 'audit'}, user=admin_user, expect=405)
         patch(reverse('api:eda_resource_detail', kwargs={'resource': resource, 'pk': '1'}), {'name': 'audit'}, user=admin_user, expect=405)
         delete(reverse('api:eda_resource_detail', kwargs={'resource': resource, 'pk': '1'}), user=admin_user, expect=405)
+        if resource in ('credentials', 'credential-types'):
+            assert 'Capstan Credentials' in response.data['detail']
+        elif resource not in ('rule-audit', 'rulebooks'):
+            assert 'Capstan Access Management' in response.data['detail']
 
 
 @pytest.mark.django_db
@@ -941,6 +1110,73 @@ def test_eda_rbac_sync_preview_reports_missing_assignment(get, organization, ran
 
 @pytest.mark.django_db
 @override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_service_reconciliation_includes_all_organizations(organization, rando, mocker):
+    from awx.main.utils.eda_rbac import build_eda_rbac_sync_report
+
+    second_organization = models.Organization.objects.create(name='Second EDA organization')
+    organization.eda_operator_role.members.add(rando)
+    second_organization.eda_operator_role.members.add(rando)
+    payloads = eda_rbac_resource_payloads(organization, rando)
+    payloads['organizations'].append({'id': 11, 'name': second_organization.name})
+    patch_eda_rbac_resources(mocker, payloads)
+
+    report = build_eda_rbac_sync_report(mode='observe')
+
+    assert report['summary']['awx_organizations'] == 2
+    assert report['summary']['desired_assignments'] == 2
+    assert {assignment['awx_organization_name'] for assignment in report['desired_assignments']} == {
+        organization.name,
+        second_organization.name,
+    }
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=True, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_change_schedules_reconciliation_after_commit(mocker):
+    from awx.main.signals import schedule_eda_rbac_reconciliation
+
+    mocker.patch('awx.main.signals.is_testing', return_value=False)
+    on_commit = mocker.patch('awx.main.signals.connection.on_commit')
+    reconcile = mocker.patch('awx.main.signals.reconcile_eda_rbac.delay')
+
+    schedule_eda_rbac_reconciliation(action='post_add')
+
+    on_commit.assert_called_once()
+    on_commit.call_args.args[0]()
+    reconcile.assert_called_once_with()
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=True, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_configuration_change_schedules_initial_reconciliation(mocker):
+    from awx.main.signals import schedule_eda_configuration_reconciliation
+
+    mocker.patch('awx.main.signals.is_testing', return_value=False)
+    on_commit = mocker.patch('awx.main.signals.connection.on_commit')
+    reconcile = mocker.patch('awx.main.signals.reconcile_eda_rbac.delay')
+
+    schedule_eda_configuration_reconciliation(setting='EDA_SERVER_URL')
+
+    on_commit.assert_called_once()
+    on_commit.call_args.args[0]()
+    reconcile.assert_called_once_with(refresh_credential_secrets=True)
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=True, EDA_SERVER_URL='https://eda.example.test')
+def test_unrelated_configuration_change_does_not_schedule_eda_reconciliation(mocker):
+    from awx.main.signals import schedule_eda_configuration_reconciliation
+
+    mocker.patch('awx.main.signals.is_testing', return_value=False)
+    on_commit = mocker.patch('awx.main.signals.connection.on_commit')
+
+    schedule_eda_configuration_reconciliation(setting='CUSTOM_LOGO')
+
+    on_commit.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
 def test_eda_rbac_sync_creates_missing_assignment(post, organization, rando, admin_user, mocker):
     organization.eda_operator_role.members.add(rando)
     patch_eda_rbac_resources(mocker, eda_rbac_resource_payloads(organization, rando))
@@ -954,6 +1190,28 @@ def test_eda_rbac_sync_creates_missing_assignment(post, organization, rando, adm
         'user-role-assignments',
         {'user': 50, 'role_definition': 5, 'content_type': 'shared.organization', 'object_id': 10},
     )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_rbac_sync_projects_organization_credential_administrator(get, organization, rando, admin_user, mocker):
+    organization.credential_admin_role.members.add(rando)
+    payloads = eda_rbac_resource_payloads(organization, rando)
+    payloads['role-definitions'].append(
+        {
+            'id': 18,
+            'name': 'Organization EDA Credential Admin',
+            'content_type': 'shared.organization',
+        }
+    )
+    patch_eda_rbac_resources(mocker, payloads)
+
+    response = get(reverse('api:eda_rbac_sync'), user=admin_user, expect=200)
+
+    assert response.data['summary']['desired_assignments'] == 1
+    assert response.data['missing_assignments'][0]['actor_name'] == rando.username
+    assert response.data['missing_assignments'][0]['awx_role_label'] == 'Credential Administrator'
+    assert response.data['missing_assignments'][0]['eda_role_name'] == 'Organization EDA Credential Admin'
 
 
 @pytest.mark.django_db
@@ -1015,6 +1273,12 @@ def test_eda_rbac_sync_supports_legacy_short_organization_role_names(get, organi
             'awx_role_field': 'auditor_role',
             'aliases': ['Auditor', 'Organization Viewer'],
         },
+        {
+            'name': 'Organization EDA Credential Admin',
+            'content_type': 'shared.organization',
+            'awx_role_field': 'credential_admin_role',
+            'aliases': ['EDA Credential Admin'],
+        },
     ]
 
 
@@ -1068,3 +1332,307 @@ def test_eda_rbac_sync_rejects_operator(post, organization, rando):
     response = post(reverse('api:eda_rbac_sync'), {'mode': 'sync'}, user=rando, expect=403)
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_sync_projects_type_credential_and_secret_without_leaking_it(post, organization, admin_user, mocker):
+    credential_type = models.CredentialType.objects.create(
+        name='Capstan API',
+        kind='cloud',
+        inputs={
+            'fields': [
+                {'id': 'endpoint', 'label': 'Endpoint', 'type': 'string'},
+                {'id': 'token', 'label': 'Token', 'type': 'string', 'secret': True},
+            ]
+        },
+        injectors={
+            'file': {'template.token': '{{ token }}'},
+            'env': {
+                'CAPSTAN_ENDPOINT': '{{ endpoint }}',
+                'CAPSTAN_TOKEN': '{{ token }}',
+                'CAPSTAN_TOKEN_FILE': '{{ tower.filename.token }}',
+            },
+        },
+    )
+    credential = models.Credential.objects.create(
+        name='Capstan API production',
+        organization=organization,
+        credential_type=credential_type,
+        inputs={'endpoint': 'https://api.example.test', 'token': 'never-return-this-token'},
+    )
+    patch_eda_credential_resources(mocker, eda_credential_resource_payloads(organization))
+
+    def create_resource(resource, payload):
+        if resource == 'credential-types':
+            return {'id': 20, **payload, 'managed': False}
+        if resource == 'credentials':
+            return {
+                'id': 30,
+                'name': payload['name'],
+                'description': payload['description'],
+                'credential_type_id': payload['credential_type_id'],
+                'organization_id': payload['organization_id'],
+            }
+        raise AssertionError(f'Unexpected EDA create resource: {resource}')
+
+    create = mocker.patch('awx.main.utils.eda_credentials.EDAControllerClient.create_resource', side_effect=create_resource)
+
+    response = post(
+        reverse('api:eda_credential_sync'),
+        {'mode': 'sync', 'refresh_secrets': True},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['summary']['capstan_credential_types'] == 1
+    assert response.data['summary']['capstan_credentials'] == 1
+    assert response.data['summary']['projected_credential_types'] == 1
+    assert response.data['summary']['projected_credentials'] == 1
+    assert response.data['secret_values_included'] is False
+    assert 'never-return-this-token' not in str(response.data)
+    assert response.data['desired_credentials'][0]['input_fields'] == ['endpoint', 'token']
+    assert response.data['actions'][1]['input_fields'] == ['endpoint', 'token']
+    credential_payload = create.call_args_list[1].args[1]
+    assert credential_payload['inputs'] == {
+        'endpoint': 'https://api.example.test',
+        'token': 'never-return-this-token',
+    }
+    assert credential_payload['description'].startswith(f'[capstan-credential:{credential.pk}]')
+    type_payload = create.call_args_list[0].args[1]
+    assert type_payload['injectors']['env']['CAPSTAN_TOKEN_FILE'] == '{{ eda.filename.token }}'
+    assert credential_type.injectors['env']['CAPSTAN_TOKEN_FILE'] == '{{ tower.filename.token }}'
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_sync_reuses_compatible_managed_type_and_projects_use_access(
+    post,
+    organization,
+    rando,
+    admin_user,
+    credentialtype_scm,
+    mocker,
+):
+    credential = models.Credential.objects.create(
+        name='Git source',
+        organization=organization,
+        credential_type=credentialtype_scm,
+        inputs={'username': 'git-user', 'password': 'git-secret'},
+    )
+    credential.use_role.members.add(rando)
+    payloads = eda_credential_resource_payloads(
+        organization,
+        credential_types=[
+            {
+                'id': 21,
+                'name': credentialtype_scm.name,
+                'namespace': credentialtype_scm.namespace,
+                'managed': True,
+                'inputs': credentialtype_scm.inputs,
+                'injectors': credentialtype_scm.injectors,
+            }
+        ],
+        users=[{'id': 50, 'username': rando.username}],
+    )
+    patch_eda_credential_resources(mocker, payloads)
+
+    def create_resource(resource, payload):
+        if resource == 'credentials':
+            return {
+                'id': 31,
+                'name': payload['name'],
+                'description': payload['description'],
+                'credential_type_id': payload['credential_type_id'],
+                'organization_id': payload['organization_id'],
+            }
+        if resource == 'user-role-assignments':
+            return {'id': 70, **payload}
+        raise AssertionError(f'Unexpected EDA create resource: {resource}')
+
+    create = mocker.patch('awx.main.utils.eda_credentials.EDAControllerClient.create_resource', side_effect=create_resource)
+
+    response = post(reverse('api:eda_credential_sync'), {'mode': 'sync'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['projected_credential_types'] == 1
+    assert response.data['summary']['projected_credentials'] == 1
+    assert response.data['summary']['desired_access_assignments'] == 1
+    assert response.data['missing_access_assignments'][0]['actor_name'] == rando.username
+    assert response.data['missing_access_assignments'][0]['role_name'] == 'EDA Credential Use'
+    assert create.call_args_list[0].args[0] == 'credentials'
+    assert create.call_args_list[1].args == (
+        'user-role-assignments',
+        {
+            'user': 50,
+            'role_definition': 17,
+            'content_type': 'eda.edacredential',
+            'object_id': 31,
+        },
+    )
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_sync_rejects_dynamic_secret_sources_without_resolving_them(
+    post,
+    organization,
+    admin_user,
+    credentialtype_scm,
+    mocker,
+):
+    credential = models.Credential.objects.create(
+        name='Dynamic Git source',
+        organization=organization,
+        credential_type=credentialtype_scm,
+        inputs={'username': 'git-user'},
+    )
+    mocker.patch.object(models.Credential, 'dynamic_input_fields', new_callable=mocker.PropertyMock, return_value=['password'])
+    payloads = eda_credential_resource_payloads(
+        organization,
+        credential_types=[
+            {
+                'id': 21,
+                'name': credentialtype_scm.name,
+                'namespace': credentialtype_scm.namespace,
+                'managed': True,
+            }
+        ],
+    )
+    patch_eda_credential_resources(mocker, payloads)
+    create = mocker.patch('awx.main.utils.eda_credentials.EDAControllerClient.create_resource')
+
+    response = post(reverse('api:eda_credential_sync'), {'mode': 'sync'}, user=admin_user, expect=200)
+
+    assert response.data['summary']['projected_credentials'] == 0
+    assert response.data['errors'][0]['action'] == 'resolve_credential_inputs'
+    assert response.data['errors'][0]['name'] == credential.name
+    create.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(MODULE_EDA_ENABLED=True, EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_change_schedules_secret_refresh_after_commit(mocker):
+    from awx.main.signals import schedule_eda_credential_reconciliation
+
+    mocker.patch('awx.main.signals.is_testing', return_value=False)
+    on_commit = mocker.patch('awx.main.signals.connection.on_commit')
+    reconcile = mocker.patch('awx.main.signals.reconcile_eda_rbac.delay')
+
+    schedule_eda_credential_reconciliation()
+
+    on_commit.assert_called_once()
+    on_commit.call_args.args[0]()
+    reconcile.assert_called_once_with(refresh_credential_secrets=True)
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_sync_rejects_operator(post, organization, rando):
+    organization.eda_operator_role.members.add(rando)
+
+    response = post(reverse('api:eda_credential_sync'), {'mode': 'sync'}, user=rando, expect=403)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_import_preview_does_not_change_capstan(get, organization, admin_user, mocker):
+    patch_eda_credential_resources(mocker, eda_native_credential_payloads(organization))
+
+    response = get(reverse('api:eda_credential_import'), user=admin_user, expect=200)
+
+    assert response.data['mode'] == 'preview'
+    assert response.data['secret_values_included'] is False
+    assert response.data['summary'] == {
+        'eda_credential_types': 1,
+        'eda_credentials': 1,
+        'importable_credential_types': 1,
+        'importable_credentials': 1,
+        'existing': 0,
+        'secrets_required': 1,
+        'actions': 0,
+        'errors': 0,
+    }
+    assert response.data['credentials'][0]['missing_secret_fields'] == ['token']
+    assert '$encrypted$' not in str(response.data)
+    assert not models.CredentialType.objects.filter(name='Event Engine webhook').exists()
+    assert not models.Credential.objects.filter(name='Operations webhook').exists()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_import_copies_types_and_non_secret_inputs_idempotently(post, organization, admin_user, mocker):
+    payloads = eda_native_credential_payloads(organization)
+    patch_eda_credential_resources(mocker, payloads)
+
+    response = post(reverse('api:eda_credential_import'), {}, user=admin_user, expect=200)
+
+    assert response.data['mode'] == 'apply'
+    assert response.data['summary']['actions'] == 2
+    assert response.data['summary']['secrets_required'] == 1
+    credential_type = models.CredentialType.objects.get(name='Event Engine webhook')
+    credential = models.Credential.objects.get(name='Operations webhook')
+    assert credential_type.kind == 'cloud'
+    assert credential_type.description.startswith('[eda-credential-type:21]')
+    assert credential_type.inputs == {
+        'fields': [
+            {'id': 'endpoint', 'label': 'Endpoint', 'type': 'string'},
+            {'id': 'token', 'label': 'Token', 'type': 'string', 'secret': True},
+        ],
+        'required': ['endpoint', 'token'],
+    }
+    assert credential_type.injectors['env']['EDA_TOKEN_FILE'] == '{{ tower.filename.token }}'
+    assert credential.description.startswith('[eda-credential:31]\n[eda-missing-secrets:token]')
+    assert credential.inputs == {'endpoint': 'https://events.example.test'}
+    assert 'token' not in credential.inputs
+    assert '$encrypted$' not in str(response.data)
+
+    repeated = post(reverse('api:eda_credential_import'), {}, user=admin_user, expect=200)
+
+    assert repeated.data['summary']['actions'] == 0
+    assert repeated.data['summary']['existing'] == 2
+    assert models.CredentialType.objects.filter(name='Event Engine webhook').count() == 1
+    assert models.Credential.objects.filter(name='Operations webhook').count() == 1
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_import_requires_system_administrator(get, post, organization, rando, mocker):
+    organization.eda_admin_role.members.add(rando)
+    list_resources = patch_eda_credential_resources(mocker, eda_native_credential_payloads(organization))
+
+    get(reverse('api:eda_credential_import'), user=rando, expect=403)
+    post(reverse('api:eda_credential_import'), {}, user=rando, expect=403)
+
+    list_resources.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(EDA_SERVER_URL='https://eda.example.test')
+def test_eda_credential_sync_does_not_overwrite_imported_credential_until_secret_is_entered(
+    post,
+    organization,
+    admin_user,
+    mocker,
+):
+    payloads = eda_native_credential_payloads(organization)
+    patch_eda_credential_resources(mocker, payloads)
+    post(reverse('api:eda_credential_import'), {}, user=admin_user, expect=200)
+    update_resource = mocker.patch(
+        'awx.main.utils.eda_credentials.EDAControllerClient.update_resource',
+        side_effect=lambda resource, pk, payload: {'id': pk, **payload, 'managed': False},
+    )
+
+    response = post(
+        reverse('api:eda_credential_sync'),
+        {'mode': 'enforce', 'refresh_secrets': True},
+        user=admin_user,
+        expect=200,
+    )
+
+    assert response.data['summary']['projected_credentials'] == 1
+    assert response.data['summary']['errors'] == 1
+    assert response.data['errors'][0]['action'] == 'resolve_credential_inputs'
+    assert 'enter these secret fields in Capstan' in response.data['errors'][0]['detail']
+    assert all(call.args[0] == 'credential-types' for call in update_resource.call_args_list)

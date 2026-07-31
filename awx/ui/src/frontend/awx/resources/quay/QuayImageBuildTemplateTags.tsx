@@ -6,7 +6,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxView } from '../../common/useAwxView';
 import { QuayImageBuildTemplate } from '../../interfaces/QuayImageBuildTemplate';
-import { QuayStatus } from './QuayOverview';
+import { QuayStatus } from './QuayStatus';
 import { useParams } from 'react-router-dom';
 
 interface QuayImageTag {

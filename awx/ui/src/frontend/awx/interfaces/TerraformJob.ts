@@ -10,11 +10,18 @@ export interface TerraformJob {
   finished: string | null;
   elapsed: number;
 
+  terraform_job_template: number | null;
   project: number | null;
   terraform_dir: string;
   extra_vars: string;
   verbosity: 0 | 1 | 2 | 3 | 4;
   terraform_operation: 'apply' | 'plan' | 'destroy';
+  state_backend: 'terraform' | 'git';
+  state_project: number | null;
+  state_branch: string;
+  state_key: string;
+  state_revision_read: number | null;
+  state_revision_written: number | null;
 
   target_inventory: number | null;
   target_group: string;
@@ -43,6 +50,21 @@ export interface TerraformJob {
     };
     terraform_job_template?: { id: number; name: string; description: string };
     project?: { id: number; name: string; scm_type: string };
+    state_project?: { id: number; name: string; scm_type: string };
+    state_revision_read?: {
+      id: number;
+      git_commit: string;
+      checksum: string;
+      serial: number | null;
+      created: string;
+    };
+    state_revision_written?: {
+      id: number;
+      git_commit: string;
+      checksum: string;
+      serial: number | null;
+      created: string;
+    };
     target_inventory?: { id: number; name: string; kind: string };
     created_by?: { id: number; username: string };
     user_capabilities: {

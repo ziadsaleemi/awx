@@ -76,7 +76,6 @@ function requestErrorMessage(error: unknown, fallback: string) {
 }
 
 export type GatekeeperPolicyManagerView =
-  | 'overview'
   | 'changes'
   | 'templates'
   | 'constraints'
@@ -383,47 +382,6 @@ function StatusLabel(props: { ok: boolean; okText: string; failText: string }) {
     <Label color="red" icon={<TimesCircleIcon />}>
       {props.failText}
     </Label>
-  );
-}
-
-function GatekeeperMetricTile(props: {
-  label: string;
-  value: string | number;
-  detail: string;
-  attention?: boolean;
-}) {
-  return (
-    <div
-      data-cy="gatekeeper-metric-tile"
-      style={{
-        border: '1px solid var(--pf-v5-global--BorderColor--100)',
-        minHeight: 112,
-        minWidth: 0,
-        padding: 16,
-        width: '100%',
-      }}
-    >
-      <Stack hasGutter>
-        <StackItem>
-          <strong
-            style={{
-              color: props.attention ? 'var(--pf-v5-global--danger-color--100)' : undefined,
-              fontSize: 24,
-              lineHeight: 1.2,
-              overflowWrap: 'anywhere',
-            }}
-          >
-            {props.value}
-          </strong>
-        </StackItem>
-        <StackItem>
-          <div>{props.label}</div>
-          <div style={{ marginTop: 4, opacity: 0.75, overflowWrap: 'anywhere' }}>
-            {props.detail}
-          </div>
-        </StackItem>
-      </Stack>
-    </div>
   );
 }
 
@@ -825,13 +783,13 @@ function GatekeeperConfigDetail(props: { config: GatekeeperConfig }) {
   );
 }
 
-export function GatekeeperPolicyManager(props?: {
+export function GatekeeperPolicyManager(props: {
   canManagePolicy?: boolean;
-  view?: GatekeeperPolicyManagerView;
+  view: GatekeeperPolicyManagerView;
 }) {
   const { t } = useTranslation();
-  const canManagePolicy = props?.canManagePolicy ?? true;
-  const view = props?.view ?? 'overview';
+  const canManagePolicy = props.canManagePolicy ?? true;
+  const view = props.view;
   const getPageUrl = useGetPageUrl();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamString = searchParams.toString();
@@ -1322,7 +1280,6 @@ export function GatekeeperPolicyManager(props?: {
             ? t('Rollback plan')
             : t('Manifest textarea resource');
 
-  const showOverview = view === 'overview';
   const showChanges = view === 'changes';
   const showTemplates = view === 'templates';
   const showConstraints = view === 'constraints';
@@ -1997,213 +1954,6 @@ export function GatekeeperPolicyManager(props?: {
                 </CardBody>
               </Card>
             </StackItem>
-          ) : null}
-          {showOverview ? (
-            <>
-              <StackItem>
-                <Card isFlat data-cy="gatekeeper-posture">
-                  <CardHeader>
-                    <CardTitle>{t('Admission policy posture')}</CardTitle>
-                  </CardHeader>
-                  <CardBody>
-                    <Stack hasGutter>
-                      <StackItem>
-                        <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap' }}>
-                          <StatusLabel
-                            ok={data.configured}
-                            okText={t('Kubernetes API connected')}
-                            failText={t('Kubernetes API unavailable')}
-                          />
-                          <StatusLabel
-                            ok={data.errors.length === 0}
-                            okText={t('Resource reads healthy')}
-                            failText={t('{{count}} read errors', { count: data.errors.length })}
-                          />
-                        </span>
-                      </StackItem>
-                      <StackItem>
-                        <div
-                          style={{
-                            display: 'grid',
-                            gap: 16,
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))',
-                          }}
-                        >
-                          <GatekeeperMetricTile
-                            label={t('ConstraintTemplates')}
-                            value={data.counts.constraint_templates}
-                            detail={t('Available policy kinds')}
-                          />
-                          <GatekeeperMetricTile
-                            label={t('Constraints')}
-                            value={data.counts.constraints}
-                            detail={t('Active admission policies')}
-                          />
-                          <GatekeeperMetricTile
-                            label={t('Violations')}
-                            value={data.counts.violations}
-                            detail={t('{{count}} in the current filtered view', {
-                              count: data.counts.filtered_violations,
-                            })}
-                            attention={data.counts.violations > 0}
-                          />
-                          <GatekeeperMetricTile
-                            label={t('Configurations')}
-                            value={data.counts.configs}
-                            detail={t('Data sync and readiness resources')}
-                          />
-                        </div>
-                      </StackItem>
-                    </Stack>
-                  </CardBody>
-                </Card>
-              </StackItem>
-              <StackItem>
-                <Grid hasGutter style={{ alignItems: 'stretch' }}>
-                  <GridItem sm={12} xl={6}>
-                    <Card isFlat style={{ height: '100%' }}>
-                      <CardHeader>
-                        <CardTitle>{t('Cluster connection')}</CardTitle>
-                      </CardHeader>
-                      <CardBody>
-                        <DescriptionList isCompact>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Kubernetes API')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              <span style={{ overflowWrap: 'anywhere' }}>
-                                {data.cluster.server_url || t('Not configured')}
-                              </span>
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Context')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.cluster.context || t('Default')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('TLS verification')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.cluster.verify_ssl ? t('Enabled') : t('Disabled')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Discovery errors')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.errors.length}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                        </DescriptionList>
-                      </CardBody>
-                    </Card>
-                  </GridItem>
-                  <GridItem sm={12} xl={6}>
-                    <Card isFlat style={{ height: '100%' }}>
-                      <CardHeader>
-                        <CardTitle>{t('API coverage')}</CardTitle>
-                      </CardHeader>
-                      <CardBody>
-                        <DescriptionList isCompact>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('ConstraintTemplates')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.api_versions?.constraint_templates || t('Not discovered')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Constraints')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.api_versions?.constraints?.join(', ') || t('Not discovered')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>{t('Configurations')}</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {data.api_versions?.configs || t('Not discovered')}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                        </DescriptionList>
-                      </CardBody>
-                    </Card>
-                  </GridItem>
-                </Grid>
-              </StackItem>
-              <StackItem>
-                <Card isFlat data-cy="gatekeeper-awx-workflow">
-                  <CardHeader>
-                    <CardTitle>{t('Operator work queues')}</CardTitle>
-                  </CardHeader>
-                  <CardBody>
-                    <Table aria-label={t('Gatekeeper operator work queues')} variant="compact">
-                      <Thead>
-                        <Tr>
-                          <Th width={25}>{t('Queue')}</Th>
-                          <Th width={15}>{t('Items')}</Th>
-                          <Th width={40}>{t('Purpose')}</Th>
-                          <Th width={20}>{t('Action')}</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        <Tr>
-                          <Td dataLabel={t('Queue')}>{t('Violations')}</Td>
-                          <Td dataLabel={t('Items')}>{data.counts.violations}</Td>
-                          <Td dataLabel={t('Purpose')}>
-                            {t('Triage out-of-policy resources and prepare governed remediation.')}
-                          </Td>
-                          <Td dataLabel={t('Action')}>
-                            <Link to="/policy-as-code/gatekeeper/violations">
-                              {t('Triage violations')}
-                            </Link>
-                          </Td>
-                        </Tr>
-                        <Tr>
-                          <Td dataLabel={t('Queue')}>{t('Governed changes')}</Td>
-                          <Td dataLabel={t('Items')}>{t('Preview first')}</Td>
-                          <Td dataLabel={t('Purpose')}>
-                            {t(
-                              'Project-sync, preview, dry-run, apply, delete, or roll back manifests.'
-                            )}
-                          </Td>
-                          <Td dataLabel={t('Action')}>
-                            <Link to="/policy-as-code/gatekeeper/changes">
-                              {t('Open governed changes')}
-                            </Link>
-                          </Td>
-                        </Tr>
-                        <Tr>
-                          <Td dataLabel={t('Queue')}>{t('Policy inventory')}</Td>
-                          <Td dataLabel={t('Items')}>
-                            {data.counts.constraint_templates + data.counts.constraints}
-                          </Td>
-                          <Td dataLabel={t('Purpose')}>
-                            {t('Inspect template schemas, constraints, enforcement, and status.')}
-                          </Td>
-                          <Td dataLabel={t('Action')}>
-                            <Link to="/policy-as-code/gatekeeper/templates">
-                              {t('Review templates')}
-                            </Link>
-                          </Td>
-                        </Tr>
-                        <Tr>
-                          <Td dataLabel={t('Queue')}>{t('Audit evidence')}</Td>
-                          <Td dataLabel={t('Items')}>{t('Activity Stream')}</Td>
-                          <Td dataLabel={t('Purpose')}>
-                            {t(
-                              'Trace RBAC, OPA approval, Kubernetes admission, and rollback evidence.'
-                            )}
-                          </Td>
-                          <Td dataLabel={t('Action')}>
-                            <Link to={getPageUrl(AwxRoute.ActivityStream)}>
-                              {t('Open Activity Stream')}
-                            </Link>
-                          </Td>
-                        </Tr>
-                      </Tbody>
-                    </Table>
-                  </CardBody>
-                </Card>
-              </StackItem>
-            </>
           ) : null}
           {showTemplates ? (
             <StackItem>

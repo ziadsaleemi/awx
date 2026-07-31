@@ -1589,7 +1589,7 @@ export function VmwareProviderSettings() {
         </PageSection>
       ) : (
         <PageTabs>
-          <PageTab label={t('Overview')}>
+          <PageTab label={t('Details')}>
             <OverviewTab
               connectionEntries={connectionEntries}
               connectionDataMap={connectionDataMap}

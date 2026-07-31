@@ -146,9 +146,10 @@ export function PageForm<T extends object>(props: PageFormProps<T>) {
         {error && <ErrorAlert error={error} isMd={isMd} onCancel={props.onCancel} />}
         <Scrollable>
           <FormContainer
+            data-cy="page-form-content"
             variant="light"
             isFilled
-            isWidthLimited
+            isWidthLimited={!multipleColumns}
             padding={{ default: props.disablePadding ? 'noPadding' : 'padding' }}
             style={{ maxWidth: multipleColumns ? undefined : 880 }} // This is the PF limitMaxWidth for forms
           >

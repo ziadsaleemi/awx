@@ -74,6 +74,7 @@ from awx.main.models import (
     WorkflowApprovalTemplate,
     TerraformJobTemplate,
     TerraformJob,
+    TerraformStateRevision,
     QuayImageBuildJob,
     QuayImageBuildTemplate,
     CatalogItem,
@@ -1842,6 +1843,7 @@ class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
         'created_by',
         'modified_by',
         'project',
+        'state_project',
         'organization',
         'target_inventory',
     )
@@ -1856,7 +1858,11 @@ class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
     def can_add(self, data):
         if data is None:
             return Organization.accessible_objects(self.user, 'job_template_admin_role').exists()
-        return self.check_related('organization', Organization, data, role_field='job_template_admin_role')
+        return (
+            self.check_related('organization', Organization, data, role_field='job_template_admin_role')
+            and self.check_related('project', Project, data, role_field='use_role', mandatory=False)
+            and self.check_related('state_project', Project, data, role_field='use_role', mandatory=False)
+        )
 
     def can_start(self, obj, validate_license=True):
         if validate_license:
@@ -1870,7 +1876,21 @@ class TerraformJobTemplateAccess(UnifiedCredentialsMixin, BaseAccess):
             return False
         if data is None:
             return True
-        return self.check_related('project', Project, data, obj=obj, role_field='use_role', mandatory=False)
+        return self.check_related(
+            'project',
+            Project,
+            data,
+            obj=obj,
+            role_field='use_role',
+            mandatory=False,
+        ) and self.check_related(
+            'state_project',
+            Project,
+            data,
+            obj=obj,
+            role_field='use_role',
+            mandatory=False,
+        )
 
     def can_delete(self, obj):
         return self.user.is_superuser or self.user in obj.admin_role
@@ -1887,6 +1907,9 @@ class TerraformJobAccess(BaseAccess):
         'modified_by',
         'terraform_job_template',
         'project',
+        'state_project',
+        'state_revision_read',
+        'state_revision_written',
         'target_inventory',
     )
 
@@ -1907,6 +1930,34 @@ class TerraformJobAccess(BaseAccess):
 
     def can_delete(self, obj):
         return self.user.is_superuser
+
+
+class TerraformStateRevisionAccess(BaseAccess):
+    """State metadata is visible wherever its parent Terraform template is visible."""
+
+    model = TerraformStateRevision
+    select_related = (
+        'terraform_job_template',
+        'terraform_job',
+        'state_project',
+    )
+
+    def filtered_queryset(self):
+        return TerraformStateRevision.objects.filter(
+            terraform_job_template__in=TerraformJobTemplate.accessible_pk_qs(
+                self.user,
+                'read_role',
+            )
+        ).distinct()
+
+    def can_add(self, data):
+        return False
+
+    def can_change(self, obj, data):
+        return False
+
+    def can_delete(self, obj):
+        return False
 
 
 class QuayImageBuildTemplateAccess(BaseAccess):

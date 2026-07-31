@@ -229,6 +229,41 @@ class TestLocalStateWarning:
 
 
 class TestExecutionEnvironmentWrapping:
+    def test_development_disable_ee_uses_native_terraform(self):
+        task = _make_task()
+        inst = _make_instance()
+
+        with mock.patch.dict('awx.main.tasks.terraform.os.environ', {'AWX_DISABLE_EE': '1'}):
+            with mock.patch('awx.main.tasks.terraform.shutil.which', return_value='/usr/bin/terraform'):
+                ee = task._resolve_terraform_ee(inst, private_data_dir='/tmp/runner')
+
+        assert ee is None
+        inst.resolve_execution_environment.assert_not_called()
+
+    def test_development_disable_ee_preserves_configured_ee_without_native_terraform(self):
+        task = _make_task()
+        inst = _make_instance()
+        configured_ee = mock.MagicMock()
+        inst.resolve_execution_environment.return_value = configured_ee
+
+        with mock.patch.dict('awx.main.tasks.terraform.os.environ', {'AWX_DISABLE_EE': '1'}):
+            with mock.patch('awx.main.tasks.terraform.shutil.which', return_value=None):
+                ee = task._resolve_terraform_ee(inst, private_data_dir='/tmp/runner')
+
+        assert ee is configured_ee
+
+    def test_configured_ee_is_preserved_outside_development_bypass(self):
+        task = _make_task()
+        inst = _make_instance()
+        configured_ee = mock.MagicMock()
+        inst.resolve_execution_environment.return_value = configured_ee
+
+        with mock.patch.dict('awx.main.tasks.terraform.os.environ', {}, clear=True):
+            with mock.patch('awx.main.tasks.terraform.shutil.which', return_value='/usr/bin/terraform'):
+                ee = task._resolve_terraform_ee(inst, private_data_dir='/tmp/runner')
+
+        assert ee is configured_ee
+
     def test_official_terraform_images_are_detected(self):
         assert _image_uses_terraform_entrypoint('hashicorp/terraform:latest')
         assert _image_uses_terraform_entrypoint('docker.io/hashicorp/terraform:1.15')

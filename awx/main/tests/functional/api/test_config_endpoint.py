@@ -18,6 +18,7 @@ class TestConfigEndpointFields:
         assert 'analytics_status' in response.data
         assert 'analytics_collectors' in response.data
         assert 'become_methods' in response.data
+        assert response.data['custom_logo_size'] == 48
 
     @pytest.mark.parametrize(
         "role_type",

@@ -24,7 +24,7 @@ urls = [
     re_path(r'^probe_template_for_hosts/$', analytics.AnalyticsProbeTemplateForHostsList.as_view(), name='analytics_probe_template_for_hosts_explorer'),
     re_path(r'^probe_template_for_hosts_options/$', analytics.AnalyticsProbeTemplateForHostsList.as_view(), name='analytics_probe_template_for_hosts_options'),
     re_path(r'^roi_templates/$', analytics.AnalyticsRoiTemplatesList.as_view(), name='analytics_roi_templates_explorer'),
-    re_path(r'^roi_templates_options/$', analytics.AnalyticsRoiTemplatesList.as_view(), name='analytics_roi_templates_options'),
+    re_path(r'^roi_templates_options/$', analytics.AnalyticsRoiTemplatesOptionsList.as_view(), name='analytics_roi_templates_options'),
 ]
 
 __all__ = ['urls']

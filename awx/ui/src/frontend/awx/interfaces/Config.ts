@@ -78,6 +78,7 @@ export interface Config {
   project_local_paths: unknown[];
   custom_virtualenvs: unknown[];
   custom_logo?: string;
+  custom_logo_size?: number;
   custom_login_info?: string;
   modules?: {
     eda?: {

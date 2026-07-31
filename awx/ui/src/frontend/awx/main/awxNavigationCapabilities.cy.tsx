@@ -188,12 +188,6 @@ describe('Capstan navigation capabilities', () => {
       path: 'policy-as-code',
       children: [
         {
-          id: AwxRoute.PolicyAsCodeOverview,
-          label: 'Overview',
-          path: 'overview',
-          element: <div />,
-        },
-        {
           id: AwxRoute.PolicyAsCodeGatekeeper,
           label: 'Gatekeeper',
           path: 'gatekeeper',
@@ -207,7 +201,6 @@ describe('Capstan navigation capabilities', () => {
             { id: AwxRoute.PolicyAsCodeOpaModules, path: 'modules', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaDecisions, path: 'decisions', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaViolations, path: 'violations', element: <div /> },
-            { id: AwxRoute.PolicyAsCodeOpaProjectSync, path: 'project-sync', element: <div /> },
             { id: AwxRoute.PolicyAsCodeOpaTester, path: 'tester', element: <div /> },
             { path: '', element: <div /> },
           ],
@@ -220,7 +213,6 @@ describe('Capstan navigation capabilities', () => {
     const filteredRoutes = filterPolicyRoutesByPermissions(policyRoutes, false);
 
     expect(childIds(filteredRoutes)).to.deep.equal([
-      AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
       AwxRoute.PolicyAsCodeOpa,
       undefined,
@@ -240,7 +232,6 @@ describe('Capstan navigation capabilities', () => {
       label: 'Galaxy NG',
       path: 'galaxy-ng',
       children: [
-        { id: AwxRoute.GalaxyNGOverview, path: 'overview', element: <div /> },
         { id: AwxRoute.GalaxyNGNamespaces, path: 'namespaces', element: <div /> },
         { id: AwxRoute.GalaxyNGCollections, path: 'collections', element: <div /> },
         { id: AwxRoute.GalaxyNGProjectImports, path: 'project-imports', element: <div /> },
@@ -268,7 +259,6 @@ describe('Capstan navigation capabilities', () => {
         })
       )
     ).to.deep.equal([
-      AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
       AwxRoute.GalaxyNGRepositories,
@@ -286,7 +276,6 @@ describe('Capstan navigation capabilities', () => {
         })
       )
     ).to.deep.equal([
-      AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
       AwxRoute.GalaxyNGProjectImports,
@@ -305,7 +294,6 @@ describe('Capstan navigation capabilities', () => {
         })
       )
     ).to.deep.equal([
-      AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
       AwxRoute.GalaxyNGRepositories,
@@ -323,7 +311,6 @@ describe('Capstan navigation capabilities', () => {
         })
       )
     ).to.deep.equal([
-      AwxRoute.GalaxyNGOverview,
       AwxRoute.GalaxyNGNamespaces,
       AwxRoute.GalaxyNGCollections,
       AwxRoute.GalaxyNGProjectImports,
@@ -333,7 +320,6 @@ describe('Capstan navigation capabilities', () => {
       AwxRoute.GalaxyNGSignatureKeys,
       AwxRoute.GalaxyNGCollectionApprovals,
       AwxRoute.GalaxyNGTasks,
-      AwxRoute.GalaxyNGApiToken,
       undefined,
     ]);
   });
@@ -344,7 +330,6 @@ describe('Capstan navigation capabilities', () => {
       label: 'Project Quay',
       path: 'quay',
       children: [
-        { id: AwxRoute.QuayOverview, path: 'overview', element: <div /> },
         { id: AwxRoute.QuayRepositories, path: 'repositories', element: <div /> },
         {
           id: AwxRoute.QuayRepositoryDetails,
@@ -370,13 +355,11 @@ describe('Capstan navigation capabilities', () => {
     };
 
     expect(childIds(filterQuayRoutesByPermissions(quayRoutes, false))).to.deep.equal([
-      AwxRoute.QuayOverview,
       AwxRoute.QuayRepositories,
       AwxRoute.QuayRepositoryDetails,
       undefined,
     ]);
     expect(childIds(filterQuayRoutesByPermissions(quayRoutes, true))).to.deep.equal([
-      AwxRoute.QuayOverview,
       AwxRoute.QuayRepositories,
       AwxRoute.QuayRepositoryDetails,
       AwxRoute.QuayRepositoryPermissions,
@@ -393,12 +376,6 @@ describe('Capstan navigation capabilities', () => {
       label: 'Policy as Code',
       path: 'policy-as-code',
       children: [
-        {
-          id: AwxRoute.PolicyAsCodeOverview,
-          label: 'Overview',
-          path: 'overview',
-          element: <div />,
-        },
         {
           id: AwxRoute.PolicyAsCodeGatekeeper,
           label: 'Gatekeeper',
@@ -417,7 +394,6 @@ describe('Capstan navigation capabilities', () => {
     };
 
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, false))).to.deep.equal([
-      AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeOpa,
       undefined,
       undefined,
@@ -428,7 +404,6 @@ describe('Capstan navigation capabilities', () => {
       undefined,
     ]);
     expect(childIds(filterPolicyRoutesByModules(policyRoutes, true, true))).to.deep.equal([
-      AwxRoute.PolicyAsCodeOverview,
       AwxRoute.PolicyAsCodeGatekeeper,
       AwxRoute.PolicyAsCodeOpa,
       undefined,

@@ -45,6 +45,10 @@ interface TerraformTemplateFormValues {
   extra_vars: string;
   verbosity: 0 | 1 | 2 | 3 | 4;
   terraform_operation: 'apply' | 'plan' | 'destroy';
+  state_backend: 'terraform' | 'git';
+  state_project: Project | null;
+  state_branch: string;
+  state_key: string;
   target_inventory: Inventory | null;
   target_group: InventoryGroup | null;
   timeout: number;
@@ -63,6 +67,10 @@ function defaultValues(template?: TerraformJobTemplate): TerraformTemplateFormVa
     extra_vars: template?.extra_vars ?? '',
     verbosity: template?.verbosity ?? 0,
     terraform_operation: template?.terraform_operation ?? 'apply',
+    state_backend: template?.state_backend ?? 'terraform',
+    state_project: (template?.summary_fields?.state_project as unknown as Project) ?? null,
+    state_branch: template?.state_branch ?? 'capstan-terraform-state',
+    state_key: template?.state_key ?? '',
     target_inventory: (template?.summary_fields?.target_inventory as unknown as Inventory) ?? null,
     target_group: template?.target_group ? { id: -1, name: template.target_group } : null,
     timeout: template?.timeout ?? 0,
@@ -105,6 +113,7 @@ export function CreateTerraformTemplate() {
     const payload = {
       ...rest,
       project: values.project?.id ?? null,
+      state_project: values.state_project?.id ?? null,
       target_inventory: values.target_inventory?.id ?? null,
       target_group: values.target_group?.name ?? '',
     };
@@ -159,6 +168,7 @@ export function EditTerraformTemplate() {
     const payload = {
       ...rest,
       project: values.project?.id ?? null,
+      state_project: values.state_project?.id ?? null,
       target_inventory: values.target_inventory?.id ?? null,
       target_group: values.target_group?.name ?? '',
     };
@@ -195,6 +205,9 @@ function TerraformTemplateFormInputs() {
   const targetInventory = useWatch<TerraformTemplateFormValues>({
     name: 'target_inventory',
   }) as Inventory | null;
+  const stateBackend = useWatch<TerraformTemplateFormValues>({
+    name: 'state_backend',
+  });
   const targetInventoryId = targetInventory?.id ?? null;
   const prevTargetInventoryId = useRef<number | null>(targetInventoryId);
 
@@ -219,6 +232,13 @@ function TerraformTemplateFormInputs() {
     return { total: response.count, values: response.results };
   }, [targetInventoryId]);
 
+  const queryGitProjects = useCallback(async () => {
+    const response = await requestGet<AwxItemsResponse<Project>>(
+      awxAPI`/projects/?page_size=200&scm_type=git`
+    );
+    return { total: response.count, values: response.results };
+  }, []);
+
   const verbosityOptions = [
     { value: 0, label: t('0 (Normal)') },
     { value: 1, label: t('1 (Verbose)') },
@@ -231,6 +251,11 @@ function TerraformTemplateFormInputs() {
     { value: 'apply', label: t('Apply') },
     { value: 'plan', label: t('Plan') },
     { value: 'destroy', label: t('Destroy') },
+  ];
+
+  const stateBackendOptions = [
+    { value: 'terraform', label: t('Terraform configuration') },
+    { value: 'git', label: t('Capstan managed Git') },
   ];
 
   return (
@@ -278,6 +303,51 @@ function TerraformTemplateFormInputs() {
         labelHelp={t('Control the level of output Terraform will produce as it executes.')}
         options={verbosityOptions}
       />
+      <PageFormSelect<TerraformTemplateFormValues>
+        name="state_backend"
+        label={t('State management')}
+        labelHelpTitle={t('Terraform state management')}
+        labelHelp={t(
+          'Use the backend declared by the Terraform code, or let Capstan restore, lock, encrypt, and version local Terraform state in Git.'
+        )}
+        options={stateBackendOptions}
+        isRequired
+      />
+      {stateBackend === 'git' && (
+        <>
+          <PageFormAsyncSelect<TerraformTemplateFormValues, 'state_project', Project>
+            name="state_project"
+            id="state-project"
+            label={t('State project')}
+            labelHelp={t(
+              'Git project used for encrypted state revisions. Leave empty to use the Terraform source project. Its source credential must have push access.'
+            )}
+            query={queryGitProjects}
+            valueToString={(value) => value?.name ?? ''}
+            placeholder={t('Use Terraform source project')}
+            loadingPlaceholder={t('Loading Git projects...')}
+            loadingErrorText={t('Error loading Git projects')}
+            limit={200}
+          />
+          <PageFormTextInput<TerraformTemplateFormValues>
+            name="state_branch"
+            label={t('State branch')}
+            labelHelp={t(
+              'Dedicated branch serialized by Capstan while jobs restore and publish state.'
+            )}
+            isRequired
+            placeholder={t('capstan-terraform-state')}
+          />
+          <PageFormTextInput<TerraformTemplateFormValues>
+            name="state_key"
+            label={t('State key')}
+            labelHelp={t(
+              'Stable state identity. Leave empty for template-<id>. Launch variable placeholders such as environments/{environment} create isolated states.'
+            )}
+            placeholder={t('Automatic: template-<id>')}
+          />
+        </>
+      )}
       <PageFormCredentialSelect<TerraformTemplateFormValues>
         name="credentials"
         label={t('Credentials')}

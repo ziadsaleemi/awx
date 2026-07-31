@@ -294,6 +294,8 @@ function useCatalogDeploymentColumns(): ITableColumn<CatalogDeployment>[] {
         header: t('Deployed'),
         cell: (deployment) => <TextCell text={new Date(deployment.created).toLocaleString()} />,
         sort: 'created',
+        defaultSort: true,
+        defaultSortDirection: 'desc',
       },
     ],
     [getPageUrl, pageNavigate, t]

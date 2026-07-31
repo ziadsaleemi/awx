@@ -51,6 +51,21 @@ register(
 )
 
 register(
+    'CUSTOM_LOGO_SIZE',
+    field_class=fields.ChoiceField,
+    choices=[
+        (36, _('Small')),
+        (48, _('Medium')),
+        (64, _('Large')),
+    ],
+    default=48,
+    label=_('Header Logo Size'),
+    help_text=_('Set the height of the custom logo displayed in the application header.'),
+    category=_('UI'),
+    category_slug='ui',
+)
+
+register(
     'CUSTOM_LOGIN_BACKGROUND',
     field_class=CustomLoginBackgroundField,
     allow_blank=True,

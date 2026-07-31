@@ -643,6 +643,14 @@ def _opa_policy_module_history(policy_id, limit=25):
     return ActivityStream.objects.filter(object1='opa_policy_module', object2=policy_id).order_by('-timestamp', '-id')[:limit]
 
 
+def _opa_policy_module_project_source(policy_id):
+    for entry in _opa_policy_module_history(policy_id, 100):
+        project_source = _opa_policy_module_activity_changes(entry).get('project_source')
+        if isinstance(project_source, dict):
+            return project_source
+    return None
+
+
 def _project_sync_patterns(value):
     if value in (None, ''):
         return list(OPA_PROJECT_SYNC_DEFAULT_PATTERNS), None
@@ -1115,7 +1123,9 @@ class OPAPolicyModuleDetailView(OPAModuleAPIView):
             payload, status_code = _opa_http_error_payload(exc)
             return Response(payload, status=status_code)
 
-        return Response(_opa_policy_module_summary(module, include_raw=True))
+        response = _opa_policy_module_summary(module, include_raw=True)
+        response['project_source'] = _opa_policy_module_project_source(policy_id)
+        return Response(response)
 
     def put(self, request, policy_id=None, *args, **kwargs):
         policy_id, error = _validate_policy_id(policy_id)
@@ -1299,7 +1309,7 @@ class OPAActivityDetailView(OPAModuleAPIView):
 
 class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
     """
-    POST /api/v2/opa/policy-modules/project-sync/
+    GET, POST /api/v2/opa/policy-modules/project-sync/
 
     Discover Rego modules from an already-synced Capstan Project checkout and
     preview, dry-run, or apply them through OPA's Policy API.
@@ -1318,6 +1328,35 @@ class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
             'status': project.status or '',
         }
 
+    def get(self, request, *args, **kwargs):
+        project_id = request.query_params.get('project') or request.query_params.get('project_id')
+        project, error = _project_for_opa_sync(request.user, project_id)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_path = request.query_params.get('path') or ''
+        policy_id_prefix = request.query_params.get('policy_id_prefix') or ''
+        entries, error = _load_project_opa_modules(project, requested_path, policy_id_prefix)
+        if error:
+            return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'count': len(entries),
+                'project': self._project_payload(project),
+                'project_source': _project_source(project, requested_path or ','.join(OPA_PROJECT_SYNC_DEFAULT_PATTERNS)),
+                'results': [
+                    {
+                        'file_path': entry['file_path'],
+                        'policy_id': entry['policy_id'],
+                        'policy_text': entry['policy_text'],
+                        'module': entry['module'],
+                    }
+                    for entry in entries
+                ],
+            }
+        )
+
     def post(self, request, *args, **kwargs):
         mode = str(request.data.get('mode') or 'preview').strip().lower()
         if mode not in OPA_PROJECT_SYNC_MODES:
@@ -1333,6 +1372,19 @@ class OPAPolicyModuleProjectSyncView(OPAModuleAPIView):
         entries, error = _load_project_opa_modules(project, requested_path, policy_id_prefix)
         if error:
             return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_policy_id = request.data.get('policy_id')
+        if requested_policy_id not in (None, ''):
+            if len(entries) != 1:
+                return Response(
+                    {'detail': _('policy_id can only be specified when one Rego file is selected.')},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            requested_policy_id, error = _validate_policy_id(requested_policy_id)
+            if error:
+                return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+            entries[0]['policy_id'] = requested_policy_id
+            entries[0]['module'] = _opa_policy_module_summary({'id': requested_policy_id, 'raw': entries[0]['policy_text'], 'ast': {}})
 
         project_source = _project_source(project, requested_path or ','.join(OPA_PROJECT_SYNC_DEFAULT_PATTERNS))
         engine = OPAPolicyEngine()

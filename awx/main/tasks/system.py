@@ -216,6 +216,35 @@ def migrate_jsonfield(table, pkfield, columns):
         logger.warning(f"Migration of {table} to jsonb is finished.")
 
 
+@task(queue=get_task_queuename, timeout=600, on_duplicate='queue_one')
+def reconcile_eda_rbac(refresh_credential_secrets=False):
+    """Project Capstan identity, RBAC, credential types, and credentials into EDA."""
+    from awx.main.utils.eda import configured_url, module_enabled
+    from awx.main.utils.eda_credentials import build_eda_credential_sync_report
+    from awx.main.utils.eda_rbac import build_eda_rbac_sync_report
+
+    if not module_enabled() or not configured_url():
+        return {'status': 'skipped', 'reason': 'not_configured'}
+
+    rbac_report = build_eda_rbac_sync_report(mode='enforce', create_missing_identities=True)
+    credential_report = build_eda_credential_sync_report(
+        mode='enforce',
+        refresh_secrets=bool(refresh_credential_secrets),
+    )
+    rbac_summary = rbac_report.get('summary') or {}
+    credential_summary = credential_report.get('summary') or {}
+    error_count = int(rbac_summary.get('errors') or 0) + int(credential_summary.get('errors') or 0)
+    if error_count:
+        logger.warning('EDA access reconciliation completed with %s error(s).', error_count)
+    else:
+        logger.info(
+            'EDA access reconciliation completed: %s RBAC action(s), %s credential action(s).',
+            rbac_summary.get('actions', 0),
+            credential_summary.get('actions', 0),
+        )
+    return {'rbac': rbac_report, 'credentials': credential_report}
+
+
 @task(queue=get_task_queuename, timeout=3600, on_duplicate='queue_one')
 def apply_cluster_membership_policies():
     from awx.main.signals import disable_activity_stream
@@ -673,7 +702,6 @@ def _get_active_task_ids_from_dispatcherd(binder):
     """
     active_task_ids = []
     try:
-
         logger.debug("Querying dispatcherd API for running tasks")
         data = binder.control('running')
 

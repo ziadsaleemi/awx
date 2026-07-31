@@ -14,8 +14,13 @@ import { Link } from 'react-router-dom';
 import { usePageNavSideBar } from '../PageNavigation/PageNavSidebar';
 import { useBreakpoint } from '../components/useBreakPoint';
 
-export function PageMasthead(props: { brand: ReactNode; children?: ReactNode }) {
+export function PageMasthead(props: {
+  brand: ReactNode;
+  brandHref?: string;
+  children?: ReactNode;
+}) {
   const isSmallOrLarger = useBreakpoint('sm');
+  const brandHref = props.brandHref ?? '/';
   return (
     <Masthead
       display={{ default: 'inline' }}
@@ -27,7 +32,7 @@ export function PageMasthead(props: { brand: ReactNode; children?: ReactNode }) 
       <PageMastheadToggle />
       {isSmallOrLarger && (
         <MastheadMain>
-          <MastheadBrand component={(props) => <Link {...props} to="/" />}>
+          <MastheadBrand component={(props) => <Link {...props} to={brandHref} />}>
             {props.brand}
           </MastheadBrand>
         </MastheadMain>

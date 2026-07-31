@@ -9,7 +9,6 @@ from django.db.models import Q
 from awx.main import models
 from awx.main.utils.eda import EDAControllerClient, EDAControllerError, _coerce_items, _pick_first
 
-
 EDA_ORGANIZATION_CONTENT_TYPE = 'shared.organization'
 EDA_RBAC_SYNC_MODES = {'observe', 'sync', 'enforce'}
 
@@ -43,6 +42,13 @@ AWX_TO_EDA_ORG_ROLE_MAPPINGS = (
         'eda_role_name': 'Organization Auditor',
         'eda_role_aliases': ('Auditor', 'Organization Viewer'),
         'actor_source': 'awx_organization_auditor',
+    },
+    {
+        'awx_role_field': 'credential_admin_role',
+        'awx_role_label': 'Credential Administrator',
+        'eda_role_name': 'Organization EDA Credential Admin',
+        'eda_role_aliases': ('EDA Credential Admin',),
+        'actor_source': 'awx_credential_admin',
     },
 )
 
@@ -113,7 +119,9 @@ def _result_items(payload):
     return [item for item in _coerce_items(payload) if isinstance(item, dict)]
 
 
-def _accessible_sync_organizations(user):
+def _accessible_sync_organizations(user=None):
+    if user is None:
+        return models.Organization.objects.all().order_by('name')
     if user.is_superuser:
         return models.Organization.objects.all().order_by('name')
     query = Q(pk__in=models.Organization.accessible_objects(user, 'admin_role').values('pk'))
@@ -435,7 +443,7 @@ def _assignment_payload(assignment):
     }
 
 
-def build_eda_rbac_sync_report(user, *, mode='observe', create_missing_identities=True):
+def build_eda_rbac_sync_report(user=None, *, mode='observe', create_missing_identities=True):
     mode = str(mode or 'observe').strip().lower()
     if mode not in EDA_RBAC_SYNC_MODES:
         raise EDAControllerError('EDA RBAC sync mode is invalid.', 'invalid')

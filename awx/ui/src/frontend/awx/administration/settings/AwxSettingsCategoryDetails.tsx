@@ -78,12 +78,14 @@ export function AwxSettingsCategoryDetailsPage(props: {
   if (all.isLoading || !all.data) return <LoadingPage />;
 
   const title = titleOverride ?? groupsBase.find((group) => group.id === categoryId)?.name;
+  const description = groupsBase.find((group) => group.id === categoryId)?.description;
   const smokePanel = smokePanelOverride ?? (categoryId === 'eda' ? 'eda' : undefined);
 
   return (
     <PageLayout>
       <PageHeader
         title={title ?? category.name}
+        description={description}
         headerActions={<PageActions actions={actions} position={DropdownPosition.right} />}
       />
       <AwxSettingsCategoryDetails options={categoryOptions} data={all.data} />

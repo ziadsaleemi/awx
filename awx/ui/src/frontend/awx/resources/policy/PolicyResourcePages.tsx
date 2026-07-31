@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   ButtonVariant,
+  ClipboardCopy,
   CodeBlock,
   CodeBlockCode,
   FormSelect,
@@ -13,19 +14,28 @@ import {
   PageSection,
   Stack,
   StackItem,
+  Tab,
+  Tabs,
+  TabTitleText,
   ToolbarItem,
 } from '@patternfly/react-core';
 import {
+  CaretLeftIcon,
   CheckCircleIcon,
   DownloadIcon,
   MagicIcon,
+  PencilAltIcon,
   PlusCircleIcon,
   SyncAltIcon,
   TimesCircleIcon,
+  TrashIcon,
 } from '@patternfly/react-icons';
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import { DropdownPosition } from '@patternfly/react-core/deprecated';
+import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import styled from 'styled-components';
 import {
   DateTimeCell,
   IFilterState,
@@ -35,19 +45,30 @@ import {
   LoadingPage,
   PageActionSelection,
   PageActionType,
+  PageActions,
   PageDetail,
   PageDetails,
+  PageFormSubmitHandler,
+  PageFormSelect,
+  PageFormTextArea,
+  PageFormTextInput,
   PageHeader,
   PageLayout,
   PageTable,
   ToolbarFilterType,
+  useGetPageUrl,
   useInMemoryView,
 } from '../../../../framework';
+import { PageDetailCodeEditor } from '../../../../framework/PageDetails/PageDetailCodeEditor';
+import { PageFormSection } from '../../../../framework/PageForm/Utils/PageFormSection';
 import { AwxError } from '../../common/AwxError';
+import { AwxPageForm } from '../../common/AwxPageForm';
 import { awxAPI } from '../../common/api/awx-utils';
-import { postRequest } from '../../../common/crud/Data';
+import { postRequest, requestDelete } from '../../../common/crud/Data';
 import { useGet } from '../../../common/crud/useGet';
-import { OPAPolicyManagementPanel } from '../../administration/settings/OPAPolicyManagementPanel';
+import { Project } from '../../interfaces/Project';
+import { AwxRoute } from '../../main/AwxRoutes';
+import { PageFormProjectSelect } from '../projects/components/PageFormProjectSelect';
 
 interface OPAPolicyModuleSummary {
   id: string;
@@ -67,6 +88,94 @@ interface OPAPolicyModulesResponse {
   server_url: string;
   count: number;
   modules: OPAPolicyModuleSummary[];
+}
+
+interface OPAPolicyModuleDetail extends OPAPolicyModuleSummary {
+  raw: string;
+  ast?: unknown;
+  project_source?: OPAProjectSource | null;
+}
+
+interface OPAPolicyModuleFormValues {
+  project: Project | null;
+  rego_file: string;
+  policy_id: string;
+  policy_text: string;
+}
+
+interface OPAProjectSource {
+  project_id: number;
+  project_name: string;
+  scm_type?: string;
+  scm_url?: string;
+  scm_branch?: string;
+  scm_revision?: string;
+  path?: string;
+  file_path?: string;
+}
+
+interface OPAProjectFile {
+  file_path: string;
+  policy_id: string;
+  policy_text: string;
+  module: OPAPolicyModuleSummary;
+}
+
+interface OPAProjectFilesResponse {
+  count: number;
+  project: {
+    id: number;
+    name: string;
+  };
+  project_source: OPAProjectSource;
+  results: OPAProjectFile[];
+}
+
+interface OPAPolicyModuleProjectApplyResponse {
+  changed: boolean;
+  persisted: boolean;
+  results: {
+    policy_id: string;
+    file_path: string;
+    changed: boolean;
+    persisted: boolean;
+    after: OPAPolicyModuleSummary;
+  }[];
+}
+
+interface OPAPolicyModuleDeleteResponse {
+  changed: boolean;
+  policy_id: string;
+}
+
+interface OPAPolicyModuleVersion {
+  activity_stream_id: number;
+  operation: string;
+  timestamp: string;
+  actor?: { id: number; username: string } | null;
+  before?: OPAPolicyModuleSummary | null;
+  after?: OPAPolicyModuleSummary | null;
+  can_restore_before: boolean;
+  can_restore_after: boolean;
+}
+
+interface OPAPolicyModuleVersionsResponse {
+  policy_id: string;
+  count: number;
+  versions: OPAPolicyModuleVersion[];
+}
+
+type OPAPolicyModuleVersionSide = 'before' | 'after';
+type OPAPolicyModuleDetailTab = 'details' | 'versions' | 'decisions' | 'violations';
+
+interface OPAPolicyModuleRollbackResponse {
+  changed: boolean;
+  policy_id: string;
+  version: OPAPolicyModuleVersionSide;
+  source_activity_stream_id: number;
+  module: OPAPolicyModuleDetail;
+  previous_sha256: string;
+  restored_sha256: string;
 }
 
 interface OPAActivityEntry {
@@ -284,6 +393,149 @@ function EnforcementLabel(props: { action: string }) {
   );
 }
 
+const PolicyModuleEditor = styled.div`
+  textarea {
+    font-family: var(--pf-v5-global--FontFamily--monospace);
+    min-height: 24rem;
+    resize: vertical;
+  }
+`;
+
+const PolicyModuleVersionControls = styled.div`
+  display: grid;
+  gap: var(--pf-v5-global--spacer--md);
+  grid-template-columns: minmax(16rem, 28rem) auto;
+  margin-top: var(--pf-v5-global--spacer--sm);
+  width: fit-content;
+  max-width: 100%;
+
+  @media (max-width: 62rem) {
+    grid-template-columns: minmax(14rem, 1fr);
+    width: 100%;
+  }
+`;
+
+const PolicyModuleVersionSelect = styled.div`
+  width: min(100%, 38rem);
+`;
+
+function formatPolicyModuleVersion(version: OPAPolicyModuleVersion) {
+  const timestamp = version.timestamp ? new Date(version.timestamp).toLocaleString() : '';
+  return `#${version.activity_stream_id} - ${version.operation}${timestamp ? ` - ${timestamp}` : ''}`;
+}
+
+function validatePolicyId(value: string, requiredMessage: string, invalidMessage: string) {
+  const policyId = value.trim().replace(/^\/+|\/+$/g, '');
+  if (!policyId) return requiredMessage;
+  if (policyId.includes('..') || !/^[A-Za-z0-9_.@/-]+$/.test(policyId)) {
+    return invalidMessage;
+  }
+  return undefined;
+}
+
+function OPAPolicyModuleFormFields(props: { editing: boolean }) {
+  const { t } = useTranslation();
+  const { resetField, setValue } = useFormContext<OPAPolicyModuleFormValues>();
+  const project = useWatch<OPAPolicyModuleFormValues, 'project'>({ name: 'project' });
+  const regoFile = useWatch<OPAPolicyModuleFormValues, 'rego_file'>({ name: 'rego_file' });
+  const projectId = project?.id;
+  const previousProjectId = useRef(projectId);
+  const projectFilesResponse = useGet<OPAProjectFilesResponse>(
+    projectId ? awxAPI`/opa/policy-modules/project-sync/` : undefined,
+    { project_id: projectId ?? '' }
+  );
+  const projectFiles = useMemo(
+    () => projectFilesResponse.data?.results ?? [],
+    [projectFilesResponse.data?.results]
+  );
+  const projectFileOptions = useMemo(
+    () =>
+      projectFiles.map((file) => ({
+        value: file.file_path,
+        label: file.file_path,
+      })),
+    [projectFiles]
+  );
+
+  useEffect(() => {
+    if (previousProjectId.current === projectId) return;
+    resetField('rego_file', { defaultValue: '' });
+    resetField('policy_text', { defaultValue: '' });
+    if (!props.editing) resetField('policy_id', { defaultValue: '' });
+    previousProjectId.current = projectId;
+  }, [projectId, props.editing, resetField]);
+
+  useEffect(() => {
+    const selectedFile = projectFiles.find((file) => file.file_path === regoFile);
+    if (!selectedFile) return;
+    setValue('policy_text', selectedFile.policy_text, { shouldValidate: true });
+    if (!props.editing) {
+      setValue('policy_id', selectedFile.policy_id, { shouldValidate: true });
+    }
+  }, [projectFiles, props.editing, regoFile, setValue]);
+
+  return (
+    <PageFormSection title={t('Policy module source')} singleColumn>
+      <PageFormProjectSelect<OPAPolicyModuleFormValues> name="project" isRequired />
+      <PageFormSelect<OPAPolicyModuleFormValues>
+        id="rego_file"
+        name="rego_file"
+        label={t('Rego file')}
+        isRequired
+        options={projectFileOptions}
+        placeholderText={
+          !projectId
+            ? t('Select a project first')
+            : projectFilesResponse.isLoading
+              ? t('Loading Rego files...')
+              : t('Select Rego file')
+        }
+        helperText={t(
+          'Rego files are discovered from the selected synced Project. Projects remain the source of truth for policy code.'
+        )}
+        isDisabled={!projectId || projectFilesResponse.isLoading}
+      />
+      {projectFilesResponse.error ? (
+        <Alert
+          variant="danger"
+          isInline
+          title={t('Could not load Rego files from the selected Project.')}
+        />
+      ) : null}
+      <PageFormTextInput<OPAPolicyModuleFormValues>
+        id="opa-policy-id"
+        name="policy_id"
+        label={t('Policy ID')}
+        helperText={t(
+          'Unique OPA Policy API path, for example capstan/job_launch. The policy ID cannot be changed after creation.'
+        )}
+        isRequired
+        isReadOnly={props.editing}
+        validate={(value) =>
+          validatePolicyId(
+            value,
+            t('Policy ID is required.'),
+            t('Policy ID contains invalid characters.')
+          )
+        }
+      />
+      <PolicyModuleEditor>
+        <PageFormTextArea<OPAPolicyModuleFormValues>
+          id="opa-policy-text"
+          name="policy_text"
+          label={t('Rego preview')}
+          helperText={t(
+            'This read-only preview is loaded from the selected Project file. Update policy code in the Project, sync the Project, then save this module again.'
+          )}
+          isRequired
+          isReadOnly
+          disableAutoResize
+        />
+      </PolicyModuleEditor>
+    </PageFormSection>
+  );
+}
+
 export function OPAPolicyModuleList(props: { canManagePolicy: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -390,6 +642,23 @@ export function OPAPolicyModuleList(props: { canManagePolicy: boolean }) {
     ],
     [props.canManagePolicy, response.refresh, t]
   );
+  const rowActions = useMemo<IPageAction<OPAPolicyModuleSummary>[]>(
+    () => [
+      {
+        type: PageActionType.Link,
+        selection: PageActionSelection.Single,
+        isPinned: true,
+        icon: PencilAltIcon,
+        label: t('Edit policy module'),
+        href: (module) =>
+          detailUrl('/policy-as-code/opa/modules/edit', {
+            policy: module.id,
+          }),
+        isHidden: () => !props.canManagePolicy,
+      },
+    ],
+    [props.canManagePolicy, t]
+  );
 
   return (
     <PageTable<OPAPolicyModuleSummary>
@@ -397,6 +666,7 @@ export function OPAPolicyModuleList(props: { canManagePolicy: boolean }) {
       tableColumns={columns}
       toolbarFilters={filters}
       toolbarActions={actions}
+      rowActions={rowActions}
       errorStateTitle={t('Error loading policy modules')}
       emptyStateTitle={t('No policy modules yet')}
       emptyStateDescription={t('Create a policy module or sync Rego files from a Capstan Project.')}
@@ -411,34 +681,35 @@ export function OPAPolicyModuleList(props: { canManagePolicy: boolean }) {
   );
 }
 
-export function OPAActivityPage(props: { violationsOnly?: boolean }) {
+export function OPAActivityPage(props: { violationsOnly?: boolean; policyId?: string }) {
   const { t } = useTranslation();
   const response = useGet<OPAActivityResponse>(awxAPI`/opa/activity/?limit=200`);
   const detailPath = props.violationsOnly
     ? '/policy-as-code/opa/violations'
     : '/policy-as-code/opa/decisions';
-  const entries = useMemo(
-    () =>
-      (props.violationsOnly ? response.data?.denials ?? [] : response.data?.decisions ?? []).map(
-        (entry) => ({
-          ...entry,
-          result: entry.is_denial ? 'denied' : 'allowed',
-          search_text: [
-            entry.policy_id,
-            entry.object1,
-            entry.object2,
-            entry.source,
-            entry.summary,
-            entry.error,
-            entry.actor?.username,
-            entry.project_source?.file_path,
-          ]
-            .filter(Boolean)
-            .join(' '),
-        })
-      ),
-    [props.violationsOnly, response.data?.decisions, response.data?.denials]
-  );
+  const entries = useMemo(() => {
+    const activity = props.violationsOnly
+      ? response.data?.denials ?? []
+      : response.data?.decisions ?? [];
+    return activity
+      .filter((entry) => !props.policyId || entry.policy_id === props.policyId)
+      .map((entry) => ({
+        ...entry,
+        result: entry.is_denial ? 'denied' : 'allowed',
+        search_text: [
+          entry.policy_id,
+          entry.object1,
+          entry.object2,
+          entry.source,
+          entry.summary,
+          entry.error,
+          entry.actor?.username,
+          entry.project_source?.file_path,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      }));
+  }, [props.policyId, props.violationsOnly, response.data?.decisions, response.data?.denials]);
   const columns = useMemo<ITableColumn<OPAActivityEntry>[]>(
     () => [
       {
@@ -511,6 +782,7 @@ export function OPAActivityPage(props: { violationsOnly?: boolean }) {
     items: response.isLoading ? undefined : entries,
     tableColumns: columns,
     toolbarFilters: filters,
+    disableQueryString: Boolean(props.policyId),
     keyFn: (entry) => entry.activity_stream_id,
     error: toError(response.error, t('Could not load OPA activity.')),
   });
@@ -525,8 +797,12 @@ export function OPAActivityPage(props: { violationsOnly?: boolean }) {
       }
       emptyStateDescription={
         props.violationsOnly
-          ? t('Denied policy decisions will appear here.')
-          : t('Policy decisions will appear here after protected actions are evaluated.')
+          ? props.policyId
+            ? t('Denied decisions for this policy module will appear here.')
+            : t('Denied policy decisions will appear here.')
+          : props.policyId
+            ? t('Decisions for this policy module will appear here after protected actions run.')
+            : t('Policy decisions will appear here after protected actions are evaluated.')
       }
       defaultSubtitle={t('OPA decision')}
       {...view}
@@ -1129,32 +1405,460 @@ export function GatekeeperResourceList(props: { kind: GatekeeperInventoryKind })
   );
 }
 
-export function OPAPolicyModulePage(props: { create?: boolean; canManagePolicy: boolean }) {
+export function OPAPolicyModulePage(props: {
+  mode: 'create' | 'edit' | 'detail';
+  canManagePolicy: boolean;
+}) {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const policyId = props.create ? undefined : searchParams.get('policy') || undefined;
+  const getPageUrl = useGetPageUrl();
+  const policyId = props.mode === 'create' ? undefined : searchParams.get('policy') || undefined;
+  const moduleResponse = useGet<OPAPolicyModuleDetail>(
+    props.mode !== 'create' && policyId ? awxAPI`/opa/policy-modules/${policyId}/` : undefined
+  );
+  const versionsResponse = useGet<OPAPolicyModuleVersionsResponse>(
+    props.mode === 'detail' && policyId
+      ? awxAPI`/opa/policy-modules/${policyId}/versions/`
+      : undefined
+  );
+  const [selectedVersionId, setSelectedVersionId] = useState('');
+  const [selectedVersionSide, setSelectedVersionSide] =
+    useState<OPAPolicyModuleVersionSide>('before');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [mutationError, setMutationError] = useState<string>();
+  const [mutationResult, setMutationResult] = useState<string>();
+  const versions = useMemo(
+    () => versionsResponse.data?.versions ?? [],
+    [versionsResponse.data?.versions]
+  );
+  const selectedVersion = useMemo(
+    () => versions.find((version) => String(version.activity_stream_id) === selectedVersionId),
+    [selectedVersionId, versions]
+  );
+  const selectedVersionCanRestore =
+    selectedVersionSide === 'before'
+      ? Boolean(selectedVersion?.can_restore_before)
+      : Boolean(selectedVersion?.can_restore_after);
+  const requestedTab = searchParams.get('tab');
+  const activeTab: OPAPolicyModuleDetailTab =
+    requestedTab === 'versions' || requestedTab === 'decisions' || requestedTab === 'violations'
+      ? requestedTab
+      : 'details';
+  const detailHref = policyId
+    ? detailUrl('/policy-as-code/opa/modules/detail', { policy: policyId })
+    : '/policy-as-code/opa/modules';
+  const title =
+    props.mode === 'create'
+      ? t('Create OPA policy module')
+      : props.mode === 'edit'
+        ? t('Edit {{policyId}}', { policyId: policyId ?? t('OPA policy module') })
+        : policyId || t('OPA policy module');
+
+  useEffect(() => {
+    if (props.mode !== 'detail' || !versions.length || selectedVersionId) return;
+    const restorable = versions.find(
+      (version) => version.can_restore_before || version.can_restore_after
+    );
+    const nextVersion = restorable ?? versions[0];
+    setSelectedVersionId(String(nextVersion.activity_stream_id));
+    setSelectedVersionSide(nextVersion.can_restore_before ? 'before' : 'after');
+  }, [props.mode, selectedVersionId, versions]);
+
+  const detailActions = useMemo<IPageAction<OPAPolicyModuleDetail>[]>(
+    () => [
+      {
+        type: PageActionType.Link,
+        selection: PageActionSelection.Single,
+        isPinned: true,
+        icon: PencilAltIcon,
+        label: t('Edit policy module'),
+        href: () =>
+          detailUrl('/policy-as-code/opa/modules/edit', {
+            policy: policyId ?? '',
+          }),
+        isHidden: () => !props.canManagePolicy,
+      },
+      { type: PageActionType.Seperator },
+      {
+        type: PageActionType.Button,
+        selection: PageActionSelection.Single,
+        icon: TrashIcon,
+        label: t('Delete policy module'),
+        isDanger: true,
+        onClick: () => setShowDeleteConfirm(true),
+        isHidden: () => !props.canManagePolicy,
+      },
+    ],
+    [policyId, props.canManagePolicy, t]
+  );
+
+  if (props.mode !== 'create' && !policyId) {
+    return <AwxError error={new Error(t('Policy module ID is required.'))} />;
+  }
+  if (props.mode !== 'create' && moduleResponse.error) {
+    return (
+      <AwxError
+        error={toError(moduleResponse.error, t('Could not load the OPA policy module.'))!}
+        handleRefresh={moduleResponse.refresh}
+      />
+    );
+  }
+  if (props.mode !== 'create' && (moduleResponse.isLoading || !moduleResponse.data)) {
+    return <LoadingPage breadcrumbs />;
+  }
+
+  const onSubmit: PageFormSubmitHandler<OPAPolicyModuleFormValues> = async (values) => {
+    const normalizedPolicyId = values.policy_id.trim().replace(/^\/+|\/+$/g, '');
+    const response = await postRequest<
+      OPAPolicyModuleProjectApplyResponse,
+      { project: number; path: string; policy_id: string; mode: 'apply' }
+    >(awxAPI`/opa/policy-modules/project-sync/`, {
+      project: values.project!.id,
+      path: values.rego_file,
+      policy_id: normalizedPolicyId,
+      mode: 'apply',
+    });
+    const savedModule = response.results[0];
+    if (!savedModule) {
+      throw new Error(t('The selected Project file did not produce a policy module.'));
+    }
+    navigate(
+      detailUrl('/policy-as-code/opa/modules/detail', {
+        policy: savedModule.policy_id,
+      }),
+      { replace: true }
+    );
+  };
+
+  const deleteModule = async () => {
+    if (!policyId) return;
+    setIsDeleting(true);
+    setMutationError(undefined);
+    try {
+      await requestDelete<OPAPolicyModuleDeleteResponse>(
+        awxAPI`/opa/policy-modules/${policyId}/`,
+        new AbortController().signal
+      );
+      navigate('/policy-as-code/opa/modules', { replace: true });
+    } catch (error) {
+      setMutationError(
+        error instanceof Error ? error.message : t('Could not delete the OPA policy module.')
+      );
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const rollbackModule = async () => {
+    if (!policyId || !selectedVersion || !selectedVersionCanRestore) return;
+    setIsRollingBack(true);
+    setMutationError(undefined);
+    setMutationResult(undefined);
+    try {
+      const response = await postRequest<
+        OPAPolicyModuleRollbackResponse,
+        { activity_stream_id: number; version: OPAPolicyModuleVersionSide }
+      >(awxAPI`/opa/policy-modules/${policyId}/rollback/`, {
+        activity_stream_id: selectedVersion.activity_stream_id,
+        version: selectedVersionSide,
+      });
+      setMutationResult(
+        t('Policy module restored from Activity Stream #{{id}}.', {
+          id: response.source_activity_stream_id,
+        })
+      );
+      moduleResponse.refresh();
+      versionsResponse.refresh();
+    } catch (error) {
+      setMutationError(
+        error instanceof Error ? error.message : t('Could not roll back the OPA policy module.')
+      );
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
+  if (props.mode === 'create' || props.mode === 'edit') {
+    const defaultValue: OPAPolicyModuleFormValues =
+      props.mode === 'edit' && moduleResponse.data
+        ? {
+            project: moduleResponse.data.project_source
+              ? ({
+                  id: moduleResponse.data.project_source.project_id,
+                  name: moduleResponse.data.project_source.project_name,
+                } as Project)
+              : null,
+            rego_file: moduleResponse.data.project_source?.file_path ?? '',
+            policy_id: moduleResponse.data.id,
+            policy_text: moduleResponse.data.raw,
+          }
+        : {
+            project: null,
+            rego_file: '',
+            policy_id: '',
+            policy_text: '',
+          };
+    return (
+      <PageLayout>
+        <PageHeader
+          title={title}
+          breadcrumbs={[
+            { label: t('Policy Modules'), to: '/policy-as-code/opa/modules' },
+            { label: title },
+          ]}
+        />
+        <AwxPageForm<OPAPolicyModuleFormValues>
+          submitText={props.mode === 'create' ? t('Create policy module') : t('Save policy module')}
+          onSubmit={onSubmit}
+          onCancel={() =>
+            props.mode === 'edit' ? navigate(detailHref) : navigate('/policy-as-code/opa/modules')
+          }
+          defaultValue={defaultValue}
+        >
+          <OPAPolicyModuleFormFields editing={props.mode === 'edit'} />
+        </AwxPageForm>
+      </PageLayout>
+    );
+  }
+
+  const module = moduleResponse.data!;
   return (
     <PageLayout>
       <PageHeader
-        title={props.create ? t('Create OPA policy module') : policyId || t('OPA policy module')}
+        title={title}
         breadcrumbs={[
           { label: t('Policy Modules'), to: '/policy-as-code/opa/modules' },
-          { label: props.create ? t('Create') : policyId || t('Details') },
+          { label: policyId || t('Details') },
         ]}
-      />
-      <OPAPolicyManagementPanel
-        sections={['modules']}
-        canManagePolicy={props.canManagePolicy}
-        moduleId={policyId}
-        showModuleInventory={false}
-        onModuleSaved={(id) =>
-          navigate(detailUrl('/policy-as-code/opa/modules/detail', { policy: id }), {
-            replace: true,
-          })
+        headerActions={
+          <PageActions<OPAPolicyModuleDetail>
+            actions={detailActions}
+            position={DropdownPosition.right}
+            selectedItem={module}
+          />
         }
-        onModuleDeleted={() => navigate('/policy-as-code/opa/modules')}
       />
+      <Tabs
+        activeKey={activeTab}
+        onSelect={(event, key) => {
+          event.preventDefault();
+          if (key === 'back') {
+            navigate('/policy-as-code/opa/modules');
+            return;
+          }
+          const nextTab = String(key) as OPAPolicyModuleDetailTab;
+          const modulePath = `/policy-as-code/opa/modules/detail?policy=${encodeURIComponent(
+            module.id
+          )}`;
+          navigate(nextTab === 'details' ? modulePath : `${modulePath}&tab=${nextTab}`, {
+            replace: true,
+          });
+        }}
+        inset={{ default: 'insetSm' }}
+        isBox
+        style={{
+          backgroundColor: 'var(--pf-v5-c-tabs__link--BackgroundColor)',
+          flexShrink: 0,
+        }}
+      >
+        <Tab
+          eventKey="back"
+          title={
+            <TabTitleText>
+              <CaretLeftIcon />
+              <span style={{ marginLeft: 6 }}>{t('Back to Policy Modules')}</span>
+            </TabTitleText>
+          }
+        />
+        <Tab eventKey="details" title={<TabTitleText>{t('Details')}</TabTitleText>} />
+        <Tab eventKey="versions" title={<TabTitleText>{t('Version History')}</TabTitleText>} />
+        <Tab eventKey="decisions" title={<TabTitleText>{t('Decisions')}</TabTitleText>} />
+        <Tab eventKey="violations" title={<TabTitleText>{t('Violations')}</TabTitleText>} />
+      </Tabs>
+      {mutationError ? (
+        <PageSection padding={{ default: 'padding' }}>
+          <Alert variant="danger" isInline title={mutationError} />
+        </PageSection>
+      ) : null}
+      {mutationResult ? (
+        <PageSection padding={{ default: 'padding' }}>
+          <Alert variant="success" isInline title={mutationResult} />
+        </PageSection>
+      ) : null}
+      {activeTab === 'details' ? (
+        <PageDetails>
+          <PageDetail label={t('Policy ID')}>{module.id}</PageDetail>
+          <PageDetail label={t('Package')}>{module.package || t('Not detected')}</PageDetail>
+          <PageDetail label={t('Source')}>
+            <SourceLabel managed={module.awx_managed} />
+          </PageDetail>
+          <PageDetail label={t('Rules')}>
+            {module.rules.length ? module.rules.join(', ') : t('Not detected')}
+          </PageDetail>
+          <PageDetail label={t('Decision paths')}>
+            {module.decision_paths.length ? module.decision_paths.join(', ') : t('Not detected')}
+          </PageDetail>
+          <PageDetail label={t('Module size')}>
+            {t('{{bytes}} bytes', { bytes: module.size })}
+          </PageDetail>
+          <PageDetail label={t('Lines')}>{module.line_count}</PageDetail>
+          <PageDetail label={t('Checksum')}>
+            <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+              {module.sha256}
+            </ClipboardCopy>
+          </PageDetail>
+          <PageDetailCodeEditor
+            label={t('Rego module')}
+            value={module.raw}
+            toggleLanguage={false}
+          />
+        </PageDetails>
+      ) : null}
+      {activeTab === 'versions' ? (
+        <PageDetails>
+          <PageDetail label={t('Policy ID')}>{module.id}</PageDetail>
+          <PageDetail label={t('Audited versions')}>
+            {versionsResponse.data?.count ?? versions.length}
+          </PageDetail>
+          <PageDetail label={t('Current checksum')}>
+            <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
+              {module.sha256}
+            </ClipboardCopy>
+          </PageDetail>
+          <PageDetail label={t('Version history')} fullWidth>
+            {versionsResponse.isLoading ? (
+              t('Loading audited versions...')
+            ) : versionsResponse.error ? (
+              <Alert variant="danger" isInline title={t('Could not load version history.')} />
+            ) : versions.length ? (
+              <PolicyModuleVersionSelect>
+                <FormSelect
+                  id="opa-module-version"
+                  value={selectedVersionId}
+                  aria-label={t('Version history')}
+                  onChange={(_event, value) => {
+                    const nextId = String(value);
+                    const nextVersion = versions.find(
+                      (version) => String(version.activity_stream_id) === nextId
+                    );
+                    setSelectedVersionId(nextId);
+                    setSelectedVersionSide(nextVersion?.can_restore_before ? 'before' : 'after');
+                  }}
+                  isDisabled={isRollingBack}
+                >
+                  {versions.map((version) => (
+                    <FormSelectOption
+                      key={version.activity_stream_id}
+                      value={String(version.activity_stream_id)}
+                      label={formatPolicyModuleVersion(version)}
+                    />
+                  ))}
+                </FormSelect>
+              </PolicyModuleVersionSelect>
+            ) : (
+              t('No audited versions found.')
+            )}
+          </PageDetail>
+          {selectedVersion ? (
+            <>
+              <PageDetail label={t('Changed by')}>
+                {selectedVersion.actor?.username ?? t('System')}
+              </PageDetail>
+              <PageDetail label={t('Activity Stream')}>
+                <Link
+                  to={getPageUrl(AwxRoute.ActivityStream, {
+                    query: { id: selectedVersion.activity_stream_id },
+                  })}
+                >
+                  {t('View Activity Stream #{{id}}', {
+                    id: selectedVersion.activity_stream_id,
+                  })}
+                </Link>
+              </PageDetail>
+              <PageDetail label={t('Changed')}>
+                {selectedVersion.timestamp ? (
+                  <DateTimeCell value={selectedVersion.timestamp} />
+                ) : (
+                  t('Not recorded')
+                )}
+              </PageDetail>
+              <PageDetail label={t('Before checksum')}>
+                {selectedVersion.before?.sha256 || t('None')}
+              </PageDetail>
+              <PageDetail label={t('After checksum')}>
+                {selectedVersion.after?.sha256 || t('None')}
+              </PageDetail>
+              <PageDetail label={t('Restore snapshot')} fullWidth>
+                <PolicyModuleVersionControls>
+                  <FormSelect
+                    id="opa-module-restore"
+                    value={selectedVersionSide}
+                    aria-label={t('Restore snapshot')}
+                    onChange={(_event, value) =>
+                      setSelectedVersionSide(String(value) as OPAPolicyModuleVersionSide)
+                    }
+                    isDisabled={isRollingBack}
+                  >
+                    <FormSelectOption
+                      value="before"
+                      label={t('Before change')}
+                      isDisabled={!selectedVersion.can_restore_before}
+                    />
+                    <FormSelectOption
+                      value="after"
+                      label={t('After change')}
+                      isDisabled={!selectedVersion.can_restore_after}
+                    />
+                  </FormSelect>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void rollbackModule()}
+                    isLoading={isRollingBack}
+                    isDisabled={isRollingBack || !selectedVersionCanRestore}
+                  >
+                    {t('Rollback version')}
+                  </Button>
+                </PolicyModuleVersionControls>
+              </PageDetail>
+            </>
+          ) : null}
+        </PageDetails>
+      ) : null}
+      {activeTab === 'decisions' ? <OPAActivityPage policyId={module.id} /> : null}
+      {activeTab === 'violations' ? <OPAActivityPage policyId={module.id} violationsOnly /> : null}
+      <Modal
+        titleIconVariant="danger"
+        title={t('Delete policy module')}
+        variant={ModalVariant.small}
+        description={t('This removes the policy module from the configured OPA server.')}
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        actions={[
+          <Button
+            key="delete"
+            variant="danger"
+            onClick={() => void deleteModule()}
+            isLoading={isDeleting}
+            data-cy="opa-module-delete-confirm"
+          >
+            {t('Delete')}
+          </Button>,
+          <Button
+            key="cancel"
+            variant="link"
+            onClick={() => setShowDeleteConfirm(false)}
+            isDisabled={isDeleting}
+          >
+            {t('Cancel')}
+          </Button>,
+        ]}
+      >
+        {t('Delete {{policyId}}?', { policyId: module.id })}
+      </Modal>
     </PageLayout>
   );
 }
@@ -1291,7 +1995,9 @@ function GatekeeperViolationRemediation(props: {
                 </PageDetail>
                 <PageDetail label={t('Audit')}>
                   {result.audit?.activity_stream_id ? (
-                    <Link to={`/activity-stream?id=${result.audit.activity_stream_id}`}>
+                    <Link
+                      to={`/administration/activity-stream?id=${result.audit.activity_stream_id}`}
+                    >
                       {t('Activity Stream #{{id}}', {
                         id: result.audit.activity_stream_id,
                       })}

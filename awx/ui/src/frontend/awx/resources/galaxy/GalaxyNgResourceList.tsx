@@ -34,7 +34,7 @@ import { useGet } from '../../../common/crud/useGet';
 import { awxAPI } from '../../common/api/awx-utils';
 import { useAwxActiveUser } from '../../common/useAwxActiveUser';
 import { useAwxView } from '../../common/useAwxView';
-import { GalaxyNgStatus } from './GalaxyNgOverview';
+import { GalaxyNgStatus } from './GalaxyNgStatus';
 import { GalaxyNgHeaderActions } from './GalaxyNgHeaderActions';
 
 const CollectionCardsGrid = styled.div`
@@ -488,17 +488,6 @@ export const galaxyNgResourceDescriptions: Record<GalaxyNgResourceKind, string> 
   tasks: 'Galaxy NG and Pulp import, sync, copy, and publish tasks.',
 };
 
-export const galaxyNgResourceNativeRoutes: Record<GalaxyNgResourceKind, string> = {
-  namespaces: 'namespaces/',
-  collections: 'collections/',
-  repositories: 'ansible/repositories/',
-  remotes: 'ansible/remotes/',
-  'remote-registries': '',
-  'signature-keys': 'signature-keys/',
-  'collection-approvals': 'approval-dashboard/',
-  tasks: 'tasks/',
-};
-
 function shortTaskName(value?: string) {
   if (!value) return '';
   const parts = value.split('.');
@@ -783,7 +772,6 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
 
   const title = t(galaxyNgResourceTitles[resource]);
   const description = t(galaxyNgResourceDescriptions[resource]);
-  const nativeUiRoute = galaxyNgResourceNativeRoutes[resource];
   const useCollectionCards = resource === 'collections' && view.pageItems !== undefined;
 
   return (
@@ -793,8 +781,6 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
         description={description}
         headerActions={
           <GalaxyNgHeaderActions
-            status={status.data}
-            uiRoute={nativeUiRoute}
             page={title}
             prompt={t(
               'Help me review this Galaxy NG resource page for Capstan. Explain what this resource does, what looks missing or unhealthy, and what actions should be taken next.'
@@ -816,6 +802,24 @@ export function GalaxyNgResourceList(props: { resource: GalaxyNgResourceKind }) 
           style={{ margin: '0 24px 16px' }}
         >
           {status.data.message}
+        </Alert>
+      ) : status.data?.controller_error ? (
+        <Alert
+          isInline
+          variant="danger"
+          title={t('Galaxy NG is unavailable')}
+          style={{ margin: '0 24px 16px' }}
+        >
+          {status.data.controller_error}
+        </Alert>
+      ) : status.data?.compatibility && status.data.compatibility.state !== 'compatible' ? (
+        <Alert
+          isInline
+          variant="warning"
+          title={t('Galaxy NG compatibility needs attention')}
+          style={{ margin: '0 24px 16px' }}
+        >
+          {status.data.compatibility.error || status.data.compatibility.message}
         </Alert>
       ) : null}
       <PageTable<GalaxyNgRecord>

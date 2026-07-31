@@ -949,7 +949,7 @@ function DefaultProviderSettings(props: { provider: string }) {
         </PageSection>
       )}
       <PageTabs>
-        <PageTab label={t('Overview')}>
+        <PageTab label={t('Details')}>
           <DigitalOceanOverviewTab
             connectedEntry={connectedEntry}
             data={data}

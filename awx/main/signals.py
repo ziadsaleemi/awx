@@ -11,6 +11,7 @@ import sys
 # Django
 from django.db import connection, transaction
 from django.conf import settings
+from django.core.signals import setting_changed
 from django.db.models.signals import (
     pre_save,
     post_save,
@@ -30,6 +31,8 @@ from crum.signals import current_user_getter
 # AWX
 from awx.main.models import (
     ActivityStream,
+    Credential,
+    CredentialType,
     ExecutionEnvironment,
     Group,
     Host,
@@ -41,6 +44,7 @@ from awx.main.models import (
     Role,
     SystemJob,
     SystemJobTemplate,
+    Team,
     TerraformJob,
     UnifiedJob,
     UnifiedJobTemplate,
@@ -54,7 +58,7 @@ from awx.main.models import (
 )
 from awx.main.utils import model_instance_diff, model_to_dict, camelcase_to_underscore, get_current_apps, is_testing
 from awx.main.utils import ignore_inventory_computed_fields, ignore_inventory_group_removal, _inventory_updates
-from awx.main.tasks.system import update_inventory_computed_fields, handle_removed_image
+from awx.main.tasks.system import update_inventory_computed_fields, handle_removed_image, reconcile_eda_rbac
 from awx.main.fields import is_implicit_parent
 
 from awx.main import consumers
@@ -154,6 +158,45 @@ def sync_rbac_to_superuser_status(instance, sender, **kwargs):
                 user.save(update_fields=['is_superuser'])
 
 
+def schedule_eda_rbac_reconciliation(action=None, **kwargs):
+    """Queue EDA access reconciliation after Capstan identity or RBAC changes commit."""
+    if is_testing() or not getattr(settings, 'MODULE_EDA_ENABLED', True) or not getattr(settings, 'EDA_SERVER_URL', ''):
+        return
+    if action and action not in ('post_add', 'post_remove', 'post_clear'):
+        return
+    connection.on_commit(reconcile_eda_rbac.delay)
+
+
+def schedule_eda_credential_reconciliation(action=None, **kwargs):
+    """Queue EDA credential reconciliation after Capstan credential changes commit."""
+    if is_testing() or not getattr(settings, 'MODULE_EDA_ENABLED', True) or not getattr(settings, 'EDA_SERVER_URL', ''):
+        return
+    if action and action not in ('post_add', 'post_remove', 'post_clear'):
+        return
+    connection.on_commit(lambda: reconcile_eda_rbac.delay(refresh_credential_secrets=True))
+
+
+def schedule_eda_configuration_reconciliation(setting=None, enter=True, **kwargs):
+    """Bootstrap EDA projection after its Capstan-managed connection changes."""
+    connection_settings = {
+        'MODULE_EDA_ENABLED',
+        'EDA_SERVER_URL',
+        'EDA_AUTH_TOKEN',
+        'EDA_USERNAME',
+        'EDA_PASSWORD',
+        'EDA_VERIFY_SSL',
+    }
+    if (
+        is_testing()
+        or not enter
+        or setting not in connection_settings
+        or not getattr(settings, 'MODULE_EDA_ENABLED', True)
+        or not getattr(settings, 'EDA_SERVER_URL', '')
+    ):
+        return
+    connection.on_commit(lambda: reconcile_eda_rbac.delay(refresh_credential_secrets=True))
+
+
 def rbac_activity_stream(instance, sender, **kwargs):
     # Only if we are associating/disassociating
     if kwargs['action'] in ['pre_add', 'pre_remove']:
@@ -204,8 +247,21 @@ connect_computed_field_signals()
 m2m_changed.connect(rebuild_role_ancestor_list, Role.parents.through)
 m2m_changed.connect(rbac_activity_stream, Role.members.through)
 m2m_changed.connect(rbac_activity_stream, Role.parents.through)
+m2m_changed.connect(schedule_eda_rbac_reconciliation, Role.members.through, dispatch_uid='eda_rbac_role_members')
+m2m_changed.connect(schedule_eda_rbac_reconciliation, Role.parents.through, dispatch_uid='eda_rbac_role_parents')
 post_save.connect(sync_superuser_status_to_rbac, sender=User)
 m2m_changed.connect(sync_rbac_to_superuser_status, Role.members.through)
+post_save.connect(schedule_eda_rbac_reconciliation, sender=Organization, dispatch_uid='eda_rbac_organization_save')
+post_delete.connect(schedule_eda_rbac_reconciliation, sender=Organization, dispatch_uid='eda_rbac_organization_delete')
+post_save.connect(schedule_eda_rbac_reconciliation, sender=Team, dispatch_uid='eda_rbac_team_save')
+post_delete.connect(schedule_eda_rbac_reconciliation, sender=Team, dispatch_uid='eda_rbac_team_delete')
+post_save.connect(schedule_eda_rbac_reconciliation, sender=User, dispatch_uid='eda_rbac_user_save')
+post_delete.connect(schedule_eda_rbac_reconciliation, sender=User, dispatch_uid='eda_rbac_user_delete')
+post_save.connect(schedule_eda_credential_reconciliation, sender=Credential, dispatch_uid='eda_credential_save')
+post_delete.connect(schedule_eda_credential_reconciliation, sender=Credential, dispatch_uid='eda_credential_delete')
+post_save.connect(schedule_eda_credential_reconciliation, sender=CredentialType, dispatch_uid='eda_credential_type_save')
+post_delete.connect(schedule_eda_credential_reconciliation, sender=CredentialType, dispatch_uid='eda_credential_type_delete')
+setting_changed.connect(schedule_eda_configuration_reconciliation, dispatch_uid='eda_configuration_reconciliation')
 pre_delete.connect(cleanup_detached_labels_on_deleted_parent, sender=UnifiedJob)
 pre_delete.connect(cleanup_detached_labels_on_deleted_parent, sender=UnifiedJobTemplate)
 

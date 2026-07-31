@@ -42,6 +42,22 @@ export function TerraformTemplateDetails() {
       </PageDetail>
       <PageDetail label={t('Project')}>{template.summary_fields?.project?.name ?? '-'}</PageDetail>
       <PageDetail label={t('Terraform Directory')}>{template.terraform_dir || '.'}</PageDetail>
+      <PageDetail label={t('State Management')}>
+        {template.state_backend === 'git' ? t('Capstan managed Git') : t('Terraform configuration')}
+      </PageDetail>
+      {template.state_backend === 'git' && (
+        <>
+          <PageDetail label={t('State Project')}>
+            {template.summary_fields?.state_project?.name ??
+              template.summary_fields?.project?.name ??
+              t('None')}
+          </PageDetail>
+          <PageDetail label={t('State Branch')}>{template.state_branch}</PageDetail>
+          <PageDetail label={t('State Key')}>
+            {template.state_key || t('Automatic: template-{{id}}', { id: template.id })}
+          </PageDetail>
+        </>
+      )}
       <PageDetail label={t('Target Inventory')}>
         {template.summary_fields?.target_inventory?.name ?? t('None')}
       </PageDetail>

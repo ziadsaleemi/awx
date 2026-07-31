@@ -14,6 +14,10 @@ export interface TerraformJobTemplate {
   extra_vars: string;
   verbosity: 0 | 1 | 2 | 3 | 4;
   terraform_operation: 'apply' | 'plan' | 'destroy';
+  state_backend: 'terraform' | 'git';
+  state_project: number | null;
+  state_branch: string;
+  state_key: string;
 
   target_inventory: number | null;
   target_group: string;
@@ -35,6 +39,7 @@ export interface TerraformJobTemplate {
   summary_fields: {
     organization?: { id: number; name: string };
     project?: { id: number; name: string; scm_type: string };
+    state_project?: { id: number; name: string; scm_type: string };
     inventory?: { id: number; name: string; kind: string };
     execution_environment?: { id: number; name: string };
     target_inventory?: { id: number; name: string; kind: string };
@@ -62,6 +67,55 @@ export interface TerraformJobTemplate {
   related: {
     launch: string;
     jobs: string;
+    state_revisions: string;
     survey_spec: string;
+  };
+}
+
+export interface TerraformStateRevision {
+  id: number;
+  type: 'terraform_state_revision';
+  url: string;
+  created: string;
+  modified: string;
+  terraform_job_template: number;
+  terraform_job: number | null;
+  state_project: number | null;
+  state_key: string;
+  state_branch: string;
+  state_path: string;
+  git_commit: string;
+  checksum: string;
+  serial: number | null;
+  lineage: string;
+  terraform_version: string;
+  resource_count: number;
+  output_count: number;
+  operation: 'apply' | 'plan' | 'destroy';
+  job_status: string;
+  summary: {
+    format_version?: number;
+    serial?: number | null;
+    lineage?: string;
+    terraform_version?: string;
+    resource_count: number;
+    output_count: number;
+    resources: {
+      mode: string;
+      type: string;
+      name: string;
+      provider: string;
+      instance_count: number;
+    }[];
+    outputs: { name: string; sensitive: boolean; type?: unknown }[];
+  };
+  summary_fields: {
+    terraform_job?: { id: number; name: string; status: string };
+    state_project?: { id: number; name: string };
+  };
+  related: {
+    terraform_job_template: string;
+    terraform_job?: string;
+    state_project?: string;
   };
 }

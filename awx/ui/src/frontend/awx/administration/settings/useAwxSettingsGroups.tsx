@@ -33,7 +33,9 @@ export function useAwxSettingsGroupsBase() {
       {
         id: 'ui',
         name: t('User Interface Settings'),
-        description: t('Customize logos and login page text.'),
+        description: t(
+          'Customize Capstan branding, application header sizing, and login screen content.'
+        ),
         defaultSlugs: ['ui'],
         categories: [],
       },
@@ -77,6 +79,7 @@ export function useAwxSettingsGroupsBase() {
         name: t('Authentication Providers'),
         defaultSlugs: [
           'authentication',
+          'azuread-tenant-oauth2',
           'azuread-oauth2',
           'github',
           'github-org',

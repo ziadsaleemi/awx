@@ -2,6 +2,7 @@
 # All Rights Reserved.
 
 import logging
+import uuid
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -11,6 +12,7 @@ from ansible_base.lib.utils.models import prevent_search
 from awx.api.versioning import reverse
 from awx.main.models.base import (
     accepts_json,
+    CreatedModifiedModel,
     VarsDictProperty,
     VERBOSITY_CHOICES,
 )
@@ -26,12 +28,22 @@ from awx.main.fields import ImplicitRoleField, AskForField, JSONBlob
 
 logger = logging.getLogger('awx.main.models.terraform')
 
-__all__ = ['TerraformJobTemplate', 'TerraformJob']
+__all__ = [
+    'TerraformJobTemplate',
+    'TerraformJob',
+    'TerraformStateLock',
+    'TerraformStateRevision',
+]
 
 TERRAFORM_OPERATION_CHOICES = [
     ('apply', _('Apply')),
     ('plan', _('Plan')),
     ('destroy', _('Destroy')),
+]
+
+TERRAFORM_STATE_BACKEND_CHOICES = [
+    ('terraform', _('Terraform configuration')),
+    ('git', _('Capstan managed Git')),
 ]
 
 
@@ -69,10 +81,7 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
         max_length=1024,
         blank=True,
         default='.',
-        help_text=_(
-            'Path within the project to the directory containing the Terraform '
-            'root module. Use "." for the repository root (default).'
-        ),
+        help_text=_('Path within the project to the directory containing the Terraform ' 'root module. Use "." for the repository root (default).'),
     )
 
     extra_vars = prevent_search(
@@ -80,10 +89,7 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
             models.TextField(
                 blank=True,
                 default='',
-                help_text=_(
-                    'Variables to pass to Terraform as a tfvars file. '
-                    'Accepts JSON or YAML key/value pairs.'
-                ),
+                help_text=_('Variables to pass to Terraform as a tfvars file. ' 'Accepts JSON or YAML key/value pairs.'),
             )
         )
     )
@@ -100,6 +106,50 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
         choices=TERRAFORM_OPERATION_CHOICES,
         default='apply',
         help_text=_('The Terraform operation to run: apply, plan, or destroy.'),
+    )
+
+    # ------------------------------------------------------------------ #
+    # State management                                                     #
+    # ------------------------------------------------------------------ #
+    state_backend = models.CharField(
+        max_length=16,
+        choices=TERRAFORM_STATE_BACKEND_CHOICES,
+        default='terraform',
+        help_text=_('Use the backend declared by the Terraform configuration, or let ' 'Capstan persist encrypted local state in a Git project.'),
+    )
+
+    state_project = models.ForeignKey(
+        'Project',
+        related_name='terraform_state_templates',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Git project used to persist encrypted Terraform state. When empty, ' 'the Terraform source project is used.'),
+    )
+
+    state_branch = models.CharField(
+        max_length=255,
+        blank=True,
+        default='capstan-terraform-state',
+        help_text=_('Dedicated Git branch used for encrypted Terraform state revisions.'),
+    )
+
+    state_key = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text=_(
+            'Stable logical key for this state. When empty, Capstan uses ' '"template-<id>". The key may contain letters, numbers, ".", "_", "-", and "/".'
+        ),
+    )
+
+    state_encryption_key = models.CharField(
+        max_length=2048,
+        blank=True,
+        default='',
+        editable=False,
+        help_text=_('Encrypted data-encryption key for managed Terraform state.'),
     )
 
     # ------------------------------------------------------------------ #
@@ -123,10 +173,7 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
         max_length=512,
         blank=True,
         default='',
-        help_text=_(
-            'Inventory group to add provisioned hosts to. '
-            'The group is created automatically if it does not exist.'
-        ),
+        help_text=_('Inventory group to add provisioned hosts to. ' 'The group is created automatically if it does not exist.'),
     )
 
     # ------------------------------------------------------------------ #
@@ -140,10 +187,7 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
     timeout = models.IntegerField(
         blank=True,
         default=0,
-        help_text=_(
-            'The number of seconds to run before the task is cancelled. '
-            'Zero means no timeout.'
-        ),
+        help_text=_('The number of seconds to run before the task is cancelled. ' 'Zero means no timeout.'),
     )
 
     # ------------------------------------------------------------------ #
@@ -198,6 +242,10 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
             'extra_vars',
             'verbosity',
             'terraform_operation',
+            'state_backend',
+            'state_project',
+            'state_branch',
+            'state_key',
             'target_inventory',
             'target_group',
             'allow_simultaneous',
@@ -212,6 +260,14 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
         errors = {}
         if self.project is None:
             errors['project'] = [_('A Terraform Job Template must have a project assigned.')]
+        if self.state_backend == 'git':
+            state_project = self.state_project or self.project
+            if state_project is None:
+                errors['state_project'] = [_('Managed Git state requires a Git project.')]
+            elif state_project.scm_type != 'git':
+                errors['state_project'] = [_('Managed Git state requires a project with Git source control.')]
+            if not self.state_branch:
+                errors['state_branch'] = [_('Managed Git state requires a branch name.')]
         return errors
 
     @property
@@ -240,12 +296,17 @@ class TerraformJobTemplate(UnifiedJobTemplate, SurveyJobTemplateMixin, ResourceM
             return cls.objects.values_list('id', flat=True)
         from django.contrib.contenttypes.models import ContentType
         from awx.main.models.rbac import RoleAncestorEntry
+
         ct = ContentType.objects.get_for_model(cls)
-        return RoleAncestorEntry.objects.filter(
-            ancestor__in=accessor.roles.all(),
-            role_field=role_field,
-            content_type=ct,
-        ).values_list('object_id').distinct()
+        return (
+            RoleAncestorEntry.objects.filter(
+                ancestor__in=accessor.roles.all(),
+                role_field=role_field,
+                content_type=ct,
+            )
+            .values_list('object_id')
+            .distinct()
+        )
 
 
 class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManagerUnifiedJobMixin):
@@ -308,6 +369,59 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         help_text=_('The Terraform operation that was run: apply, plan, or destroy.'),
     )
 
+    state_backend = models.CharField(
+        max_length=16,
+        choices=TERRAFORM_STATE_BACKEND_CHOICES,
+        default='terraform',
+        help_text=_('State management mode used for this job.'),
+    )
+
+    state_project = models.ForeignKey(
+        'Project',
+        related_name='terraform_state_jobs',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        help_text=_('Git project used to persist encrypted state for this job.'),
+    )
+
+    state_branch = models.CharField(
+        max_length=255,
+        blank=True,
+        default='capstan-terraform-state',
+        help_text=_('Git branch used to persist encrypted state for this job.'),
+    )
+
+    state_key = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text=_('Logical managed state key used for this job.'),
+    )
+
+    state_revision_read = models.ForeignKey(
+        'TerraformStateRevision',
+        related_name='jobs_restored',
+        blank=True,
+        null=True,
+        default=None,
+        editable=False,
+        on_delete=models.SET_NULL,
+        help_text=_('Managed state revision restored before this job ran.'),
+    )
+
+    state_revision_written = models.ForeignKey(
+        'TerraformStateRevision',
+        related_name='jobs_published',
+        blank=True,
+        null=True,
+        default=None,
+        editable=False,
+        on_delete=models.SET_NULL,
+        help_text=_('Managed state revision published by this job.'),
+    )
+
     target_inventory = models.ForeignKey(
         'Inventory',
         related_name='terraform_jobs',
@@ -348,10 +462,7 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         default=dict,
         blank=True,
         editable=False,
-        help_text=_(
-            'Terraform output values captured after a successful apply. '
-            'Propagated to downstream jobs in a workflow via ancestor_artifacts.'
-        ),
+        help_text=_('Terraform output values captured after a successful apply. ' 'Propagated to downstream jobs in a workflow via ancestor_artifacts.'),
     )
 
     extra_vars_dict = VarsDictProperty('extra_vars', True)
@@ -362,6 +473,7 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
     @classmethod
     def _get_task_class(cls):
         from awx.main.tasks.terraform import RunTerraformJob
+
         return RunTerraformJob
 
     @classmethod
@@ -402,10 +514,12 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
 
     def get_event_queryset(self):
         from awx.main.models.events import TerraformJobEvent
+
         return TerraformJobEvent.objects.filter(terraform_job=self)
 
     def result_stdout_raw_handle(self, enforce_max_bytes=False):
         from io import StringIO
+
         legacy = self.result_stdout_text
         if legacy:
             return StringIO(legacy)
@@ -428,3 +542,84 @@ class TerraformJob(UnifiedJob, SurveyJobMixin, JobNotificationMixin, TaskManager
         if isinstance(self.artifacts, dict):
             return self.artifacts
         return {}
+
+
+class TerraformStateRevision(CreatedModifiedModel):
+    """Immutable audit metadata for an encrypted Terraform state Git commit."""
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('-created', '-id')
+        indexes = [
+            models.Index(
+                fields=('terraform_job_template', 'state_key', '-created'),
+                name='main_tfstat_templat_766e4f_idx',
+            ),
+            models.Index(fields=('git_commit',), name='main_tfstat_git_com_48660d_idx'),
+        ]
+
+    terraform_job_template = models.ForeignKey(
+        'TerraformJobTemplate',
+        related_name='state_revisions',
+        on_delete=models.CASCADE,
+    )
+    terraform_job = models.ForeignKey(
+        'TerraformJob',
+        related_name='state_revisions',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+    )
+    state_project = models.ForeignKey(
+        'Project',
+        related_name='terraform_state_revisions',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+    )
+    state_key = models.CharField(max_length=1024)
+    state_branch = models.CharField(max_length=255)
+    state_path = models.CharField(max_length=1024)
+    git_commit = models.CharField(max_length=64, blank=True, default='')
+    checksum = models.CharField(max_length=64)
+    serial = models.BigIntegerField(blank=True, null=True, default=None)
+    lineage = models.CharField(max_length=255, blank=True, default='')
+    terraform_version = models.CharField(max_length=64, blank=True, default='')
+    resource_count = models.PositiveIntegerField(default=0)
+    output_count = models.PositiveIntegerField(default=0)
+    operation = models.CharField(
+        max_length=16,
+        choices=TERRAFORM_OPERATION_CHOICES,
+        default='apply',
+    )
+    job_status = models.CharField(max_length=32, blank=True, default='')
+    summary = JSONBlob(default=dict, blank=True)
+
+
+class TerraformStateLock(CreatedModifiedModel):
+    """Branch-scoped lock preventing concurrent managed state Git pushes."""
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('created',)
+
+    scope = models.CharField(max_length=64, unique=True)
+    lock_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    terraform_job_template = models.ForeignKey(
+        'TerraformJobTemplate',
+        related_name='state_locks',
+        on_delete=models.CASCADE,
+    )
+    terraform_job = models.ForeignKey(
+        'TerraformJob',
+        related_name='state_locks',
+        on_delete=models.CASCADE,
+    )
+    state_project = models.ForeignKey(
+        'Project',
+        related_name='terraform_state_locks',
+        on_delete=models.CASCADE,
+    )
+    state_branch = models.CharField(max_length=255)
