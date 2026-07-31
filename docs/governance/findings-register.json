@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "product": "Capstan",
+  "owner": "Capstan maintainers",
+  "lastReviewed": "2026-07-31",
+  "findings": [
+    {
+      "id": "CAPSTAN-SaaS-001",
+      "title": "Public control-plane topology disclosure",
+      "status": "closed",
+      "severity": "high",
+      "resolution": "SaaS ping responses expose version and mode only; functional coverage verifies node and installation fields are absent."
+    },
+    {
+      "id": "CAPSTAN-SaaS-002",
+      "title": "Tenant jobs can fall back to platform task workers",
+      "status": "open",
+      "severity": "critical",
+      "releaseBlocker": "SaaS execution",
+      "requiredEvidence": "Scheduler and launch-path negative tests prove every SaaS job targets only tenant-owned execution instances."
+    },
+    {
+      "id": "CAPSTAN-SaaS-003",
+      "title": "Tenant execution-instance enrollment is not implemented",
+      "status": "open",
+      "severity": "critical",
+      "releaseBlocker": "SaaS execution",
+      "requiredEvidence": "Enrollment, authentication, rotation, suspension, retirement, and organization-scoped instance-group proof."
+    },
+    {
+      "id": "CAPSTAN-SaaS-004",
+      "title": "Cross-tenant isolation matrix is incomplete",
+      "status": "open",
+      "severity": "critical",
+      "releaseBlocker": "Public SaaS",
+      "requiredEvidence": "Negative API, RBAC, scheduler, event, audit, integration, backup, restore, export, and deletion tests."
+    },
+    {
+      "id": "CAPSTAN-SaaS-005",
+      "title": "Registration lacks production identity and abuse controls",
+      "status": "open",
+      "severity": "high",
+      "releaseBlocker": "Public registration",
+      "requiredEvidence": "Verified identity, MFA/federation policy, recovery, bot defense, legal acceptance, and lifecycle operations."
+    }
+  ]
+}

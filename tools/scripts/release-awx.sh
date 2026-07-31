@@ -108,6 +108,8 @@ require_release_files() {
   [[ "$(tr -d '[:space:]' < VERSION)" == "$version" ]] || fail "top-level VERSION is not $version"
   grep -q "ABOUT_MODAL_VERSION = '$version'" awx/ui/src/frontend/common/AboutModal.tsx || fail "About modal version is not $version"
   grep -q "\"version\": \"$version\"" awx/ui/src/package.json || fail "UI package version is not $version"
+  test "$(python3 -c 'import json; print(json.load(open("awx/ui/src/package-lock.json"))["version"])')" = "$version" || fail "UI package lock version is not $version"
+  test "$(python3 -c 'import json; print(json.load(open("awx/ui/src/package-lock.json"))["packages"][""]["version"])')" = "$version" || fail "UI package lock root package version is not $version"
   grep -q "awx_image_tag: \"$version\"" tools/awx-deploy/ansible/roles/awx_deploy_common/defaults/main.yml || fail "deploy default image tag is not $version"
   grep -q "awx_image_tag: \"$version\"" tools/awx-deploy/ansible/group_vars/all.yml.example || fail "deploy example image tag is not $version"
 }

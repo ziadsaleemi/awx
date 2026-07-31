@@ -1,6 +1,7 @@
-import { Page } from '@patternfly/react-core';
+import { Alert, Page } from '@patternfly/react-core';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import useSWR, { mutate } from 'swr';
 import { LoadingState } from '../../../framework/components/LoadingState';
 import { AnsibleLogin } from '../../common/AnsibleLogin/AnsibleLogin';
@@ -11,6 +12,7 @@ import { useAwxActiveUser } from '../common/useAwxActiveUser';
 import { AwxConfigProvider } from '../common/useAwxConfig';
 import { WebSocketProvider } from '../common/useAwxWebSocket';
 import { DocsVersionProvider } from '../common/useDocsVersion';
+import { AwxTenantRegistration } from './AwxTenantRegistration';
 
 type AwxAuthOptions = {
   [key: string]: {
@@ -43,6 +45,9 @@ export function AwxLogin(props: { children: React.ReactNode }) {
     custom_login_info?: string;
     custom_login_background?: string;
     password_auth_methods?: string[];
+    product_mode?: 'on_prem' | 'saas';
+    registration_enabled?: boolean;
+    registration_url?: string;
   }>('/api/', requestGet);
   const authOptions: AuthOption[] = [];
   if (options && typeof options === 'object') {
@@ -56,6 +61,8 @@ export function AwxLogin(props: { children: React.ReactNode }) {
   }
 
   const { activeAwxUser, refreshActiveAwxUser } = useAwxActiveUser();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [cachedCustomLogo, setCachedCustomLogo] = useState<string | undefined>(getCachedCustomLogo);
 
   const customLogo =
@@ -92,6 +99,41 @@ export function AwxLogin(props: { children: React.ReactNode }) {
   const brandImg = customLogo ?? cachedCustomLogo ?? STATIC_BRAND_LOGO;
 
   if (!activeAwxUser) {
+    if (location.pathname === '/register') {
+      if (!rootInfo) {
+        return (
+          <Page>
+            <LoadingState />
+          </Page>
+        );
+      }
+      if (
+        rootInfo.product_mode !== 'saas' ||
+        !rootInfo.registration_enabled ||
+        !rootInfo.registration_url
+      ) {
+        return <Navigate to="/" replace />;
+      }
+      return (
+        <AwxTenantRegistration
+          registrationUrl={rootInfo.registration_url}
+          brandImg={brandImg}
+          brandImgAlt={process.env.PRODUCT}
+          textContent={rootInfo.custom_login_info}
+          backgroundImgSrc={rootInfo.custom_login_background}
+          onSuccess={(response) => {
+            navigate(
+              `/?registration=success&username=${encodeURIComponent(response.user.username)}`,
+              { replace: true }
+            );
+          }}
+        />
+      );
+    }
+
+    const query = new URLSearchParams(location.search);
+    const registrationSucceeded = query.get('registration') === 'success';
+    const registeredUsername = query.get('username') ?? undefined;
     return (
       <AnsibleLogin
         authOptions={authOptions}
@@ -109,6 +151,24 @@ export function AwxLogin(props: { children: React.ReactNode }) {
         brandImgAlt={process.env.PRODUCT}
         textContent={rootInfo?.custom_login_info}
         backgroundImgSrc={rootInfo?.custom_login_background}
+        initialUsername={registeredUsername}
+        formNotice={
+          registrationSucceeded ? (
+            <Alert
+              isInline
+              variant="success"
+              title={t('Organization created')}
+              style={{ marginBottom: 'var(--pf-v5-global--spacer--lg)' }}
+            >
+              {t('Log in with the administrator account you just created.')}
+            </Alert>
+          ) : undefined
+        }
+        formFooter={
+          rootInfo?.product_mode === 'saas' && rootInfo.registration_enabled ? (
+            <Link to="/register">{t('Create an organization')}</Link>
+          ) : undefined
+        }
       />
     );
   }

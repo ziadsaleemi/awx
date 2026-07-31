@@ -110,7 +110,8 @@ describe('AIAssistantPanel', () => {
     cy.intercept('POST', '/api/v2/ai/chat/', {
       message: {
         role: 'assistant',
-        content: '**Capstan host summary**\n\n- web01\n- db01\n\nUse `Resources > Hosts` for details.',
+        content:
+          '**Capstan host summary**\n\n- web01\n- db01\n\nUse `Resources > Hosts` for details.',
       },
       model: 'awx',
       provider: 'awx',

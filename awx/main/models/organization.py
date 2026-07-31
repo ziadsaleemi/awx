@@ -51,6 +51,37 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
         # Remove add permission, only superuser can add
         default_permissions = ('change', 'delete', 'view')
 
+    TENANT_STATUS_ACTIVE = 'active'
+    TENANT_STATUS_SUSPENDED = 'suspended'
+    TENANT_STATUS_DELETING = 'deleting'
+    TENANT_STATUS_CHOICES = (
+        (TENANT_STATUS_ACTIVE, _('Active')),
+        (TENANT_STATUS_SUSPENDED, _('Suspended')),
+        (TENANT_STATUS_DELETING, _('Deleting')),
+    )
+
+    is_saas_tenant = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text=_('Designates an organization created through the Capstan SaaS tenant registration flow.'),
+    )
+    tenant_slug = models.SlugField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        help_text=_('Stable public identifier for a SaaS tenant.'),
+    )
+    tenant_status = models.CharField(
+        max_length=16,
+        blank=True,
+        default='',
+        choices=TENANT_STATUS_CHOICES,
+        editable=False,
+        help_text=_('Lifecycle status for a SaaS tenant. Self-hosted organizations leave this blank.'),
+    )
+
     instance_groups = OrderedManyToManyField('InstanceGroup', blank=True, through='OrganizationInstanceGroupMembership')
     galaxy_credentials = OrderedManyToManyField(
         'Credential', blank=True, through='OrganizationGalaxyCredentialMembership', related_name='%(class)s_galaxy_credentials'

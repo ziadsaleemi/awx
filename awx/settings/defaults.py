@@ -8,8 +8,35 @@ import re  # noqa
 import tempfile
 import socket
 
+from django.core.exceptions import ImproperlyConfigured
+
+
+def _environment_boolean(name, default=False):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    value = raw_value.strip().lower()
+    if value in {'1', 'true', 'yes', 'on'}:
+        return True
+    if value in {'0', 'false', 'no', 'off'}:
+        return False
+    raise ImproperlyConfigured('{} must be a boolean value.'.format(name))
+
 DEBUG = True
 SQL_DEBUG = DEBUG
+
+# Product delivery profile. This is deployment-owned and intentionally not a
+# database setting: changing it requires a controlled rollout of every web and
+# controller process so the security boundary cannot drift between replicas.
+CAPSTAN_PRODUCT_MODE = os.getenv('CAPSTAN_PRODUCT_MODE', 'on_prem').strip().lower()
+if CAPSTAN_PRODUCT_MODE not in {'on_prem', 'saas'}:
+    raise ImproperlyConfigured('CAPSTAN_PRODUCT_MODE must be either "on_prem" or "saas".')
+CAPSTAN_SAAS_REGISTRATION_ENABLED = _environment_boolean('CAPSTAN_SAAS_REGISTRATION_ENABLED', False)
+CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT = os.getenv('CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT', '5/hour')
+CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION = _environment_boolean(
+    'CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION',
+    CAPSTAN_PRODUCT_MODE == 'saas',
+)
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))

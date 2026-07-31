@@ -2,7 +2,7 @@
 awx_deploy_method: server
 
 awx_image: docker.io/ziadsaleemi/awx
-awx_image_tag: "25.1.11"
+awx_image_tag: "25.1.12"
 awx_skip_image_pull: false
 awx_ee_image: quay.io/ansible/awx-ee:latest
 

@@ -68,6 +68,11 @@ class ApiRootView(APIView):
         if any(backend.startswith('awx.sso.backends.LDAPBackend') for backend in settings.AUTHENTICATION_BACKENDS):
             password_auth_methods.append('ldap')
         data['password_auth_methods'] = password_auth_methods
+        data['product_mode'] = settings.CAPSTAN_PRODUCT_MODE
+        registration_enabled = settings.CAPSTAN_PRODUCT_MODE == 'saas' and settings.CAPSTAN_SAAS_REGISTRATION_ENABLED
+        data['registration_enabled'] = registration_enabled
+        if registration_enabled:
+            data['registration_url'] = reverse('api:tenant_registration_view', request=request)
         return Response(data)
 
 
@@ -188,7 +193,12 @@ class ApiV2PingView(APIView):
         Everything returned here should be considered public / insecure, as
         this requires no auth and is intended for use by the installer process.
         """
-        response = {'ha': is_ha_environment(), 'version': get_awx_version(), 'active_node': settings.CLUSTER_HOST_ID, 'install_uuid': settings.INSTALL_UUID}
+        response = {'ha': is_ha_environment(), 'version': get_awx_version(), 'product_mode': settings.CAPSTAN_PRODUCT_MODE}
+
+        if settings.CAPSTAN_PRODUCT_MODE == 'saas':
+            return Response(response)
+
+        response.update(active_node=settings.CLUSTER_HOST_ID, install_uuid=settings.INSTALL_UUID)
 
         response['instances'] = []
         for instance in Instance.objects.exclude(node_type='hop'):
@@ -381,6 +391,8 @@ class ApiV2ConfigView(APIView):
             custom_logo=settings.CUSTOM_LOGO,
             custom_logo_size=settings.CUSTOM_LOGO_SIZE,
             custom_login_info=settings.CUSTOM_LOGIN_INFO,
+            product_mode=settings.CAPSTAN_PRODUCT_MODE,
+            external_execution_required=bool(settings.CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION),
             modules={
                 'eda': {
                     'enabled': bool(getattr(settings, 'MODULE_EDA_ENABLED', True)),

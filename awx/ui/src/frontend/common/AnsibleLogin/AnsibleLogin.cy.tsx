@@ -45,4 +45,21 @@ describe('AnsibleLogin', () => {
 
     cy.contains('Use your local or LDAP directory credentials.').should('be.visible');
   });
+
+  it('should render an optional form notice and action', () => {
+    cy.mount(
+      <AnsibleLogin
+        loginApiUrl="/login"
+        brandImgAlt=""
+        initialUsername="tenant-admin"
+        formNotice={<div>Organization created</div>}
+        formFooter={<a href="/register">Create an organization</a>}
+        onSuccess={() => {}}
+      />
+    );
+
+    cy.contains('Organization created').should('be.visible');
+    cy.get('input[name="pf-login-username-id"]').should('have.value', 'tenant-admin');
+    cy.contains('Create an organization').should('have.attr', 'href', '/register');
+  });
 });

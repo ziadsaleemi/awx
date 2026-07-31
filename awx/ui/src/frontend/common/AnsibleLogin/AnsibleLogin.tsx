@@ -18,6 +18,59 @@ import { getCookie } from '../crud/cookie';
 import { createRequestError, RequestError } from '../crud/RequestError';
 import { AuthOption, SocialAuthLogin } from '../SocialAuthLogin';
 
+interface AnsibleLoginPageProps {
+  loginTitle?: string;
+  loginSubtitle?: string;
+  brandImg?: ReactNode;
+  brandImgAlt: string;
+  textContent?: string;
+  backgroundImgSrc?: string;
+  children: ReactNode;
+  mainFooter?: ReactNode;
+}
+
+export function AnsibleLoginPage(props: AnsibleLoginPageProps) {
+  const [translations] = useFrameworkTranslations();
+
+  return (
+    <LoginPageBackground
+      style={
+        props.backgroundImgSrc
+          ? {
+              backgroundImage: `url(${JSON.stringify(props.backgroundImgSrc)})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundAttachment: 'fixed',
+            }
+          : undefined
+      }
+    >
+      <ErrorBoundary message={translations.errorText}>
+        <LoginStyled
+          footer={
+            props.textContent ? (
+              <LoginFooter>
+                <p>{props.textContent}</p>
+              </LoginFooter>
+            ) : undefined
+          }
+        >
+          <BrandInCard>
+            {typeof props.brandImg === 'string' ? (
+              <Brand src={props.brandImg} alt={props.brandImgAlt} />
+            ) : (
+              props.brandImg
+            )}
+          </BrandInCard>
+          <LoginMainHeader title={props.loginTitle} subtitle={props.loginSubtitle} />
+          <LoginMainBody>{props.children}</LoginMainBody>
+          {props.mainFooter}
+        </LoginStyled>
+      </ErrorBoundary>
+    </LoginPageBackground>
+  );
+}
+
 export function AnsibleLogin(props: {
   /** Title for the login main body header of the login page */
   loginTitle?: string;
@@ -45,10 +98,18 @@ export function AnsibleLogin(props: {
 
   /** Callback function that is called when the user successfully logs in */
   onSuccess: () => void;
+
+  /** Content displayed above the username and password form */
+  formNotice?: ReactNode;
+
+  /** Content displayed immediately below the username and password form */
+  formFooter?: ReactNode;
+
+  /** Initial username, such as the administrator created during tenant registration */
+  initialUsername?: string;
 }) {
   const { t } = useTranslation();
-  const [translations] = useFrameworkTranslations();
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(props.initialUsername ?? '');
   const [password, setPassword] = useState('');
   const [helperText, setHelperText] = useState<ReactNode>('');
   const location = useLocation();
@@ -123,92 +184,70 @@ export function AnsibleLogin(props: {
     }
   }, [hasAuthFailedFlag, t]);
 
+  useEffect(() => {
+    if (props.initialUsername) {
+      setUsername(props.initialUsername);
+    }
+  }, [props.initialUsername]);
+
   // Need to use component version of PatternFly's LoginPage
   // because we need to be able to use a component for the brand image
   // SEE: https://github.com/patternfly/patternfly-react/blob/main/packages/react-core/src/components/LoginPage/LoginPage.tsx
   return (
-    <LoginPageBackground
-      style={
-        props.backgroundImgSrc
-          ? {
-              backgroundImage: `url(${JSON.stringify(props.backgroundImgSrc)})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundAttachment: 'fixed',
-            }
-          : undefined
+    <AnsibleLoginPage
+      loginTitle={props.loginTitle ?? t('Log in to your account')}
+      loginSubtitle={props.loginSubtitle}
+      brandImg={props.brandImg}
+      brandImgAlt={props.brandImgAlt}
+      textContent={props.textContent}
+      backgroundImgSrc={props.backgroundImgSrc}
+      mainFooter={
+        props.authOptions ? (
+          <LoginMainFooter
+            socialMediaLoginContent={<SocialAuthLogin options={props.authOptions} />}
+            socialMediaLoginAriaLabel={t('Log in with authentication provider')}
+          />
+        ) : undefined
       }
     >
-      {/* background applied via inline style above, no separate img element needed */}
-      <ErrorBoundary message={translations.errorText}>
-        <LoginStyled
-          footer={
-            props.textContent ? (
-              <LoginFooter>
-                <p>{props.textContent}</p>
-              </LoginFooter>
-            ) : undefined
+      {props.formNotice}
+      <LoginForm
+        showHelperText={!!helperText}
+        helperText={helperText}
+        helperTextIcon={<ErrorExclamationCircleIconStyled />}
+        usernameLabel={t('Username')}
+        usernameValue={username}
+        onChangeUsername={(_, username) => {
+          setHelperText('');
+          setUsername(username);
+        }}
+        isValidUsername={!helperText || !!username}
+        passwordLabel={t('Password')}
+        passwordValue={password}
+        onChangePassword={(_, password) => {
+          setHelperText('');
+          setPassword(password);
+        }}
+        isValidPassword={!helperText || !!password}
+        isShowPasswordEnabled
+        showPasswordAriaLabel={t('Show password')}
+        hidePasswordAriaLabel={t('Hide password')}
+        loginButtonLabel={t('Log in')}
+        onLoginButtonClick={(event) => {
+          event.preventDefault();
+          if (!username) {
+            setHelperText(t('Username is required'));
+            return;
           }
-        >
-          <BrandInCard>
-            {typeof props.brandImg === 'string' ? (
-              <Brand src={props.brandImg} alt={props.brandImgAlt} />
-            ) : (
-              props.brandImg
-            )}
-          </BrandInCard>
-          <LoginMainHeader
-            title={props.loginTitle ?? t('Log in to your account')}
-            subtitle={props.loginSubtitle}
-          />
-          <LoginMainBody>
-            <LoginForm
-              showHelperText={!!helperText}
-              helperText={helperText}
-              helperTextIcon={<ErrorExclamationCircleIconStyled />}
-              usernameLabel={t('Username')}
-              usernameValue={username}
-              onChangeUsername={(_, username) => {
-                setHelperText('');
-                setUsername(username);
-              }}
-              isValidUsername={!helperText || !!username}
-              passwordLabel={t('Password')}
-              passwordValue={password}
-              onChangePassword={(_, password) => {
-                setHelperText('');
-                setPassword(password);
-              }}
-              isValidPassword={!helperText || !!password}
-              isShowPasswordEnabled
-              showPasswordAriaLabel={t('Show password')}
-              hidePasswordAriaLabel={t('Hide password')}
-              loginButtonLabel={t('Log in')}
-              onLoginButtonClick={(event) => {
-                event.preventDefault();
-                if (!username) {
-                  setHelperText(t('Username is required'));
-                  return;
-                }
-                if (!password) {
-                  setHelperText(t('Password is required'));
-                  return;
-                }
-                void onSubmit();
-              }}
-            />
-          </LoginMainBody>
-          {props.authOptions && (
-            <LoginMainFooter
-              socialMediaLoginContent={
-                props.authOptions ? <SocialAuthLogin options={props.authOptions} /> : undefined
-              }
-              socialMediaLoginAriaLabel={t('Log in with authentication provider')}
-            />
-          )}
-        </LoginStyled>
-      </ErrorBoundary>
-    </LoginPageBackground>
+          if (!password) {
+            setHelperText(t('Password is required'));
+            return;
+          }
+          void onSubmit();
+        }}
+      />
+      {props.formFooter ? <LoginFormFooterStyled>{props.formFooter}</LoginFormFooterStyled> : null}
+    </AnsibleLoginPage>
   );
 }
 
@@ -252,4 +291,9 @@ const BrandInCard = styled.div`
     height: 52px;
     max-width: 220px;
   }
+`;
+
+const LoginFormFooterStyled = styled.div`
+  margin-top: var(--pf-v5-global--spacer--lg);
+  text-align: center;
 `;

@@ -16,7 +16,7 @@ export interface AnsibleAboutModalProps {
   onClose?: () => void;
 }
 
-export const ABOUT_MODAL_VERSION = '25.1.11';
+export const ABOUT_MODAL_VERSION = '25.1.12';
 
 interface AnsibleAboutModuleVersion {
   label: string;
