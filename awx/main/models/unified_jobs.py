@@ -418,7 +418,7 @@ class UnifiedJobTemplate(PolymorphicModel, CommonModelNameNotUnique, ExecutionEn
             kwargs['survey_passwords'] = new_job_passwords  # saved in config object for relaunch
 
         if instance_groups:
-            unified_job.preferred_instance_groups_cache = [ig.id for ig in instance_groups]
+            unified_job.preferred_instance_groups_cache = [ig.id for ig in unified_job._execution_eligible_instance_groups(instance_groups)]
         else:
             unified_job.preferred_instance_groups_cache = unified_job._get_preferred_instance_group_cache()
 
@@ -811,7 +811,18 @@ class UnifiedJob(
         return 'unified_job_template'  # Override in subclasses.
 
     def _get_preferred_instance_group_cache(self):
-        return [ig.pk for ig in self.preferred_instance_groups]
+        return [ig.pk for ig in self._execution_eligible_instance_groups(self.preferred_instance_groups)]
+
+    def _execution_eligible_instance_groups(self, instance_groups):
+        if settings.CAPSTAN_PRODUCT_MODE != 'saas' or not settings.CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION or self.capacity_type == 'control':
+            return list(instance_groups)
+        if not self.organization_id:
+            return []
+        return [
+            instance_group
+            for instance_group in instance_groups
+            if instance_group.tenant_organization_id == self.organization_id and instance_group.tenant_status == instance_group.TenantStates.ACTIVE
+        ]
 
     @classmethod
     def _get_unified_job_template_class(cls):

@@ -13,7 +13,6 @@ import asn1
 from ansible_base.lib.utils.schema import extend_schema_if_available
 from awx.api import serializers
 from awx.api.generics import GenericAPIView, Response
-from awx.api.permissions import IsSystemAdmin
 from awx.main import models
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -23,7 +22,7 @@ from cryptography.x509.oid import NameOID
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
-from rest_framework import status
+from rest_framework import permissions, status
 
 # Red Hat has an OID namespace (RHANANA). Receptor has its own designation under that.
 RECEPTOR_OID = "1.3.6.1.4.1.2312.19.1"
@@ -45,11 +44,19 @@ RECEPTOR_OID = "1.3.6.1.4.1.2312.19.1"
 # └── requirements.yml
 
 
+class IsSystemAdminOrTenantInstanceAdmin(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and (request.user.is_superuser or not request.user.is_system_auditor))
+
+    def has_object_permission(self, request, view, obj):
+        return bool(request.user.is_superuser or (obj.tenant_organization_id and request.user in obj.tenant_organization.admin_role))
+
+
 class InstanceInstallBundle(GenericAPIView):
     name = _('Install Bundle')
     model = models.Instance
     serializer_class = serializers.InstanceSerializer
-    permission_classes = (IsSystemAdmin,)
+    permission_classes = (IsSystemAdminOrTenantInstanceAdmin,)
     resource_purpose = 'install bundle'
 
     @extend_schema_if_available(extensions={"x-ai-description": "Generate and download install bundle for an instance"})

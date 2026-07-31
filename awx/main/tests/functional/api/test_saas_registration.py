@@ -79,6 +79,7 @@ def test_registration_creates_tenant_and_non_system_admin(post):
 
     organization = Organization.objects.get(name='Northstar Automation')
     user = User.objects.get(username='northstar-admin')
+    execution_pool = InstanceGroup.objects.get(tenant_organization=organization)
 
     assert organization.tenant_slug == 'northstar-automation'
     assert organization.tenant_status == Organization.TENANT_STATUS_ACTIVE
@@ -90,6 +91,9 @@ def test_registration_creates_tenant_and_non_system_admin(post):
     assert user.is_system_auditor is False
     assert organization.admin_role.members.filter(pk=user.pk).exists()
     assert organization.member_role.members.filter(pk=user.pk).exists()
+    assert execution_pool.name == f'tenant-{organization.id}-northstar-automation'
+    assert execution_pool.tenant_status == InstanceGroup.TenantStates.ACTIVE
+    assert organization.instance_groups.filter(pk=execution_pool.pk).exists()
     assert response.data == {
         'organization': {
             'id': organization.id,
@@ -101,6 +105,11 @@ def test_registration_creates_tenant_and_non_system_admin(post):
             'id': user.id,
             'username': user.username,
             'email': user.email,
+        },
+        'execution_pool': {
+            'id': execution_pool.id,
+            'name': execution_pool.name,
+            'status': execution_pool.tenant_status,
         },
         'login_url': '/api/login/',
     }

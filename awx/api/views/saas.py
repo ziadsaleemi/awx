@@ -34,7 +34,7 @@ class TenantRegistrationView(APIView):
     def post(self, request):
         serializer = TenantRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        organization, user = serializer.save()
+        organization, user, execution_pool = serializer.save()
         return Response(
             {
                 'organization': {
@@ -47,6 +47,11 @@ class TenantRegistrationView(APIView):
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
+                },
+                'execution_pool': {
+                    'id': execution_pool.id,
+                    'name': execution_pool.name,
+                    'status': execution_pool.tenant_status,
                 },
                 'login_url': '/api/login/',
             },

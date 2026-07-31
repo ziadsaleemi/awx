@@ -3,8 +3,9 @@ from unittest import mock
 import pytest
 
 from awx.api.versioning import reverse
+from awx.api.views.instance_install_bundle import IsSystemAdminOrTenantInstanceAdmin
 from awx.main.models.activity_stream import ActivityStream
-from awx.main.models.ha import Instance
+from awx.main.models.ha import Instance, InstanceGroup
 
 from django.test.utils import override_settings
 from django.http import HttpResponse
@@ -99,3 +100,86 @@ def test_instance_install_bundle(get, admin_user, system_auditor):
     with mock.patch('awx.api.views.instance_install_bundle.InstanceInstallBundle.get', return_value=HttpResponse({'test': 'data'}, status=status.HTTP_200_OK)):
         get(url=url, user=admin_user, expect=200)
         get(url=url, user=system_auditor, expect=403)
+
+
+@pytest.mark.django_db
+@override_settings(CAPSTAN_PRODUCT_MODE='saas', CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION=True, IS_K8S=False)
+def test_tenant_admin_can_enroll_owned_external_execution_instance(post, organization, org_admin):
+    organization.is_saas_tenant = True
+    organization.tenant_slug = 'test-org'
+    organization.tenant_status = organization.TENANT_STATUS_ACTIVE
+    organization.save(update_fields=['is_saas_tenant', 'tenant_slug', 'tenant_status'])
+    execution_pool = InstanceGroup.objects.create(
+        name='tenant-test-org',
+        tenant_organization=organization,
+        tenant_status=InstanceGroup.TenantStates.ACTIVE,
+    )
+
+    response = post(
+        reverse('api:instance_list'),
+        {
+            'hostname': 'tenant-execution.example.org',
+            'node_type': 'execution',
+            'node_state': 'installed',
+            'tenant_organization': organization.id,
+            'execution_pool': execution_pool.id,
+            'peers': [],
+        },
+        org_admin,
+        expect=201,
+    )
+
+    instance = Instance.objects.get(pk=response.data['id'])
+    assert instance.tenant_organization == organization
+    assert execution_pool.instances.filter(pk=instance.pk).exists()
+
+
+@pytest.mark.django_db
+@override_settings(CAPSTAN_PRODUCT_MODE='saas', CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION=True, IS_K8S=False)
+def test_tenant_admin_cannot_enroll_instance_into_foreign_pool(post, organization, org_admin):
+    organization.is_saas_tenant = True
+    organization.tenant_slug = 'test-org'
+    organization.tenant_status = organization.TENANT_STATUS_ACTIVE
+    organization.save(update_fields=['is_saas_tenant', 'tenant_slug', 'tenant_status'])
+    foreign_organization = type(organization).objects.create(
+        name='Foreign tenant',
+        is_saas_tenant=True,
+        tenant_slug='foreign-tenant',
+        tenant_status=organization.TENANT_STATUS_ACTIVE,
+    )
+    foreign_pool = InstanceGroup.objects.create(
+        name='tenant-foreign',
+        tenant_organization=foreign_organization,
+        tenant_status=InstanceGroup.TenantStates.ACTIVE,
+    )
+
+    response = post(
+        reverse('api:instance_list'),
+        {
+            'hostname': 'tenant-execution.example.org',
+            'node_type': 'execution',
+            'node_state': 'installed',
+            'tenant_organization': organization.id,
+            'execution_pool': foreign_pool.id,
+            'peers': [],
+        },
+        org_admin,
+        expect=400,
+    )
+
+    assert 'execution_pool' in response.data
+    assert not Instance.objects.filter(hostname='tenant-execution.example.org').exists()
+
+
+@pytest.mark.django_db
+def test_tenant_instance_install_bundle_permission_is_owner_scoped(organization, org_admin, rando, admin_user):
+    organization.is_saas_tenant = True
+    organization.tenant_slug = 'test-org'
+    organization.tenant_status = organization.TENANT_STATUS_ACTIVE
+    organization.save(update_fields=['is_saas_tenant', 'tenant_slug', 'tenant_status'])
+    instance = Instance.objects.create(hostname='tenant-execution.example.org', node_type='execution', tenant_organization=organization)
+    permission = IsSystemAdminOrTenantInstanceAdmin()
+
+    assert permission.has_object_permission(mock.Mock(user=admin_user), mock.Mock(), instance)
+    assert permission.has_object_permission(mock.Mock(user=org_admin), mock.Mock(), instance)
+    assert not permission.has_object_permission(mock.Mock(user=rando), mock.Mock(), instance)

@@ -6485,6 +6485,12 @@ class InstanceSerializer(BaseSerializer):
     listener_port = serializers.IntegerField(source='canonical_address_port', required=False, allow_null=True)
     peers_from_control_nodes = serializers.BooleanField(source='canonical_address_peers_from_control_nodes', required=False)
     protocol = serializers.SerializerMethodField()
+    execution_pool = serializers.PrimaryKeyRelatedField(
+        queryset=InstanceGroup.objects.all(),
+        write_only=True,
+        required=False,
+        help_text=_("Tenant-owned execution pool that this instance will join."),
+    )
 
     class Meta:
         model = Instance
@@ -6521,6 +6527,8 @@ class InstanceSerializer(BaseSerializer):
             'node_state',
             'managed',
             'ip_address',
+            'tenant_organization',
+            'execution_pool',
             'peers',
             'reverse_peers',
             'listener_port',
@@ -6559,6 +6567,7 @@ class InstanceSerializer(BaseSerializer):
         return res
 
     def create_or_update(self, validated_data, obj=None, create=True):
+        execution_pool = validated_data.pop('execution_pool', None)
         # create a managed receptor address if listener port is defined
         port = validated_data.pop('listener_port', -1)
         peers_from_control_nodes = validated_data.pop('peers_from_control_nodes', -1)
@@ -6569,6 +6578,8 @@ class InstanceSerializer(BaseSerializer):
 
         if create:
             instance = super(InstanceSerializer, self).create(validated_data)
+            if execution_pool:
+                execution_pool.instances.add(instance)
         else:
             instance = super(InstanceSerializer, self).update(obj, validated_data)
             instance.refresh_from_db()  # instance canonical address lookup is deferred, so needs to be reloaded
@@ -6633,7 +6644,28 @@ class InstanceSerializer(BaseSerializer):
         if 'canonical_address_peers_from_control_nodes' in attrs:
             attrs['peers_from_control_nodes'] = attrs.pop('canonical_address_peers_from_control_nodes')
 
-        if not self.instance and not settings.IS_K8S:
+        tenant_organization = attrs.get('tenant_organization') or getattr(self.instance, 'tenant_organization', None)
+        execution_pool = attrs.get('execution_pool')
+        request = self.context.get('request')
+
+        if self.instance and 'tenant_organization' in attrs and attrs['tenant_organization'] != self.instance.tenant_organization:
+            raise serializers.ValidationError({'tenant_organization': _("Cannot change the tenant owner of an instance.")})
+
+        if tenant_organization:
+            if not tenant_organization.is_saas_tenant or tenant_organization.tenant_status != tenant_organization.TENANT_STATUS_ACTIVE:
+                raise serializers.ValidationError({'tenant_organization': _("Select an active SaaS tenant organization.")})
+            if attrs.get('node_type', getattr(self.instance, 'node_type', None)) != Instance.Types.EXECUTION:
+                raise serializers.ValidationError({'node_type': _("Tenant-owned instances must be execution nodes.")})
+            if not self.instance and execution_pool is None:
+                raise serializers.ValidationError({'execution_pool': _("Select a tenant execution pool.")})
+            if execution_pool and (
+                execution_pool.tenant_organization_id != tenant_organization.pk or execution_pool.tenant_status != InstanceGroup.TenantStates.ACTIVE
+            ):
+                raise serializers.ValidationError({'execution_pool': _("Execution pool must be active and owned by the selected tenant.")})
+            if request and not request.user.is_superuser and request.user not in tenant_organization.admin_role:
+                raise serializers.ValidationError({'tenant_organization': _("You do not administer this tenant organization.")})
+
+        if not self.instance and not settings.IS_K8S and not (settings.CAPSTAN_PRODUCT_MODE == 'saas' and tenant_organization):
             raise serializers.ValidationError(_("Can only create instances on Kubernetes or OpenShift."))
 
         # cannot enable peers_from_control_nodes if listener_port is not set
@@ -6833,6 +6865,8 @@ class InstanceGroupSerializer(BaseSerializer):
             "url",
             "related",
             "name",
+            "tenant_organization",
+            "tenant_status",
             "created",
             "modified",
             "capacity",
@@ -6943,10 +6977,34 @@ class InstanceGroupSerializer(BaseSerializer):
     def validate(self, attrs):
         attrs = super(InstanceGroupSerializer, self).validate(attrs)
 
+        tenant_organization = attrs.get('tenant_organization') or getattr(self.instance, 'tenant_organization', None)
+        tenant_status = attrs.get('tenant_status', getattr(self.instance, 'tenant_status', ''))
+        request = self.context.get('request')
+
+        if self.instance and 'tenant_organization' in attrs and attrs['tenant_organization'] != self.instance.tenant_organization:
+            raise serializers.ValidationError({'tenant_organization': _("Cannot change the tenant owner of an execution pool.")})
+        if tenant_organization:
+            if not tenant_organization.is_saas_tenant or tenant_organization.tenant_status != tenant_organization.TENANT_STATUS_ACTIVE:
+                raise serializers.ValidationError({'tenant_organization': _("Select an active SaaS tenant organization.")})
+            if tenant_status not in InstanceGroup.TenantStates.values:
+                raise serializers.ValidationError({'tenant_status': _("Select a valid tenant execution-pool lifecycle state.")})
+            if attrs.get('is_container_group', getattr(self.instance, 'is_container_group', False)):
+                raise serializers.ValidationError({'is_container_group': _("Tenant execution pools use externally enrolled execution instances.")})
+            if request and not request.user.is_superuser and request.user not in tenant_organization.admin_role:
+                raise serializers.ValidationError({'tenant_organization': _("You do not administer this tenant organization.")})
+        elif tenant_status:
+            raise serializers.ValidationError({'tenant_status': _("Shared instance groups cannot define a tenant lifecycle state.")})
+
         if attrs.get('credential') and not attrs.get('is_container_group'):
             raise serializers.ValidationError({'is_container_group': _('is_container_group must be True when associating a credential to an Instance Group')})
 
         return attrs
+
+    def create(self, validated_data):
+        instance_group = super().create(validated_data)
+        if instance_group.tenant_organization_id:
+            instance_group.tenant_organization.instance_groups.add(instance_group)
+        return instance_group
 
     def get_ig_mgr(self):
         # Store capacity values (globally computed) in the context

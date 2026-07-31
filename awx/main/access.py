@@ -572,26 +572,58 @@ class InstanceAccess(BaseAccess):
     prefetch_related = ('rampart_groups',)
 
     def filtered_queryset(self):
-        return Instance.objects.filter(rampart_groups__in=self.user.get_queryset(InstanceGroup)).distinct()
+        tenant_organizations = Organization.access_qs(self.user, 'change').filter(is_saas_tenant=True)
+        return Instance.objects.filter(Q(rampart_groups__in=self.user.get_queryset(InstanceGroup)) | Q(tenant_organization__in=tenant_organizations)).distinct()
 
     def can_attach(self, obj, sub_obj, relationship, data, skip_sub_obj_read_check=False):
         if relationship == 'rampart_groups' and isinstance(sub_obj, InstanceGroup):
-            return self.user.is_superuser
+            if self.user.is_superuser:
+                return True
+            return bool(
+                obj.tenant_organization_id and obj.tenant_organization_id == sub_obj.tenant_organization_id and self.user in obj.tenant_organization.admin_role
+            )
         return super(InstanceAccess, self).can_attach(obj, sub_obj, relationship, data, skip_sub_obj_read_check=skip_sub_obj_read_check)
 
     def can_unattach(self, obj, sub_obj, relationship, data=None):
         if relationship == 'rampart_groups' and isinstance(sub_obj, InstanceGroup):
-            return self.user.is_superuser
-        return super(InstanceAccess, self).can_unattach(obj, sub_obj, relationship, relationship, data=data)
+            if self.user.is_superuser:
+                return True
+            return bool(
+                obj.tenant_organization_id and obj.tenant_organization_id == sub_obj.tenant_organization_id and self.user in obj.tenant_organization.admin_role
+            )
+        return super(InstanceAccess, self).can_unattach(obj, sub_obj, relationship, data=data)
 
     def can_add(self, data):
-        return self.user.is_superuser
+        if self.user.is_superuser:
+            return True
+        if settings.CAPSTAN_PRODUCT_MODE != 'saas' or not isinstance(data, dict):
+            return False
+        organization_pk = get_pk_from_dict(data, 'tenant_organization')
+        return (
+            Organization.access_qs(self.user, 'change')
+            .filter(
+                pk=organization_pk,
+                is_saas_tenant=True,
+                tenant_status=Organization.TENANT_STATUS_ACTIVE,
+            )
+            .exists()
+        )
 
     def can_change(self, obj, data):
-        return False
+        if self.user.is_superuser:
+            return True
+        if not obj.tenant_organization_id or self.user not in obj.tenant_organization.admin_role:
+            return False
+        return not data or set(data).issubset({'enabled', 'capacity_adjustment'})
 
     def can_delete(self, obj):
-        return False
+        if self.user.is_superuser:
+            return True
+        return bool(
+            obj.tenant_organization_id
+            and self.user in obj.tenant_organization.admin_role
+            and not UnifiedJob.objects.filter(execution_node=obj.hostname, status__in=('pending', 'waiting', 'running')).exists()
+        )
 
 
 class InstanceGroupAccess(BaseAccess):
@@ -602,21 +634,44 @@ class InstanceGroupAccess(BaseAccess):
     I can edit Instance Groups when I am:
        - a superuser
        - admin role on the Instance group
-    I can add/delete Instance Groups:
-       - a superuser(system administrator), because these are not org-scoped
+    I can add/delete Instance Groups when I am:
+       - a superuser(system administrator)
+       - an administrator of the SaaS tenant that owns the execution pool
     I can use Instance Groups when I have:
        - use_role on the instance group
     """
 
     model = InstanceGroup
+    select_related = ('tenant_organization',)
     prefetch_related = ('instances',)
+
+    def filtered_queryset(self):
+        tenant_organizations = Organization.access_qs(self.user, 'view').filter(is_saas_tenant=True)
+        return InstanceGroup.objects.filter(
+            Q(pk__in=InstanceGroup.access_ids_qs(self.user, 'view')) | Q(tenant_organization__in=tenant_organizations)
+        ).distinct()
 
     @check_superuser
     def can_use(self, obj):
-        return self.user in obj.use_role
+        if self.user in obj.use_role:
+            return True
+        return bool(obj.tenant_organization_id and (self.user in obj.tenant_organization.execute_role or self.user in obj.tenant_organization.admin_role))
 
     def can_add(self, data):
-        return self.user.is_superuser
+        if self.user.is_superuser:
+            return True
+        if settings.CAPSTAN_PRODUCT_MODE != 'saas' or not isinstance(data, dict):
+            return False
+        organization_pk = get_pk_from_dict(data, 'tenant_organization')
+        return (
+            Organization.access_qs(self.user, 'change')
+            .filter(
+                pk=organization_pk,
+                is_saas_tenant=True,
+                tenant_status=Organization.TENANT_STATUS_ACTIVE,
+            )
+            .exists()
+        )
 
     @check_superuser
     def can_change(self, obj, data):
@@ -624,11 +679,15 @@ class InstanceGroupAccess(BaseAccess):
 
     @check_superuser
     def can_admin(self, obj):
-        return self.user in obj.admin_role
+        if self.user in obj.admin_role:
+            return True
+        return bool(obj.tenant_organization_id and self.user in obj.tenant_organization.admin_role)
 
     def can_delete(self, obj):
         if obj.name in [settings.DEFAULT_EXECUTION_QUEUE_NAME, settings.DEFAULT_CONTROL_PLANE_QUEUE_NAME]:
             return False
+        if obj.tenant_organization_id and self.user in obj.tenant_organization.admin_role:
+            return True
         return self.user.has_obj_perm(obj, 'delete')
 
 

@@ -21,6 +21,7 @@ class TaskManagerInstance:
         self.consumed_capacity = 0
         self.capacity = obj.capacity
         self.hostname = obj.hostname
+        self.tenant_organization_id = getattr(obj, 'tenant_organization_id', None)
         self.jobs_running = 0
 
     def consume_capacity(self, impact, job_impact=False):
@@ -42,9 +43,13 @@ class TaskManagerInstanceGroup:
     def __init__(self, obj, task_manager_instances=None, **kwargs):
         self.name = obj.name
         self.is_container_group = obj.is_container_group
+        self.tenant_organization_id = getattr(obj, 'tenant_organization_id', None)
+        self.tenant_status = getattr(obj, 'tenant_status', '')
         self.container_group_jobs = 0
         self.container_group_consumed_forks = 0
         _instances = obj.instances.all()
+        if self.tenant_organization_id:
+            _instances = [instance for instance in _instances if instance.tenant_organization_id == self.tenant_organization_id]
         # We want the list of TaskManagerInstance objects because these are shared across the TaskManagerInstanceGroup objects.
         # This way when we consume capacity on an instance that is in multiple groups, we tabulate across all the groups correctly.
         self.instances = [task_manager_instances[instance.hostname] for instance in _instances if instance.hostname in task_manager_instances]
@@ -130,7 +135,7 @@ class TaskManagerInstanceGroup:
 
 
 class TaskManagerInstances:
-    def __init__(self, instances=None, instance_fields=('node_type', 'capacity', 'hostname', 'enabled'), **kwargs):
+    def __init__(self, instances=None, instance_fields=('node_type', 'capacity', 'hostname', 'enabled', 'tenant_organization_id'), **kwargs):
         self.instances_by_hostname = dict()
         self.instance_groups_container_group_jobs = dict()
         self.instance_groups_container_group_consumed_forks = dict()
@@ -140,7 +145,7 @@ class TaskManagerInstances:
             instances = (
                 Instance.objects.filter(hostname__isnull=False, node_state=Instance.States.READY, enabled=True)
                 .exclude(node_type='hop')
-                .only('node_type', 'node_state', 'capacity', 'hostname', 'enabled')
+                .only('node_type', 'node_state', 'capacity', 'hostname', 'enabled', 'tenant_organization_id')
             )
         for instance in instances:
             self.instances_by_hostname[instance.hostname] = TaskManagerInstance(instance, **kwargs)
@@ -177,7 +182,13 @@ class TaskManagerInstanceGroups:
         else:
             if instance_groups_queryset is None:
                 instance_groups_queryset = InstanceGroup.objects.prefetch_related('instances').only(
-                    'name', 'instances', 'max_concurrent_jobs', 'max_forks', 'is_container_group'
+                    'name',
+                    'instances',
+                    'max_concurrent_jobs',
+                    'max_forks',
+                    'is_container_group',
+                    'tenant_organization_id',
+                    'tenant_status',
                 )
             for instance_group in instance_groups_queryset:
                 if instance_group.name == self.controlplane_ig_name:
@@ -242,16 +253,27 @@ class TaskManagerInstanceGroups:
         return largest_instance
 
     def get_instance_groups_from_task_cache(self, task):
+        tenant_external_execution = (
+            settings.CAPSTAN_PRODUCT_MODE == 'saas' and settings.CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION and task.capacity_type != 'control'
+        )
         igs = []
         if task.preferred_instance_groups_cache:
             for pk in task.preferred_instance_groups_cache:
                 ig = self.pk_ig_map.get(pk, None)
                 if ig:
+                    if tenant_external_execution and (
+                        not task.organization_id or ig.tenant_organization_id != task.organization_id or ig.tenant_status != InstanceGroup.TenantStates.ACTIVE
+                    ):
+                        logger.warning(f"Ignoring instance group {ig.name} because it is not an active execution pool for task tenant {task.organization_id}")
+                        continue
                     igs.append(ig)
                 else:
-                    logger.warn(f"Unknown instance group with pk {pk} for task {task}")
+                    logger.warning(f"Unknown instance group with pk {pk} for task {task}")
         if len(igs) == 0:
-            logger.warn(f"No instance groups in cache exist, defaulting to global instance groups for task {task}")
+            if tenant_external_execution:
+                logger.warning(f"No active tenant execution pools in cache for SaaS task {task}; refusing global instance group fallback")
+                return []
+            logger.warning(f"No instance groups in cache exist, defaulting to global instance groups for task {task}")
             return task.global_instance_groups
         return igs
 

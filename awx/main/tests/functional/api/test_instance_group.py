@@ -273,6 +273,36 @@ def test_instance_group_attach_to_instance(post, instance_group, node_type_insta
 
 
 @pytest.mark.django_db
+def test_cannot_cross_attach_tenant_instance_and_execution_pool(post, organization, admin_user):
+    organization.is_saas_tenant = True
+    organization.tenant_slug = 'tenant-one'
+    organization.tenant_status = organization.TENANT_STATUS_ACTIVE
+    organization.save(update_fields=['is_saas_tenant', 'tenant_slug', 'tenant_status'])
+    foreign_organization = type(organization).objects.create(
+        name='Tenant two',
+        is_saas_tenant=True,
+        tenant_slug='tenant-two',
+        tenant_status=organization.TENANT_STATUS_ACTIVE,
+    )
+    tenant_instance = Instance.objects.create(hostname='tenant-one-execution', node_type='execution', tenant_organization=organization)
+    foreign_pool = InstanceGroup.objects.create(
+        name='tenant-two-pool',
+        tenant_organization=foreign_organization,
+        tenant_status=InstanceGroup.TenantStates.ACTIVE,
+    )
+
+    response = post(
+        reverse('api:instance_group_instance_list', kwargs={'pk': foreign_pool.pk}),
+        {'associate': True, 'id': tenant_instance.id},
+        admin_user,
+        expect=400,
+    )
+
+    assert 'same tenant' in str(response.data)
+    assert not foreign_pool.instances.filter(pk=tenant_instance.pk).exists()
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize('node_type', ['control', 'hybrid', 'execution'])
 def test_instance_group_unattach_from_instance(post, instance_group, node_type_instance, admin, node_type):
     instance = node_type_instance(hostname=node_type, node_type=node_type)

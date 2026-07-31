@@ -632,7 +632,8 @@ class TaskManager(TaskBase):
                 found_acceptable_queue = True
                 continue
 
-            for instance_group in self.tm_models.instance_groups.get_instance_groups_from_task_cache(task):
+            candidate_instance_groups = self.tm_models.instance_groups.get_instance_groups_from_task_cache(task)
+            for instance_group in candidate_instance_groups:
                 if not self.tm_models.instance_groups[instance_group.name].has_remaining_capacity(task):
                     continue
                 if instance_group.is_container_group:
@@ -671,12 +672,22 @@ class TaskManager(TaskBase):
                         )
                     )
             if not found_acceptable_queue:
-                self.task_needs_capacity(task, tasks_to_update_job_explanation)
+                explanation = None
+                if (
+                    not candidate_instance_groups
+                    and settings.CAPSTAN_PRODUCT_MODE == 'saas'
+                    and settings.CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION
+                    and task.capacity_type != 'control'
+                ):
+                    explanation = gettext_noop(
+                        "This SaaS job cannot start because its organization has no active tenant-owned execution instance with available capacity."
+                    )
+                self.task_needs_capacity(task, tasks_to_update_job_explanation, explanation=explanation)
         UnifiedJob.objects.bulk_update(tasks_to_update_job_explanation, ['job_explanation'])
 
-    def task_needs_capacity(self, task, tasks_to_update_job_explanation):
+    def task_needs_capacity(self, task, tasks_to_update_job_explanation, explanation=None):
         task.log_lifecycle("needs_capacity")
-        job_explanation = gettext_noop("This job is not ready to start because there is not enough available capacity.")
+        job_explanation = explanation or gettext_noop("This job is not ready to start because there is not enough available capacity.")
         if task.job_explanation != job_explanation:
             if task.created < (tz_now() - self.time_delta_job_explanation):
                 # Many launched jobs are immediately blocked, but most blocks will resolve in a few seconds.

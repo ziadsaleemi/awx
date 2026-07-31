@@ -514,6 +514,8 @@ class InstanceInstanceGroupsList(InstanceGroupMembershipMixin, SubListCreateAtta
             return {'msg': _(f"Cannot change instance group membership of control-only node: {parent.hostname}.")}
         if parent.node_type == 'hop':
             return {'msg': _(f"Cannot change instance group membership of hop node : {parent.hostname}.")}
+        if (parent.tenant_organization_id or sub.tenant_organization_id) and parent.tenant_organization_id != sub.tenant_organization_id:
+            return {'msg': _("Tenant execution instances can only join execution pools owned by the same tenant.")}
         return None
 
     def is_valid_removal(self, parent, sub):
@@ -637,6 +639,8 @@ class InstanceGroupInstanceList(InstanceGroupMembershipMixin, SubListAttachDetac
             return {'msg': _(f"Cannot change instance group membership of control-only node: {sub.hostname}.")}
         if sub.node_type == 'hop':
             return {'msg': _(f"Cannot change instance group membership of hop node : {sub.hostname}.")}
+        if (parent.tenant_organization_id or sub.tenant_organization_id) and parent.tenant_organization_id != sub.tenant_organization_id:
+            return {'msg': _("Tenant execution instances can only join execution pools owned by the same tenant.")}
         return None
 
     def is_valid_removal(self, parent, sub):

@@ -6,7 +6,7 @@ from django.db import IntegrityError, transaction
 from django.core.validators import RegexValidator
 from rest_framework import serializers
 
-from awx.main.models import Organization
+from awx.main.models import InstanceGroup, Organization
 
 
 class TenantRegistrationSerializer(serializers.Serializer):
@@ -87,6 +87,12 @@ class TenantRegistrationSerializer(serializers.Serializer):
                     tenant_status=Organization.TENANT_STATUS_ACTIVE,
                     is_saas_tenant=True,
                 )
+                execution_pool = InstanceGroup.objects.create(
+                    name=f'tenant-{organization.pk}-{organization.tenant_slug}'[:250],
+                    tenant_organization=organization,
+                    tenant_status=InstanceGroup.TenantStates.ACTIVE,
+                )
+                organization.instance_groups.add(execution_pool)
                 user = User.objects.create_user(
                     username=validated_data['username'],
                     email=validated_data['email'],
@@ -100,4 +106,4 @@ class TenantRegistrationSerializer(serializers.Serializer):
                 organization.member_role.members.add(user)
         except IntegrityError as exc:
             raise serializers.ValidationError({'detail': 'The organization or user is no longer available.'}) from exc
-        return organization, user
+        return organization, user, execution_pool

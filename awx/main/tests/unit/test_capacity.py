@@ -1,4 +1,5 @@
 import pytest
+from django.test import override_settings
 
 from awx.main.scheduler.task_manager_models import TaskManagerModels
 
@@ -24,6 +25,9 @@ class Job(FakeObject):
         self.instance_group = kwargs.get('instance_group', None)
         self.instance_group_id = self.instance_group.id if self.instance_group else None
         self.capacity_type = kwargs.get('capacity_type', 'execution')
+        self.organization_id = kwargs.get('organization_id')
+        self.preferred_instance_groups_cache = kwargs.get('preferred_instance_groups_cache')
+        self.global_instance_groups = kwargs.get('global_instance_groups', [])
 
     def log_format(self):
         return 'job 382 (fake)'
@@ -43,6 +47,8 @@ class InstanceGroup(FakeObject):
         super(InstanceGroup, self).__init__(**kwargs)
         self.instance_list = []
         self.pk = self.id = kwargs.get('id', 1)
+        self.tenant_organization_id = kwargs.get('tenant_organization_id')
+        self.tenant_status = kwargs.get('tenant_status', '')
 
     @property
     def instances(self):
@@ -67,6 +73,7 @@ class Instance(FakeObject):
         self.node_type = kwargs.get('node_type', 'hybrid')
         self.capacity = kwargs.get('capacity', 0)
         self.hostname = kwargs.get('hostname', 'fakehostname')
+        self.tenant_organization_id = kwargs.get('tenant_organization_id')
         self.consumed_capacity = 0
         self.jobs_running = 0
 
@@ -99,6 +106,54 @@ def create_ig_manager():
         return tm_models.instance_groups
 
     return _rf
+
+
+def test_tenant_group_excludes_cross_tenant_instances():
+    tenant_group = InstanceGroup(id=10, name='tenant-1', tenant_organization_id=1, tenant_status='active')
+    tenant_instance = Instance(hostname='tenant-1-execution', capacity=200, node_type='execution', tenant_organization_id=1)
+    foreign_instance = Instance(hostname='tenant-2-execution', capacity=200, node_type='execution', tenant_organization_id=2)
+    tenant_group.instances.add(tenant_instance, foreign_instance)
+
+    groups = TaskManagerModels(
+        instances=[tenant_instance, foreign_instance],
+        instance_groups=[tenant_group],
+    ).instance_groups
+
+    assert groups['tenant-1'].instance_hostnames == ('tenant-1-execution',)
+
+
+@override_settings(CAPSTAN_PRODUCT_MODE='saas', CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION=True)
+def test_saas_task_uses_only_active_execution_pools_owned_by_its_tenant():
+    owned = InstanceGroup(id=10, name='tenant-1', tenant_organization_id=1, tenant_status='active')
+    suspended = InstanceGroup(id=11, name='tenant-1-suspended', tenant_organization_id=1, tenant_status='suspended')
+    foreign = InstanceGroup(id=12, name='tenant-2', tenant_organization_id=2, tenant_status='active')
+    shared = InstanceGroup(id=13, name='default')
+    groups = TaskManagerModels(instances=[], instance_groups=[owned, suspended, foreign, shared]).instance_groups
+    task = Job(
+        organization_id=1,
+        preferred_instance_groups_cache=[shared.id, foreign.id, suspended.id, owned.id],
+        global_instance_groups=[shared],
+    )
+
+    assert groups.get_instance_groups_from_task_cache(task) == [owned]
+
+
+@override_settings(CAPSTAN_PRODUCT_MODE='saas', CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION=True)
+def test_saas_task_without_owned_pool_fails_closed_without_global_fallback():
+    shared = InstanceGroup(id=13, name='default')
+    groups = TaskManagerModels(instances=[], instance_groups=[shared]).instance_groups
+    task = Job(organization_id=1, preferred_instance_groups_cache=[], global_instance_groups=[shared])
+
+    assert groups.get_instance_groups_from_task_cache(task) == []
+
+
+@override_settings(CAPSTAN_PRODUCT_MODE='on_prem', CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION=False)
+def test_on_prem_task_without_cached_pool_retains_global_fallback():
+    shared = InstanceGroup(id=13, name='default')
+    groups = TaskManagerModels(instances=[], instance_groups=[shared]).instance_groups
+    task = Job(organization_id=1, preferred_instance_groups_cache=[], global_instance_groups=[shared])
+
+    assert groups.get_instance_groups_from_task_cache(task) == [shared]
 
 
 @pytest.mark.parametrize('ig_name,consumed_capacity', [('default', 43), ('ig_large', 43 * 2), ('ig_small', 43)])

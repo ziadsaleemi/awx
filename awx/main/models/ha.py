@@ -101,7 +101,12 @@ class Instance(HasPolicyEditsMixin, BaseModel):
                 condition=~Q(ip_address=""),  # don't apply to constraint to empty entries
                 name="unique_ip_address_not_empty",
                 violation_error_message=_("Field ip_address must be unique."),
-            )
+            ),
+            models.CheckConstraint(
+                condition=Q(tenant_organization__isnull=True) | Q(node_type='execution'),
+                name='tenant_instance_must_be_execution_node',
+                violation_error_message=_("Tenant-owned instances must be execution nodes."),
+            ),
         ]
 
     def __str__(self):
@@ -116,6 +121,15 @@ class Instance(HasPolicyEditsMixin, BaseModel):
         blank=True,
         default="",
         max_length=50,
+    )
+    tenant_organization = models.ForeignKey(
+        'Organization',
+        related_name='execution_instances',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.PROTECT,
+        help_text=_("SaaS tenant that exclusively owns this execution instance."),
     )
 
     # Auto-fields, implementation is different from BaseModel
@@ -408,6 +422,28 @@ class InstanceGroup(HasPolicyEditsMixin, BaseModel, RelatedJobsMixin, ResourceMi
     """A model representing a Queue/Group of AWX Instances."""
 
     name = models.CharField(max_length=250, unique=True)
+    tenant_organization = models.ForeignKey(
+        'Organization',
+        related_name='execution_pools',
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.PROTECT,
+        help_text=_("SaaS tenant that exclusively owns this execution pool."),
+    )
+
+    class TenantStates(models.TextChoices):
+        ACTIVE = 'active', _('Active')
+        SUSPENDED = 'suspended', _('Suspended')
+        RETIRED = 'retired', _('Retired')
+
+    tenant_status = models.CharField(
+        max_length=16,
+        choices=TenantStates.choices,
+        blank=True,
+        default='',
+        help_text=_("Lifecycle state for a tenant-owned execution pool."),
+    )
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
     instances = models.ManyToManyField(
@@ -489,6 +525,14 @@ class InstanceGroup(HasPolicyEditsMixin, BaseModel, RelatedJobsMixin, ResourceMi
         permissions = [('use_instancegroup', 'Can use instance group in a preference list of a resource')]
         # Since this has no direct organization field only superuser can add, so remove add permission
         default_permissions = ('change', 'delete', 'view')
+        constraints = [
+            models.CheckConstraint(
+                condition=(Q(tenant_organization__isnull=True) & Q(tenant_status=''))
+                | (Q(tenant_organization__isnull=False) & Q(tenant_status__in=['active', 'suspended', 'retired'])),
+                name='tenant_execution_pool_requires_lifecycle_state',
+                violation_error_message=_("Tenant execution pools require a lifecycle state; shared groups must not define one."),
+            )
+        ]
 
     def set_default_policy_fields(self):
         self.policy_instance_list = []
