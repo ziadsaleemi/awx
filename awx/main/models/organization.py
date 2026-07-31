@@ -1,6 +1,7 @@
 # Copyright (c) 2015 Ansible, Inc.
 # All Rights Reserved.
 
+import uuid
 
 # Django
 from django.conf import settings
@@ -25,7 +26,32 @@ from awx.main.models.rbac import (
 from awx.main.models.unified_jobs import UnifiedJob
 from awx.main.models.mixins import ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin
 
-__all__ = ['Organization', 'Team', 'UserType', 'UserTypeAssignment', 'UserUISettings', 'UserSessionMembership']
+__all__ = ['Organization', 'SaaSTenantRegistration', 'Team', 'UserType', 'UserTypeAssignment', 'UserUISettings', 'UserSessionMembership']
+
+
+class SaaSTenantRegistration(CreatedModifiedModel):
+    """A verified-once request that has not yet become an active tenant."""
+
+    organization_name = models.CharField(max_length=512)
+    organization_slug = models.SlugField(max_length=255, unique=True)
+    username = models.CharField(max_length=150, unique=True)
+    email = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=150, blank=True, default='')
+    last_name = models.CharField(max_length=150, blank=True, default='')
+    password_hash = models.CharField(max_length=128)
+    verification_nonce = models.UUIDField(default=uuid.uuid4, editable=False)
+    terms_version = models.CharField(max_length=64)
+    terms_accepted_at = models.DateTimeField()
+    expires_at = models.DateTimeField(db_index=True)
+    verified_at = models.DateTimeField(null=True, blank=True, default=None)
+    consumed_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    class Meta:
+        app_label = 'main'
+        ordering = ('-created',)
+
+    def __str__(self):
+        return '{} ({})'.format(self.organization_name, self.email)
 
 
 class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVirtualEnvMixin, RelatedJobsMixin, OpaQueryPathMixin):
@@ -80,6 +106,26 @@ class Organization(CommonModel, NotificationFieldsModel, ResourceMixin, CustomVi
         choices=TENANT_STATUS_CHOICES,
         editable=False,
         help_text=_('Lifecycle status for a SaaS tenant. Self-hosted organizations leave this blank.'),
+    )
+    tenant_terms_version = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        editable=False,
+        help_text=_('Legal terms version accepted when this SaaS tenant was provisioned.'),
+    )
+    tenant_terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        default=None,
+        editable=False,
+        help_text=_('Time at which the initial SaaS tenant administrator accepted the legal terms.'),
+    )
+    tenant_terms_accepted_by_email = models.EmailField(
+        blank=True,
+        default='',
+        editable=False,
+        help_text=_('Verified email address that accepted the SaaS tenant legal terms.'),
     )
 
     instance_groups = OrderedManyToManyField('InstanceGroup', blank=True, through='OrganizationInstanceGroupMembership')

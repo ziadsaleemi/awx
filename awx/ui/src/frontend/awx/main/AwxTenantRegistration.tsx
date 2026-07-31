@@ -2,6 +2,7 @@ import {
   ActionGroup,
   Alert,
   Button,
+  Checkbox,
   Form,
   FormGroup,
   FormHelperText,
@@ -10,7 +11,7 @@ import {
   HelperTextItem,
   TextInput,
 } from '@patternfly/react-core';
-import { FormEvent, ReactNode, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { AnsibleLoginPage } from '../../common/AnsibleLogin/AnsibleLogin';
@@ -29,21 +30,76 @@ interface TenantRegistrationValues {
 }
 
 interface TenantRegistrationResponse {
-  organization: {
-    id: number;
-    name: string;
-    tenant_slug: string;
-    tenant_status: string;
-  };
-  user: {
-    id: number;
-    username: string;
-    email: string;
-  };
-  login_url: string;
+  detail: string;
+  verification_required: boolean;
 }
 
-type TenantRegistrationErrors = Partial<Record<keyof TenantRegistrationValues | 'detail', string>>;
+type TenantRegistrationErrors = Partial<
+  Record<
+    | keyof TenantRegistrationValues
+    | 'terms_accepted'
+    | 'terms_version'
+    | 'bot_challenge_token'
+    | 'detail',
+    string
+  >
+>;
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (
+        container: HTMLElement,
+        options: {
+          sitekey: string;
+          callback: (token: string) => void;
+          'expired-callback': () => void;
+          'error-callback': () => void;
+          theme: 'auto';
+        }
+      ) => string;
+      remove: (widgetId: string) => void;
+    };
+  }
+}
+
+function TurnstileChallenge(props: { siteKey: string; onToken: (token: string) => void }) {
+  const { onToken, siteKey } = props;
+  const container = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let widgetId: string | undefined;
+    let disposed = false;
+    const render = () => {
+      if (disposed || widgetId || !container.current || !window.turnstile) return;
+      widgetId = window.turnstile.render(container.current, {
+        sitekey: siteKey,
+        callback: onToken,
+        'expired-callback': () => onToken(''),
+        'error-callback': () => onToken(''),
+        theme: 'auto',
+      });
+    };
+    let script = document.querySelector<HTMLScriptElement>('script[data-capstan-turnstile]');
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.dataset.capstanTurnstile = 'true';
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', render);
+    render();
+    return () => {
+      disposed = true;
+      script?.removeEventListener('load', render);
+      if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
+    };
+  }, [onToken, siteKey]);
+
+  return <div ref={container} aria-label="Security check" />;
+}
 
 function TenantRegistrationField(props: {
   name: keyof TenantRegistrationValues;
@@ -120,6 +176,11 @@ function requestErrors(error: unknown): TenantRegistrationErrors {
 
 export function AwxTenantRegistration(props: {
   registrationUrl: string;
+  termsVersion: string;
+  termsUrl: string;
+  privacyUrl: string;
+  botProvider: 'turnstile';
+  botSiteKey: string;
   brandImg?: ReactNode;
   brandImgAlt: string;
   textContent?: string;
@@ -131,6 +192,8 @@ export function AwxTenantRegistration(props: {
   const [errors, setErrors] = useState<TenantRegistrationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [slugWasEdited, setSlugWasEdited] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [botChallengeToken, setBotChallengeToken] = useState('');
 
   const requiredFields = useMemo(
     () =>
@@ -167,6 +230,12 @@ export function AwxTenantRegistration(props: {
     if (values.password && values.password !== values.confirm_password) {
       nextErrors.confirm_password = t('Passwords do not match.');
     }
+    if (!termsAccepted) {
+      nextErrors.terms_accepted = t('Accept the Terms of Service and Privacy Policy to continue.');
+    }
+    if (!botChallengeToken) {
+      nextErrors.bot_challenge_token = t('Complete the security check to continue.');
+    }
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -176,10 +245,12 @@ export function AwxTenantRegistration(props: {
     setErrors({});
     try {
       const { confirm_password: _confirmPassword, ...payload } = values;
-      const response = await postRequest<TenantRegistrationResponse>(
-        props.registrationUrl,
-        payload
-      );
+      const response = await postRequest<TenantRegistrationResponse>(props.registrationUrl, {
+        ...payload,
+        terms_accepted: termsAccepted,
+        terms_version: props.termsVersion,
+        bot_challenge_token: botChallengeToken,
+      });
       props.onSuccess(response);
     } catch (error) {
       setErrors(requestErrors(error));
@@ -265,6 +336,44 @@ export function AwxTenantRegistration(props: {
           type="password"
           isRequired
         />
+        <FormGroup fieldId="tenant-registration-terms_accepted">
+          <Checkbox
+            id="tenant-registration-terms_accepted"
+            isChecked={termsAccepted}
+            onChange={(_, checked) => {
+              setTermsAccepted(checked);
+              setErrors((current) => ({ ...current, terms_accepted: undefined }));
+            }}
+            label={
+              <>
+                {t('I accept the ')}
+                <a href={props.termsUrl} target="_blank" rel="noreferrer">
+                  {t('Terms of Service')}
+                </a>
+                {t(' and ')}
+                <a href={props.privacyUrl} target="_blank" rel="noreferrer">
+                  {t('Privacy Policy')}
+                </a>
+                {`.`}
+              </>
+            }
+          />
+          {errors.terms_accepted ? (
+            <FormHelperText>
+              <HelperTextItem variant="error">{errors.terms_accepted}</HelperTextItem>
+            </FormHelperText>
+          ) : null}
+        </FormGroup>
+        {props.botProvider === 'turnstile' ? (
+          <FormGroup fieldId="tenant-registration-security-check" label={t('Security check')}>
+            <TurnstileChallenge siteKey={props.botSiteKey} onToken={setBotChallengeToken} />
+            {errors.bot_challenge_token ? (
+              <FormHelperText>
+                <HelperTextItem variant="error">{errors.bot_challenge_token}</HelperTextItem>
+              </FormHelperText>
+            ) : null}
+          </FormGroup>
+        ) : null}
         <ActionGroup>
           <Button
             type="submit"
@@ -272,7 +381,7 @@ export function AwxTenantRegistration(props: {
             isLoading={isSubmitting}
             isDisabled={isSubmitting}
           >
-            {t('Create organization')}
+            {t('Request organization')}
           </Button>
           <Button component={(buttonProps) => <Link {...buttonProps} to="/" />} variant="link">
             {t('Back to login')}

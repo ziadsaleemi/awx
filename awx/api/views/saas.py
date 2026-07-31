@@ -6,7 +6,12 @@ from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 
 from awx.api.generics import APIView
-from awx.api.serializers_saas import TenantRegistrationSerializer
+from awx.api.serializers_saas import (
+    TenantRegistrationSerializer,
+    TenantRegistrationVerificationSerializer,
+    send_registration_verification,
+)
+from awx.main.utils.saas_registration import registration_is_ready
 
 
 class TenantRegistrationRateThrottle(SimpleRateThrottle):
@@ -19,20 +24,49 @@ class TenantRegistrationRateThrottle(SimpleRateThrottle):
         return settings.CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT
 
 
-class TenantRegistrationView(APIView):
+class TenantRegistrationVerificationRateThrottle(TenantRegistrationRateThrottle):
+    scope = 'tenant_registration_verification'
+
+    def get_rate(self):
+        return settings.CAPSTAN_SAAS_REGISTRATION_VERIFICATION_RATE_LIMIT
+
+
+class TenantRegistrationBaseView(APIView):
     permission_classes = (AllowAny,)
     authentication_classes = ()
+
+    def initial(self, request, *args, **kwargs):
+        if not registration_is_ready():
+            raise Http404
+        return super().initial(request, *args, **kwargs)
+
+
+class TenantRegistrationView(TenantRegistrationBaseView):
     throttle_classes = (TenantRegistrationRateThrottle,)
     name = 'Tenant registration'
     resource_purpose = 'Capstan SaaS tenant registration'
 
-    def initial(self, request, *args, **kwargs):
-        if settings.CAPSTAN_PRODUCT_MODE != 'saas' or not settings.CAPSTAN_SAAS_REGISTRATION_ENABLED:
-            raise Http404
-        return super().initial(request, *args, **kwargs)
+    def post(self, request):
+        serializer = TenantRegistrationSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        registration = serializer.save()
+        send_registration_verification(registration)
+        return Response(
+            {
+                'detail': 'Check your email to verify the organization registration.',
+                'verification_required': True,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class TenantRegistrationVerificationView(TenantRegistrationBaseView):
+    throttle_classes = (TenantRegistrationVerificationRateThrottle,)
+    name = 'Tenant registration verification'
+    resource_purpose = 'Verify a Capstan SaaS tenant registration'
 
     def post(self, request):
-        serializer = TenantRegistrationSerializer(data=request.data)
+        serializer = TenantRegistrationVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         organization, user, execution_pool = serializer.save()
         return Response(

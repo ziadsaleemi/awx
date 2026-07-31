@@ -127,7 +127,28 @@ stringData:
     CAPSTAN_PRODUCT_MODE = {{ awx_product_mode | to_json }}
     CAPSTAN_SAAS_REGISTRATION_ENABLED = {{ 'True' if awx_saas_registration_enabled | bool else 'False' }}
     CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT = {{ awx_saas_registration_rate_limit | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_VERIFICATION_RATE_LIMIT = {{ awx_saas_registration_verification_rate_limit | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_TOKEN_MAX_AGE = {{ awx_saas_registration_token_max_age | int }}
+    CAPSTAN_SAAS_REGISTRATION_PUBLIC_URL = {{ awx_saas_registration_public_url | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_EMAIL_FROM = {{ awx_saas_registration_email_from | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_TERMS_VERSION = {{ awx_saas_registration_terms_version | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_TERMS_URL = {{ awx_saas_registration_terms_url | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_PRIVACY_URL = {{ awx_saas_registration_privacy_url | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_BOT_PROVIDER = "turnstile"
+    CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SITE_KEY = {{ awx_saas_registration_turnstile_site_key | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY = {{ awx_saas_registration_turnstile_secret_key | to_json }}
     CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION = {{ 'True' if awx_saas_require_external_execution | bool else 'False' }}
+
+{% if awx_saas_registration_enabled | bool %}
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = {{ awx_saas_smtp_host | to_json }}
+    EMAIL_PORT = {{ awx_saas_smtp_port | int }}
+    EMAIL_HOST_USER = {{ awx_saas_smtp_user | to_json }}
+    EMAIL_HOST_PASSWORD = {{ awx_saas_smtp_password | to_json }}
+    EMAIL_USE_TLS = {{ 'True' if awx_saas_smtp_use_tls | bool else 'False' }}
+    EMAIL_USE_SSL = {{ 'True' if awx_saas_smtp_use_ssl | bool else 'False' }}
+    EMAIL_TIMEOUT = 10
+{% endif %}
 
 {% if awx_ldap_enabled | bool %}
     import ldap

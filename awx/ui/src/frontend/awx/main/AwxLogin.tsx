@@ -13,6 +13,7 @@ import { AwxConfigProvider } from '../common/useAwxConfig';
 import { WebSocketProvider } from '../common/useAwxWebSocket';
 import { DocsVersionProvider } from '../common/useDocsVersion';
 import { AwxTenantRegistration } from './AwxTenantRegistration';
+import { AwxTenantVerification } from './AwxTenantVerification';
 
 type AwxAuthOptions = {
   [key: string]: {
@@ -48,6 +49,12 @@ export function AwxLogin(props: { children: React.ReactNode }) {
     product_mode?: 'on_prem' | 'saas';
     registration_enabled?: boolean;
     registration_url?: string;
+    registration_verification_url?: string;
+    registration_terms_version?: string;
+    registration_terms_url?: string;
+    registration_privacy_url?: string;
+    registration_bot_provider?: 'turnstile';
+    registration_bot_site_key?: string;
   }>('/api/', requestGet);
   const authOptions: AuthOption[] = [];
   if (options && typeof options === 'object') {
@@ -99,6 +106,29 @@ export function AwxLogin(props: { children: React.ReactNode }) {
   const brandImg = customLogo ?? cachedCustomLogo ?? STATIC_BRAND_LOGO;
 
   if (!activeAwxUser) {
+    if (location.pathname === '/register/verify') {
+      const token = new URLSearchParams(location.search).get('token') ?? '';
+      if (!rootInfo) {
+        return (
+          <Page>
+            <LoadingState />
+          </Page>
+        );
+      }
+      if (!rootInfo.registration_enabled || !rootInfo.registration_verification_url || !token) {
+        return <Navigate to="/register" replace />;
+      }
+      return (
+        <AwxTenantVerification
+          verificationUrl={rootInfo.registration_verification_url}
+          token={token}
+          brandImg={brandImg}
+          brandImgAlt={process.env.PRODUCT}
+          textContent={rootInfo.custom_login_info}
+          backgroundImgSrc={rootInfo.custom_login_background}
+        />
+      );
+    }
     if (location.pathname === '/register') {
       if (!rootInfo) {
         return (
@@ -110,29 +140,37 @@ export function AwxLogin(props: { children: React.ReactNode }) {
       if (
         rootInfo.product_mode !== 'saas' ||
         !rootInfo.registration_enabled ||
-        !rootInfo.registration_url
+        !rootInfo.registration_url ||
+        !rootInfo.registration_terms_version ||
+        !rootInfo.registration_terms_url ||
+        !rootInfo.registration_privacy_url ||
+        rootInfo.registration_bot_provider !== 'turnstile' ||
+        !rootInfo.registration_bot_site_key
       ) {
         return <Navigate to="/" replace />;
       }
       return (
         <AwxTenantRegistration
           registrationUrl={rootInfo.registration_url}
+          termsVersion={rootInfo.registration_terms_version}
+          termsUrl={rootInfo.registration_terms_url}
+          privacyUrl={rootInfo.registration_privacy_url}
+          botProvider={rootInfo.registration_bot_provider}
+          botSiteKey={rootInfo.registration_bot_site_key}
           brandImg={brandImg}
           brandImgAlt={process.env.PRODUCT}
           textContent={rootInfo.custom_login_info}
           backgroundImgSrc={rootInfo.custom_login_background}
-          onSuccess={(response) => {
-            navigate(
-              `/?registration=success&username=${encodeURIComponent(response.user.username)}`,
-              { replace: true }
-            );
+          onSuccess={() => {
+            navigate('/?registration=pending', { replace: true });
           }}
         />
       );
     }
 
     const query = new URLSearchParams(location.search);
-    const registrationSucceeded = query.get('registration') === 'success';
+    const registrationPending = query.get('registration') === 'pending';
+    const registrationVerified = query.get('registration') === 'verified';
     const registeredUsername = query.get('username') ?? undefined;
     return (
       <AnsibleLogin
@@ -153,14 +191,25 @@ export function AwxLogin(props: { children: React.ReactNode }) {
         backgroundImgSrc={rootInfo?.custom_login_background}
         initialUsername={registeredUsername}
         formNotice={
-          registrationSucceeded ? (
+          registrationPending ? (
+            <Alert
+              isInline
+              variant="info"
+              title={t('Check your email')}
+              style={{ marginBottom: 'var(--pf-v5-global--spacer--lg)' }}
+            >
+              {t(
+                'Open the verification link before signing in. No organization has been created yet.'
+              )}
+            </Alert>
+          ) : registrationVerified ? (
             <Alert
               isInline
               variant="success"
-              title={t('Organization created')}
+              title={t('Organization verified')}
               style={{ marginBottom: 'var(--pf-v5-global--spacer--lg)' }}
             >
-              {t('Log in with the administrator account you just created.')}
+              {t('Log in with the administrator account you created.')}
             </Alert>
           ) : undefined
         }

@@ -14,7 +14,7 @@ from awx.api.views.root import (
     ApiV2SubscriptionView,
     ApiV2AttachView,
 )
-from awx.api.views.saas import TenantRegistrationView
+from awx.api.views.saas import TenantRegistrationVerificationView, TenantRegistrationView
 from awx.api.views import (
     UserMeList,
     DashboardView,
@@ -96,6 +96,7 @@ v2_urls = [
     re_path(r'^$', ApiV2RootView.as_view(), name='api_v2_root_view'),
     re_path(r'^auth/$', ApiV2AuthView.as_view(), name='api_v2_auth_view'),
     re_path(r'^tenant-registration/$', TenantRegistrationView.as_view(), name='tenant_registration_view'),
+    re_path(r'^tenant-registration/verify/$', TenantRegistrationVerificationView.as_view(), name='tenant_registration_verification_view'),
     re_path(r'^credential_types/', include(credential_type_urls)),
     re_path(r'^credential_input_sources/', include(credential_input_source_urls)),
     re_path(r'^hosts/(?P<pk>[0-9]+)/ansible_facts/$', HostAnsibleFactsDetail.as_view(), name='host_ansible_facts_detail'),

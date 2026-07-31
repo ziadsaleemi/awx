@@ -1,6 +1,19 @@
 import { AwxTenantRegistration } from './AwxTenantRegistration';
+import { AwxTenantVerification } from './AwxTenantVerification';
 
 describe('AwxTenantRegistration', () => {
+  beforeEach(() => {
+    cy.window().then((win) => {
+      win.turnstile = {
+        render: (_container, options) => {
+          options.callback('browser-challenge');
+          return 'test-widget';
+        },
+        remove: () => undefined,
+      };
+    });
+  });
+
   it('creates a tenant with a generated organization identifier', () => {
     const onSuccess = cy.stub().as('onSuccess');
     cy.intercept('POST', '/api/v2/tenant-registration/', (request) => {
@@ -12,22 +25,15 @@ describe('AwxTenantRegistration', () => {
         first_name: 'Northstar',
         last_name: 'Admin',
         password: 'CloudHarbor-2026!',
+        terms_accepted: true,
+        terms_version: '2026-07-31',
+        bot_challenge_token: 'browser-challenge',
       });
       request.reply({
-        statusCode: 201,
+        statusCode: 202,
         body: {
-          organization: {
-            id: 1,
-            name: 'Northstar Automation',
-            tenant_slug: 'northstar-automation',
-            tenant_status: 'active',
-          },
-          user: {
-            id: 2,
-            username: 'northstar-admin',
-            email: 'admin@northstar.example',
-          },
-          login_url: '/api/login/',
+          detail: 'Check your email to verify the organization registration.',
+          verification_required: true,
         },
       });
     }).as('registerTenant');
@@ -35,6 +41,11 @@ describe('AwxTenantRegistration', () => {
     cy.mount(
       <AwxTenantRegistration
         registrationUrl="/api/v2/tenant-registration/"
+        termsVersion="2026-07-31"
+        termsUrl="https://capstan.example/terms"
+        privacyUrl="https://capstan.example/privacy"
+        botProvider="turnstile"
+        botSiteKey="site-key"
         brandImgAlt="Capstan"
         onSuccess={onSuccess}
       />,
@@ -49,7 +60,8 @@ describe('AwxTenantRegistration', () => {
     cy.get('#tenant-registration-email').type('admin@northstar.example');
     cy.get('#tenant-registration-password').type('CloudHarbor-2026!');
     cy.get('#tenant-registration-confirm_password').type('CloudHarbor-2026!');
-    cy.contains('button', 'Create organization').click();
+    cy.get('#tenant-registration-terms_accepted').click();
+    cy.contains('button', 'Request organization').click();
 
     cy.wait('@registerTenant');
     cy.get('@onSuccess').should('have.been.calledOnce');
@@ -60,6 +72,11 @@ describe('AwxTenantRegistration', () => {
     cy.mount(
       <AwxTenantRegistration
         registrationUrl="/api/v2/tenant-registration/"
+        termsVersion="2026-07-31"
+        termsUrl="https://capstan.example/terms"
+        privacyUrl="https://capstan.example/privacy"
+        botProvider="turnstile"
+        botSiteKey="site-key"
         brandImgAlt="Capstan"
         onSuccess={() => {}}
       />,
@@ -71,7 +88,8 @@ describe('AwxTenantRegistration', () => {
     cy.get('#tenant-registration-email').type('admin@northstar.example');
     cy.get('#tenant-registration-password').type('CloudHarbor-2026!');
     cy.get('#tenant-registration-confirm_password').type('Different-2026!');
-    cy.contains('button', 'Create organization').click();
+    cy.get('#tenant-registration-terms_accepted').click();
+    cy.contains('button', 'Request organization').click();
 
     cy.contains('Passwords do not match.').should('be.visible');
     cy.get('@registerTenant.all').should('have.length', 0);
@@ -86,6 +104,11 @@ describe('AwxTenantRegistration', () => {
     cy.mount(
       <AwxTenantRegistration
         registrationUrl="/api/v2/tenant-registration/"
+        termsVersion="2026-07-31"
+        termsUrl="https://capstan.example/terms"
+        privacyUrl="https://capstan.example/privacy"
+        botProvider="turnstile"
+        botSiteKey="site-key"
         brandImgAlt="Capstan"
         onSuccess={() => {}}
       />,
@@ -97,8 +120,57 @@ describe('AwxTenantRegistration', () => {
     cy.get('#tenant-registration-email').type('admin@northstar.example');
     cy.get('#tenant-registration-password').type('CloudHarbor-2026!');
     cy.get('#tenant-registration-confirm_password').type('CloudHarbor-2026!');
-    cy.contains('button', 'Create organization').click();
+    cy.get('#tenant-registration-terms_accepted').click();
+    cy.contains('button', 'Request organization').click();
 
     cy.contains('This organization identifier is unavailable.').should('be.visible');
+  });
+});
+
+describe('AwxTenantVerification', () => {
+  it('verifies the pending organization and links to login', () => {
+    cy.intercept('POST', '/api/v2/tenant-registration/verify/', (request) => {
+      expect(request.body).to.deep.equal({ token: 'signed-token' });
+      request.reply({
+        statusCode: 201,
+        body: { user: { username: 'northstar-admin' } },
+      });
+    }).as('verifyTenant');
+
+    cy.mount(
+      <AwxTenantVerification
+        verificationUrl="/api/v2/tenant-registration/verify/"
+        token="signed-token"
+        brandImgAlt="Capstan"
+      />,
+      { path: '/register/verify', initialEntries: ['/register/verify'] }
+    );
+
+    cy.wait('@verifyTenant');
+    cy.contains('Organization verified').should('be.visible');
+    cy.contains('Sign in with northstar-admin.').should('be.visible');
+    cy.contains('a', 'Continue to login')
+      .should('have.attr', 'href')
+      .and('contain', 'registration=verified');
+  });
+
+  it('offers a new registration for an invalid or consumed link', () => {
+    cy.intercept('POST', '/api/v2/tenant-registration/verify/', {
+      statusCode: 400,
+      body: { token: 'This verification link has already been used.' },
+    }).as('verifyTenant');
+
+    cy.mount(
+      <AwxTenantVerification
+        verificationUrl="/api/v2/tenant-registration/verify/"
+        token="consumed-token"
+        brandImgAlt="Capstan"
+      />,
+      { path: '/register/verify', initialEntries: ['/register/verify'] }
+    );
+
+    cy.wait('@verifyTenant');
+    cy.contains('Unable to verify organization').should('be.visible');
+    cy.contains('a', 'Start a new registration').should('have.attr', 'href', '/register');
   });
 });

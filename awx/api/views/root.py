@@ -33,6 +33,7 @@ from awx.main.ha import is_ha_environment
 from awx.main.tasks.system import clear_setting_cache
 from awx.main.utils import get_awx_version, get_custom_venv_choices
 from awx.main.utils.licensing import validate_entitlement_manifest
+from awx.main.utils.saas_registration import registration_is_ready
 from awx.api.versioning import URLPathVersioning, reverse
 from awx.main.constants import PRIVILEGE_ESCALATION_METHODS
 from awx.main.models import Project, Organization, Instance, InstanceGroup, JobTemplate
@@ -69,10 +70,16 @@ class ApiRootView(APIView):
             password_auth_methods.append('ldap')
         data['password_auth_methods'] = password_auth_methods
         data['product_mode'] = settings.CAPSTAN_PRODUCT_MODE
-        registration_enabled = settings.CAPSTAN_PRODUCT_MODE == 'saas' and settings.CAPSTAN_SAAS_REGISTRATION_ENABLED
+        registration_enabled = registration_is_ready()
         data['registration_enabled'] = registration_enabled
         if registration_enabled:
             data['registration_url'] = reverse('api:tenant_registration_view', request=request)
+            data['registration_verification_url'] = reverse('api:tenant_registration_verification_view', request=request)
+            data['registration_terms_version'] = settings.CAPSTAN_SAAS_REGISTRATION_TERMS_VERSION
+            data['registration_terms_url'] = settings.CAPSTAN_SAAS_REGISTRATION_TERMS_URL
+            data['registration_privacy_url'] = settings.CAPSTAN_SAAS_REGISTRATION_PRIVACY_URL
+            data['registration_bot_provider'] = settings.CAPSTAN_SAAS_REGISTRATION_BOT_PROVIDER
+            data['registration_bot_site_key'] = settings.CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SITE_KEY
         return Response(data)
 
 

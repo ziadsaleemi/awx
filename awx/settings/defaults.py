@@ -22,6 +22,17 @@ def _environment_boolean(name, default=False):
         return False
     raise ImproperlyConfigured('{} must be a boolean value.'.format(name))
 
+
+def _environment_integer(name, default):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ImproperlyConfigured('{} must be an integer value.'.format(name)) from exc
+
+
 DEBUG = True
 SQL_DEBUG = DEBUG
 
@@ -33,10 +44,32 @@ if CAPSTAN_PRODUCT_MODE not in {'on_prem', 'saas'}:
     raise ImproperlyConfigured('CAPSTAN_PRODUCT_MODE must be either "on_prem" or "saas".')
 CAPSTAN_SAAS_REGISTRATION_ENABLED = _environment_boolean('CAPSTAN_SAAS_REGISTRATION_ENABLED', False)
 CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT = os.getenv('CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT', '5/hour')
+CAPSTAN_SAAS_REGISTRATION_VERIFICATION_RATE_LIMIT = os.getenv('CAPSTAN_SAAS_REGISTRATION_VERIFICATION_RATE_LIMIT', '20/hour')
+CAPSTAN_SAAS_REGISTRATION_TOKEN_MAX_AGE = _environment_integer('CAPSTAN_SAAS_REGISTRATION_TOKEN_MAX_AGE', 86400)
+CAPSTAN_SAAS_REGISTRATION_PUBLIC_URL = os.getenv('CAPSTAN_SAAS_REGISTRATION_PUBLIC_URL', '').rstrip('/')
+CAPSTAN_SAAS_REGISTRATION_EMAIL_FROM = os.getenv('CAPSTAN_SAAS_REGISTRATION_EMAIL_FROM', '')
+CAPSTAN_SAAS_REGISTRATION_TERMS_VERSION = os.getenv('CAPSTAN_SAAS_REGISTRATION_TERMS_VERSION', '')
+CAPSTAN_SAAS_REGISTRATION_TERMS_URL = os.getenv('CAPSTAN_SAAS_REGISTRATION_TERMS_URL', '')
+CAPSTAN_SAAS_REGISTRATION_PRIVACY_URL = os.getenv('CAPSTAN_SAAS_REGISTRATION_PRIVACY_URL', '')
+CAPSTAN_SAAS_REGISTRATION_BOT_PROVIDER = os.getenv('CAPSTAN_SAAS_REGISTRATION_BOT_PROVIDER', 'turnstile').strip().lower()
+CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SITE_KEY = os.getenv('CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SITE_KEY', '')
+CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY = os.getenv('CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY', '')
+CAPSTAN_SAAS_REGISTRATION_TURNSTILE_VERIFY_URL = os.getenv(
+    'CAPSTAN_SAAS_REGISTRATION_TURNSTILE_VERIFY_URL', 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+)
 CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION = _environment_boolean(
     'CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION',
     CAPSTAN_PRODUCT_MODE == 'saas',
 )
+
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = _environment_integer('EMAIL_PORT', 25)
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = _environment_boolean('EMAIL_USE_TLS', False)
+EMAIL_USE_SSL = _environment_boolean('EMAIL_USE_SSL', False)
+EMAIL_TIMEOUT = _environment_integer('EMAIL_TIMEOUT', 10)
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))

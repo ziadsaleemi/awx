@@ -51,7 +51,38 @@ class SaasDeploymentProfileTests(unittest.TestCase):
             self.assertIn("CAPSTAN_PRODUCT_MODE = {{ awx_product_mode | to_json }}", source)
             self.assertIn("CAPSTAN_SAAS_REGISTRATION_ENABLED", source)
             self.assertIn("CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_VERIFICATION_RATE_LIMIT", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_TOKEN_MAX_AGE", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_PUBLIC_URL", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_EMAIL_FROM", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_TERMS_VERSION", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_TERMS_URL", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_PRIVACY_URL", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SITE_KEY", source)
+            self.assertIn("CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY", source)
             self.assertIn("CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION", source)
+            self.assertIn('EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"', source)
+            self.assertIn("EMAIL_HOST = {{ awx_saas_smtp_host | to_json }}", source)
+            self.assertIn("EMAIL_HOST_PASSWORD = {{ awx_saas_smtp_password | to_json }}", source)
+
+    def test_public_registration_requires_verification_dependencies(self):
+        validation = (ROLE_ROOT / "awx_deploy_common/tasks/main.yml").read_text()
+
+        for variable in (
+            "awx_saas_registration_public_url",
+            "awx_saas_registration_email_from",
+            "awx_saas_registration_terms_version",
+            "awx_saas_registration_terms_url",
+            "awx_saas_registration_privacy_url",
+            "awx_saas_registration_turnstile_site_key",
+            "awx_saas_registration_turnstile_secret_key",
+            "awx_saas_smtp_host",
+            "awx_saas_registration_token_max_age",
+        ):
+            self.assertIn(variable, validation)
+        self.assertIn("when: awx_saas_registration_enabled | bool", validation)
+        self.assertEqual(validation.count("is match('^https://')"), 3)
+        self.assertIn("SMTP TLS and SSL cannot both be enabled", validation)
 
     def test_saas_task_nodes_are_control_only(self):
         task_service = (ROLE_ROOT / "awx_task/templates/awx-task.service.j2").read_text()

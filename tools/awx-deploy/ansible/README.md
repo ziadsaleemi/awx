@@ -53,12 +53,35 @@ Registration is separately guarded and remains off unless explicitly enabled:
 awx_product_mode: saas
 awx_saas_registration_enabled: true
 awx_saas_registration_rate_limit: "5/hour"
+awx_saas_registration_verification_rate_limit: "20/hour"
+awx_saas_registration_token_max_age: 86400
+awx_saas_registration_public_url: https://capstan.example.com
+awx_saas_registration_email_from: no-reply@capstan.example.com
+awx_saas_registration_terms_version: "2026-07-31"
+awx_saas_registration_terms_url: https://capstan.example.com/legal/terms
+awx_saas_registration_privacy_url: https://capstan.example.com/legal/privacy
+awx_saas_registration_turnstile_site_key: replace-with-site-key
+awx_saas_smtp_host: smtp.example.com
+awx_saas_smtp_port: 587
+awx_saas_smtp_user: no-reply@capstan.example.com
+awx_saas_smtp_use_tls: true
+awx_saas_smtp_use_ssl: false
 awx_saas_require_external_execution: true
 ```
 
+Pass `CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY` and
+`CAPSTAN_SAAS_SMTP_PASSWORD` through the environment or Ansible Vault. Never
+commit either secret. Registration is advertised only when every runtime gate
+is present. A request must pass the Turnstile challenge and accept the current
+legal terms; Capstan creates no tenant or user until the signed, expiring email
+verification link is consumed. Verification links are single-use.
+
 Capstan Deploy rejects registration in `on_prem` mode and rejects a SaaS profile
-that disables external execution. Keep public registration disabled until the
-production identity and abuse-control gates tracked in `ENHANCEMENTS.md` are met.
+that disables external execution. It also rejects an enabled public registration
+profile when its URL, email, legal, Turnstile, or SMTP dependencies are missing.
+Keep public registration disabled until the remaining MFA, recovery, tenant
+export/deletion, and production-isolation gates tracked in `ENHANCEMENTS.md` are
+met.
 
 For private service names that are not resolvable by cluster DNS, provide
 portable pod host aliases to both Capstan web and task workloads:

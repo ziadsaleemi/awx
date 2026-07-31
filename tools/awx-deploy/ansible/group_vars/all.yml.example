@@ -12,6 +12,21 @@ awx_ee_image: quay.io/ansible/awx-ee:latest
 awx_product_mode: on_prem  # on_prem | saas
 awx_saas_registration_enabled: false
 awx_saas_registration_rate_limit: "5/hour"
+awx_saas_registration_verification_rate_limit: "20/hour"
+awx_saas_registration_token_max_age: 86400
+awx_saas_registration_public_url: "https://capstan.example.com"
+awx_saas_registration_email_from: "Capstan <no-reply@example.com>"
+awx_saas_registration_terms_version: "2026-07-31"
+awx_saas_registration_terms_url: "https://example.com/terms"
+awx_saas_registration_privacy_url: "https://example.com/privacy"
+awx_saas_registration_turnstile_site_key: ""
+awx_saas_registration_turnstile_secret_key: "{{ lookup('env', 'CAPSTAN_SAAS_REGISTRATION_TURNSTILE_SECRET_KEY') }}"
+awx_saas_smtp_host: "smtp.example.com"
+awx_saas_smtp_port: 587
+awx_saas_smtp_user: ""
+awx_saas_smtp_password: "{{ lookup('env', 'CAPSTAN_SAAS_SMTP_PASSWORD') }}"
+awx_saas_smtp_use_tls: true
+awx_saas_smtp_use_ssl: false
 awx_saas_require_external_execution: "{{ awx_product_mode == 'saas' }}"
 
 awx_admin_user: admin

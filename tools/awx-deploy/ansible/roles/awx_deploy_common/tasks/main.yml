@@ -18,6 +18,28 @@
       awx_product_mode must be on_prem or saas. Public registration is SaaS-only,
       and SaaS deployments must require tenant-owned external execution nodes.
 
+- name: Validate public SaaS registration gates
+  ansible.builtin.assert:
+    that:
+      - awx_saas_registration_public_url | length > 0
+      - awx_saas_registration_public_url is match('^https://')
+      - awx_saas_registration_email_from | length > 0
+      - awx_saas_registration_terms_version | length > 0
+      - awx_saas_registration_terms_url | length > 0
+      - awx_saas_registration_terms_url is match('^https://')
+      - awx_saas_registration_privacy_url | length > 0
+      - awx_saas_registration_privacy_url is match('^https://')
+      - awx_saas_registration_turnstile_site_key | length > 0
+      - awx_saas_registration_turnstile_secret_key | length > 0
+      - awx_saas_smtp_host | length > 0
+      - awx_saas_registration_token_max_age | int > 0
+      - not ((awx_saas_smtp_use_tls | bool) and (awx_saas_smtp_use_ssl | bool))
+    fail_msg: >-
+      Public SaaS registration requires explicit HTTPS public, terms, and privacy URLs,
+      an SMTP sender and host, a positive token lifetime, and Cloudflare Turnstile site
+      and secret keys. SMTP TLS and SSL cannot both be enabled.
+  when: awx_saas_registration_enabled | bool
+
 - name: Resolve container engine command
   ansible.builtin.set_fact:
     awx_container_engine_cmd: "{{ 'docker' if awx_container_engine == 'docker' else 'podman' }}"
