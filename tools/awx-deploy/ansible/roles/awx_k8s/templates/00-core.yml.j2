@@ -124,6 +124,11 @@ stringData:
     SESSION_COOKIE_SECURE = {{ 'True' if effective_session_cookie_secure else 'False' }}
     CSRF_COOKIE_SECURE = {{ 'True' if effective_csrf_cookie_secure else 'False' }}
 
+    CAPSTAN_PRODUCT_MODE = {{ awx_product_mode | to_json }}
+    CAPSTAN_SAAS_REGISTRATION_ENABLED = {{ 'True' if awx_saas_registration_enabled | bool else 'False' }}
+    CAPSTAN_SAAS_REGISTRATION_RATE_LIMIT = {{ awx_saas_registration_rate_limit | to_json }}
+    CAPSTAN_SAAS_REQUIRE_EXTERNAL_EXECUTION = {{ 'True' if awx_saas_require_external_execution | bool else 'False' }}
+
 {% if awx_ldap_enabled | bool %}
     import ldap
     from django_auth_ldap import config as django_auth_ldap_config
@@ -345,17 +350,20 @@ data:
         service: control
         filename: /var/run/receptor/receptor.sock
         permissions: "0660"
+{% if awx_product_mode == 'on_prem' %}
     - work-command:
         worktype: {{ awx_receptor_work_type }}
         command: {{ awx_receptor_runner_command }}
         params: worker
         allowruntimeparams: true
         verifysignature: false
+{% endif %}
     - work-signing:
         privatekey: /etc/receptor/work_private_key.pem
         tokenexpiration: 1m
     - work-verification:
         publickey: /etc/receptor/work_public_key.pem
+{% if awx_product_mode == 'on_prem' %}
     - work-kubernetes:
         worktype: kubernetes-runtime-auth
         authmethod: runtime
@@ -370,6 +378,7 @@ data:
         allowruntimepod: true
         allowruntimeparams: true
         verifysignature: false
+{% endif %}
     - tls-client:
         name: tlsclient
         rootcas: /etc/receptor/tls/ca/mesh-CA.crt

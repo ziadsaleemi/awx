@@ -24,9 +24,11 @@
     filename: {{ awx_receptor_socket_file }}
     permissions: "0660"
 
+{% if awx_product_mode == 'on_prem' %}
 - work-command:
     worktype: {{ awx_receptor_work_type }}
     command: {{ awx_receptor_runner_command }}
     params: worker
     allowruntimeparams: true
     verifysignature: {{ awx_receptor_enable_work_signing | bool | lower }}
+{% endif %}

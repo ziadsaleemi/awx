@@ -7,6 +7,17 @@
       - awx_image_tag | length > 0
     fail_msg: "Set awx_deploy_method to server, k3s, or k8s and provide awx_image/awx_image_tag."
 
+- name: Validate Capstan delivery profile
+  ansible.builtin.assert:
+    that:
+      - awx_product_mode in ['on_prem', 'saas']
+      - not (awx_saas_registration_enabled | bool) or awx_product_mode == 'saas'
+      - awx_product_mode != 'saas' or (awx_saas_require_external_execution | bool)
+      - awx_product_mode != 'saas' or awx_effective_instance_node_type == 'control'
+    fail_msg: >-
+      awx_product_mode must be on_prem or saas. Public registration is SaaS-only,
+      and SaaS deployments must require tenant-owned external execution nodes.
+
 - name: Resolve container engine command
   ansible.builtin.set_fact:
     awx_container_engine_cmd: "{{ 'docker' if awx_container_engine == 'docker' else 'podman' }}"

@@ -35,6 +35,31 @@ media, and container storage paths as Capstan.
 Secrets must be passed through environment variables, vault, or extra vars.
 Do not commit `group_vars/all.yml` with real passwords.
 
+## On-premises and SaaS profiles
+
+`awx_product_mode` is a deployment boundary, not a visual preference:
+
+- `on_prem` is the default. Server task nodes remain `hybrid`, Receptor exposes
+  local work execution, and existing Kubernetes execution behavior is unchanged.
+- `saas` keeps the web and task processes as the control plane, but task instances
+  register as `control` and Receptor exposes no local or in-cluster work handlers.
+  The scheduler accepts only active execution pools and nodes owned by the job's
+  tenant organization. Tenant administrators enroll their own execution nodes
+  from Capstan; no tenant task container is deployed in the control-plane cluster.
+
+Registration is separately guarded and remains off unless explicitly enabled:
+
+```yaml
+awx_product_mode: saas
+awx_saas_registration_enabled: true
+awx_saas_registration_rate_limit: "5/hour"
+awx_saas_require_external_execution: true
+```
+
+Capstan Deploy rejects registration in `on_prem` mode and rejects a SaaS profile
+that disables external execution. Keep public registration disabled until the
+production identity and abuse-control gates tracked in `ENHANCEMENTS.md` are met.
+
 For private service names that are not resolvable by cluster DNS, provide
 portable pod host aliases to both Capstan web and task workloads:
 
