@@ -100,10 +100,9 @@ def _image_uses_terraform_entrypoint(image: str) -> bool:
     """
     Return True for official or mirrored hashicorp/terraform images.
 
-    Those images ship with ``ENTRYPOINT ["terraform"]``.  AWX passes the full
-    Terraform command itself (``terraform init`` / ``terraform plan`` / ...),
-    so the container entrypoint must be cleared or Docker executes
-    ``terraform terraform init``.
+    Those images ship with ``ENTRYPOINT ["terraform"]``.  Capstan removes the
+    leading ``terraform`` executable from the container arguments so Docker
+    and Podman can invoke that entrypoint directly.
     """
     repository = (image or '').split('@', 1)[0]
     tag_separator = repository.rfind(':')
@@ -436,9 +435,10 @@ class RunTerraformJob(SourceControlMixin):
         self._write_envvars_file(env, private_data_dir)
         pull = getattr(ee, 'pull', 'missing')
         runtime = _container_runtime()
-        entrypoint_args = []
+        container_args = list(args)
         if _image_uses_terraform_entrypoint(getattr(ee, 'image', '')):
-            entrypoint_args = ['--entrypoint', '']
+            if container_args and container_args[0] == 'terraform':
+                container_args = container_args[1:]
 
         container_cmd = (
             [
@@ -454,11 +454,8 @@ class RunTerraformJob(SourceControlMixin):
                 '--env-file',
                 os.path.join(private_data_dir, 'env', 'envvars'),
             ]
-            + entrypoint_args
-            + [
-                ee.image,
-            ]
-            + list(args)
+            + [ee.image]
+            + container_args
         )
 
         logger.info(
@@ -1111,7 +1108,7 @@ class RunTerraformJob(SourceControlMixin):
 
     def final_run_hook(self, instance, status, private_data_dir):
         instance.log_lifecycle('finalize_run')
-        from awx.main.scheduler import ScheduleTaskManager, ScheduleWorkflowManager
+        from awx.main.utils.common import ScheduleTaskManager, ScheduleWorkflowManager
 
         if instance.unifiedjob_blocked_jobs.exists():
             ScheduleTaskManager().schedule()

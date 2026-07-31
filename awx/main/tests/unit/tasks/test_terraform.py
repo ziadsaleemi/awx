@@ -270,7 +270,7 @@ class TestExecutionEnvironmentWrapping:
         assert _image_uses_terraform_entrypoint('registry.example.com/hashicorp/terraform@sha256:abc')
         assert not _image_uses_terraform_entrypoint('quay.io/ansible/awx-ee:latest')
 
-    def test_official_terraform_image_entrypoint_is_cleared(self, tmp_path):
+    def test_official_terraform_image_uses_image_entrypoint(self, tmp_path):
         task = _make_task()
         task.instance = _make_instance()
         ee = mock.MagicMock()
@@ -286,10 +286,9 @@ class TestExecutionEnvironmentWrapping:
                 ee,
             )
 
-        entrypoint_index = cmd.index('--entrypoint')
+        assert '--entrypoint' not in cmd
         image_index = cmd.index(ee.image)
-        assert cmd[entrypoint_index + 1] == ''
-        assert cmd[image_index + 1 :] == ['terraform', 'init', '-no-color']
+        assert cmd[image_index + 1 :] == ['init', '-no-color']
 
     def test_generic_execution_environment_entrypoint_is_preserved(self, tmp_path):
         task = _make_task()
@@ -662,3 +661,16 @@ class TestRunStatusTransitions:
         task.run(1)
 
         task._populate_inventory.assert_not_called()
+
+    def test_final_run_hook_reschedules_dependencies_and_workflow(self):
+        task = _make_task()
+        inst = _make_instance()
+        inst.spawned_by_workflow = True
+        inst.unifiedjob_blocked_jobs.exists.return_value = True
+
+        with mock.patch('awx.main.utils.common.ScheduleTaskManager') as task_manager:
+            with mock.patch('awx.main.utils.common.ScheduleWorkflowManager') as workflow_manager:
+                task.final_run_hook(inst, 'successful', '/tmp/private-data')
+
+        task_manager.return_value.schedule.assert_called_once_with()
+        workflow_manager.return_value.schedule.assert_called_once_with()
