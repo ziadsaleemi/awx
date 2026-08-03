@@ -8,6 +8,8 @@ Usage:
 
 Options:
   --image IMAGE          Container image repository. Default: docker.io/ziadsaleemi/awx
+  --control-plane-image IMAGE
+                         Control-plane EE repository. Default: docker.io/ziadsaleemi/capstan-control-plane-ee
   --platforms LIST      Buildx platforms. Default: linux/amd64
   --builder NAME        Buildx builder name. Default: awx-release-builder
   --skip-build          Do not build or push the image.
@@ -31,6 +33,7 @@ fi
 shift || true
 
 image="docker.io/ziadsaleemi/awx"
+control_plane_image="docker.io/ziadsaleemi/capstan-control-plane-ee"
 platforms="linux/amd64"
 builder="awx-release-builder"
 skip_build=0
@@ -42,6 +45,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --image)
       image="${2:?Missing value for --image}"
+      shift 2
+      ;;
+    --control-plane-image)
+      control_plane_image="${2:?Missing value for --control-plane-image}"
       shift 2
       ;;
     --platforms)
@@ -112,6 +119,8 @@ require_release_files() {
   test "$(python3 -c 'import json; print(json.load(open("awx/ui/src/package-lock.json"))["packages"][""]["version"])')" = "$version" || fail "UI package lock root package version is not $version"
   grep -q "awx_image_tag: \"$version\"" tools/awx-deploy/ansible/roles/awx_deploy_common/defaults/main.yml || fail "deploy default image tag is not $version"
   grep -q "awx_image_tag: \"$version\"" tools/awx-deploy/ansible/group_vars/all.yml.example || fail "deploy example image tag is not $version"
+  grep -q "awx_control_plane_ee_image: $control_plane_image:$version" tools/awx-deploy/ansible/roles/awx_deploy_common/defaults/main.yml || fail "deploy default control-plane EE is not $control_plane_image:$version"
+  grep -q "awx_control_plane_ee_image: $control_plane_image:$version" tools/awx-deploy/ansible/group_vars/all.yml.example || fail "deploy example control-plane EE is not $control_plane_image:$version"
 }
 
 run_checks() {
@@ -153,6 +162,16 @@ build_image() {
     --build-arg "HEADLESS=${HEADLESS:-false}" \
     "${tags[@]}" \
     -f Dockerfile .
+
+  control_plane_tags=(--tag "$control_plane_image:$version")
+  if [[ "$tag_latest" -eq 1 ]]; then
+    control_plane_tags+=(--tag "$control_plane_image:latest")
+  fi
+  docker buildx build \
+    --push \
+    --platform="$platforms" \
+    "${control_plane_tags[@]}" \
+    -f tools/awx-deploy/support/control-plane-ee/Containerfile .
 }
 
 push_tag() {
@@ -174,3 +193,4 @@ fi
 
 echo "Capstan release complete: $version"
 echo "Image: $image:$version"
+echo "Control-plane EE: $control_plane_image:$version"

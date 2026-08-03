@@ -5,6 +5,7 @@ awx_image: docker.io/ziadsaleemi/awx
 awx_image_tag: "25.1.15"
 awx_skip_image_pull: false
 awx_ee_image: quay.io/ansible/awx-ee:latest
+awx_control_plane_ee_image: docker.io/ziadsaleemi/capstan-control-plane-ee:25.1.15
 
 # Delivery profile. SaaS control planes schedule and dispatch work but never
 # advertise local execution capacity; tenants enroll their own execution nodes.

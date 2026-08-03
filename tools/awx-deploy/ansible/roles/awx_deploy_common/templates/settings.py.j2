@@ -150,7 +150,7 @@ AWX_ISOLATION_SHOW_PATHS = [
 ]
 
 GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{"name": "Capstan EE (latest)", "image": "{{ awx_ee_image }}"}]
-CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_ee_image }}"
+CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_control_plane_ee_image }}"
 
 {% if awx_eda_configure_awx_settings | bool %}
 {% set effective_eda_server_url = awx_eda_server_url %}

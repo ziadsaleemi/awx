@@ -230,7 +230,7 @@ stringData:
     MEDIA_ROOT = "/var/lib/awx/public/media"
     PROJECTS_ROOT = "/var/lib/awx/projects"
     GLOBAL_JOB_EXECUTION_ENVIRONMENTS = [{"name": "Capstan EE (latest)", "image": "{{ awx_ee_image }}"}]
-    CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_ee_image }}"
+    CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_control_plane_ee_image }}"
 {% if awx_eda_configure_awx_settings | bool %}
 {% set effective_eda_server_url = awx_eda_server_url if awx_eda_server_url else awx_eda_k8s_api_url %}
     EDA_SERVER_URL = {{ effective_eda_server_url | to_json }}

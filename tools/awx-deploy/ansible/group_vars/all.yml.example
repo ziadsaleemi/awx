@@ -6,6 +6,7 @@ awx_deploy_method: server # server | k3s | k8s
 awx_image: docker.io/ziadsaleemi/awx
 awx_image_tag: "25.1.15"
 awx_ee_image: quay.io/ansible/awx-ee:latest
+awx_control_plane_ee_image: docker.io/ziadsaleemi/capstan-control-plane-ee:25.1.15
 
 # on_prem keeps local execution capacity. saas makes the control plane
 # dispatcher-only and requires each tenant to enroll its own execution nodes.

@@ -1,0 +1,8 @@
+ARG BASE_IMAGE=quay.io/ansible/awx-ee:latest
+FROM ${BASE_IMAGE}
+
+USER 0
+RUN getent passwd 1000 >/dev/null || \
+    printf 'awx:x:1000:0:Capstan runtime:/runner:/bin/bash\n' >> /etc/passwd; \
+    test "$(getent passwd 1000 | cut -d: -f1,3,4,6)" = "awx:1000:0:/runner"
+USER 1000

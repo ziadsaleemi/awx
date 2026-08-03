@@ -17,6 +17,18 @@ class KubernetesResilienceTests(unittest.TestCase):
         self.assertIn("chown -R 1000:0 /var/lib/awx/projects", deployment)
         self.assertIn("runAsUser: 0", deployment)
 
+    def test_control_plane_execution_image_has_runtime_uid_contract(self):
+        containerfile = (REPO_ROOT / "tools" / "awx-deploy" / "support" / "control-plane-ee" / "Containerfile").read_text()
+        common_defaults = (ROLES / "awx_deploy_common" / "defaults" / "main.yml").read_text()
+        server_settings = (ROLES / "awx_deploy_common" / "templates" / "settings.py.j2").read_text()
+        k8s_settings = (ROLES / "awx_k8s" / "templates" / "00-core.yml.j2").read_text()
+
+        self.assertIn("getent passwd 1000", containerfile)
+        self.assertIn("USER 1000", containerfile)
+        self.assertIn("awx_control_plane_ee_image:", common_defaults)
+        self.assertIn('CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_control_plane_ee_image }}"', server_settings)
+        self.assertIn('CONTROL_PLANE_EXECUTION_ENVIRONMENT = "{{ awx_control_plane_ee_image }}"', k8s_settings)
+
     def test_eda_operator_single_replica_resilience_defaults(self):
         role_defaults = (ROLES / "awx_eda_k8s" / "defaults" / "main.yml").read_text()
         common_defaults = (ROLES / "awx_deploy_common" / "defaults" / "main.yml").read_text()
