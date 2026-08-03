@@ -1,0 +1,186 @@
+---
+version: 1
+
+# DaVault collection release promotion is intentionally isolated from the
+# platform manifests so it can be reconciled without unrelated cloud secrets.
+resources:
+  - key: credential.davault_collection_scm
+    endpoint: credentials
+    match:
+      name: DaVault Collection GitHub Read-only
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+    data:
+      name: DaVault Collection GitHub Read-only
+      description: Repository-scoped read-only GitHub access for r92corporation/ansible-collection-davault.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: Source Control
+            kind: scm
+      inputs:
+        username: x-access-token
+        password: ${DAVAULT_COLLECTION_SCM_TOKEN}
+    secret_update: preserve
+
+  - key: credential_type.galaxy_release_publisher_v2
+    endpoint: credential_types
+    match:
+      name: Galaxy NG Release Publisher v2
+      kind: cloud
+    data:
+      name: Galaxy NG Release Publisher v2
+      description: Injects scoped GitHub read and Galaxy NG publish tokens for release-promotion jobs.
+      kind: cloud
+      inputs:
+        fields:
+          - id: server_url
+            type: string
+            label: Galaxy NG server URL
+          - id: token
+            type: string
+            label: Galaxy NG API token
+            secret: true
+          - id: github_token
+            type: string
+            label: GitHub repository token
+            secret: true
+        required: [server_url, token, github_token]
+      injectors:
+        env:
+          GALAXY_SERVER_URL: "{{ server_url }}"
+          GALAXY_TOKEN: "{{ token }}"
+          GITHUB_TOKEN: "{{ github_token }}"
+
+  - key: credential.galaxy_release_publisher_v2
+    endpoint: credentials
+    match:
+      name: R92 DaVault Release Publisher v2
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+    data:
+      name: R92 DaVault Release Publisher v2
+      description: Scoped credential for publishing immutable R92 collection releases.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+      credential_type:
+        $ref: credential_type.galaxy_release_publisher_v2
+      inputs:
+        server_url: ${GALAXY_NG_SERVER_URL}
+        token: ${GALAXY_NG_AUTH_TOKEN}
+        github_token: ${DAVAULT_COLLECTION_SCM_TOKEN}
+    secret_update: preserve
+
+  - key: project.davault_collection
+    endpoint: projects
+    match:
+      name: R92 DaVault Collection
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+    data:
+      name: R92 DaVault Collection
+      description: Authoritative source and immutable Galaxy NG release promotion for r92.davault.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+      scm_type: git
+      scm_url: https://github.com/r92corporation/ansible-collection-davault.git
+      scm_branch: main
+      scm_update_on_launch: true
+      credential:
+        $ref: credential.davault_collection_scm
+      default_environment:
+        $lookup:
+          endpoint: execution_environments
+          match:
+            name: R92 Capstan EE
+            organization:
+              $lookup:
+                endpoint: organizations
+                match:
+                  name: R92 Corporation
+    actions:
+      - path: update
+        method: POST
+        when: changed
+
+  - key: job_template.davault_galaxy_release_sync
+    endpoint: job_templates
+    match:
+      name: Sync DaVault Release to Galaxy NG
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+    data:
+      name: Sync DaVault Release to Galaxy NG
+      description: Publish the latest immutable r92.davault GitHub release when Galaxy NG does not already contain it.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match:
+            name: R92 Corporation
+      project:
+        $ref: project.davault_collection
+      inventory:
+        $lookup:
+          endpoint: inventories
+          match:
+            name: DaVault LINOOP Lab
+            organization:
+              $lookup:
+                endpoint: organizations
+                match:
+                  name: R92 Corporation
+      execution_environment:
+        $lookup:
+          endpoint: execution_environments
+          match:
+            name: R92 Capstan EE
+            organization:
+              $lookup:
+                endpoint: organizations
+                match:
+                  name: R92 Corporation
+      playbook: automation/sync_galaxy_release.yml
+      job_type: run
+    associations:
+      - name: credentials
+        exact: true
+        items:
+          - $ref: credential.galaxy_release_publisher_v2
+
+  - key: schedule.davault_galaxy_release_sync
+    endpoint: schedules
+    match:
+      name: Daily DaVault Galaxy Release Sync
+      unified_job_template:
+        $ref: job_template.davault_galaxy_release_sync
+    data:
+      name: Daily DaVault Galaxy Release Sync
+      description: Check for a new immutable DaVault collection release and promote it to Galaxy NG.
+      unified_job_template:
+        $ref: job_template.davault_galaxy_release_sync
+      enabled: true
+      rrule: DTSTART:20260804T050000Z RRULE:FREQ=DAILY;INTERVAL=1

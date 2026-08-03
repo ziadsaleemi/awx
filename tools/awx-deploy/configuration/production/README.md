@@ -25,12 +25,25 @@ python3 scripts/reconcile_configuration.py --check \
   configuration/production/awx-ziadsaleemi-content.yml
 python3 scripts/reconcile_configuration.py \
   configuration/production/awx-ziadsaleemi-content.yml
+
+# Reconcile the independently versioned DaVault collection release pipeline.
+python3 scripts/reconcile_configuration.py --check \
+  configuration/production/awx-ziadsaleemi-davault.yml
+python3 scripts/reconcile_configuration.py \
+  configuration/production/awx-ziadsaleemi-davault.yml
 ```
 
 Copy `awx-ziadsaleemi.env.example` to `awx-ziadsaleemi.env` for local use. The
 real `.env` file is ignored by the repository. Repeat reconciliation after any
 manifest change; unchanged resources are left intact and encrypted credential
 values are preserved.
+
+The DaVault manifest requires a repository-scoped GitHub read token and a
+Galaxy NG publish token. It creates a dedicated Project, versioned credential
+contract, release-sync Job Template, and daily schedule. The job reads an
+immutable GitHub release artifact, uploads a missing version to staging, moves
+it to published, and performs no mutations when that version is already
+published.
 
 The vSphere Terraform module persists state in Azure Blob Storage. Supply the
 `AZURE_*` values for an identity with `Storage Blob Data Contributor` access to
