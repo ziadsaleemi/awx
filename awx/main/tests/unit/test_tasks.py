@@ -1942,6 +1942,19 @@ def test_project_update_no_ee(mock_me):
     assert 'The ProjectUpdate could not run because there is no Execution Environment' in str(e.value)
 
 
+def test_project_update_stage_is_group_writable(mock_me, tmp_path, settings):
+    settings.PROJECTS_ROOT = str(tmp_path)
+    project = Project(pk=1, local_path='_1__example')
+    project_update = ProjectUpdate(pk=1, project=project, launch_type='sync')
+    task = jobs.RunProjectUpdate()
+
+    with mock.patch.object(jobs.BaseTask, 'pre_run_hook'):
+        task.pre_run_hook(project_update, str(tmp_path / 'private'))
+
+    stage_path = project_update.get_cache_path() + '/stage'
+    assert os.stat(stage_path).st_mode & 0o7777 == 0o2775
+
+
 @pytest.mark.parametrize(
     'work_unit_data, expected_function_call',
     [

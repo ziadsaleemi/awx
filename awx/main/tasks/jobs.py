@@ -1610,6 +1610,9 @@ class RunProjectUpdate(BaseTask):
             logger.warning('{0} unexpectedly existed before update'.format(stage_path))
             shutil.rmtree(stage_path)
         os.makedirs(stage_path)  # presence of empty cache indicates lack of roles or collections
+        # The task service can run as root while the control-plane EE runs as
+        # UID 1000/GID 0. Keep the staging tree writable by that shared group.
+        os.chmod(stage_path, 0o2775)
 
     def build_project_dir(self, instance, private_data_dir):
         # the project update playbook is not in a git repo, but uses a vendoring directory

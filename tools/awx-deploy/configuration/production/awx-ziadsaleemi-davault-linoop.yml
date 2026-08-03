@@ -4,6 +4,71 @@ version: 1
 # LINOOP DaVault desired state. Secret values are injected only while reconciling
 # this manifest and are retained encrypted by Capstan on later non-secret updates.
 resources:
+  - key: credential.galaxy_ng_published
+    endpoint: credentials
+    match:
+      name: R92 Galaxy NG Published
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: R92 Galaxy NG Published
+      description: R92 organization collection source backed by the integrated Galaxy NG published distribution.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: Ansible Galaxy/Automation Hub API Token
+            kind: galaxy
+      inputs:
+        url: http://awx-galaxy-ng.galaxy-ng.svc.cluster.local:5001/api/galaxy/content/published/
+        token: ${GALAXY_NG_READ_TOKEN}
+    secret_update: preserve
+
+  - key: credential.galaxy_ng_community
+    endpoint: credentials
+    match:
+      name: R92 Galaxy NG Community
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: R92 Galaxy NG Community
+      description: Upstream collection source synchronized through the integrated Galaxy NG community distribution.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match:
+            name: Ansible Galaxy/Automation Hub API Token
+            kind: galaxy
+      inputs:
+        url: http://awx-galaxy-ng.galaxy-ng.svc.cluster.local:5001/api/galaxy/content/community/
+        token: ${GALAXY_NG_READ_TOKEN}
+    secret_update: preserve
+
+  - key: organization.r92_galaxy
+    endpoint: organizations
+    match:
+      name: R92 Corporation
+    data:
+      name: R92 Corporation
+    associations:
+      - name: galaxy_credentials
+        exact: true
+        items:
+          - $ref: credential.galaxy_ng_published
+          - $ref: credential.galaxy_ng_community
+
   - key: credential_type.davault_workload_identity
     endpoint: credential_types
     match:
