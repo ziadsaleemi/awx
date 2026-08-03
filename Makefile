@@ -510,8 +510,11 @@ bulk_data:
 	$(PYTHON) tools/data_generators/rbac_dummy_data_generator.py --preset=$(DATA_GEN_PRESET)
 
 dist/$(SDIST_TAR_FILE):
+	rm -f dist/awx.tar.gz dist/awx-*.tar.gz
 	$(PYTHON) -m build -s
-	ln -sf $(SDIST_TAR_FILE) dist/awx.tar.gz
+	artifact="$$(find dist -maxdepth 1 -type f -name 'awx-*.tar.gz' -print | sort | tail -1)"; \
+		test -n "$$artifact"; \
+		ln -sf "$$(basename "$$artifact")" dist/awx.tar.gz
 
 sdist: dist/$(SDIST_TAR_FILE)
 	echo $(HEADLESS)
