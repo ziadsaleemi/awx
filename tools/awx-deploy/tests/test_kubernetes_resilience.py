@@ -7,6 +7,16 @@ ROLES = REPO_ROOT / "tools" / "awx-deploy" / "ansible" / "roles"
 
 
 class KubernetesResilienceTests(unittest.TestCase):
+    def test_capstan_runtime_uid_and_project_volume_contract(self):
+        dockerfile = (REPO_ROOT / "tools" / "ansible" / "roles" / "dockerfile" / "templates" / "Dockerfile.j2").read_text()
+        deployment = (ROLES / "awx_k8s" / "templates" / "30-awx.yml.j2").read_text()
+
+        self.assertIn("useradd --uid 1000 --gid 0", dockerfile)
+        self.assertIn('getent passwd 1000 | cut -d: -f1,3,4,6', dockerfile)
+        self.assertIn("name: init-project-permissions", deployment)
+        self.assertIn("chown -R 1000:0 /var/lib/awx/projects", deployment)
+        self.assertIn("runAsUser: 0", deployment)
+
     def test_eda_operator_single_replica_resilience_defaults(self):
         role_defaults = (ROLES / "awx_eda_k8s" / "defaults" / "main.yml").read_text()
         common_defaults = (ROLES / "awx_deploy_common" / "defaults" / "main.yml").read_text()

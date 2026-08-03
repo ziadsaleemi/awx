@@ -169,6 +169,12 @@ RUN pip3.12 install -vv virtualenv supervisor dumb-init build
 
 RUN rm -rf /root/.cache && rm -rf /tmp/*
 
+# Kubernetes and server deployments run Capstan as numeric UID 1000. Keep a
+# real passwd entry so Git/SSH can resolve HOME before project synchronization.
+RUN getent passwd 1000 >/dev/null || \
+    useradd --uid 1000 --gid 0 --home-dir /var/lib/awx --no-create-home --shell /bin/bash awx && \
+    test "$(getent passwd 1000 | cut -d: -f1,3,4,6)" = "awx:1000:0:/var/lib/awx"
+
 {% if (build_dev|bool) or (kube_dev|bool) %}
 # Install development/test requirements
 RUN dnf module -y enable nodejs:20 && dnf module -y install nodejs:20/common && \

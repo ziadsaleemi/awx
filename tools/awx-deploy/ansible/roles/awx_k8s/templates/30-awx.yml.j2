@@ -197,6 +197,19 @@ spec:
         runAsGroup: 0
         fsGroup: 0
       initContainers:
+        - name: init-project-permissions
+          image: {{ awx_image }}:{{ awx_image_tag }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - /bin/bash
+            - -lc
+          args:
+            - chown -R 1000:0 /var/lib/awx/projects && chmod -R u+rwX,g+rwX /var/lib/awx/projects
+          volumeMounts:
+            - name: projects
+              mountPath: /var/lib/awx/projects
         - name: init-receptor-config
           image: {{ awx_image }}:{{ awx_image_tag }}
           command:
