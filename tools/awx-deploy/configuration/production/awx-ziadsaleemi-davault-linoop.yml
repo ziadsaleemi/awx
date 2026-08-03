@@ -1,0 +1,316 @@
+---
+version: 1
+
+# LINOOP DaVault desired state. Secret values are injected only while reconciling
+# this manifest and are retained encrypted by Capstan on later non-secret updates.
+resources:
+  - key: credential_type.davault_workload_identity
+    endpoint: credential_types
+    match:
+      name: DaVault Workload Identity
+      kind: cloud
+    data:
+      name: DaVault Workload Identity
+      description: Injects a tenant-scoped, short-lived DaVault workload identity.
+      kind: cloud
+      inputs:
+        fields:
+          - {id: endpoint, type: string, label: DaVault HTTPS endpoint}
+          - {id: access_token, type: string, label: Short-lived access token, secret: true}
+          - {id: ca_path, type: string, label: Private CA path}
+        required: [endpoint, access_token]
+      injectors:
+        env:
+          DAVAULT_ENDPOINT: "{{ endpoint }}"
+          DAVAULT_ACCESS_TOKEN: "{{ access_token }}"
+          DAVAULT_CA_PATH: "{{ ca_path }}"
+
+  - key: credential_type.davault_directory_accounts
+    endpoint: credential_types
+    match:
+      name: DaVault Directory Accounts
+      kind: cloud
+    data:
+      name: DaVault Directory Accounts
+      description: Injects bounded write-only directory account declarations.
+      kind: cloud
+      inputs:
+        fields:
+          - id: accounts_json
+            type: string
+            label: Directory accounts JSON
+            secret: true
+            multiline: true
+        required: [accounts_json]
+      injectors:
+        env:
+          DAVAULT_DIRECTORY_ACCOUNTS_JSON: "{{ accounts_json }}"
+
+  - key: credential.davault_linoop_scm
+    endpoint: credentials
+    match:
+      name: DaVault LINOOP Configuration GitHub Read-only
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP Configuration GitHub Read-only
+      description: Repository-scoped read-only deploy key for the LINOOP configuration repository.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match: {name: Source Control, kind: scm}
+      inputs:
+        username: git
+        ssh_key_data: ${DAVAULT_LINOOP_SCM_PRIVATE_KEY}
+    secret_update: preserve
+
+  - key: credential.davault_linoop_machine
+    endpoint: credentials
+    match:
+      name: DaVault LINOOP Machine
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP Machine
+      description: SSH identity for the LINOOP DaVault control-plane host.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match: {name: Machine, kind: ssh}
+      inputs:
+        username: ${DAVAULT_LINOOP_MACHINE_USERNAME}
+        password: ${DAVAULT_LINOOP_MACHINE_PASSWORD}
+    secret_update: preserve
+
+  - key: credential.linoop_ad_provisioning
+    endpoint: credentials
+    match:
+      name: LINOOP Active Directory Provisioning
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: LINOOP Active Directory Provisioning
+      description: Lab-only AD provisioning identity; replace with a delegated service identity.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $lookup:
+          endpoint: credential_types
+          match: {name: Machine, kind: ssh}
+      inputs:
+        username: ${LINOOP_AD_USERNAME}
+        password: ${LINOOP_AD_PASSWORD}
+    secret_update: preserve
+
+  - key: credential.linoop_directory_accounts
+    endpoint: credentials
+    match:
+      name: LINOOP Disposable AD Accounts
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: LINOOP Disposable AD Accounts
+      description: Disposable identities for governed LINOOP lifecycle testing.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $ref: credential_type.davault_directory_accounts
+      inputs:
+        accounts_json: ${DAVAULT_DIRECTORY_ACCOUNTS_JSON}
+    secret_update: preserve
+
+  - key: credential.davault_linoop_workload
+    endpoint: credentials
+    match:
+      name: DaVault LINOOP Workload Identity
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP Workload Identity
+      description: Tenant-scoped automation identity for managed-credential enrollment.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      credential_type:
+        $ref: credential_type.davault_workload_identity
+      inputs:
+        endpoint: ${DAVAULT_ENDPOINT}
+        access_token: ${DAVAULT_ACCESS_TOKEN}
+        ca_path: ${DAVAULT_CA_PATH}
+    secret_update: preserve
+
+  - key: project.davault_linoop_configuration
+    endpoint: projects
+    match:
+      name: DaVault LINOOP Configuration
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP Configuration
+      description: Configuration-as-code authority for the LINOOP DaVault organization.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      scm_type: git
+      scm_url: git@github.com:r92corporation/davault-config-linoop.git
+      scm_branch: main
+      scm_update_on_launch: true
+      credential:
+        $ref: credential.davault_linoop_scm
+      default_environment:
+        $lookup:
+          endpoint: execution_environments
+          match:
+            name: R92 Capstan EE
+            organization:
+              $lookup:
+                endpoint: organizations
+                match: {name: R92 Corporation}
+    actions:
+      - path: update
+        method: POST
+        when: changed
+
+  - key: inventory.davault_linoop_configuration
+    endpoint: inventories
+    match:
+      name: DaVault LINOOP Configuration
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP Configuration
+      description: Hosts and groups synchronized from the LINOOP configuration repository.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+
+  - key: inventory_source.davault_linoop_scm
+    endpoint: inventory_sources
+    match:
+      name: DaVault LINOOP SCM Inventory
+      inventory:
+        $ref: inventory.davault_linoop_configuration
+    data:
+      name: DaVault LINOOP SCM Inventory
+      inventory:
+        $ref: inventory.davault_linoop_configuration
+      source: scm
+      source_project:
+        $ref: project.davault_linoop_configuration
+      source_path: ansible/inventories/lab/hosts.yml
+      overwrite: true
+      overwrite_vars: true
+      update_on_launch: true
+    actions:
+      - path: update
+        method: POST
+        when: changed
+
+  - key: job_template.davault_linoop_prepare_mtls
+    endpoint: job_templates
+    match:
+      name: DaVault LINOOP - Prepare Connector mTLS
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP - Prepare Connector mTLS
+      description: Idempotently prepare the LINOOP connector mTLS boundary from versioned configuration.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      project:
+        $ref: project.davault_linoop_configuration
+      inventory:
+        $ref: inventory.davault_linoop_configuration
+      execution_environment:
+        $lookup:
+          endpoint: execution_environments
+          match:
+            name: R92 Capstan EE
+            organization:
+              $lookup:
+                endpoint: organizations
+                match: {name: R92 Corporation}
+      playbook: ansible/playbooks/prepare_connector_mtls.yml
+      job_type: run
+      extra_vars: |
+        davault_connector_id: CONN-C2CA219E
+    associations:
+      - name: credentials
+        exact: true
+        items:
+          - $ref: credential.davault_linoop_machine
+
+  - key: job_template.davault_linoop_onboard_ad
+    endpoint: job_templates
+    match:
+      name: DaVault LINOOP - Onboard AD Accounts
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+    data:
+      name: DaVault LINOOP - Onboard AD Accounts
+      description: Create approved disposable AD identities and enroll them through a DaVault workload identity.
+      organization:
+        $lookup:
+          endpoint: organizations
+          match: {name: R92 Corporation}
+      project:
+        $ref: project.davault_linoop_configuration
+      inventory:
+        $ref: inventory.davault_linoop_configuration
+      execution_environment:
+        $lookup:
+          endpoint: execution_environments
+          match:
+            name: R92 Capstan EE
+            organization:
+              $lookup:
+                endpoint: organizations
+                match: {name: R92 Corporation}
+      playbook: ansible/playbooks/onboard_active_directory_accounts.yml
+      job_type: run
+      extra_vars: |
+        davault_connector_id: CONN-C2CA219E
+        davault_platform_id: PLAT-5C02AD2E
+        davault_safe_id: VSAFE-F5C043E6
+    associations:
+      - name: credentials
+        exact: true
+        items:
+          - $ref: credential.linoop_ad_provisioning
+          - $ref: credential.linoop_directory_accounts
+          - $ref: credential.davault_linoop_workload

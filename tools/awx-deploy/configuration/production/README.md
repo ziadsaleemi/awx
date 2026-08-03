@@ -31,6 +31,14 @@ python3 scripts/reconcile_configuration.py --check \
   configuration/production/awx-ziadsaleemi-davault.yml
 python3 scripts/reconcile_configuration.py \
   configuration/production/awx-ziadsaleemi-davault.yml
+
+# Reconcile the LINOOP DaVault organization only when its scoped secret
+# environment is available. Apply once, wait for project and inventory sync,
+# then apply again so playbook-backed templates can be validated.
+python3 scripts/reconcile_configuration.py --check \
+  configuration/production/awx-ziadsaleemi-davault-linoop.yml
+python3 scripts/reconcile_configuration.py \
+  configuration/production/awx-ziadsaleemi-davault-linoop.yml
 ```
 
 Copy `awx-ziadsaleemi.env.example` to `awx-ziadsaleemi.env` for local use. The
@@ -44,6 +52,14 @@ contract, release-sync Job Template, and daily schedule. The job reads an
 immutable GitHub release artifact, uploads a missing version to staging, moves
 it to published, and performs no mutations when that version is already
 published.
+
+The LINOOP DaVault manifest uses a repository-scoped read-only SSH deploy key,
+not a GitHub API token, and therefore uses the SSH SCM URL. If this is changed
+to token authentication, use the repository HTTPS URL. It keeps target account
+material and the tenant-scoped DaVault workload token in separate encrypted
+Capstan credentials. Do not substitute a browser session or human administrator
+token for the workload identity. The onboarding template must not be launched
+until that bounded workload identity has been issued and attached.
 
 The vSphere Terraform module persists state in Azure Blob Storage. Supply the
 `AZURE_*` values for an identity with `Storage Blob Data Contributor` access to
